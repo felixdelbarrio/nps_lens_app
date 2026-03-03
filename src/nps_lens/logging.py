@@ -23,28 +23,10 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key.startswith("_"):
                 continue
-            if key in {
-                "msg",
-                "args",
-                "levelname",
-                "levelno",
-                "name",
-                "created",
-                "msecs",
-                "relativeCreated",
-                "pathname",
-                "filename",
-                "module",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-                "lineno",
-                "funcName",
-                "thread",
-                "threadName",
-                "processName",
-                "process",
-            }:
+            if key in {"msg", "args", "levelname", "levelno", "name", "created", "msecs",
+                       "relativeCreated", "pathname", "filename", "module", "exc_info",
+                       "exc_text", "stack_info", "lineno", "funcName", "thread", "threadName",
+                       "processName", "process"}:
                 continue
             extra[key] = value
 

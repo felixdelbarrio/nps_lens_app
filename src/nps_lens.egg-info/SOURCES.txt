@@ -39,6 +39,10 @@ src/nps_lens/models/nps.py
 src/nps_lens/models/review.py
 src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
+src/nps_lens/ui/__init__.py
+src/nps_lens/ui/business.py
+src/nps_lens/ui/charts.py
+src/nps_lens/ui/narratives.py
 tests/test_drivers.py
 tests/test_ingest_contracts.py
 tests/test_knowledge_cache.py

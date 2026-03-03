@@ -1,0 +1,7 @@
+[theme]
+# Conservative theming aligned to design tokens (see design/tokens.json).
+primaryColor = "#85C8FF"
+backgroundColor = "#F7F8F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#070E46"
+font = "sans serif"

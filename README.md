@@ -33,10 +33,32 @@ make ci
 make run
 ```
 
+### Cargar tu Excel real (sin fricción)
+
+En la **barra lateral** de la app:
+
+1. Ve a **Datos → Fuente** y elige **“Subir Excel”**.
+2. Sube tu fichero `.xlsx` (por ejemplo `NPS Térmico Senda - 01Enero-02Febrero.xlsx`).
+3. Si el Excel tiene varias hojas, selecciona la hoja.
+
+La app ejecuta validación de esquema y muestra un panel **“Calidad de datos”** con errores/avisos (sin romper el flujo).
+
 4) *(Opcional)* Generar un ejemplo de Deep‑Dive Pack por CLI:
 ```bash
 .venv/bin/nps-lens build-example-pack
 ```
+
+---
+
+## UI (orientada a negocio)
+
+Páginas principales:
+
+- **Resumen ejecutivo**: KPIs, tendencia y un **informe ejecutivo** listo para copiar/pegar.
+- **Comparativas**: periodo actual vs periodo base (qué cambió y dónde).
+- **Cohortes**: matriz por segmento/usuario para localizar bolsas de fricción.
+- **Drivers & oportunidades**: priorización por impacto + confianza.
+- **Texto & temas**: qué se repite y cómo suena (lenguaje natural).
 
 ---
 
