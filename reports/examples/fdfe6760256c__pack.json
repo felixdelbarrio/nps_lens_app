@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2026-03-03T17:59:58.955635",
+  "insight_id": "fdfe6760256c",
+  "title": "Oportunidad priorizada: Palanca=Funcionamiento Continuo",
+  "context": {
+    "geo": "MX",
+    "channel": "Senda",
+    "driver_dim": "Palanca",
+    "driver_val": "Funcionamiento Continuo"
+  },
+  "metrics": {
+    "nps": -35.04098360655738,
+    "detractor_rate": 0.538422131147541
+  },
+  "quantitative_evidence": {
+    "n": 1952,
+    "driver": {
+      "dimension": "Palanca",
+      "value": "Funcionamiento Continuo"
+    },
+    "nps": -35.04098360655738,
+    "promoter_rate": 0.1880122950819672,
+    "detractor_rate": 0.538422131147541
+  },
+  "qualitative_evidence": {
+    "verbatims": [
+      "Presenta operaciones inciertas o demoradas",
+      "muy mal banco jamas puedes hacer operaciones siempre hay un tema para que no puedas sacar el dinero no atiender muy mal servicio",
+      "HA FUNCIONADO BIÉN , SOLO ALGUNAS FALLAS EN LA APLICACIÓN.",
+      "No se pueden cambiar los limites de depósito con el token de administrador",
+      "EL NUEVO FORMATO DE BANCA ES INSOPORTABLE",
+      "Montos para transferencia faciles de modificar",
+      "ME SACA FRECUENTEMENTE DE LA BANCA SIN AVISAR,",
+      "Saca muy rápido de la sesión y como que deja atrapado el usuario y después cuesta trabajo volver a Ingresar. Gracias.",
+      "Aparecen mezclados los datos de dos de mis cuentas bancarias y no me permite realizar operaciones debido al cruce de informacion",
+      "Cuesta trabajo reimprimir acuses de transferencia y sobre todo de depósitos de meses anteriores, ese punto lo podrían mejorar. gracias."
+    ]
+  },
+  "hypotheses": [
+    {
+      "title": "Tratamiento asociado a detractores (best-effort)",
+      "treatment": "Palanca == Funcionamiento Continuo",
+      "effect": NaN,
+      "p_value": NaN,
+      "n": 71479,
+      "method": "logit_failed",
+      "confidence": 0.2,
+      "why": "Estimación con controles observables (segmento/canal/periodo/geo). Ver supuestos.",
+      "assumptions": [
+        "Best-effort only."
+      ],
+      "warnings": [
+        "Model failed: Singular matrix"
+      ]
+    }
+  ],
+  "suggested_questions": [
+    "¿Qué cambios (release, incidents, campañas) ocurrieron en la ventana temporal donde se deteriora el driver?",
+    "¿Qué segmentos/usuarios de decisión concentran el problema? ¿Hay cohortes por canal?",
+    "¿Qué verbatims se repiten y qué 'tema' agrupan? ¿Hay errores o fricciones específicas?",
+    "¿Qué métricas operativas (tiempos, errores, conversiones) confirman la hipótesis?",
+    "¿Qué experimento de producto o fix técnico podría validar/invalidar la causa raíz rápidamente?"
+  ],
+  "suggested_actions": [
+    "Abrir ticket con evidencia multi-fuente y owner claro (producto/tech/ops).",
+    "Instrumentar evento en el touchpoint afectado (journey_step) para medir fricción.",
+    "Diseñar experimento A/B (o rollout controlado) sobre la palanca/subpalanca priorizada.",
+    "Crear alerta semanal para degradaciones del driver (change-point + umbral)."
+  ],
+  "technical_trace": {
+    "pack_version": "1.0",
+    "filters": {
+      "geo": "MX",
+      "channel": "Senda",
+      "driver_dim": "Palanca",
+      "driver_val": "Funcionamiento Continuo"
+    },
+    "created_at_utc": "2026-03-03T17:59:58.955551Z"
+  }
+}

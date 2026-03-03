@@ -27,9 +27,17 @@ def get_theme(mode: str) -> Theme:
     p = palette(toks, mode)
 
     # Map token subset to app-level semantics.
+    # Map token subset to app-level semantics.
     bg = p["color.primary.bg.alternative.default"]
-    surface = p["color.primary.bg.action.active"] if mode == "dark" else "#f7f8fa"
-    surface_2 = p["color.primary.bg.action.default"]
+    if mode == "dark":
+        # Dark: keep surfaces close to bg for a premium "navy dark" look.
+        surface = p["color.primary.bg.alternative.default"]
+        surface_2 = "#16203a"
+    else:
+        # Light: neutral surfaces; avoid using action colors as backgrounds.
+        surface = "#ffffff"
+        surface_2 = "#f7f8fa"
+
     text = p["color.primary.text.primary"]
     muted = p["color.primary.text.disabled"]
     border = p["color.primary.bg.bar"]
@@ -37,7 +45,6 @@ def get_theme(mode: str) -> Theme:
     danger = p["color.primary.bg.alert"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
-
     return Theme(
         mode=mode,
         bg=bg,
@@ -73,11 +80,18 @@ def apply_theme(t: Theme) -> None:
   --nps-muted: {t.muted};
   --nps-border: {t.border};
   --nps-accent: {t.accent};
+  --nps-shadow-color: color-mix(in srgb, #000 10%, transparent);
+  --nps-border-softer: color-mix(in srgb, var(--nps-text) 18%, transparent);
+  --nps-border-soft: color-mix(in srgb, var(--nps-text) 22%, transparent);
+  --nps-border-strong: color-mix(in srgb, var(--nps-text) 32%, transparent);
+  --nps-border-stronger: color-mix(in srgb, var(--nps-text) 42%, transparent);
+  --nps-accent-soft: color-mix(in srgb, var(--nps-accent) 18%, transparent);
+  --nps-accent-strong: color-mix(in srgb, var(--nps-accent) 45%, transparent);
   --nps-danger: {t.danger};
   --nps-warning: {t.warning};
   --nps-success: {t.success};
   --nps-radius: 18px;
-  --nps-shadow: 0 10px 30px rgba(0,0,0,0.10);
+  --nps-shadow: 0 10px 30px var(--nps-shadow-color);
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
@@ -98,13 +112,13 @@ header[data-testid="stHeader"] {{
 /* Sidebar */
 [data-testid="stSidebar"] {{
   background: var(--nps-surface);
-  border-right: 1px solid rgba(127,127,127,0.25);
+  border-right: 1px solid var(--nps-border-soft);
 }}
 
 /* Cards */
 .nps-card {{
   background: var(--nps-surface);
-  border: 1px solid rgba(127,127,127,0.22);
+  border: 1px solid var(--nps-border-softer);
   border-radius: var(--nps-radius);
   padding: 16px 18px;
   box-shadow: var(--nps-shadow);
@@ -128,8 +142,8 @@ header[data-testid="stHeader"] {{
   display: inline-block;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(133,200,255,0.18);
-  border: 1px solid rgba(133,200,255,0.45);
+  background: var(--nps-accent-soft);
+  border: 1px solid var(--nps-accent-strong);
   color: var(--nps-text);
   font-size: 12px;
   font-weight: 600;
@@ -138,7 +152,7 @@ header[data-testid="stHeader"] {{
 /* Buttons */
 div.stButton > button {{
   border-radius: 12px;
-  border: 1px solid rgba(127,127,127,0.35);
+  border: 1px solid var(--nps-border-strong);
 }}
 
 div.stButton > button[kind="primary"] {{
@@ -147,11 +161,19 @@ div.stButton > button[kind="primary"] {{
   border: none;
 }}
 
+/* Secondary buttons (incl. download) */
+div.stButton > button[kind="secondary"],
+button[kind="secondary"] {{
+  background: var(--nps-surface-2) !important;
+  color: var(--nps-text) !important;
+  border: 1px solid var(--nps-border-strong) !important;
+}}
+
 /* Dataframes */
 [data-testid="stDataFrame"] {{
   border-radius: var(--nps-radius);
   overflow: hidden;
-  border: 1px solid rgba(127,127,127,0.25);
+  border: 1px solid var(--nps-border-soft);
 }}
 
 /* Controls (BaseWeb) — keep contrast in dark mode */
@@ -169,11 +191,19 @@ div[data-baseweb="popover"] * {{
 ul[role="listbox"] {{
   background: var(--nps-surface) !important;
 }}
+div[data-baseweb="menu"], div[role="listbox"] {{{{
+  background: var(--nps-surface) !important;
+  border: 1px solid var(--nps-border) !important;
+}}}}
+div[data-baseweb="menu"] *, div[role="listbox"] * {{{{
+  color: var(--nps-text) !important;
+}}}}
+
 ul[role="listbox"] li {{
   background: transparent !important;
 }}
 ul[role="listbox"] li[aria-selected="true"] {{
-  background: rgba(255,255,255,0.06) !important;
+  background: var(--nps-accent-soft) !important;
 }}
 div[data-testid="stRadio"] label, div[data-testid="stCheckbox"] label {{
   color: var(--nps-text) !important;
@@ -190,6 +220,20 @@ section[data-testid="stSidebar"] > div {{
 /* Inputs */
 input, textarea {{
   color: var(--nps-text) !important;
+}}
+
+
+/* File uploader */
+div[data-testid="stFileUploaderDropzone"] {{
+  background: var(--nps-surface-2) !important;
+  border: 1px dashed var(--nps-border-stronger) !important;
+  border-radius: var(--nps-radius) !important;
+}}
+div[data-testid="stFileUploaderDropzone"] * {{
+  color: var(--nps-text) !important;
+}}
+div[data-testid="stFileUploader"] small {{
+  color: var(--nps-muted) !important;
 }}
 
 </style>

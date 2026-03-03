@@ -1,18 +1,45 @@
 from __future__ import annotations
 
+import contextlib
+import json
 from pathlib import Path
 from typing import Any, Optional
 
-import streamlit as st
-
 import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
 
+from nps_lens.analytics.causal import best_effort_ate_logit
+from nps_lens.analytics.changepoints import detect_nps_changepoints
+from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.journey import build_routes
+from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.config import Settings
+from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
+from nps_lens.ui.charts import (
+    chart_cohort_heatmap,
+    chart_driver_bar,
+    chart_driver_delta,
+    chart_nps_trend,
+    chart_topic_bars,
+)
 from nps_lens.ui.components import card, kpi, pills, section
+from nps_lens.ui.narratives import (
+    build_executive_story,
+    compare_periods,
+    executive_summary,
+    explain_opportunities,
+    explain_topics,
+)
 from nps_lens.ui.theme import Theme, apply_theme, get_theme
+
+st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_NPS_CSV = REPO_ROOT / "data" / "examples" / "nps_thermal_senda_mx_sample.csv"
+
+DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento")
 
 
 @st.cache_data(show_spinner=False)
@@ -67,7 +94,8 @@ def cached_driver_table(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
-    return rank_opportunities(df, min_n=min_n)
+    dims = [d for d in DEFAULT_OPP_DIMS if d in df.columns]
+    return rank_opportunities(df, dimensions=dims, min_n=min_n)
 
 @st.cache_data(show_spinner=False)
 def cached_extract_topics(texts, n_clusters: int = 8):
@@ -80,6 +108,23 @@ def cached_build_routes(df: pd.DataFrame):
 @st.cache_data(show_spinner=False)
 def cached_detect_changepoints(df: pd.DataFrame):
     return detect_nps_changepoints(df)
+
+
+
+def _copy_to_clipboard(payload: str, *, toast: str = "Copiado") -> None:
+    """Copy text to clipboard via a tiny JS snippet (Streamlit has no native clipboard API)."""
+    # Use JSON encoding to safely escape quotes/newlines.
+    js = (
+        "<script>"
+        f"navigator.clipboard.writeText({json.dumps(payload)});"
+        "</script>"
+    )
+    components.html(js, height=0)
+    # `st.toast` exists on newer Streamlit; fallback to success if not.
+    if hasattr(st, "toast"):
+        st.toast(toast)
+    else:
+        st.success(toast)
 
 def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
     """Best-effort parse of a JSON object embedded in free text."""
@@ -652,23 +697,12 @@ def page_changes(df: pd.DataFrame) -> None:
     )
 
 
-def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path) -> None:
-    # Lazy import: LLM stack is heavy; only load when this page is opened.
-    from nps_lens.llm import KnowledgeCache, build_insight_pack, export_pack, stable_signature
-    st.subheader("WoW: Deep-Dive Pack para ChatGPT (copy/paste + memoria)")
 
-    st.markdown(
-        "<div class='nps-card nps-muted'>"
-        "Selecciona una oportunidad, genera un pack con contexto + evidencia y llévalo a tu LLM. "
-        "Después pega la respuesta aquí para que la app recuerde decisiones y no repita insights." 
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
+def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
     opps = cached_rank_opportunities(df, min_n=min_n)
     if not opps:
         st.warning("No hay oportunidades con el umbral actual.")
-        return
+        return None, None, None
 
     labels = [
         (
@@ -677,11 +711,15 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
         )
         for o in opps[:40]
     ]
-
     choice = st.selectbox("Oportunidad priorizada", labels)
     selected = opps[labels.index(choice)]
-
     slice_df = df.loc[df[selected.dimension].astype(str) == selected.value].copy()
+    return selected, slice_df, opps
+
+
+def _llm_build_pack(df: pd.DataFrame, settings: Settings, selected, slice_df: pd.DataFrame):
+    # Lazy import: LLM stack is heavy; only load when this page is opened.
+    from nps_lens.llm import build_insight_pack, export_pack
 
     causal = best_effort_ate_logit(
         df=df,
@@ -707,75 +745,109 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
 
     out = export_pack(pack, Path("reports/examples"))
     md = out["md"].read_text(encoding="utf-8")
+    return md, out, pack, context
 
-    section("Prompt listo para copiar", "Pégalo en tu GPT de insights.")
-    st.text_area("Deep-Dive Pack (Markdown)", md, height=420)
 
-    st.download_button(
-        "Descargar pack .md",
-        data=md.encode("utf-8"),
-        file_name=out["md"].name,
-        mime="text/markdown",
+def _llm_render_copy_prompt(md: str, out) -> None:
+    section(
+        "1) Copiar prompt para el LLM",
+        "Pulsa el boton para copiar el pack al portapapeles y pegalo en tu GPT. "
+        "No hace falta seleccionar texto.",
     )
 
+    b1, b2 = st.columns([1, 1])
+    with b1:
+        if st.button("Copiar prompt", type="primary", use_container_width=True):
+            _copy_to_clipboard(md, toast="Prompt copiado. Pegalo en tu GPT.")
+    with b2:
+        st.download_button(
+            "Descargar pack .md",
+            data=md.encode("utf-8"),
+            file_name=out["md"].name,
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+
+def _llm_render_paste_and_parse() -> tuple[str, Optional[dict[str, Any]]]:
     st.divider()
     st.subheader("Pegar respuesta del LLM y guardarla en Knowledge Cache")
-    
-section("2) Pega el insight del LLM para integrarlo en la narrativa")
-st.markdown(
-    "<div class='nps-card nps-card--flat'>"
-    "<b>Cómo usarlo</b><br/>"
-        "<span class='nps-muted'>Pega aquí la respuesta del LLM (idealmente el JSON "
-        "con el esquema de Insight). "
-    "Al guardarlo, aparecerá en **Resumen** y se incluirá en el briefing exportable.</span>"
-    "</div>",
-    unsafe_allow_html=True,
-)
 
-answer = st.text_area("Respuesta del LLM (pega aquí)", "", height=220)
+    section("2) Pega el insight del LLM para integrarlo en la narrativa")
+    st.markdown(
+        "<div class='nps-card nps-card--flat'>"
+        "<b>Como usarlo</b><br/>"
+        "<span class='nps-muted'>Pega aqui la respuesta del LLM (idealmente el JSON "
+        "con el esquema de Insight). Al guardarlo, aparecera en <b>Resumen</b> "
+        "y se incluira en el briefing exportable.</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
-c1, c2 = st.columns([1, 1])
-with c1:
-    add_to_dash = st.button("+ Añadir al dashboard", type="primary", use_container_width=True)
-with c2:
-    save_cache = st.button("💾 Guardar en knowledge cache", use_container_width=True)
+    answer = st.text_area("Respuesta del LLM (pega aqui)", "", height=220)
+    parsed = _try_parse_json(answer)
 
-parsed = _try_parse_json(answer)
-if parsed is not None:
-    ok, errs = _validate_insight_schema(parsed)
-    if ok:
-        with st.expander("Vista previa del insight detectado", expanded=True):
-            st.write(
-                {
-                    "insight_id": parsed.get("insight_id"),
-                    "title": parsed.get("title"),
-                    "confidence": parsed.get("confidence"),
-                    "severity": parsed.get("severity"),
-                    "tags": parsed.get("tags"),
-                }
-            )
-            st.caption(parsed.get("executive_summary", "")[:600])
-    else:
-        st.warning("Se detectó JSON, pero no coincide con el esquema esperado: " + "; ".join(errs))
-elif answer.strip():
-    st.warning("No pude detectar un JSON válido dentro del texto pegado.")
-
-if add_to_dash:
-    if parsed is None:
-        st.error("Pega un JSON válido para poder integrarlo en el dashboard.")
-    else:
+    if parsed is not None:
         ok, errs = _validate_insight_schema(parsed)
-        if not ok:
-            st.error("El JSON no cumple el esquema: " + "; ".join(errs))
+        if ok:
+            with st.expander("Vista previa del insight detectado", expanded=True):
+                st.write(
+                    {
+                        "insight_id": parsed.get("insight_id"),
+                        "title": parsed.get("title"),
+                        "confidence": parsed.get("confidence"),
+                        "severity": parsed.get("severity"),
+                        "tags": parsed.get("tags"),
+                    }
+                )
+                st.caption(str(parsed.get("executive_summary", ""))[:600])
         else:
-            insights = list(st.session_state.get("llm_insights", []))
-            insights = [i for i in insights if i.get("insight_id") != parsed.get("insight_id")]
-            insights.insert(0, parsed)
-            st.session_state["llm_insights"] = insights[:20]
-            st.success("Listo. Ya forma parte del discurso en **Resumen**.")
-            st.rerun()
+            st.warning(
+                "Se detecto JSON, pero no coincide con el esquema esperado: " + "; ".join(errs)
+            )
+    elif answer.strip():
+        st.warning("No pude detectar un JSON valido dentro del texto pegado.")
 
-if save_cache:
+    return answer, parsed
+
+
+def _llm_actions_row() -> tuple[bool, bool]:
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        add_to_dash = st.button("Anadir al dashboard", type="primary", use_container_width=True)
+    with c2:
+        save_cache = st.button("Guardar en knowledge cache", use_container_width=True)
+    return add_to_dash, save_cache
+
+
+def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]]) -> None:
+    if parsed is None:
+        st.error("Pega un JSON valido para poder integrarlo en el dashboard.")
+        return
+
+    ok, errs = _validate_insight_schema(parsed)
+    if not ok:
+        st.error("El JSON no cumple el esquema: " + "; ".join(errs))
+        return
+
+    insights = list(st.session_state.get("llm_insights", []))
+    insights = [i for i in insights if i.get("insight_id") != parsed.get("insight_id")]
+    insights.insert(0, parsed)
+    st.session_state["llm_insights"] = insights[:20]
+    st.success("Listo. Ya forma parte del discurso en Resumen.")
+    st.rerun()
+
+
+def _llm_save_to_cache(
+    cache_path: Path,
+    context: dict[str, Any],
+    pack,
+    answer: str,
+    settings: Settings,
+    selected,
+) -> None:
+    from nps_lens.llm import KnowledgeCache, stable_signature
+
     kc = KnowledgeCache(cache_path)
     sig = stable_signature(context=context, title=pack.title)
     record = {
@@ -793,7 +865,42 @@ if save_cache:
         ],
     }
     kc.upsert(sig, record)
-    st.success("Guardado. Se usará para deduplicación y contexto futuro.")
+    st.success("Guardado. Se usara para deduplicacion y contexto futuro.")
+
+
+
+def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path) -> None:
+    st.subheader("WoW: Deep-Dive Pack para ChatGPT (copy/paste + memoria)")
+    st.markdown(
+        "<div class='nps-card nps-muted'>"
+        "Selecciona una oportunidad, genera un pack con contexto + evidencia y llevalo a tu LLM. "
+        "Despues pega la respuesta aqui para que la app recuerde decisiones y no repita insights."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    selected, slice_df, _ = _llm_select_opportunity(df, min_n=min_n)
+    if selected is None or slice_df is None:
+        return
+
+    md, out, pack, context = _llm_build_pack(df, settings, selected, slice_df)
+    _llm_render_copy_prompt(md, out)
+
+    answer, parsed = _llm_render_paste_and_parse()
+    add_to_dash, save_cache = _llm_actions_row()
+
+    if add_to_dash:
+        _llm_add_to_dashboard(parsed)
+
+    if save_cache:
+        _llm_save_to_cache(
+            cache_path=cache_path,
+            context=context,
+            pack=pack,
+            answer=answer,
+            settings=settings,
+            selected=selected,
+        )
 
 
 def page_quality(df: pd.DataFrame) -> None:
@@ -813,7 +920,6 @@ def page_quality(df: pd.DataFrame) -> None:
 def main() -> None:
     settings = Settings.from_env()
 
-    st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
     (
         data_path,
         min_n,
@@ -860,6 +966,7 @@ def main() -> None:
             )
         st.stop()
 
+    with st.spinner("Cargando y optimizando datos..."):
         df = load_nps_data(data_path, sheet_name=sheet_name)
 
 

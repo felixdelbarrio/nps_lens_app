@@ -13,6 +13,8 @@ class ChartTheme:
     accent: str
     text: str
     grid: str
+    paper_bg: str
+    plot_bg: str
 
 
 def chart_theme(theme: Theme) -> ChartTheme:
@@ -20,7 +22,9 @@ def chart_theme(theme: Theme) -> ChartTheme:
     return ChartTheme(
         accent=primary_accent(toks, theme.mode),
         text=theme.text,
-        grid="rgba(127,127,127,0.25)",
+        grid=theme.border,
+        paper_bg="rgba(0,0,0,0)",
+        plot_bg="rgba(0,0,0,0)",
     )
 
 
@@ -29,8 +33,8 @@ def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
         height=height,
         margin=dict(l=10, r=10, t=10, b=10),
         font=dict(color=th.text),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor=th.paper_bg,
+        plot_bgcolor=th.plot_bg,
     )
     fig.update_xaxes(showgrid=True, gridcolor=th.grid, zeroline=False)
     fig.update_yaxes(showgrid=False, zeroline=False)
