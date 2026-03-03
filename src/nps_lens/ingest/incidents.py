@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from hashlib import sha1
-from typing import List
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
-
 
 INCIDENTS_REQUIRED = [
     "opened_at",
@@ -28,7 +26,7 @@ def dataset_id_for(path: str) -> str:
 
 def read_incidents_csv(path: str) -> IngestResult:
     df = pd.read_csv(path)
-    issues: List[ValidationIssue] = []
+    issues: list[ValidationIssue] = []
     issues.extend(require_columns(df, INCIDENTS_REQUIRED))
     if any(i.level == "ERROR" for i in issues):
         return IngestResult(df=df, issues=issues, dataset_id=dataset_id_for(path))

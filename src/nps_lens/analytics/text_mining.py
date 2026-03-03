@@ -1,27 +1,114 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-
 STOPWORDS_ES = {
-    "de","la","que","el","en","y","a","los","del","se","las","por","un","para","con",
-    "no","una","su","al","lo","como","más","pero","sus","le","ya","o","este","sí",
-    "porque","esta","entre","cuando","muy","sin","sobre","también","me","hasta","hay",
-    "donde","quien","desde","todo","nos","durante","todos","uno","les","ni","contra",
-    "otros","ese","eso","ante","ellos","e","esto","mí","antes","algunos","qué","unos",
-    "yo","otro","otras","otra","él","tanto","esa","estos","mucho","quienes","nada",
-    "muchos","cual","poco","ella","estar","estas","algunas","algo","nosotros","mi",
+    "de",
+    "la",
+    "que",
+    "el",
+    "en",
+    "y",
+    "a",
+    "los",
+    "del",
+    "se",
+    "las",
+    "por",
+    "un",
+    "para",
+    "con",
+    "no",
+    "una",
+    "su",
+    "al",
+    "lo",
+    "como",
+    "más",
+    "pero",
+    "sus",
+    "le",
+    "ya",
+    "o",
+    "este",
+    "sí",
+    "porque",
+    "esta",
+    "entre",
+    "cuando",
+    "muy",
+    "sin",
+    "sobre",
+    "también",
+    "me",
+    "hasta",
+    "hay",
+    "donde",
+    "quien",
+    "desde",
+    "todo",
+    "nos",
+    "durante",
+    "todos",
+    "uno",
+    "les",
+    "ni",
+    "contra",
+    "otros",
+    "ese",
+    "eso",
+    "ante",
+    "ellos",
+    "e",
+    "esto",
+    "mí",
+    "antes",
+    "algunos",
+    "qué",
+    "unos",
+    "yo",
+    "otro",
+    "otras",
+    "otra",
+    "él",
+    "tanto",
+    "esa",
+    "estos",
+    "mucho",
+    "quienes",
+    "nada",
+    "muchos",
+    "cual",
+    "poco",
+    "ella",
+    "estar",
+    "estas",
+    "algunas",
+    "algo",
+    "nosotros",
+    "mi",
 }
 
 
-TONE_LEXICON: Dict[str, List[str]] = {
-    "frustracion": ["no puedo", "no deja", "error", "falla", "fallo", "bloquea", "se queda", "lento", "intermitente", "timeout"],
+TONE_LEXICON: dict[str, list[str]] = {
+    "frustracion": [
+        "no puedo",
+        "no deja",
+        "error",
+        "falla",
+        "fallo",
+        "bloquea",
+        "se queda",
+        "lento",
+        "intermitente",
+        "timeout",
+    ],
     "urgencia": ["urge", "urgente", "ya", "hoy", "ahora"],
     "confusion": ["no entiendo", "como", "donde", "por que", "qué"],
     "aprecio": ["excelente", "muy bien", "genial", "gracias", "práctica", "facil", "rápida"],
@@ -33,8 +120,8 @@ TONE_LEXICON: Dict[str, List[str]] = {
 class TopicCluster:
     cluster_id: int
     n: int
-    top_terms: List[str]
-    examples: List[str]
+    top_terms: list[str]
+    examples: list[str]
 
 
 def _clean_text(s: str) -> str:
@@ -46,7 +133,7 @@ def _clean_text(s: str) -> str:
 
 def extract_topics(
     texts: pd.Series, n_clusters: int = 10, max_features: int = 4000
-) -> List[TopicCluster]:
+) -> list[TopicCluster]:
     cleaned = texts.dropna().astype(str).map(_clean_text)
     cleaned = cleaned[cleaned.str.len() >= 5]
     if cleaned.empty:
@@ -66,7 +153,7 @@ def extract_topics(
     labels = km.fit_predict(X)
 
     terms = np.array(vec.get_feature_names_out())
-    clusters: List[TopicCluster] = []
+    clusters: list[TopicCluster] = []
     for cid in range(k):
         idxs = np.where(labels == cid)[0]
         if len(idxs) == 0:
@@ -79,11 +166,11 @@ def extract_topics(
     return clusters
 
 
-def classify_tone(text: Optional[str]) -> List[str]:
+def classify_tone(text: Optional[str]) -> list[str]:
     if not text:
         return []
     t = _clean_text(text)
-    labels: List[str] = []
+    labels: list[str] = []
     for label, pats in TONE_LEXICON.items():
         for p in pats:
             if p in t:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import List, Optional
+from typing import Optional
 
 import pandas as pd
 import ruptures as rpt
@@ -14,7 +14,7 @@ from nps_lens.analytics.drivers import compute_nps_from_scores
 class ChangePoint:
     dimension: str
     value: str
-    points: List[date]
+    points: list[date]
     method: str
     note: str
 
@@ -52,7 +52,7 @@ def detect_nps_changepoints(
     algo = rpt.Pelt(model=model).fit(ts.values.reshape(-1, 1))
     bkps = algo.predict(pen=pen)
     # bkps include last index
-    pts: List[date] = []
+    pts: list[date] = []
     for idx in bkps[:-1]:
         pts.append(ts.index[idx - 1].date())
     return ChangePoint(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -25,9 +25,9 @@ def rank_opportunities(
     dimensions: Sequence[str],
     score_col: str = "NPS",
     min_n: int = 200,
-) -> List[Opportunity]:
+) -> list[Opportunity]:
     overall = compute_nps_from_scores(df[score_col])
-    out: List[Opportunity] = []
+    out: list[Opportunity] = []
     for dim in dimensions:
         if dim not in df.columns:
             continue

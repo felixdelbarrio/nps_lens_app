@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import List, Optional
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
-
 
 REVIEWS_REQUIRED = ["store", "date", "rating", "text", "app_version", "geo"]
 
@@ -19,7 +17,7 @@ def dataset_id_for(source: str) -> str:
 
 def read_reviews_csv(path: str) -> IngestResult:
     df = pd.read_csv(path)
-    issues: List[ValidationIssue] = []
+    issues: list[ValidationIssue] = []
     issues.extend(require_columns(df, REVIEWS_REQUIRED))
     if any(i.level == "ERROR" for i in issues):
         return IngestResult(df=df, issues=issues, dataset_id=dataset_id_for(path))

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
@@ -12,13 +11,13 @@ import statsmodels.api as sm
 class CausalHypothesis:
     treatment: str
     outcome: str
-    controls: List[str]
+    controls: list[str]
     effect: float
     p_value: float
     n: int
     method: str
-    assumptions: List[str]
-    warnings: List[str]
+    assumptions: list[str]
+    warnings: list[str]
 
 
 def _prepare_binary_treatment(df: pd.DataFrame, col: str, value: str) -> pd.Series:
@@ -30,7 +29,7 @@ def best_effort_ate_logit(
     treatment_col: str,
     treatment_value: str,
     outcome_col: str = "is_detractor",
-    control_cols: Optional[List[str]] = None,
+    control_cols: Optional[list[str]] = None,
 ) -> Optional[CausalHypothesis]:
     """Pragmatic causal estimate (best-effort).
 
@@ -56,8 +55,8 @@ def best_effort_ate_logit(
 
     y = pd.to_numeric(data[outcome_col], errors="coerce")
     t = _prepare_binary_treatment(data, treatment_col, treatment_value)
-    X_parts: List[pd.Series] = [t.rename("treat")]
-    warnings: List[str] = []
+    X_parts: list[pd.Series] = [t.rename("treat")]
+    warnings: list[str] = []
 
     for c in control_cols:
         if c not in data.columns:
@@ -66,7 +65,8 @@ def best_effort_ate_logit(
         # one-hot for categoricals (limit cardinality)
         if data[c].dtype == "object" or str(data[c].dtype).startswith("category"):
             top = data[c].astype(str).value_counts().head(20).index.tolist()
-            dummies = pd.get_dummies(data[c].astype(str).where(data[c].astype(str).isin(top), "__OTHER__"), prefix=c)
+            limited = data[c].astype(str).where(data[c].astype(str).isin(top), "__OTHER__")
+            dummies = pd.get_dummies(limited, prefix=c)
             for colname in dummies.columns:
                 X_parts.append(dummies[colname])
         else:
@@ -104,7 +104,7 @@ def best_effort_ate_logit(
             ],
             warnings=warnings,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         warnings.append(f"Model failed: {e}")
         return CausalHypothesis(
             treatment=f"{treatment_col} == {treatment_value}",

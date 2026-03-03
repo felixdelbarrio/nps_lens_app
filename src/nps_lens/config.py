@@ -14,7 +14,7 @@ class Settings:
     log_level: str
 
     @staticmethod
-    def from_env() -> "Settings":
+    def from_env() -> Settings:
         data_dir = Path(os.getenv("NPS_LENS_DATA_DIR", "./data"))
         knowledge_dir = Path(os.getenv("NPS_LENS_KNOWLEDGE_DIR", "./knowledge"))
         return Settings(

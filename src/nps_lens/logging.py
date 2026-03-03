@@ -5,7 +5,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -14,19 +14,37 @@ class LogEvent:
     message: str
     timestamp: str
     name: str
-    extra: Dict[str, Any]
+    extra: dict[str, Any]
 
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         for key, value in record.__dict__.items():
             if key.startswith("_"):
                 continue
-            if key in {"msg", "args", "levelname", "levelno", "name", "created", "msecs",
-                       "relativeCreated", "pathname", "filename", "module", "exc_info",
-                       "exc_text", "stack_info", "lineno", "funcName", "thread", "threadName",
-                       "processName", "process"}:
+            if key in {
+                "msg",
+                "args",
+                "levelname",
+                "levelno",
+                "name",
+                "created",
+                "msecs",
+                "relativeCreated",
+                "pathname",
+                "filename",
+                "module",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "lineno",
+                "funcName",
+                "thread",
+                "threadName",
+                "processName",
+                "process",
+            }:
                 continue
             extra[key] = value
 

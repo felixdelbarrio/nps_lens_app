@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -13,11 +12,40 @@ from nps_lens.llm.knowledge_cache import stable_signature
 from nps_lens.llm.schemas import InsightPackV1
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    """Best-effort conversion to int with strict typing.
+
+    This is used for values coming from JSON-like dicts where the type is `object`.
+    """
+
+    if isinstance(value, bool):
+        # avoid treating True/False as 1/0 accidentally
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value.strip()))
+        except ValueError:
+            return default
+    return default
+
+
 def render_pack_markdown(pack: InsightPackV1) -> str:
     ctx = "\n".join([f"- **{k}**: {v}" for k, v in pack.context.items()])
-    hyps = "\n".join([f"- **{h.get('title','Hipótesis')}** (conf={h.get('confidence','?')}) — {h.get('why','')}" for h in pack.hypotheses])
+    hyps_lines = []
+    for h in pack.hypotheses:
+        title = h.get("title", "Hipótesis")
+        conf = h.get("confidence", "?")
+        why = h.get("why", "")
+        hyps_lines.append(f"- **{title}** (conf={conf}) — {why}")
+    hyps = "\n".join(hyps_lines)
     questions = "\n".join([f"- {q}" for q in pack.suggested_questions])
     actions = "\n".join([f"- {a}" for a in pack.suggested_actions])
+
+    n_val = _as_int(pack.quantitative_evidence.get("n"), default=0)
 
     return f"""# LLM Deep-Dive Pack — {pack.title}
 
@@ -27,7 +55,7 @@ def render_pack_markdown(pack: InsightPackV1) -> str:
 ## Métricas clave
 - **NPS**: {pack.metrics.get('nps', float('nan')):.1f}
 - **% Detractores**: {pack.metrics.get('detractor_rate', float('nan')):.3f}
-- **N (respuestas)**: {int(pack.quantitative_evidence.get('n', 0))}
+- **N (respuestas)**: {n_val}
 
 ## Evidencia cuantitativa
 ```json
@@ -57,9 +85,9 @@ def render_pack_markdown(pack: InsightPackV1) -> str:
 
 def build_insight_pack(
     title: str,
-    context: Dict[str, str],
+    context: dict[str, str],
     nps_slice: pd.DataFrame,
-    driver: Dict[str, str],
+    driver: dict[str, str],
     causal: Optional[CausalHypothesis] = None,
     examples: int = 10,
 ) -> InsightPackV1:
@@ -79,13 +107,16 @@ def build_insight_pack(
 
     # qualitative evidence: sample verbatims
     verb = nps_slice.get("Comment")
-    samples: List[str] = []
+    samples: list[str] = []
     if verb is not None:
         samples = verb.dropna().astype(str).head(examples).tolist()
     qualitative = {"verbatims": samples}
 
-    hypotheses: List[Dict[str, Any]] = []
+    hypotheses: list[dict[str, Any]] = []
     if causal is not None:
+        conf = 0.2
+        if causal.p_value == causal.p_value:  # not NaN
+            conf = float(1.0 - min(1.0, causal.p_value * 5.0))
         hypotheses.append(
             {
                 "title": "Tratamiento asociado a detractores (best-effort)",
@@ -94,19 +125,28 @@ def build_insight_pack(
                 "p_value": causal.p_value,
                 "n": causal.n,
                 "method": causal.method,
-                "confidence": float(1.0 - min(1.0, causal.p_value * 5.0)) if causal.p_value == causal.p_value else 0.2,
-                "why": "Estimación con controles observables (segmento/canal/periodo/geo). Ver supuestos.",
+                "confidence": conf,
+                "why": (
+                    "Estimación con controles observables (segmento/canal/periodo/geo). "
+                    "Ver supuestos."
+                ),
                 "assumptions": causal.assumptions,
                 "warnings": causal.warnings,
             }
         )
 
     suggested_questions = [
-        "¿Qué cambios (release, incidents, campañas) ocurrieron en la ventana temporal donde se deteriora el driver?",
+        (
+            "¿Qué cambios (release, incidents, campañas) ocurrieron en la ventana temporal "
+            "donde se deteriora el driver?"
+        ),
         "¿Qué segmentos/usuarios de decisión concentran el problema? ¿Hay cohortes por canal?",
         "¿Qué verbatims se repiten y qué 'tema' agrupan? ¿Hay errores o fricciones específicas?",
         "¿Qué métricas operativas (tiempos, errores, conversiones) confirman la hipótesis?",
-        "¿Qué experimento de producto o fix técnico podría validar/invalidar la causa raíz rápidamente?",
+        (
+            "¿Qué experimento de producto o fix técnico podría validar/invalidar "
+            "la causa raíz rápidamente?"
+        ),
     ]
     suggested_actions = [
         "Abrir ticket con evidencia multi-fuente y owner claro (producto/tech/ops).",
@@ -136,7 +176,7 @@ def build_insight_pack(
     )
 
 
-def export_pack(pack: InsightPackV1, out_dir: Path) -> Dict[str, Path]:
+def export_pack(pack: InsightPackV1, out_dir: Path) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{pack.insight_id}__pack.md"
     json_path = out_dir / f"{pack.insight_id}__pack.json"

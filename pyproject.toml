@@ -30,6 +30,8 @@ dev = [
   "pytest-cov>=5.0,<6.0",
   "mypy>=1.8,<1.12",
   "types-python-dateutil",
+  # Pin compatible with Python 3.9 (newer pandas-stubs builds require >=3.10)
+  "pandas-stubs==2.2.2.240807",
   "ruff>=0.3,<0.7",
   "black>=24.2,<25.0",
   "pre-commit>=3.6,<4.0",
@@ -51,9 +53,15 @@ target-version = ["py39"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
-select = ["E","F","I","B","UP","SIM","PL","RUF"]
-ignore = ["PLR0913","PLR2004"]
 fix = true
+
+[tool.ruff.lint]
+select = ["E","F","I","B","UP","SIM","PL","RUF"]
+ignore = [
+  "PLR0913",  # many function args ok for analytics helpers
+  "PLR2004",  # allow magic numbers in scoring heuristics
+  "UP007",    # Python 3.9: keep Optional[...] (no X | Y)
+]
 
 [tool.mypy]
 python_version = "3.9"
@@ -62,7 +70,12 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["ruptures.*","networkx.*"]
+module = [
+  "ruptures.*",
+  "networkx.*",
+  "statsmodels.*",
+  "sklearn.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

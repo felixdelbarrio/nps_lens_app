@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, date
-from typing import Optional
+from datetime import date, datetime
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 
 
 class CanonicalBase(BaseModel):

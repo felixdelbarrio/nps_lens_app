@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,11 +11,11 @@ class InsightPackV1(BaseModel):
 
     insight_id: str
     title: str
-    context: Dict[str, str]
-    metrics: Dict[str, float]
-    quantitative_evidence: Dict[str, object]
-    qualitative_evidence: Dict[str, object]
-    hypotheses: List[Dict[str, object]]
-    suggested_questions: List[str]
-    suggested_actions: List[str]
-    technical_trace: Dict[str, object]
+    context: dict[str, str]
+    metrics: dict[str, float]
+    quantitative_evidence: dict[str, object]
+    qualitative_evidence: dict[str, object]
+    hypotheses: list[dict[str, object]]
+    suggested_questions: list[str]
+    suggested_actions: list[str]
+    technical_trace: dict[str, object]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 
 def icon_path(repo_root: Path, icon_name: str) -> Path:

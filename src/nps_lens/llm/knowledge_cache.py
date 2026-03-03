@@ -4,10 +4,10 @@ import json
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional, cast
 
 
-def stable_signature(context: Dict[str, str], title: str) -> str:
+def stable_signature(context: dict[str, str], title: str) -> str:
     key = json.dumps({"title": title, "context": context}, sort_keys=True, ensure_ascii=False)
     return sha1(key.encode("utf-8")).hexdigest()
 
@@ -15,7 +15,7 @@ def stable_signature(context: Dict[str, str], title: str) -> str:
 @dataclass
 class CacheHit:
     signature: str
-    entry: Dict[str, Any]
+    entry: dict[str, Any]
 
 
 class KnowledgeCache:
@@ -23,10 +23,12 @@ class KnowledgeCache:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
-            self.path.write_text(json.dumps({"schema_version": "1.0", "entries": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+            init = {"schema_version": "1.0", "entries": []}
+            self.path.write_text(json.dumps(init, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def load(self) -> Dict[str, Any]:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+    def load(self) -> dict[str, Any]:
+        # json.loads is typed as Any; cast to keep strict mypy happy.
+        return cast(dict[str, Any], json.loads(self.path.read_text(encoding="utf-8")))
 
     def find(self, signature: str) -> Optional[CacheHit]:
         data = self.load()
@@ -35,9 +37,9 @@ class KnowledgeCache:
                 return CacheHit(signature=signature, entry=e)
         return None
 
-    def upsert(self, signature: str, record: Dict[str, Any]) -> None:
+    def upsert(self, signature: str, record: dict[str, Any]) -> None:
         data = self.load()
-        entries: List[Dict[str, Any]] = data.get("entries", [])
+        entries: list[dict[str, Any]] = data.get("entries", [])
         updated = False
         for i, e in enumerate(entries):
             if e.get("signature") == signature:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Optional
 
 import pandas as pd
 
@@ -16,19 +17,19 @@ class ValidationIssue:
 @dataclass(frozen=True)
 class IngestResult:
     df: pd.DataFrame
-    issues: List[ValidationIssue]
+    issues: list[ValidationIssue]
     dataset_id: str
 
 
-def require_columns(df: pd.DataFrame, required: Sequence[str]) -> List[ValidationIssue]:
-    issues: List[ValidationIssue] = []
+def require_columns(df: pd.DataFrame, required: Sequence[str]) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
     missing = [c for c in required if c not in df.columns]
     for c in missing:
         issues.append(ValidationIssue(level="ERROR", message="Missing required column", column=c))
     return issues
 
 
-def standardize_columns(df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
+def standardize_columns(df: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
     out = df.copy()
     ren = {}
     for col in out.columns:

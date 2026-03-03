@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,11 +26,11 @@ def compute_nps_from_scores(scores: pd.Series) -> float:
     return float((promoters - detractors) * 100.0)
 
 
-def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> List[DriverStat]:
+def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> list[DriverStat]:
     if dimension not in df.columns:
         return []
     overall = compute_nps_from_scores(df[score_col])
-    out: List[DriverStat] = []
+    out: list[DriverStat] = []
     for value, g in df.groupby(dimension, dropna=False):
         n = int(len(g))
         nps = compute_nps_from_scores(g[score_col])
