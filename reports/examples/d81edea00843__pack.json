@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2026-03-03T09:47:07.155921Z",
+  "insight_id": "d81edea00843",
+  "title": "Ejemplo: Palanca con gap vs global",
+  "context": {
+    "geo": "MX",
+    "channel": "Senda",
+    "driver_dim": "Palanca",
+    "driver_val": "Banca",
+    "period": "2026-01-01..2026-02-02"
+  },
+  "metrics": {
+    "nps": 54.710144927536234,
+    "detractor_rate": 0.15579710144927536
+  },
+  "quantitative_evidence": {
+    "n": 276,
+    "overall_nps": 60.3,
+    "slice_nps": 54.710144927536234,
+    "gap_vs_overall": 5.589855072463763
+  },
+  "qualitative_evidence": {
+    "verbatims": [
+      "Muy mala atencion en El banco ...estan mal organizations y normalmente estan 2 cajeros atendiendo por Este Motivo se tarda uno mas de 1 hora en ser at",
+      "buen servicio",
+      "Tuve un inconveniente y el asesor telefónico me llevó de la mano para resolver con éxito mi problema",
+      "acceso al sucursal y estacionamiento no es aceptable.",
+      "Me da buen servicio y cumple con mis expectativas como Banco",
+      "BUEN SERVICIO",
+      "Muy buena atención y rapidez en los procesos",
+      "Son el banco menos malo de Mexico",
+      "BUEN SERVICIO",
+      "servicio"
+    ]
+  },
+  "hypotheses": [
+    {
+      "title": "Hipótesis causal (best-effort)",
+      "why": "La palanca seleccionada presenta un gap vs global. Revisar incidents y fricciones en el journey asociado.",
+      "confidence": 0.55
+    }
+  ],
+  "suggested_questions": [
+    "¿Qué subpalancas dentro de esta palanca concentran detractores?",
+    "¿Qué temas emergen en los verbatims? ¿Se alinean con incidencias/reviews?",
+    "¿Hubo cambios/release/incidents en la ventana temporal que expliquen el gap?"
+  ],
+  "suggested_actions": [
+    "Profundizar por Subpalanca y UsuarioDecisión con foco en detractores.",
+    "Cruzar con incidencias por ventana temporal ±3 días y sistema.",
+    "Instrumentar evento en el touchpoint más probable y crear alerta semanal."
+  ],
+  "technical_trace": {
+    "pipeline": "MVP",
+    "data": "sample csv",
+    "note": "Ejemplo generado offline para el ZIP."
+  }
+}
