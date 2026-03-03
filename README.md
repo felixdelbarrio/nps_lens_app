@@ -11,8 +11,10 @@ Incluye:
 - **WoW**: generación de **LLM Deep‑Dive Pack** (Markdown + JSON) + **Knowledge Cache** (dedup + aprendizaje incremental)
 - UI: **Streamlit** (rápido, productivo, portátil)
 
-> **Diseño**: el proyecto incluye las *especificaciones BBVA Experience* y set de iconos/font assets **tal cual** en `design/` y `assets/`.  
-> La UI aplica tokens de forma **conservadora** (Streamlit limita theming). No se inventan estilos fuera del sistema.
+> **Diseño**: la app sigue el *patrón de tokens BBVA Experience* con estilos **centralizados**.
+> - Motor de tema (light/dark) y CSS variables: `src/nps_lens/ui/theme.py`
+> - Tokens (subset) en código: `src/nps_lens/design/tokens.py`
+> No se distribuyen PDFs, tipografías ni packs de iconos en el repo.
 
 ---
 
@@ -32,16 +34,6 @@ make ci
 ```bash
 make run
 ```
-
-### Cargar tu Excel real (sin fricción)
-
-En la **barra lateral** de la app:
-
-1. Ve a **Datos → Fuente** y elige **“Subir Excel”**.
-2. Sube tu fichero `.xlsx` (por ejemplo `NPS Térmico Senda - 01Enero-02Febrero.xlsx`).
-3. Si el Excel tiene varias hojas, selecciona la hoja.
-
-La app ejecuta validación de esquema y muestra un panel **“Calidad de datos”** con errores/avisos (sin romper el flujo).
 
 4) *(Opcional)* Generar un ejemplo de Deep‑Dive Pack por CLI:
 ```bash
@@ -87,7 +79,8 @@ Ejemplo:
 - `src/nps_lens/quality/`: profiling y reglas de calidad (missing/outliers/duplicados)
 - `src/nps_lens/analytics/`: drivers, texto, change-points, causal best-effort, journey
 - `src/nps_lens/llm/`: Deep‑Dive Pack + Knowledge Cache
-- `src/nps_lens/design/`: tokens (JSON) + capa mínima de estilo
+- `src/nps_lens/design/`: tokens (subset) centralizados en código
+- `src/nps_lens/ui/`: theme (light/dark), componentes y gráficos
 - `app/streamlit_app.py`: UI
 
 ---
@@ -137,13 +130,14 @@ La UI permite:
 
 ## Sistema de diseño (BBVA Experience)
 
-- PDFs de specs: `design/specs_pdf/`
-- Tokens extraídos (subset) usados por la app: `design/tokens.json`
-- Iconos: `assets/icons/` (extraído de `all_icons.zip`)
-- Zips originales: `design/source/`
+Esta versión es **design-token-first**:
 
-**Nota**: Las fuentes (Benton/Tiempos) se adjuntan como zips en `assets/fonts/` según el material proporcionado.  
-La app **no** las instala automáticamente (para evitar violar políticas internas/licencias); ver README de tu organización para distribución/instalación.
+- Tokens (subset) y mapeo semántico centralizado: `src/nps_lens/design/tokens.py`
+- Tema Light/Dark + CSS variables centralizadas: `src/nps_lens/ui/theme.py`
+- Componentes UI (cards/KPIs/sections): `src/nps_lens/ui/components.py`
+
+No se incluyen assets propietarios (PDFs, tipografías o packs de iconos) dentro del repo.
+Si tu organización tiene el paquete oficial, reemplaza únicamente los valores en `tokens.py`.
 
 ---
 
@@ -164,3 +158,6 @@ La app **no** las instala automáticamente (para evitar violar políticas intern
 
 ## Licencia / Uso
 Uso interno. Ajusta `pyproject.toml` según tu política corporativa.
+
+
+**Nota**: el soporte Excel (.xlsx) requiere `openpyxl` y ya viene incluido en dependencias.

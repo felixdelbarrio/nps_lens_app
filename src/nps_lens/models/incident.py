@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+from pydantic import Field
+
 from nps_lens.models.common import CanonicalBase
 
 

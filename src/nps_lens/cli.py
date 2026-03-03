@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import typer
@@ -9,11 +11,14 @@ from rich import print as rprint
 
 from nps_lens.analytics import (
     best_effort_ate_logit,
+    build_routes,
+    detect_nps_changepoints,
+    driver_table,
     rank_opportunities,
 )
 from nps_lens.config import Settings
-from nps_lens.ingest import read_nps_thermal_excel
-from nps_lens.llm import build_insight_pack, export_pack
+from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
+from nps_lens.llm import KnowledgeCache, build_insight_pack, export_pack
 from nps_lens.logging import setup_logging
 
 app = typer.Typer(add_completion=False)

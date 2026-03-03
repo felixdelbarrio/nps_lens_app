@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from hashlib import sha1
+from typing import Optional
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
+
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -20,7 +23,7 @@ NPS_THERMAL_REQUIRED = [
 
 
 def dataset_id_for(path: str, geo: str, channel: str) -> str:
-    h = sha1(f"{path}|{geo}|{channel}".encode()).hexdigest()[:10]
+    h = sha1(f"{path}|{geo}|{channel}".encode("utf-8")).hexdigest()[:10]
     return f"nps_thermal:{geo}:{channel}:{h}"
 
 

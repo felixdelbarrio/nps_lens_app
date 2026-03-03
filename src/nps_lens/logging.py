@@ -5,7 +5,7 @@ import logging
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass

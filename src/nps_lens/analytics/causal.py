@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
@@ -104,7 +105,7 @@ def best_effort_ate_logit(
             ],
             warnings=warnings,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         warnings.append(f"Model failed: {e}")
         return CausalHypothesis(
             treatment=f"{treatment_col} == {treatment_value}",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -14,8 +15,7 @@ class DriverStat:
     nps: float
     detractor_rate: float
     promoter_rate: float
-    delta_vs_overall: float
-
+    gap_vs_overall: float
 
 def compute_nps_from_scores(scores: pd.Series) -> float:
     s = pd.to_numeric(scores, errors="coerce").dropna()
@@ -45,8 +45,8 @@ def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> li
                 nps=nps,
                 detractor_rate=detr,
                 promoter_rate=prom,
-                delta_vs_overall=float(nps - overall) if not np.isnan(nps) else float("nan"),
+                gap_vs_overall=float(nps - overall) if not np.isnan(nps) else float("nan"),
             )
         )
-    out.sort(key=lambda x: (np.nan_to_num(x.delta_vs_overall, nan=-1e9), x.n), reverse=True)
+    out.sort(key=lambda x: (np.nan_to_num(x.gap_vs_overall, nan=-1e9), x.n), reverse=True)
     return out

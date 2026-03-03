@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional
 
 import numpy as np
@@ -54,7 +55,10 @@ def compare_periods(df_current: pd.DataFrame, df_baseline: pd.DataFrame) -> Peri
     d0b = pd.to_datetime(base.get("Fecha"), errors="coerce").min() if n_base else None
     d1b = pd.to_datetime(base.get("Fecha"), errors="coerce").max() if n_base else None
 
-    delta_nps = float(nps_cur - nps_base) if (nps_cur == nps_cur and nps_base == nps_base) else float("nan")
+    if pd.notna(nps_cur) and pd.notna(nps_base):
+        delta_nps = float(nps_cur - nps_base)
+    else:
+        delta_nps = float("nan")
     return PeriodComparison(
         label_current=_date_range_label(d0c, d1c),
         label_baseline=_date_range_label(d0b, d1b),
@@ -117,10 +121,13 @@ def explain_opportunities(opps_df: pd.DataFrame, max_items: int = 5) -> list[str
         conf = float(r.get("confidence", 0.0))
         n = int(r.get("n", 0))
         out.append(
-            
-                f"Si mejoramos **{dim}={val}**, el modelo estima un **potencial de +{uplift:.1f} puntos** "
-                f"(confianza ~{conf:.2f}, n={n})."
-            
+            (
+                (
+                    f"Si mejoramos **{dim}={val}**, el modelo estima un "
+                    f"**potencial de +{uplift:.1f} puntos** "
+                    f"(confianza ~{conf:.2f}, n={n})."
+                )
+            )
         )
     return out
 
@@ -156,19 +163,30 @@ def build_executive_story(
     lines.append("## 1) Qué está pasando")
     nps_val = "—" if summary.n == 0 else f"{summary.nps_avg:.2f}"
     lines.append(
-        f"- **Muestras**: {summary.n:,} · **NPS medio (0–10)**: {nps_val} · "
-        f"**Detractores**: {summary.detractor_rate*100:.1f}% · **Promotores**: {summary.promoter_rate*100:.1f}%"
+        f"- **Muestras**: {summary.n:,} · **NPS medio (0-10)**: {nps_val} · "
+        f"**Detractores**: {summary.detractor_rate*100:.1f}% · "
+        f"**Promotores**: {summary.promoter_rate*100:.1f}%"
     )
     lines.append(
-        f"- **Zona de fricción**: {summary.top_detractor_driver} · **Zona fuerte**: {summary.top_promoter_driver}"
+        (
+            f"- **Zona de fricción**: {summary.top_detractor_driver} · "
+            f"**Zona fuerte**: {summary.top_promoter_driver}"
+        )
     )
 
     if comparison is not None and comparison.n_current and comparison.n_baseline:
         lines.append("")
         lines.append("## 2) Cambio vs periodo anterior")
-        lines.append(f"- Periodo actual: **{comparison.label_current}** (n={comparison.n_current:,})")
-        lines.append(f"- Periodo base: **{comparison.label_baseline}** (n={comparison.n_baseline:,})")
-        d_nps = "—" if comparison.delta_nps != comparison.delta_nps else f"{comparison.delta_nps:+.2f}"
+        lines.append(
+            f"- Periodo actual: **{comparison.label_current}** (n={comparison.n_current:,})"
+        )
+        lines.append(
+            f"- Periodo base: **{comparison.label_baseline}** (n={comparison.n_baseline:,})"
+        )
+        if comparison.delta_nps != comparison.delta_nps:
+            d_nps = "—"
+        else:
+            d_nps = f"{comparison.delta_nps:+.2f}"
         lines.append(
             f"- Variación: **Δ NPS {d_nps}** · **Δ detractores {comparison.delta_detr_pp:+.1f} pp**"
         )
@@ -188,7 +206,7 @@ def build_executive_story(
     lines.append("")
     lines.append("## 5) Próximos pasos recomendados")
     lines.append("- Validar si hay releases / incidencias / campañas en la ventana del cambio.")
-    lines.append("- Abrir 1–2 hipótesis por oportunidad priorizada y definir cómo se medirán.")
+    lines.append("- Abrir 1-2 hipótesis por oportunidad priorizada y definir cómo se medirán.")
     lines.append("- Generar un **Deep-Dive Pack** y guardar aprendizaje en la **Knowledge Cache**.")
 
     return "\n".join(lines) + "\n"

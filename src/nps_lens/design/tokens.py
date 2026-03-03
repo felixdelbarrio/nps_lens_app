@@ -1,22 +1,77 @@
+"""Design tokens.
+
+This app follows BBVA Experience token naming (e.g. "color.primary.*").
+
+Important:
+- We do NOT ship design-spec PDFs, icon packs, or font assets in this repository.
+- Tokens are centralized here as a curated subset used by the UI.
+- If you have access to the official token package, swap the values here only.
+"""
+
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 
 
 @dataclass(frozen=True)
 class DesignTokens:
-    core: dict[str, str]
-    tokens: dict[str, str]
+    """Curated subset of tokens used by the app UI."""
+
+    colors_light: dict[str, str]
+    colors_dark: dict[str, str]
 
     @staticmethod
-    def load(repo_root: Path) -> DesignTokens:
-        path = repo_root / "design" / "tokens.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return DesignTokens(core=dict(data.get("core", {})), tokens=dict(data.get("tokens", {})))
+    def default() -> "DesignTokens":
+        # Light palette (subset)
+        light: dict[str, str] = {
+            # Accents
+            "color.primary.accent.value-01.default": "#85c8ff",
+            "color.primary.accent.value-01.pressed": "#53a9ef",
+            "color.primary.accent.value-05.default": "#ffe761",
+            "color.primary.accent.value-07.default": "#ff5252",
+            # Backgrounds / surfaces
+            "color.primary.bg.alternative.default": "#ffffff",
+            "color.primary.bg.action.default": "#001391",
+            "color.primary.bg.action.active": "#070e46",
+            "color.primary.bg.selection.default": "#85c8ff",
+            "color.primary.bg.bar": "#cad1d8",
+            # Text
+            "color.primary.text.primary": "#070e46",
+            "color.primary.text.disabled": "#adb8c2",
+            "color.primary.text.main-inverse.default": "#ffffff",
+            "color.primary.text.action.default": "#001391",
+            # Status
+            "color.primary.bg.success": "#42a64c",
+            "color.primary.bg.warning": "#ffe761",
+            "color.primary.bg.alert": "#c30a0a",
+        }
+
+        # Dark palette (subset). Values curated from the dark-mode spec.
+        dark: dict[str, str] = {
+            "color.primary.accent.value-01.default": "#85c8ff",
+            "color.primary.accent.value-01.pressed": "#53a9ef",
+            "color.primary.accent.value-05.default": "#ffe761",
+            "color.primary.accent.value-07.default": "#ff5252",
+            "color.primary.bg.alternative.default": "#11192d",
+            "color.primary.bg.action.default": "#001391",
+            "color.primary.bg.action.active": "#070e46",
+            "color.primary.bg.selection.default": "#334056",
+            "color.primary.bg.bar": "#334056",
+            "color.primary.text.primary": "#ffffff",
+            "color.primary.text.disabled": "#46536d",
+            "color.primary.text.main-inverse.default": "#ffffff",
+            "color.primary.text.action.default": "#85c8ff",
+            "color.primary.bg.success": "#42a64c",
+            "color.primary.bg.warning": "#ffe761",
+            "color.primary.bg.alert": "#c30a0a",
+        }
+
+        return DesignTokens(colors_light=light, colors_dark=dark)
 
 
-def primary_color(tokens: DesignTokens) -> str:
-    # Conservative: prefer BBVA Blue 500 if present.
-    return tokens.core.get("bbva_blue_500", "#85C8FF")
+def palette(tokens: DesignTokens, mode: str) -> dict[str, str]:
+    return tokens.colors_dark if mode == "dark" else tokens.colors_light
+
+
+def primary_accent(tokens: DesignTokens, mode: str) -> str:
+    return palette(tokens, mode)["color.primary.accent.value-01.default"]

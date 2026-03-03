@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import pandas as pd
 
