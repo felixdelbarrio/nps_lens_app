@@ -39,6 +39,25 @@ st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_NPS_CSV = REPO_ROOT / "data" / "examples" / "nps_thermal_senda_mx_sample.csv"
 
+LLM_SYSTEM_PROMPT = (
+    "Eres el analista oficial de NPS Lens para canal movil Empresas. "
+    "Tu trabajo es leer un 'LLM Deep-Dive Pack' (Markdown o JSON) y devolver: "
+    "(1) un resumen ejecutivo en lenguaje de negocio (max 10 lineas) y "
+    "(2) un JSON estricto valido (sin markdown) con el esquema requerido. "
+    "No inventes datos; si falta evidencia, indicalo en risks con 'insufficient_evidence' y baja confianza. "
+    "El JSON debe ser el ultimo bloque y no debe tener trailing commas."
+)
+
+
+LLM_BUSINESS_QUESTIONS = [
+    "Devuelve un resumen ejecutivo (max 10 lineas) y el JSON del esquema. Enfocate en causas raiz y acciones priorizadas.",
+    "Identifica 3 hipotesis causales no obvias (con checks) y propone fixes/experimentos rapidos con owners y ETA.",
+    "Que palancas atacaria un director esta semana? Prioriza 3 acciones, que medir y riesgos por falta de evidencia.",
+    "Agrupa los verbatims en temas, explica el impacto en negocio y sugiere instrumentacion para confirmarlo.",
+]
+
+
+
 DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento")
 
 
@@ -717,9 +736,16 @@ def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
     return selected, slice_df, opps
 
 
-def _llm_build_pack(df: pd.DataFrame, settings: Settings, selected, slice_df: pd.DataFrame):
+def _llm_build_pack(
+    df: pd.DataFrame,
+    settings: Settings,
+    selected,
+    slice_df: pd.DataFrame,
+    out_dir: Path,
+):
+    """Build the Deep-Dive Pack + files to support manual LLM workflow."""
     # Lazy import: LLM stack is heavy; only load when this page is opened.
-    from nps_lens.llm import build_insight_pack, export_pack
+    from nps_lens.llm import build_insight_pack, export_pack, render_pack_markdown
 
     causal = best_effort_ate_logit(
         df=df,
@@ -729,37 +755,56 @@ def _llm_build_pack(df: pd.DataFrame, settings: Settings, selected, slice_df: pd
     )
 
     context = {
-        "geo": settings.default_geo,
-        "channel": settings.default_channel,
-        "driver_dim": selected.dimension,
-        "driver_val": selected.value,
+        "geo": str(settings.default_geo),
+        "channel": str(settings.default_channel),
+        "driver_dim": str(selected.dimension),
+        "driver_val": str(selected.value),
     }
+    title = f"Oportunidad priorizada: {selected.dimension}={selected.value}"
+    driver = {"dimension": str(selected.dimension), "value": str(selected.value)}
 
     pack = build_insight_pack(
-        title=f"Oportunidad priorizada: {selected.dimension}={selected.value}",
+        title=title,
         context=context,
         nps_slice=slice_df,
-        driver={"dimension": selected.dimension, "value": selected.value},
+        driver=driver,
         causal=causal,
+        examples=10,
     )
-
-    out = export_pack(pack, Path("reports/examples"))
-    md = out["md"].read_text(encoding="utf-8")
+    out = export_pack(pack, out_dir=out_dir)
+    md = render_pack_markdown(pack)
     return md, out, pack, context
 
 
-def _llm_render_copy_prompt(md: str, out) -> None:
+def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
     section(
         "1) Copiar prompt para el LLM",
-        "Pulsa el boton para copiar el pack al portapapeles y pegalo en tu GPT. "
-        "No hace falta seleccionar texto.",
+        "Elige una pregunta (lenguaje de negocio) y copia el prompt. Pégalo en tu ChatGPT y vuelve para pegar la respuesta.",
     )
 
-    b1, b2 = st.columns([1, 1])
-    with b1:
+    question = st.selectbox(
+        "Pregunta para el LLM",
+        options=LLM_BUSINESS_QUESTIONS,
+        index=0,
+        help="El prompt copiado incluirá esta pregunta + el pack con evidencia.",
+    )
+
+    prompt = (
+        "INSTRUCCIONES\n"
+        f"- {question}\n\n"
+        "REGLAS DE RESPUESTA\n"
+        "- Entrega (1) resumen ejecutivo (max 10 lineas) y (2) JSON estricto con el esquema.\n"
+        "- No inventes datos. Si falta evidencia, indica 'insufficient_evidence' en risks y baja confianza.\n"
+        "- El JSON debe ser el ultimo bloque y sin markdown.\n\n"
+        "DEEP-DIVE PACK\n"
+        f"{md}"
+    )
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
         if st.button("Copiar prompt", type="primary", use_container_width=True):
-            _copy_to_clipboard(md, toast="Prompt copiado. Pegalo en tu GPT.")
-    with b2:
+            _copy_to_clipboard(prompt, toast="Prompt copiado. Pégalo en tu ChatGPT.")
+    with c2:
         st.download_button(
             "Descargar pack .md",
             data=md.encode("utf-8"),
@@ -769,7 +814,7 @@ def _llm_render_copy_prompt(md: str, out) -> None:
         )
 
 
-def _llm_render_paste_and_parse() -> tuple[str, Optional[dict[str, Any]]]:
+def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[str, Any]]]:
     st.divider()
     st.subheader("Pegar respuesta del LLM y guardarla en Knowledge Cache")
 
@@ -784,7 +829,7 @@ def _llm_render_paste_and_parse() -> tuple[str, Optional[dict[str, Any]]]:
         unsafe_allow_html=True,
     )
 
-    answer = st.text_area("Respuesta del LLM (pega aqui)", "", height=220)
+    answer = st.text_area("Respuesta del LLM", value=default_text or "", height=240, help="Si has pulsado Generar, la respuesta aparece aqui. Si usas modo manual, pega aqui el JSON del LLM.")
     parsed = _try_parse_json(answer)
 
     if parsed is not None:
@@ -883,10 +928,10 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
     if selected is None or slice_df is None:
         return
 
-    md, out, pack, context = _llm_build_pack(df, settings, selected, slice_df)
+    md, out, pack, context = _llm_build_pack(df, settings, selected, slice_df, out_dir=cache_path.parent / "packs")
     _llm_render_copy_prompt(md, out)
 
-    answer, parsed = _llm_render_paste_and_parse()
+    answer, parsed = _llm_render_paste_and_parse("")
     add_to_dash, save_cache = _llm_actions_row()
 
     if add_to_dash:
