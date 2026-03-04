@@ -10,6 +10,7 @@ import shutil
 from typing import Any, Optional
 
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -27,8 +28,11 @@ from nps_lens.analytics.nps_helix_link import (
     link_incidents_to_nps_topics,
     tokenset,
     weekly_aggregates,
-    detect_detractor_changepoints_by_topic,
+    daily_aggregates,
+    can_use_daily_resample,
+    detect_detractor_changepoints_with_bootstrap,
     estimate_best_lag_by_topic,
+    estimate_best_lag_days_by_topic,
     incidents_lead_changepoints_flag,
 
 )
@@ -1836,7 +1840,14 @@ def page_nps_helix_linking(
     st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
     rank = causal_rank_by_topic(by_topic_weekly)
     # 3.1) Changepoints en detracción por tópico + lag (incidencias preceden X semanas)
-    cp_by_topic = detect_detractor_changepoints_by_topic(by_topic_weekly, pen=6.0)
+    # Changepoints con estabilidad (bootstrap) para etiquetar alto/medio/bajo
+    cp_by_topic = detect_detractor_changepoints_with_bootstrap(
+        by_topic_weekly,
+        pen=6.0,
+        n_boot=200,
+        block_size=2,
+        tol_periods=1,
+    )
     lag_by_topic = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
     lead_share = incidents_lead_changepoints_flag(by_topic_weekly, cp_by_topic, window_weeks=4)
 
@@ -1867,9 +1878,28 @@ def page_nps_helix_linking(
         show["corr"] = show["corr"].round(3)
         show["incidents_lead_changepoint_share"] = (show["incidents_lead_changepoint_share"] * 100).round(0)
         show["score"] = show["score"].round(3)
+        show["max_cp_stability"] = show.get("max_cp_stability", np.nan).astype(float).round(3)
         st.dataframe(
             show[
-                ["nps_topic", "confidence_learned", "score", "factor", "confirmed", "rejected", "best_lag_weeks", "corr", "incidents_lead_changepoint_share", "changepoints", "incidents", "responses", "detractor_rate", "delta_detractor_rate", "weeks"]
+                [
+                    "nps_topic",
+                    "confidence_learned",
+                    "score",
+                    "factor",
+                    "confirmed",
+                    "rejected",
+                    "best_lag_weeks",
+                    "corr",
+                    "incidents_lead_changepoint_share",
+                    "max_cp_level",
+                    "max_cp_stability",
+                    "changepoints",
+                    "incidents",
+                    "responses",
+                    "detractor_rate",
+                    "delta_detractor_rate",
+                    "weeks",
+                ]
             ].rename(
                 columns={
                     "nps_topic": "Tópico NPS",
@@ -1881,6 +1911,8 @@ def page_nps_helix_linking(
                     "best_lag_weeks": "Lag (semanas)",
                     "corr": "Corr@Lag",
                     "incidents_lead_changepoint_share": "Incidencias→CP (share)",
+                    "max_cp_level": "CP Significance",
+                    "max_cp_stability": "CP Stability",
                     "changepoints": "Changepoints",
                     "incidents": "Incidencias (asignadas)",
                     "responses": "Respuestas",
@@ -1944,10 +1976,64 @@ def page_nps_helix_linking(
         st.plotly_chart(fig_lag, use_container_width=True)
         st.caption(
             "Interpretación: el lag se elige maximizando la correlación entre incidencias(t) y detracción(t+lag). "
-            "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico."
+            "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico. "
+            "La significancia (High/Medium/Low) se estima por estabilidad con bootstrap (replicabilidad del punto de cambio)."
         )
     else:
         st.info("No hay datos suficientes para estimar changepoints/lag por tópico.")
+
+    # 4.2) Lag en días (si la densidad de NPS permite daily resample)
+    st.markdown("### Lag en días (cuando la densidad de NPS lo permite)")
+    overall_daily, by_topic_daily = daily_aggregates(nps_slice, helix_slice, assign_df)
+    if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45):
+        lag_days = estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
+        if not lag_days.empty and 'rank2' in locals() and not rank2.empty:
+            lag_days = lag_days.merge(rank2[["nps_topic"]], on="nps_topic", how="inner")
+            lag_days["corr"] = lag_days["corr"].round(3)
+            st.dataframe(
+                lag_days.sort_values(["corr"], ascending=False).head(25).rename(
+                    columns={
+                        "nps_topic": "Tópico NPS",
+                        "best_lag_days": "Lag (días)",
+                        "corr": "Corr@Lag",
+                        "points": "Puntos",
+                    }
+                ),
+                use_container_width=True,
+                height=320,
+            )
+        else:
+            st.info("No hay tópicos suficientes para estimar lag diario.")
+
+        if not lag_days.empty:
+            topic_sel = st.selectbox(
+                "Tópico para visualizar lag diario",
+                options=lag_days.sort_values(["corr"], ascending=False)["nps_topic"].tolist(),
+                key="lag_day_topic_sel",
+            )
+            lagd = int(lag_days.set_index("nps_topic").loc[topic_sel, "best_lag_days"]) if topic_sel in lag_days["nps_topic"].values else 0
+            gd = by_topic_daily[by_topic_daily["nps_topic"] == topic_sel].sort_values("date").copy()
+            gd["incidents_shifted"] = gd["incidents"].shift(lagd)
+            figd = go.Figure()
+            figd.add_trace(go.Scatter(x=gd["date"], y=gd["detractor_rate"], name="% detractores", mode="lines"))
+            figd.add_trace(go.Bar(x=gd["date"], y=gd["incidents_shifted"], name=f"# incidencias (shift {lagd}d)", yaxis="y2", opacity=0.5))
+            figd.update_layout(
+                height=360,
+                margin=dict(l=10, r=10, t=10, b=10),
+                yaxis=dict(title="% detractores", tickformat=".0%"),
+                yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
+                legend=dict(orientation="h"),
+            )
+            st.plotly_chart(figd, use_container_width=True)
+            st.caption(
+                "Se activa el lag diario cuando hay suficiente densidad de respuestas por día (cobertura) y puntos válidos. "
+                "El lag se elige maximizando corr(incidencias(t), detracción(t+lag))."
+            )
+    else:
+        st.info(
+            "El análisis diario no se activa: la densidad de NPS por día es insuficiente (pocos días con respuestas o baja cobertura). "
+            "Usa el lag semanal (arriba) o amplía la ventana."
+        )
 
 # 5) Evidence wall
     st.markdown("### Evidence wall: detractores ↔ incidencias (links semánticos)")
@@ -1992,9 +2078,11 @@ def page_nps_helix_linking(
             "min_similarity": float(min_sim),
         },
         "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
+        "metrics_overall_daily": overall_daily.to_dict(orient="records") if "overall_daily" in locals() and not overall_daily.empty else [],
         "ranked_hypotheses": rank.head(20).to_dict(orient="records") if "rank" in locals() else [],
         "changepoints_by_topic": cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else [],
         "best_lag_by_topic": lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else [],
+        "best_lag_days_by_topic": lag_days.to_dict(orient="records") if "lag_days" in locals() and not lag_days.empty else [],
         "knowledge_cache_context_entries": (
             kc_entries[
                 (kc_entries["service_origin"] == str(service_origin))
@@ -2040,6 +2128,15 @@ def page_nps_helix_linking(
             f"{(float(rec.get('detractor_rate',0))*100):.2f}% | {int(rec.get('incidents',0))} |"
         )
     md_lines.append("")
+    if "lag_days" in locals() and (not lag_days.empty):
+        md_lines.append("## 2.1) Lag estimado (diario, si aplica)")
+        md_lines.append("| Tópico | Lag (días) | Corr@Lag | Puntos |")
+        md_lines.append("|---|---:|---:|---:|")
+        for rec in lag_days.sort_values("corr", ascending=False).head(10).to_dict(orient="records"):
+            md_lines.append(
+                f"| {rec.get('nps_topic','')} | {int(rec.get('best_lag_days',0) or 0)} | {float(rec.get('corr',0) or 0):.3f} | {int(rec.get('points',0) or 0)} |"
+            )
+        md_lines.append("")
     md_lines.append("## 3) Evidencia cualitativa (links)")
     if not links_df.empty:
         for rec in links_df.head(20).to_dict(orient="records"):
@@ -2194,6 +2291,16 @@ def main() -> None:
             page_comparisons(df, theme)
         with s3:
             page_cohorts(df, theme)
+        with s4:
+            # Multi-fuente: NPS ↔ Helix. Usa el mismo df NPS ya filtrado por contexto.
+            page_nps_helix_linking(
+                nps_df=df,
+                store_dir=store_dir,
+                service_origin=service_origin,
+                service_origin_n1=service_origin_n1,
+                service_origin_n2=service_origin_n2,
+                settings=settings,
+            )
 
     with t_drivers:
         df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["drivers"])

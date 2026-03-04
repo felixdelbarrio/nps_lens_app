@@ -52,6 +52,49 @@ def estimate_best_lag_by_topic(
     return out
 
 
+def estimate_best_lag_days_by_topic(
+    by_topic_daily: pd.DataFrame,
+    max_lag_days: int = 21,
+    min_points: int = 30,
+) -> pd.DataFrame:
+    """Daily version of lag estimation.
+
+    Expects by_topic_daily with columns:
+      - date (datetime-like)
+      - nps_topic
+      - detractor_rate
+      - incidents
+
+    We search lag in days (0..max_lag_days) maximizing corr(incidents(t), detractor_rate(t+lag)).
+    """
+    if by_topic_daily.empty:
+        return pd.DataFrame(columns=["nps_topic", "best_lag_days", "corr", "points"])
+
+    rows = []
+    df = by_topic_daily.copy()
+    df = df.sort_values(["nps_topic", "date"])
+    for topic, g in df.groupby("nps_topic"):
+        g = g.sort_values("date")
+        x = g["incidents"].astype(float).values
+        y = g["detractor_rate"].astype(float).values
+        best = (0, float("nan"), 0)
+        for lag in range(0, int(max_lag_days) + 1):
+            if lag == 0:
+                xx, yy = x, y
+            else:
+                xx, yy = x[:-lag], y[lag:]
+            mask = np.isfinite(xx) & np.isfinite(yy)
+            if mask.sum() < int(min_points):
+                continue
+            c = float(np.corrcoef(xx[mask], yy[mask])[0, 1])
+            if not np.isfinite(c):
+                continue
+            if (not np.isfinite(best[1])) or (c > best[1]):
+                best = (lag, c, int(mask.sum()))
+        rows.append({"nps_topic": topic, "best_lag_days": best[0], "corr": best[1], "points": best[2]})
+    return pd.DataFrame(rows)
+
+
 def detect_detractor_changepoints_by_topic(
     by_topic_weekly: pd.DataFrame,
     pen: float = 6.0,
@@ -87,6 +130,141 @@ def detect_detractor_changepoints_by_topic(
             except Exception:
                 pts.append(str(w))
         rows.append({"nps_topic": topic, "changepoints": pts})
+    return pd.DataFrame(rows)
+
+
+def detect_detractor_changepoints_with_bootstrap(
+    by_topic_weekly: pd.DataFrame,
+    pen: float = 6.0,
+    model: str = "l2",
+    min_points: int = 10,
+    n_boot: int = 200,
+    block_size: int = 2,
+    tol_periods: int = 1,
+    random_state: int = 7,
+) -> pd.DataFrame:
+    """Detect changepoints and estimate their stability via moving-block bootstrap.
+
+    Stability is the fraction of bootstrap runs where a changepoint is detected within +/- tol_periods
+    positions of the original changepoint.
+
+    Labels:
+      - High: stability >= 0.70
+      - Medium: stability >= 0.40
+      - Low: otherwise
+
+    Returns per topic:
+      - changepoints: list[str] (ISO dates)
+      - changepoint_stability: list[float]
+      - changepoint_level: list[str]
+      - max_cp_stability: float
+      - max_cp_level: str
+    """
+    if by_topic_weekly.empty:
+        return pd.DataFrame(
+            columns=[
+                "nps_topic",
+                "changepoints",
+                "changepoint_stability",
+                "changepoint_level",
+                "max_cp_stability",
+                "max_cp_level",
+            ]
+        )
+
+    rng = np.random.RandomState(int(random_state))
+    rows = []
+    df = by_topic_weekly.copy().sort_values(["nps_topic", "week"])
+    for topic, g in df.groupby("nps_topic"):
+        g = g.sort_values("week")
+        ts = g["detractor_rate"].astype(float).dropna()
+        if len(ts) < int(min_points):
+            rows.append(
+                {
+                    "nps_topic": topic,
+                    "changepoints": [],
+                    "changepoint_stability": [],
+                    "changepoint_level": [],
+                    "max_cp_stability": np.nan,
+                    "max_cp_level": "",
+                }
+            )
+            continue
+
+        algo = rpt.Pelt(model=model).fit(ts.values.reshape(-1, 1))
+        bkps = algo.predict(pen=float(pen))
+        cp_pos = [int(i) for i in bkps[:-1] if int(i) > 0]
+        week_index = g.loc[ts.index, "week"].tolist()
+        cp_weeks = []
+        for idx in cp_pos:
+            w = week_index[idx - 1]
+            try:
+                cp_weeks.append(pd.to_datetime(w).date().isoformat())
+            except Exception:
+                cp_weeks.append(str(w))
+
+        # Bootstrap stability
+        n = len(ts)
+        if not cp_pos:
+            rows.append(
+                {
+                    "nps_topic": topic,
+                    "changepoints": [],
+                    "changepoint_stability": [],
+                    "changepoint_level": [],
+                    "max_cp_stability": np.nan,
+                    "max_cp_level": "",
+                }
+            )
+            continue
+
+        hits = np.zeros(len(cp_pos), dtype=float)
+        # Precompute start indices for blocks
+        starts_max = max(1, n - int(block_size))
+        for _ in range(int(n_boot)):
+            # moving-block bootstrap: sample contiguous blocks
+            idxs = []
+            while len(idxs) < n:
+                s = int(rng.randint(0, starts_max))
+                idxs.extend(list(range(s, min(n, s + int(block_size)))))
+            idxs = idxs[:n]
+            boot = ts.values[idxs]
+            try:
+                algo_b = rpt.Pelt(model=model).fit(boot.reshape(-1, 1))
+                bkps_b = algo_b.predict(pen=float(pen))
+                cp_b = [int(i) for i in bkps_b[:-1] if int(i) > 0]
+            except Exception:
+                cp_b = []
+            if not cp_b:
+                continue
+            for j, cp in enumerate(cp_pos):
+                if any(abs(int(b) - int(cp)) <= int(tol_periods) for b in cp_b):
+                    hits[j] += 1.0
+
+        stability = (hits / float(n_boot)).tolist()
+        level = []
+        for s in stability:
+            if s >= 0.70:
+                level.append("High")
+            elif s >= 0.40:
+                level.append("Medium")
+            else:
+                level.append("Low")
+
+        max_s = float(np.max(stability)) if stability else np.nan
+        max_level = "High" if max_s >= 0.70 else ("Medium" if max_s >= 0.40 else "Low")
+
+        rows.append(
+            {
+                "nps_topic": topic,
+                "changepoints": cp_weeks,
+                "changepoint_stability": stability,
+                "changepoint_level": level,
+                "max_cp_stability": max_s,
+                "max_cp_level": max_level,
+            }
+        )
+
     return pd.DataFrame(rows)
 
 
@@ -360,6 +538,85 @@ def weekly_aggregates(
         by_topic = by_topic.merge(by_topic_inc, on=["week", "nps_topic"], how="left")
     by_topic["incidents"] = by_topic.get("incidents", 0).fillna(0)
     return overall, by_topic
+
+
+def daily_aggregates(
+    nps_df: pd.DataFrame,
+    helix_df: pd.DataFrame,
+    incident_assignments: pd.DataFrame,
+    date_col_nps: str = "Fecha",
+    date_col_helix: str = "Fecha",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Daily aggregates analogous to weekly_aggregates.
+
+    Returns:
+      - overall_daily: date, responses, detractors, detractor_rate, incidents
+      - by_topic_daily: date, nps_topic, responses, detractors, detractor_rate, incidents
+    """
+    nps = nps_df.copy()
+    helix = helix_df.copy()
+    nps[date_col_nps] = pd.to_datetime(nps[date_col_nps], errors="coerce")
+    helix[date_col_helix] = pd.to_datetime(helix[date_col_helix], errors="coerce")
+    nps = nps.dropna(subset=[date_col_nps])
+    helix = helix.dropna(subset=[date_col_helix])
+    nps["date"] = nps[date_col_nps].dt.normalize()
+    helix["date"] = helix[date_col_helix].dt.normalize()
+
+    nps["is_detractor"] = (nps.get("NPS Group", "").astype(str).str.upper() == "DETRACTOR") | (
+        pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce") <= 6
+    )
+    overall_nps = nps.groupby("date").agg(responses=("ID", "count"), detractors=("is_detractor", "sum")).reset_index()
+    overall_nps["detractor_rate"] = overall_nps["detractors"] / overall_nps["responses"].replace({0: np.nan})
+    overall_helix = helix.groupby("date").agg(incidents=("Incident Number", "count")).reset_index()
+    overall = pd.merge(overall_nps, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
+
+    nps["nps_topic"] = build_nps_topic(nps)
+    by_topic_nps = (
+        nps.groupby(["date", "nps_topic"]).agg(responses=("ID", "count"), detractors=("is_detractor", "sum")).reset_index()
+    )
+    by_topic_nps["detractor_rate"] = by_topic_nps["detractors"] / by_topic_nps["responses"].replace({0: np.nan})
+    by_topic = by_topic_nps.copy()
+    if not incident_assignments.empty:
+        ia = incident_assignments.copy()
+        ia = ia.merge(
+            helix[["Incident Number", "date"]].astype({"Incident Number": str}),
+            left_on="incident_id",
+            right_on="Incident Number",
+            how="left",
+        )
+        by_topic_inc = ia.groupby(["date", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+        by_topic = by_topic.merge(by_topic_inc, on=["date", "nps_topic"], how="left")
+    by_topic["incidents"] = by_topic.get("incidents", 0).fillna(0)
+    return overall, by_topic
+
+
+def can_use_daily_resample(
+    overall_daily: pd.DataFrame,
+    min_days_with_responses: int = 20,
+    min_coverage: float = 0.45,
+) -> bool:
+    """Heuristic to decide if daily analysis is meaningful.
+
+    - Need at least `min_days_with_responses` days with responses
+    - Need coverage: days_with_responses / total_days_in_range >= min_coverage
+    """
+    if overall_daily.empty or "date" not in overall_daily.columns:
+        return False
+    df = overall_daily.copy().sort_values("date")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    if df.empty:
+        return False
+    days_with = int((df.get("responses", 0).astype(float) > 0).sum())
+    if days_with < int(min_days_with_responses):
+        return False
+    dmin = df["date"].min()
+    dmax = df["date"].max()
+    total_days = int((dmax - dmin).days) + 1
+    if total_days <= 0:
+        return False
+    coverage = float(days_with) / float(total_days)
+    return coverage >= float(min_coverage)
 
 
 def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:

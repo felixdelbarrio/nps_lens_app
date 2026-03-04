@@ -656,6 +656,43 @@ class HelixIncidentStore:
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
 
+    def load_df(
+        self,
+        stored: StoredDataset,
+        columns: Optional[list[str]] = None,
+        date_start: Optional[pd.Timestamp] = None,
+        date_end: Optional[pd.Timestamp] = None,
+    ) -> pd.DataFrame:
+        """Load Helix incidents for a context.
+
+        JSONL is the single source of truth (written by `save_df`).
+
+        This mirrors `DatasetStore.load_df` in a simplified form so the UI can
+        treat both stores uniformly.
+        """
+        data_path, _, _ = self._paths_for(stored.context)
+        if not data_path.exists():
+            return pd.DataFrame()
+
+        try:
+            df = pd.read_json(data_path, orient="records", lines=True, dtype=False)
+        except ValueError:
+            return pd.DataFrame()
+
+        if columns:
+            keep = [c for c in columns if c in df.columns]
+            if keep:
+                df = df[keep]
+
+        if "Fecha" in df.columns:
+            df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+            if date_start is not None:
+                df = df[df["Fecha"] >= pd.to_datetime(date_start)]
+            if date_end is not None:
+                df = df[df["Fecha"] <= pd.to_datetime(date_end)]
+
+        return df
+
     def _write_parquet_dataset(self, df: pd.DataFrame, parquet_dir: Path) -> list[str]:
         # Ensure clean dir
         if parquet_dir.exists():
