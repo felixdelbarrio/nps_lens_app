@@ -69,6 +69,6 @@
     "driver_dim": "Palanca",
     "driver_val": "Funcionamiento Continuo"
   },
-  "created_at_utc": "2026-03-04T12:23:22.610871Z"
+  "created_at_utc": "2026-03-04T13:15:00.373349Z"
 }
 ```

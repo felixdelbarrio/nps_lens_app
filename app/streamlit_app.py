@@ -47,15 +47,63 @@ st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-LLM_SYSTEM_PROMPT = (
-    "Eres el analista oficial de NPS Lens para canal movil Empresas. "
-    "Tu trabajo es leer un 'LLM Deep-Dive Pack' (Markdown o JSON) y devolver SOLO "
-    "un JSON estricto valido (sin markdown) con el esquema requerido. "
-    "No inventes datos; si falta evidencia, indicalo en risks con 'insufficient_evidence' y baja confianza. "
-    "El JSON debe ser el unico contenido de la respuesta (sin texto antes o despues) "
-    "y no debe tener trailing commas."
-)
+LLM_SYSTEM_PROMPT = """Eres el analista oficial de Insights para BBVA Banca de Empresas. Tu trabajo es:
 
+1. Leer un "LLM Deep-Dive Pack" (Markdown o JSON) generado por la plataforma de Voz del Cliente.
+2. Detectar insights no obvios y causas raíz plausibles basadas únicamente en la evidencia provista (cuantitativa y/o cualitativa), sin inventar datos ni afirmar hechos no sustentados.
+3. Devolver SOLO un JSON válido (sin texto adicional) con el esquema requerido.
+
+REGLA CRÍTICA — SOLO JSON:
+- Tu respuesta debe ser exclusivamente un objeto JSON (sin explicaciones, sin títulos, sin Markdown, sin bloques de código).
+- Usa comillas dobles estándar " (no comillas tipográficas).
+- Sin trailing commas.
+- No uses NaN/Infinity/None; usa null si aplica.
+- No agregues campos fuera del esquema.
+- Si algún campo no puede completarse con evidencia del pack, usa null o listas vacías según corresponda y explica la carencia en "assumptions" y/o "risks" (sin inventar).
+
+PRIVACIDAD Y SEGURIDAD (OBLIGATORIO):
+- No incluyas datos personales o sensibles (PII) en ningún campo.
+- Si el pack contiene PII, no la reproduzcas: usa "[REDACTED]" o reformula.
+- No incluyas credenciales, tokens, claves API, secretos ni información confidencial interna.
+- No intentes reidentificar personas/empresas ni inferir atributos sensibles.
+
+CRITERIOS PARA "INSIGHTS NO OBVIOS" (OBLIGATORIO):
+- Convergencia quant + qual
+- Ruptura por segmento/ruta
+- Cambio significativo vs baseline (si el pack lo incluye)
+- Efecto en cadena
+- Contradicción aparente
+- Asimetría (pocos casos con alto impacto)
+
+REGLAS PARA CAUSAS RAÍZ (OBLIGATORIO):
+- root_causes[].cause debe ser concreta y accionable (no genérica).
+- root_causes[].why debe explicar el mecanismo y conectar evidencia -> hipótesis.
+- Separa evidencia (evidence) de suposiciones (assumptions).
+- No afirmes causalidad si solo hay correlación.
+- Incluye 1-3 causas raíz (máximo 3).
+
+PUNTUACIONES Y FORMATOS (OBLIGATORIO):
+- confidence: 0.0-1.0 (0.0-0.3 insuficiente, 0.4-0.6 parcial, 0.7-0.85 sólida, 0.9-1.0 muy sólida)
+- severity: 1-5 (1 menor, 5 crítico)
+- eta: "YYYY-MM-DD" si hay fechas; si no, estimación corta ("2w", "1m") y decláralo en assumptions.
+- insight_id: slug estable tipo "bbva-be-{period}-{route_signature}-001" (minúsculas, guiones).
+- period: el periodo del pack; si no existe usa "unknown" y anótalo en assumptions.
+- journey_route: si no aparece, usa "unknown".
+- Usa [] para listas sin elementos confirmables. Usa "unknown" (no null) para tags sin evidencia.
+
+EVIDENCIA (OBLIGATORIO):
+- evidence.quant: SOLO métricas del pack (value siempre string, con unidad si aplica).
+- evidence.qual: SOLO verbatims del pack, sin PII (máx 5 por causa). No inventes quotes.
+
+PRUEBAS Y ACCIONES (OBLIGATORIO):
+- tests_or_checks: 2-5 comprobaciones concretas.
+- actions: 1-3 acciones por causa (owner por rol, no nombres).
+
+TAGS (OBLIGATORIO, SIN INVENTAR):
+- Completa tags solo si el pack lo contiene o se puede derivar textualmente.
+- Si no hay evidencia, usa "unknown" para geo/channel/lever/sublever/period/route_signature.
+
+Devuelve SOLO un JSON con el esquema indicado y sin ningún texto adicional."""
 
 LLM_BUSINESS_QUESTIONS = [
     "Devuelve SOLO el JSON del esquema (sin texto adicional). Enfocate en causas raiz y acciones priorizadas.",
@@ -288,65 +336,100 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     """
     components.html(html, height=52)
 
-def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
-    """Best-effort parse of a JSON object embedded in free text."""
+
+def _repair_json_text(text: str) -> str:
+    """Best-effort repair for common 'almost JSON' LLM outputs.
+
+    Repairs:
+    - smart quotes -> ASCII quotes
+    - markdown fences ```json ... ```
+    - trailing commas
+    - Python literals (None/True/False) -> JSON (null/true/false)
+    - NaN/Infinity -> null
+    """
+    if not text:
+        return ""
+
+    s = text.strip()
+
+    # Remove markdown fences
+    import re
+    s = re.sub(r"```(?:json)?\s*", "", s, flags=re.IGNORECASE)
+    s = s.replace("```", "")
+
+    # Normalize punctuation / smart quotes
+    rep = {
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u00ab": '"',
+        "\u00bb": '"',
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u00a0": " ",
+    }
+    for k, v in rep.items():
+        s = s.replace(k, v)
+
+    # If the user pasted something that contains JSON but with extra text, extract first balanced {...}
+    start = s.find("{")
+    if start != -1:
+        depth = 0
+        end = -1
+        for i in range(start, len(s)):
+            ch = s[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end != -1:
+            s = s[start:end].strip()
+
+    # Replace python-ish literals with JSON literals (careful: only whole words)
+    s = re.sub(r"\bNone\b", "null", s)
+    s = re.sub(r"\bTrue\b", "true", s)
+    s = re.sub(r"\bFalse\b", "false", s)
+    s = re.sub(r"\bNaN\b", "null", s)
+    s = re.sub(r"\bInfinity\b", "null", s)
+    s = re.sub(r"\b-Infinity\b", "null", s)
+
+    # Remove trailing commas before } or ]
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+
+    return s.strip()
+
+
+def _parse_json_with_repair(text: str) -> tuple[Optional[dict[str, Any]], Optional[str], Optional[str]]:
+    """Parse JSON from pasted text. Repairs automatically when possible.
+
+    Returns: (obj, repaired_json_text, error_message)
+    """
     import json
 
     if not text or not text.strip():
-        return None
+        return None, None, None
 
-    def _normalize_json(s: str) -> str:
-        """Normalize common non-JSON punctuation from LLM/word processors.
-
-        Users often paste JSON containing smart quotes (e.g. “ ”) which breaks json.loads.
-        We convert those to ASCII quotes before attempting to parse.
-        """
-
-        rep = {
-            "\u201c": '"',
-            "\u201d": '"',
-            "\u201e": '"',
-            "\u00ab": '"',
-            "\u00bb": '"',
-            "\u2018": "'",
-            "\u2019": "'",
-            "\u201a": "'",
-            "\u00a0": " ",
-        }
-        out = s
-        for k, v in rep.items():
-            out = out.replace(k, v)
-        return out.strip()
-
-    # First try: whole text is JSON
-    from contextlib import suppress
-
-    with suppress(Exception):
-        obj = json.loads(_normalize_json(text))
+    # First try: strict parse after minimal normalization
+    candidate = _repair_json_text(text)
+    try:
+        obj = json.loads(candidate)
         if isinstance(obj, dict):
-            return obj
+            return obj, candidate, None
+        return None, None, "El JSON detectado no es un objeto (dict)."
+    except json.JSONDecodeError as e:
+        return None, candidate, f"JSON invalido (linea {e.lineno}, col {e.colno}): {e.msg}"
+    except Exception as e:
+        return None, candidate, f"JSON invalido: {e}"
 
-    # Second try: find first balanced {...}
-    s = text
-    start = s.find("{")
-    if start == -1:
-        return None
 
-    depth = 0
-    for i in range(start, len(s)):
-        ch = s[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = _normalize_json(s[start : i + 1])
-                try:
-                    obj = json.loads(candidate)
-                    return obj if isinstance(obj, dict) else None
-                except Exception:
-                    return None
-    return None
+def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
+    """Backward-compatible wrapper used in previews."""
+    obj, _, _ = _parse_json_with_repair(text)
+    return obj
 
 
 def _validate_insight_schema(obj: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -1276,11 +1359,9 @@ def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[s
                 )
                 st.caption(str(parsed.get("executive_summary", ""))[:600])
         else:
-            st.warning(
-                "Se detecto JSON, pero no coincide con el esquema esperado: " + "; ".join(errs)
-            )
+            st.info("Se detectó JSON, pero aún no cumple el esquema: " + "; ".join(errs))
     elif answer.strip():
-        st.warning("No pude detectar un JSON valido dentro del texto pegado.")
+        st.info("Pega aquí el JSON del LLM. Se validará automáticamente al guardar.")
 
     return answer, parsed
 
@@ -1376,32 +1457,42 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
     do_save = _llm_actions_row()
 
     if do_save:
-        if parsed is None:
-            st.error(
-                "No pude detectar un JSON valido. Pega solo el JSON (sin texto adicional) "
-                "y asegúrate de usar comillas dobles estándar."
-            )
+        raw = str(st.session_state.get("llm_answer", ""))
+        obj, repaired, err = _parse_json_with_repair(raw)
+
+        if obj is None:
+            st.error("No pude reparar/detectar un JSON válido automáticamente.")
+            with st.expander("Validador JSON (detalle técnico)", expanded=True):
+                st.write(err or "JSON inválido.")
+                if repaired:
+                    st.caption("Intento de reparación (lo que la app intentó parsear):")
+                    st.code(repaired, language="json")
             return
 
-        ok, errs = _validate_insight_schema(parsed)
+        # If we repaired anything, update the textbox so the user sees the canonical JSON.
+        if repaired and repaired.strip() and repaired.strip() != raw.strip():
+            st.session_state["llm_answer"] = repaired
+
+        ok, errs = _validate_insight_schema(obj)
         if not ok:
-            st.error("El JSON no cumple el esquema: " + "; ".join(errs))
+            st.error("El JSON se pudo parsear, pero no cumple el esquema: " + "; ".join(errs))
+            with st.expander("JSON detectado (reparado)", expanded=False):
+                st.code(repaired or "", language="json")
             return
 
         # 1) Dashboard (session)
-        _llm_add_to_dashboard(parsed, rerun=False)
+        _llm_add_to_dashboard(obj, rerun=False)
 
-        # 2) Knowledge cache (persisted, per-context)
+        # 2) Knowledge cache (persisted, per-context) - store the repaired canonical JSON
         _llm_save_to_cache(
             cache_path=cache_path,
             context=context,
             pack=pack,
-            answer=answer,
+            answer=repaired or raw,
             settings=settings,
             selected=selected,
         )
-
-        # Refresh UI so the integrated insights section updates immediately.
+# Refresh UI so the integrated insights section updates immediately.
         st.rerun()
 
 
