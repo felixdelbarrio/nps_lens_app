@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from hashlib import sha1
-from typing import Optional
+from typing import Optional, Union
 
 import pandas as pd
 
@@ -31,9 +31,14 @@ def read_nps_thermal_excel(
     path: str,
     geo: str,
     channel: str,
-    sheet_name: str = "Hoja1",
+    sheet_name: Optional[Union[str, int]] = None,
 ) -> IngestResult:
-    df = pd.read_excel(path, sheet_name=sheet_name)
+    # pandas returns a dict when sheet_name=None; we want a single sheet.
+    sn: Union[str, int] = 0 if not sheet_name else sheet_name
+    df = pd.read_excel(path, sheet_name=sn, engine="openpyxl")
+    if isinstance(df, dict):
+        # take the first sheet deterministically
+        df = list(df.values())[0]
     df = standardize_columns(
         df,
         mapping={

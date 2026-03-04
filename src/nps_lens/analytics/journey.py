@@ -54,9 +54,12 @@ def build_routes(
         # MVP keeps incident data available for drill-down, but does not hard-join at row-level.
         _ = incidents_df
 
+    # Robust counting: some views load a projected dataset without "ID".
+    # In that case, count rows via a stable existing column.
+    count_col = "ID" if "ID" in data.columns else "is_detractor"
     grouped = (
         data.groupby([lever_col, sublever_col, "topic"], dropna=False)
-        .agg(n=("ID", "count"), detractor_rate=("is_detractor", "mean"))
+        .agg(n=(count_col, "count"), detractor_rate=("is_detractor", "mean"))
         .reset_index()
     )
     routes: list[RouteCandidate] = []

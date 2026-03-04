@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import base64
+import hashlib
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,8 +19,14 @@ from nps_lens.analytics.journey import build_routes
 from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.config import Settings
+from nps_lens.core.store import DatasetContext, DatasetStore
+from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
 from nps_lens.ui.charts import (
+    chart_daily_mix_business,
+    chart_daily_kpis,
+    chart_daily_volume,
+    chart_daily_score_semaforo,
     chart_cohort_heatmap,
     chart_driver_bar,
     chart_driver_delta,
@@ -37,20 +46,19 @@ from nps_lens.ui.theme import Theme, apply_theme, get_theme
 st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_NPS_CSV = REPO_ROOT / "data" / "examples" / "nps_thermal_senda_mx_sample.csv"
 
 LLM_SYSTEM_PROMPT = (
     "Eres el analista oficial de NPS Lens para canal movil Empresas. "
-    "Tu trabajo es leer un 'LLM Deep-Dive Pack' (Markdown o JSON) y devolver: "
-    "(1) un resumen ejecutivo en lenguaje de negocio (max 10 lineas) y "
-    "(2) un JSON estricto valido (sin markdown) con el esquema requerido. "
+    "Tu trabajo es leer un 'LLM Deep-Dive Pack' (Markdown o JSON) y devolver SOLO "
+    "un JSON estricto valido (sin markdown) con el esquema requerido. "
     "No inventes datos; si falta evidencia, indicalo en risks con 'insufficient_evidence' y baja confianza. "
-    "El JSON debe ser el ultimo bloque y no debe tener trailing commas."
+    "El JSON debe ser el unico contenido de la respuesta (sin texto antes o despues) "
+    "y no debe tener trailing commas."
 )
 
 
 LLM_BUSINESS_QUESTIONS = [
-    "Devuelve un resumen ejecutivo (max 10 lineas) y el JSON del esquema. Enfocate en causas raiz y acciones priorizadas.",
+    "Devuelve SOLO el JSON del esquema (sin texto adicional). Enfocate en causas raiz y acciones priorizadas.",
     "Identifica 3 hipotesis causales no obvias (con checks) y propone fixes/experimentos rapidos con owners y ETA.",
     "Que palancas atacaria un director esta semana? Prioriza 3 acciones, que medir y riesgos por falta de evidencia.",
     "Agrupa los verbatims en temas, explica el impacto en negocio y sugiere instrumentacion para confirmarlo.",
@@ -62,27 +70,94 @@ DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segme
 
 
 @st.cache_data(show_spinner=False)
-def load_nps_data(path: Path, sheet_name: Optional[str] = None) -> pd.DataFrame:
-    """Load NPS data and optimize dtypes (cached).
+def load_context_df(
+    store_dir: Path,
+    geo: str,
+    channel: str,
+    columns: tuple[str, ...],
+    date_start: Optional[str] = None,
+    date_end: Optional[str] = None,
+) -> pd.DataFrame:
+    """Load dataset for a context with column projection.
 
-    This reduces cold-start time and memory usage, and avoids re-reading on every rerun.
+    Uses the DatasetStore (JSONL source of truth + partitioned Parquet cache).
+    The `columns` tuple is part of the cache key, so each view can request only
+    the columns it needs (min CPU/RAM).
     """
-    if path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
-        df = pd.read_excel(path, sheet_name=sheet_name or 0)
-    else:
-        df = pd.read_csv(path, low_memory=False)
+    store = DatasetStore(store_dir)
+    stored = store.get(DatasetContext(geo=geo, channel=channel))
+    if stored is None:
+        return pd.DataFrame()
 
-    df["Fecha"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
-    df["NPS"] = pd.to_numeric(df.get("NPS"), errors="coerce")
+    table = store.load_table(
+        stored,
+        columns=list(columns),
+        date_start=pd.to_datetime(date_start) if date_start else None,
+        date_end=pd.to_datetime(date_end) if date_end else None,
+    )
+    # Convert to pandas only at the edge (Streamlit/Plotly). The Arrow Table is cached
+    # as RecordBatches in the store for reuse across charts.
+    df = table.to_pandas()
 
-    # Defensive: ensure taxonomy columns exist
-    for col in ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento", "Comment"]:
-        if col not in df.columns:
-            df[col] = None
+    # Lightweight dtype optimization (safe even with partial columns)
+    if "Fecha" in df.columns:
+        df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    if "NPS" in df.columns:
+        df["NPS"] = pd.to_numeric(df["NPS"], errors="coerce")
 
-    return optimize_df(df)
+    for c in ["Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento", "NPS Group"]:
+        if c in df.columns:
+            df[c] = df[c].astype("category")
+
+    return df
+
+VIEW_COLUMNS = {
+    "resumen": (
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "UsuarioDecisión",
+        "Segmento",
+        "Comment",
+        "ID",
+    ),
+    "drivers": ("Fecha", "NPS", "NPS Group", "Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento"),
+    "texto": ("Fecha", "NPS", "NPS Group", "Comment", "Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento"),
+    "journey": ("Fecha", "NPS", "NPS Group", "Comment", "Canal", "Palanca", "Subpalanca"),
+    "alertas": ("Fecha", "NPS", "NPS Group", "Canal", "Palanca", "Subpalanca"),
+    "llm": (
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Comment",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "UsuarioDecisión",
+        "Segmento",
+        "ID",
+    ),
+    "datos": (),  # empty tuple => load full dataset for inspection
+}
 
 
+
+# Column sets per chart (granular manifest). Each chart requests only what it needs.
+CHART_COLUMNS = {
+    "trend_weekly": ("Fecha", "NPS"),
+    "daily_mix": ("Fecha", "NPS"),
+    "daily_volume": ("Fecha", "NPS"),
+    "daily_kpis": ("Fecha", "NPS"),
+    "daily_semaforo": ("Fecha", "NPS"),
+    "daily_llm": ("Fecha", "NPS", "NPS Group", "Comment", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "drivers_bar": ("NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "drivers_delta": ("Fecha", "NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "cohort_heatmap": ("NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "topics": ("Comment",),
+}
 def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     """Reduce memory footprint and speed up groupbys (categoricals + downcast)."""
     out = df.copy()
@@ -102,6 +177,18 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+
+
+
+def load_llm_insights_for_context(settings: Settings, geo: str, channel: str) -> list[dict[str, Any]]:
+    """Load persisted LLM insights for the selected context."""
+    from nps_lens.llm import KnowledgeCache
+
+    kc = KnowledgeCache.for_context(settings.knowledge_dir, geo=geo, channel=channel)
+    data = kc.load()
+    entries = data.get("entries", [])
+    # entries are dicts; keep as-is
+    return list(entries)
 
 @st.cache_data(show_spinner=False)
 def cached_driver_table(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
@@ -145,6 +232,62 @@ def _copy_to_clipboard(payload: str, *, toast: str = "Copiado") -> None:
     else:
         st.success(toast)
 
+
+def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
+    """Render a browser-side copy button.
+
+    Why this exists:
+    - Calling `navigator.clipboard.writeText(...)` from Python-triggered reruns is often
+      blocked because it is *not* considered a user gesture by the browser.
+    - Rendering an actual HTML button and copying on its click is reliably treated as
+      a user gesture, so clipboard copy works consistently.
+
+    This widget is self-contained and does not require extra components.
+    """
+
+    payload_b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    uid = hashlib.sha1(payload_b64.encode("ascii")).hexdigest()[:10]
+
+    html = f"""
+    <div style=\"display:flex; gap:12px; align-items:center;\">
+      <button
+        id=\"nps_copy_{uid}\"
+        style=\"
+          width: 100%;
+          padding: 10px 14px;
+          border-radius: 12px;
+          border: 0;
+          cursor: pointer;
+          font-weight: 650;
+          background: var(--nps-accent, #1f77ff);
+          color: white;
+        \"
+        title=\"Copiar al portapapeles\"
+      >{label}</button>
+      <span id=\"nps_copy_msg_{uid}\" style=\"font-size:12px; color: var(--nps-muted, #6b7280);\"></span>
+    </div>
+    <script>
+      (function() {{
+        const btn = document.getElementById(\"nps_copy_{uid}\");
+        const msg = document.getElementById(\"nps_copy_msg_{uid}\");
+        const txt = atob(\"{payload_b64}\");
+        async function doCopy() {{
+          try {{
+            await navigator.clipboard.writeText(txt);
+            msg.textContent = \"Copiado ✅\";
+            const old = btn.textContent;
+            btn.textContent = \"Copiado\";
+            setTimeout(() => {{ btn.textContent = old; msg.textContent = \"\"; }}, 1800);
+          }} catch (e) {{
+            msg.textContent = \"No se pudo copiar. Selecciona el texto y usa Ctrl/Cmd+C.\";
+          }}
+        }}
+        btn.addEventListener(\"click\", doCopy);
+      }})();
+    </script>
+    """
+    components.html(html, height=52)
+
 def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
     """Best-effort parse of a JSON object embedded in free text."""
     import json
@@ -152,11 +295,34 @@ def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
     if not text or not text.strip():
         return None
 
+    def _normalize_json(s: str) -> str:
+        """Normalize common non-JSON punctuation from LLM/word processors.
+
+        Users often paste JSON containing smart quotes (e.g. “ ”) which breaks json.loads.
+        We convert those to ASCII quotes before attempting to parse.
+        """
+
+        rep = {
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u201e": '"',
+            "\u00ab": '"',
+            "\u00bb": '"',
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201a": "'",
+            "\u00a0": " ",
+        }
+        out = s
+        for k, v in rep.items():
+            out = out.replace(k, v)
+        return out.strip()
+
     # First try: whole text is JSON
     from contextlib import suppress
 
     with suppress(Exception):
-        obj = json.loads(text)
+        obj = json.loads(_normalize_json(text))
         if isinstance(obj, dict):
             return obj
 
@@ -174,7 +340,7 @@ def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                candidate = s[start : i + 1]
+                candidate = _normalize_json(s[start : i + 1])
                 try:
                     obj = json.loads(candidate)
                     return obj if isinstance(obj, dict) else None
@@ -228,6 +394,55 @@ def _render_llm_insights(theme: Theme) -> None:
         unsafe_allow_html=True,
     )
 
+
+@st.cache_data(show_spinner=False)
+def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
+    """Compute daily metrics used by charts and the LLM helper.
+
+    Returns a dataframe with:
+    day, n, det_pct, pas_pct, pro_pct, classic_nps
+    """
+
+    if "Fecha" not in df.columns or "NPS" not in df.columns:
+        return pd.DataFrame()
+
+    tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
+    if tmp.empty:
+        return pd.DataFrame()
+
+    tmp["day"] = tmp["Fecha"].dt.floor("D")
+    end = tmp["day"].max()
+    start = end - pd.Timedelta(days=int(days) - 1)
+    tmp = tmp.loc[tmp["day"] >= start].copy()
+    if tmp.empty:
+        return pd.DataFrame()
+
+    scores = pd.to_numeric(tmp["NPS"], errors="coerce")
+    tmp["score"] = scores.clip(lower=0, upper=10)
+    tmp = tmp.dropna(subset=["score"]).copy()
+    if tmp.empty:
+        return pd.DataFrame()
+
+    tmp["is_det"] = tmp["score"] <= 6
+    tmp["is_pas"] = (tmp["score"] >= 7) & (tmp["score"] <= 8)
+    tmp["is_pro"] = tmp["score"] >= 9
+
+    agg = (
+        tmp.groupby("day", as_index=False)
+        .agg(
+            n=("score", "size"),
+            det=("is_det", "mean"),
+            pas=("is_pas", "mean"),
+            pro=("is_pro", "mean"),
+        )
+        .sort_values("day")
+    )
+    agg["det_pct"] = agg["det"] * 100.0
+    agg["pas_pct"] = agg["pas"] * 100.0
+    agg["pro_pct"] = agg["pro"] * 100.0
+    agg["classic_nps"] = (agg["pro"] - agg["det"]) * 100.0
+    return agg[["day", "n", "det_pct", "pas_pct", "pro_pct", "classic_nps"]].copy()
+
     for ins in insights:
         actions_html = ""
         try:
@@ -260,100 +475,108 @@ def _render_llm_insights(theme: Theme) -> None:
         st.session_state["llm_insights"] = []
         st.rerun()
 
-def render_sidebar(  # noqa: PLR0915
 
+def render_sidebar(  # noqa: PLR0915
     settings: Settings,
-) -> tuple[Path, int, str, str, Path, str, Optional[str], bool]:
-    """Sidebar controls with form submit to prevent rerun storms."""
+) -> tuple[Optional[Path], int, str, str, Path, str, Optional[str], bool]:
+    """Single-source sidebar: Context (geo/channel) -> dataset -> controls.
+
+    - Context is the top-level hierarchy.
+    - Only Excel upload is supported (no local path, no examples).
+    - Uploaded data is normalized and persisted as JSONL per (geo, channel).
+    - The app always reads from the persisted JSONL to ensure consistency.
+    """
+    store = DatasetStore(settings.data_dir / "store")
+
+    # Build option sets: prefer existing contexts, but allow expanding the list.
+    existing = store.list_contexts()
+    geo_options = sorted({*(c.geo for c in existing), settings.default_geo, "ES", "CO", "PE", "AR"})
+    channel_options = sorted({*(c.channel for c in existing), settings.default_channel, "Gema"})
+
+    # Default context: first stored dataset, else Settings defaults.
+    if "_ctx" not in st.session_state:
+        ctx0 = store.default_context() or DatasetContext(settings.default_geo, settings.default_channel)
+        st.session_state["_ctx"] = {"geo": ctx0.geo, "channel": ctx0.channel}
+
+    ctx_state = st.session_state["_ctx"]
+    cur_geo = str(ctx_state.get("geo", settings.default_geo))
+    cur_channel = str(ctx_state.get("channel", settings.default_channel))
+
     defaults = st.session_state.get(
         "_controls",
         {
             "theme_mode": "light",
-            "source": "Ejemplo",
-            "data_path_str": str(DEFAULT_NPS_CSV),
-            "sheet_name": None,
             "min_n": 200,
-            "geo": settings.default_geo,
-            "channel": settings.default_channel,
         },
     )
 
     with st.sidebar:
+        st.header("Contexto")
+        geo = st.selectbox("Geografía", geo_options, index=geo_options.index(cur_geo) if cur_geo in geo_options else 0)
+        channel = st.selectbox(
+            "Canal",
+            channel_options,
+            index=channel_options.index(cur_channel) if cur_channel in channel_options else 0,
+        )
+
+        # Persist context selection
+        st.session_state["_ctx"] = {"geo": geo, "channel": channel}
+
+        st.divider()
+        st.header("Dataset (Excel)")
+        st.caption("Este Excel pertenece al contexto seleccionado (geografía + canal).")
+
+        up = st.file_uploader("Subir Excel NPS térmico (.xlsx)", type=["xlsx", "xlsm", "xls"])
+        sheet_name = (st.text_input("Hoja (opcional)", value="") or None)
+
+        # Show current dataset status if exists
+        ctx = DatasetContext(geo=geo, channel=channel)
+        stored = store.get(ctx)
+        if stored is not None:
+            meta = json.loads(stored.meta_path.read_text(encoding="utf-8"))
+            st.success(f"Dataset activo: {meta.get('rows', '?'):,} filas · actualizado {meta.get('updated_at_utc', '?')}")
+        else:
+            st.info("No hay dataset persistido para este contexto. Sube el Excel para empezar.")
+
+        if st.button("Importar / actualizar dataset", type="primary", use_container_width=True):
+            if up is None:
+                st.warning("Primero sube un Excel.")
+            else:
+                uploads_dir = settings.data_dir / "uploads"
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                upload_path = uploads_dir / up.name
+                # Write only if changed to avoid rerun storms
+                buf = up.getbuffer()
+                if (not upload_path.exists()) or (upload_path.stat().st_size != len(buf)):
+                    upload_path.write_bytes(buf)
+
+                res = read_nps_thermal_excel(
+                    str(upload_path),
+                    geo=geo,
+                    channel=channel,
+                    sheet_name=sheet_name,
+                )
+                # Persist normalized dataframe as the single source of truth
+                store.save_df(ctx, res.df, source=f"excel:{upload_path.name}")
+                st.session_state["_last_import_issues"] = [asdict(i) for i in res.issues]
+                st.rerun()
+
+        # Surface validation issues after import (if any)
+        issues = st.session_state.get("_last_import_issues") or []
+        if issues:
+            with st.expander("Avisos / errores del último import", expanded=False):
+                st.json(issues)
+
+        
+        st.divider()
         st.header("Experiencia")
         theme_mode = st.selectbox(
             "Modo visual",
             ["light", "dark"],
             index=0 if defaults["theme_mode"] == "light" else 1,
         )
-
         st.divider()
-        st.header("Datos")
-        source = st.radio(
-            "Fuente",
-            ["Subir Excel", "Ruta local", "Ejemplo"],
-            index=["Subir Excel", "Ruta local", "Ejemplo"].index(
-                defaults["source"]
-            ),
-            horizontal=False,
-        )
-
-        sheet_name: Optional[str] = None
-        data_path_str = defaults["data_path_str"]
-
-        # Upload / path selection (kept outside the form submit because file upload
-        # already causes a rerun)
-        if source == "Subir Excel":
-            up = st.file_uploader("Excel NPS térmico (.xlsx)", type=["xlsx", "xlsm", "xls"])
-            if up is None:
-                st.caption(
-                    "Sugerencia: sube tu Excel (p.ej. \"NPS Térmico Senda - "
-                    "01Enero-02Febrero.xlsx\")."
-                )
-                data_path_str = str(DEFAULT_NPS_CSV)
-            else:
-                uploads_dir = REPO_ROOT / "data" / "uploads"
-                uploads_dir.mkdir(parents=True, exist_ok=True)
-                out_path = uploads_dir / up.name
-                out_path.write_bytes(up.getbuffer())
-                data_path_str = str(out_path)
-                sheet_name = (
-                    st.text_input(
-                        "Hoja (opcional)",
-                        value=defaults.get("sheet_name") or "",
-                    )
-                    or None
-                )
-        elif source == "Ruta local":
-            data_path_str = st.text_input("Ruta a CSV/XLSX", value=data_path_str)
-            sheet_name = (
-                st.text_input(
-                    "Hoja (solo Excel)",
-                    value=defaults.get("sheet_name") or "",
-                )
-                or None
-            )
-        else:
-            data_path_str = str(DEFAULT_NPS_CSV)
-            sheet_name = None
-
-
-        # Data loading gate: avoid heavy IO and parsing on cold-start until user confirms.
-        data_key = f"{source}|{data_path_str}|{sheet_name or ''}"
-        if st.session_state.get("_data_key") != data_key:
-            st.session_state["_data_key"] = data_key
-            st.session_state["_data_ready"] = False
-
-        data_ready = bool(st.session_state.get("_data_ready", False))
-        if st.button("Cargar datos", type="primary", use_container_width=True):
-            st.session_state["_data_ready"] = True
-            data_ready = True
-
-        st.caption(
-            "La app puede tardar al leer y optimizar el dataset. "
-            "Por eso solo cargamos datos cuando tú lo indicas."
-        )
-
-        # Form to apply computational controls in one shot
+        st.header("Controles")
         with st.form("apply_controls", clear_on_submit=False):
             min_n = st.slider(
                 "Mínimo N para oportunidades",
@@ -362,46 +585,30 @@ def render_sidebar(  # noqa: PLR0915
                 int(defaults["min_n"]),
                 step=50,
             )
-
-            st.divider()
-            st.header("Contexto")
-            geo = st.text_input("Geografía", value=str(defaults["geo"]))
-            channel = st.text_input("Canal", value=str(defaults["channel"]))
-
             applied = st.form_submit_button("Aplicar")
 
         if applied:
             st.session_state["_controls"] = {
                 "theme_mode": theme_mode,
-                "source": source,
-                "data_path_str": data_path_str,
-                "sheet_name": sheet_name,
                 "min_n": int(min_n),
-                "geo": geo,
-                "channel": channel,
             }
 
-        st.divider()
-        st.header("Knowledge Cache")
-        cache_path = Path(settings.knowledge_dir) / "insights_cache.json"
-        st.caption(str(cache_path))
-
-    c = st.session_state.get("_controls", defaults)
-    # Use latest values (applied) but always respect current data selection
+    # Resolve dataset path for current context
+    stored = store.get(DatasetContext(geo=geo, channel=channel))
+    data_path = stored.path if stored is not None else None
+    data_ready = stored is not None
     return (
-        Path(data_path_str),
-        int(c["min_n"]),
-        str(c["geo"]),
-        str(c["channel"]),
-        cache_path,
+        data_path,
+        int(st.session_state.get("_controls", defaults)["min_n"]),
+        geo,
+        channel,
+        settings.knowledge_dir,
         theme_mode,
         sheet_name,
         data_ready,
     )
 
-
-
-def page_executive(df: pd.DataFrame, theme: Theme) -> None:
+def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, channel: str) -> None:
     section(
         "Resumen ejecutivo",
         "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
@@ -425,11 +632,204 @@ def page_executive(df: pd.DataFrame, theme: Theme) -> None:
     col_a, col_b = st.columns([2, 1])
     with col_a:
         card("Tendencia", "<div class='nps-muted'>Evolución del NPS medio.</div>", flat=True)
-        fig = chart_nps_trend(df, theme, freq="W")
-        if fig is None:
-            st.info("No hay suficientes datos para construir una tendencia.")
-        else:
-            st.plotly_chart(fig, use_container_width=True)
+        tab_w, tab_dm, tab_adv = st.tabs(
+            ["Semanal (media)", "Diaria (mix negocio)", "Detalle (semaforo)"]
+        )
+        with tab_w:
+            fig = chart_nps_trend(df, theme, freq="W")
+            if fig is None:
+                st.info("No hay suficientes datos para construir una tendencia.")
+            else:
+                st.plotly_chart(fig, use_container_width=True)
+
+        with tab_dm:
+            days = st.slider(
+                "Ventana (días)",
+                min_value=14,
+                max_value=120,
+                value=60,
+                step=7,
+                help=(
+                    "Vista diaria pensada para negocio: muestra el mix de "
+                    "Detractores (0-6), Pasivos (7-8) y Promotores (9-10)."
+                ),
+            )
+            st.markdown(
+                "<div class='nps-card nps-muted'>"
+                "<b>Cómo leerlo:</b> más <b>rojo</b> (detractores) empeora NPS; "
+                "más <b>verde</b> (promotores) lo mejora. "
+                "Usa la barra de <b>volumen</b> (n) para no sobre-interpretar días con pocas respuestas."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            
+            # Load only the requested window with predicate pushdown (partitioned parquet).
+            end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
+            end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
+            if end_day is not None:
+                start_day = end_day - pd.Timedelta(days=int(days) - 1)
+                df_win = load_context_df(
+                    store_dir,
+                    geo,
+                    channel,
+                    CHART_COLUMNS["daily_mix"],
+                    date_start=str(start_day.date()),
+                    date_end=str(end_day.date()),
+                )
+            else:
+                df_win = df
+
+            fig_mix = chart_daily_mix_business(df_win, theme, days=int(days))
+            if fig_mix is None:
+                st.info("No hay suficientes datos para construir la vista diaria.")
+            else:
+                st.plotly_chart(fig_mix, use_container_width=True)
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                fig_vol = chart_daily_volume(df_win, theme, days=int(days))
+                if fig_vol is not None:
+                    st.plotly_chart(fig_vol, use_container_width=True)
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.caption("Lectura ejecutiva diaria: NPS clásico (promotores - detractores) y % detractores.")
+                fig_k = chart_daily_kpis(df_win, theme, days=int(days))
+                if fig_k is not None:
+                    st.plotly_chart(fig_k, use_container_width=True)
+
+                with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
+                    st.caption(
+                        "Selecciona un día extremo (muy bueno o muy malo) y genera un prompt "
+                        "para pedirle al GPT una explicación con hipótesis y acciones."
+                    )
+
+                    df_llm_win = load_context_df(
+                        store_dir,
+                        geo,
+                        channel,
+                        CHART_COLUMNS["daily_llm"],
+                        date_start=str(start_day.date()) if end_day is not None else None,
+                        date_end=str(end_day.date()) if end_day is not None else None,
+                    )
+                    metrics = _daily_metrics(df_llm_win, days=int(days))
+                    if metrics.empty:
+                        st.info("No hay suficientes datos diarios para construir el asistente.")
+                    else:
+                        worst = metrics.sort_values(["det_pct", "n"], ascending=[False, False]).head(3)
+                        best = metrics.sort_values(["classic_nps", "n"], ascending=[False, False]).head(3)
+                        picks = []
+                        for _, r in worst.iterrows():
+                            picks.append(
+                                (
+                                    f"🔻 Peor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
+                                    r["day"],
+                                )
+                            )
+                        for _, r in best.iterrows():
+                            picks.append(
+                                (
+                                    f"🔺 Mejor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
+                                    r["day"],
+                                )
+                            )
+                        labels = [p[0] for p in picks]
+                        label = st.selectbox("Día a explicar", labels)
+                        chosen_day = picks[labels.index(label)][1]
+
+                        day_df = df.copy()
+                        day_df["_day"] = day_df["Fecha"].dt.floor("D")
+                        slice_df = day_df.loc[day_df["_day"] == chosen_day].copy()
+
+                        # Small business facts for the chosen day
+                        row = metrics.loc[metrics["day"] == chosen_day].head(1)
+                        if row.empty:
+                            st.warning("No se pudo preparar el día seleccionado.")
+                        else:
+                            rr = row.iloc[0]
+                            # Verbative samples
+                            verb = []
+                            if "Comment" in slice_df.columns:
+                                verb = (
+                                    slice_df["Comment"].dropna().astype(str).head(12).tolist()
+                                )
+
+                            # Top levers that day (if available)
+                            tops = []
+                            if "Palanca" in slice_df.columns:
+                                vc = slice_df["Palanca"].astype(str).value_counts().head(5)
+                                tops = [f"{idx} (n={int(v)})" for idx, v in vc.items()]
+
+                            prompt = (
+                                "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
+                                "1) Resumen ejecutivo (max 10 líneas)\n"
+                                "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
+                                f"Contexto:\n- geo: MX\n- channel: Senda\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
+                                "Hechos del día (métricas):\n"
+                                f"- n: {int(rr['n'])}\n"
+                                f"- % detractores (0-6): {rr['det_pct']:.1f}%\n"
+                                f"- % pasivos (7-8): {rr['pas_pct']:.1f}%\n"
+                                f"- % promotores (9-10): {rr['pro_pct']:.1f}%\n"
+                                f"- NPS clásico (promotores - detractores): {rr['classic_nps']:.1f} pp\n\n"
+                                "Hipótesis: explica qué pudo provocar este comportamiento (muy malo o muy bueno), "
+                                "separa fricción digital vs operativa vs pricing si aplica, y propone acciones.\n\n"
+                                "Palancas más presentes ese día (por volumen):\n"
+                                + "\n".join([f"- {t}" for t in tops])
+                                + "\n\n"
+                                "Verbatims (muestras):\n"
+                                + "\n".join([f"- {v}" for v in verb])
+                                + "\n\n"
+                                "Requisitos de respuesta:\n"
+                                "- No inventes métricas.\n"
+                                "- Si falta evidencia, dilo en riesgos y baja confidence.\n"
+                                "- Incluye 3-5 acciones concretas con owner/eta.\n"
+                            )
+
+                            _clipboard_copy_widget(prompt, label="Copiar prompt del día")
+                            st.download_button(
+                                "Descargar prompt (md)",
+                                data=prompt,
+                                file_name=f"prompt_dia_{chosen_day.strftime('%Y%m%d')}.md",
+                            )
+
+        with tab_adv:
+            days = st.slider(
+                "Ventana (días)",
+                min_value=14,
+                max_value=120,
+                value=60,
+                step=7,
+                key="ladder_days_adv",
+                help=(
+                    "Detalle avanzado con semáforo: rojo=detractores, amarillo=pasivos, verde=promotores. "
+                    "La intensidad representa cuántas respuestas hubo ese día."
+                ),
+            )
+            st.markdown(
+                "<div class='nps-card nps-muted'>"
+                "<b>Detalle semáforo:</b> cada columna es un día. "
+                "Rojo=0-6, Amarillo=7-8, Verde=9-10. "
+                "Más intenso = más respuestas ese día en esa categoría."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            
+            # Same windowed load for the semáforo detail.
+            if end_day is not None:
+                df_sema = load_context_df(
+                    store_dir,
+                    geo,
+                    channel,
+                    CHART_COLUMNS["daily_semaforo"],
+                    date_start=str(start_day.date()),
+                    date_end=str(end_day.date()),
+                )
+            else:
+                df_sema = df
+
+            fig2 = chart_daily_score_semaforo(df_sema, theme, days=int(days))
+            if fig2 is None:
+                st.info("No hay suficientes datos para construir la escalera.")
+            else:
+                st.plotly_chart(fig2, use_container_width=True)
+
 
     with col_b:
         det = s.top_detractor_driver
@@ -789,21 +1189,31 @@ def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
         help="El prompt copiado incluirá esta pregunta + el pack con evidencia.",
     )
 
+    # IMPORTANT: Force JSON-only output so users can paste directly into the app.
     prompt = (
+        "SISTEMA (instrucciones del analista)\n"
+        f"{LLM_SYSTEM_PROMPT}\n\n"
         "INSTRUCCIONES\n"
         f"- {question}\n\n"
-        "REGLAS DE RESPUESTA\n"
-        "- Entrega (1) resumen ejecutivo (max 10 lineas) y (2) JSON estricto con el esquema.\n"
-        "- No inventes datos. Si falta evidencia, indica 'insufficient_evidence' en risks y baja confianza.\n"
-        "- El JSON debe ser el ultimo bloque y sin markdown.\n\n"
+        "REGLA CRITICA\n"
+        "- RESPONDE SOLO con UN objeto JSON valido (sin texto antes o despues, sin markdown).\n"
+        "- Usa comillas dobles normales (\"), sin comillas tipograficas.\n"
+        "- Sin trailing commas. No uses NaN/Infinity/None: usa null si aplica.\n\n"
         "DEEP-DIVE PACK\n"
         f"{md}"
     )
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        if st.button("Copiar prompt", type="primary", use_container_width=True):
-            _copy_to_clipboard(prompt, toast="Prompt copiado. Pégalo en tu ChatGPT.")
+        # Use a browser-side button to guarantee clipboard copy (requires user gesture).
+        _clipboard_copy_widget(prompt, label="Copiar prompt")
+        with st.expander("Ver prompt (fallback manual)", expanded=False):
+            st.text_area(
+                "Prompt",
+                value=prompt,
+                height=220,
+                help="Si el navegador bloquea la copia automática, selecciona el texto y usa Ctrl/Cmd+C.",
+            )
     with c2:
         st.download_button(
             "Descargar pack .md",
@@ -829,7 +1239,26 @@ def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[s
         unsafe_allow_html=True,
     )
 
-    answer = st.text_area("Respuesta del LLM", value=default_text or "", height=240, help="Si has pulsado Generar, la respuesta aparece aqui. Si usas modo manual, pega aqui el JSON del LLM.")
+    # IMPORTANT: Do not pass `value=` on every rerun.
+    # If we always supply a `value`, Streamlit will overwrite user edits on each rerun
+    # (paste appears to do nothing, which feels like a disabled input).
+    # We persist the value via session_state using `key=`.
+    if "llm_answer" not in st.session_state:
+        st.session_state["llm_answer"] = default_text or ""
+    elif (default_text or "") and not str(st.session_state.get("llm_answer", "")).strip():
+        # If the user hasn't typed anything yet, allow a fresh default to populate.
+        st.session_state["llm_answer"] = default_text
+
+    st.text_area(
+        "Respuesta del LLM",
+        key="llm_answer",
+        height=240,
+        help=(
+            "Pega aqui la respuesta del LLM (idealmente el JSON con el esquema de Insight). "
+            "La app la analizara y podras guardarla en la Knowledge Cache."
+        ),
+    )
+    answer = str(st.session_state.get("llm_answer", ""))
     parsed = _try_parse_json(answer)
 
     if parsed is not None:
@@ -856,16 +1285,25 @@ def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[s
     return answer, parsed
 
 
-def _llm_actions_row() -> tuple[bool, bool]:
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        add_to_dash = st.button("Anadir al dashboard", type="primary", use_container_width=True)
-    with c2:
-        save_cache = st.button("Guardar en knowledge cache", use_container_width=True)
-    return add_to_dash, save_cache
+def _llm_actions_row() -> bool:
+    """Single action: save for dashboard + knowledge cache.
+
+    This eliminates user confusion and guarantees coherence between the executive
+    dashboard narrative and the persisted knowledge cache for the current context.
+    """
+
+    return st.button(
+        "Guardar (dashboard + knowledge cache)",
+        type="primary",
+        use_container_width=True,
+        help=(
+            "Guarda el insight para que aparezca en Resumen y quede persistido "
+            "en la knowledge cache del contexto."
+        ),
+    )
 
 
-def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]]) -> None:
+def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]], *, rerun: bool = False) -> None:
     if parsed is None:
         st.error("Pega un JSON valido para poder integrarlo en el dashboard.")
         return
@@ -880,7 +1318,8 @@ def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]]) -> None:
     insights.insert(0, parsed)
     st.session_state["llm_insights"] = insights[:20]
     st.success("Listo. Ya forma parte del discurso en Resumen.")
-    st.rerun()
+    if rerun:
+        st.rerun()
 
 
 def _llm_save_to_cache(
@@ -893,7 +1332,9 @@ def _llm_save_to_cache(
 ) -> None:
     from nps_lens.llm import KnowledgeCache, stable_signature
 
-    kc = KnowledgeCache(cache_path)
+    geo = str(context.get('geo') or settings.default_geo)
+    channel = str(context.get('channel') or settings.default_channel)
+    kc = KnowledgeCache.for_context(settings.knowledge_dir, geo=geo, channel=channel)
     sig = stable_signature(context=context, title=pack.title)
     record = {
         "signature": sig,
@@ -932,12 +1373,25 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
     _llm_render_copy_prompt(md, out)
 
     answer, parsed = _llm_render_paste_and_parse("")
-    add_to_dash, save_cache = _llm_actions_row()
+    do_save = _llm_actions_row()
 
-    if add_to_dash:
-        _llm_add_to_dashboard(parsed)
+    if do_save:
+        if parsed is None:
+            st.error(
+                "No pude detectar un JSON valido. Pega solo el JSON (sin texto adicional) "
+                "y asegúrate de usar comillas dobles estándar."
+            )
+            return
 
-    if save_cache:
+        ok, errs = _validate_insight_schema(parsed)
+        if not ok:
+            st.error("El JSON no cumple el esquema: " + "; ".join(errs))
+            return
+
+        # 1) Dashboard (session)
+        _llm_add_to_dashboard(parsed, rerun=False)
+
+        # 2) Knowledge cache (persisted, per-context)
         _llm_save_to_cache(
             cache_path=cache_path,
             context=context,
@@ -946,6 +1400,10 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
             settings=settings,
             selected=selected,
         )
+
+        # Refresh UI so the integrated insights section updates immediately.
+        st.rerun()
+
 
 
 def page_quality(df: pd.DataFrame) -> None:
@@ -959,7 +1417,31 @@ def page_quality(df: pd.DataFrame) -> None:
     )
 
     st.caption(f"Filas: {len(df):,} · Columnas: {len(df.columns)}")
-    st.dataframe(df.head(50), use_container_width=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        show_full = st.toggle(
+            "Mostrar dataset completo",
+            value=False,
+            help="Por rendimiento, por defecto se muestra una muestra. "
+            "Actívalo si quieres ver todas las filas (puede tardar).",
+        )
+    with c2:
+        sample_n = st.selectbox(
+            "Tamaño de muestra",
+            options=[50, 100, 200, 500, 1000],
+            index=2,
+            disabled=show_full,
+            help="Número de filas a mostrar cuando no está activado el dataset completo.",
+        )
+
+    view_df = df if show_full else df.head(int(sample_n))
+    st.dataframe(view_df, use_container_width=True, height=520)
+
+    st.caption(
+        "Nota: la tabla es desplazable. Si activas el dataset completo, "
+        "Streamlit renderiza una vista virtualizada: verás todas las filas al hacer scroll."
+    )
 
 
 def main() -> None:
@@ -979,6 +1461,11 @@ def main() -> None:
     theme = get_theme(theme_mode)
     apply_theme(theme)
 
+    ctx_key = f"{geo}__{channel}"
+    if st.session_state.get("_llm_ctx") != ctx_key:
+        st.session_state["_llm_ctx"] = ctx_key
+        st.session_state["llm_insights"] = load_llm_insights_for_context(settings, geo=geo, channel=channel)
+
     st.markdown(
         """
 <div class="nps-card nps-card--flat">
@@ -997,22 +1484,12 @@ def main() -> None:
 
     if not data_ready:
         st.info(
-            "Selecciona la fuente de datos en la barra lateral y pulsa **Cargar datos**. "
-            "Mientras tanto, aquí tienes una guía rápida de lo que verás."
+            "No hay dataset cargado para este **contexto** (geografía + canal). "
+            "Ve a la barra lateral, sube el Excel y pulsa **Importar / actualizar dataset**."
         )
-        with st.expander("¿Qué es este dashboard y qué datos espera?", expanded=True):
-            st.markdown(
-                "- **NPS**: score 0-10 por respuesta. Promotores (9-10), Pasivos (7-8), "
-                "Detractores (0-6)."
-                "- **NPS Lens** convierte ese dataset en: tendencias, drivers, temas de texto "
-                "y oportunidades."
-                "- Para mejores resultados, incluye columnas como: `Fecha`, `Canal`, `Geo`, "
-                "`Palanca`, `Subpalanca`, `NPS` y `Comment`."
-            )
         st.stop()
 
-    with st.spinner("Cargando y optimizando datos..."):
-        df = load_nps_data(data_path, sheet_name=sheet_name)
+    store_dir = settings.data_dir / "store"
 
 
     st.divider()
@@ -1040,6 +1517,7 @@ def main() -> None:
     )
 
     with t_resumen:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["resumen"] or tuple())
         st.markdown(
             "<div class='nps-card nps-card--flat'>"
             "<b>Cómo leer esta pestaña</b><br/>"
@@ -1050,28 +1528,34 @@ def main() -> None:
         )
         s1, s2, s3 = st.tabs(["Resumen", "Comparativas", "Cohortes"])
         with s1:
-            page_executive(df, theme)
+            page_executive(df, theme, store_dir, geo, channel)
         with s2:
             page_comparisons(df, theme)
         with s3:
             page_cohorts(df, theme)
 
     with t_drivers:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["drivers"])
         page_drivers(df, theme, min_n=min_n)
 
     with t_texto:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["texto"])
         page_text(df, theme)
 
     with t_journey:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["journey"])
         page_journey(df)
 
     with t_alertas:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["alertas"])
         page_changes(df)
 
     with t_llm:
+        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["llm"])
         page_llm(df, settings=settings, min_n=min_n, cache_path=cache_path)
 
     with t_datos:
+        df = load_context_df(store_dir, geo, channel, tuple())
         page_quality(df)
 
 
