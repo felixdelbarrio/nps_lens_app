@@ -15,10 +15,12 @@ src/nps_lens/analytics/causal.py
 src/nps_lens/analytics/changepoints.py
 src/nps_lens/analytics/drivers.py
 src/nps_lens/analytics/journey.py
+src/nps_lens/analytics/nps_helix_link.py
 src/nps_lens/analytics/opportunities.py
 src/nps_lens/analytics/text_mining.py
 src/nps_lens/core/__init__.py
 src/nps_lens/core/compute.py
+src/nps_lens/core/knowledge_cache.py
 src/nps_lens/core/metrics.py
 src/nps_lens/core/store.py
 src/nps_lens/design/__init__.py

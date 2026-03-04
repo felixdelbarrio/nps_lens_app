@@ -75,7 +75,24 @@ def read_helix_incidents_excel(
     If after filtering there are no rows, return empty df (ingestion is not performed).
     """
 
-    sn: Union[str, int] = 0 if not sheet_name else sheet_name
+    # Prefer Helix_Raw / Helix raw sheet as source of truth (not "Issues oficial").
+    if sheet_name is None:
+        try:
+            import openpyxl  # type: ignore
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            sheetnames = list(wb.sheetnames)
+        except Exception:
+            sheetnames = []
+        candidates = ["Helix_Raw", "Helix raw", "Helix Raw", "helix_raw", "helix raw"]
+        picked = None
+        lower_map = {s.lower(): s for s in sheetnames}
+        for c in candidates:
+            if c.lower() in lower_map:
+                picked = lower_map[c.lower()]
+                break
+        sn: Union[str, int] = picked if picked is not None else 0
+    else:
+        sn = sheet_name
     df = pd.read_excel(path, sheet_name=sn, engine="openpyxl")
     if isinstance(df, dict):
         df = list(df.values())[0]

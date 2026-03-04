@@ -10,6 +10,8 @@ import shutil
 from typing import Any, Optional
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv, find_dotenv
@@ -20,8 +22,19 @@ from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.journey import build_routes
 from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
+from nps_lens.analytics.nps_helix_link import (
+    causal_rank_by_topic,
+    link_incidents_to_nps_topics,
+    tokenset,
+    weekly_aggregates,
+    detect_detractor_changepoints_by_topic,
+    estimate_best_lag_by_topic,
+    incidents_lead_changepoints_flag,
+
+)
 from nps_lens.config import Settings
 from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
+from nps_lens.core.knowledge_cache import add_entry as kc_add_entry, load_entries as kc_load_entries, score_adjustments as kc_score_adjustments
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
@@ -1724,6 +1737,337 @@ def page_quality(df: pd.DataFrame) -> None:
     )
 
 
+
+def page_nps_helix_linking(
+    nps_df: pd.DataFrame,
+    store_dir: Path,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    settings: Settings,
+) -> None:
+    st.subheader("🔗 NPS ↔ Helix — causalidad pragmática (multi-fuente)")
+
+    helix_store = HelixIncidentStore(settings.data_dir / "helix")
+    hctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+    hstored = helix_store.get(hctx)
+    if hstored is None:
+        st.info("No hay incidencias Helix persistidas para este contexto. Súbelas en la barra lateral para activar el análisis.")
+        return
+
+    helix_df = helix_store.load_df(hstored)
+
+    # Filtro estricto por N2 solo si el contexto tiene N2.
+    n2_ctx = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
+    if n2_ctx and "BBVA_SourceServiceN2" in helix_df.columns:
+        ctx_set = tuple(sorted(n2_ctx))
+        helix_df = helix_df[helix_df["BBVA_SourceServiceN2"].apply(lambda x: tokenset(x) == ctx_set)].copy()
+
+    if helix_df.empty:
+        st.warning(
+            "No hay incidencias Helix para el contexto seleccionado (tras aplicar el filtro estricto de N2). "
+            "Si el Excel no pertenece al contexto, la ingesta no debió persistir; revisa el fichero subido."
+        )
+        return
+
+    # Ventana temporal: usa el rango del NPS cargado (y deja afinar).
+    nps_df["Fecha"] = pd.to_datetime(nps_df["Fecha"], errors="coerce")
+    dmin = pd.to_datetime(nps_df["Fecha"].min()).date()
+    dmax = pd.to_datetime(nps_df["Fecha"].max()).date()
+    colw = st.columns(3)
+    with colw[0]:
+        start = st.date_input("Desde", value=dmin, min_value=dmin, max_value=dmax, key="nh_start")
+    with colw[1]:
+        end = st.date_input("Hasta", value=dmax, min_value=dmin, max_value=dmax, key="nh_end")
+    with colw[2]:
+        min_sim = st.slider("Umbral similitud (link)", min_value=0.10, max_value=0.60, value=0.22, step=0.02, key="nh_sim")
+
+    nps_slice = nps_df[(nps_df["Fecha"].dt.date >= start) & (nps_df["Fecha"].dt.date <= end)].copy()
+    helix_df = helix_df.copy()
+    # Canonical date col for helix store is 'Fecha' (set in ingestion); if missing, fallback to bbva_closeddate/startdatetime.
+    if "Fecha" not in helix_df.columns:
+        for c in ["bbva_closeddate", "bbva_startdatetime", "Submit Date", "Last Modified Date"]:
+            if c in helix_df.columns:
+                helix_df["Fecha"] = pd.to_datetime(helix_df[c], errors="coerce")
+                break
+    else:
+        helix_df["Fecha"] = pd.to_datetime(helix_df["Fecha"], errors="coerce")
+
+    helix_slice = helix_df[(helix_df["Fecha"].dt.date >= start) & (helix_df["Fecha"].dt.date <= end)].copy()
+
+    if nps_slice.empty:
+        st.warning("No hay respuestas NPS en el rango seleccionado.")
+        return
+    if helix_slice.empty:
+        st.warning("No hay incidencias Helix en el rango seleccionado.")
+        return
+
+    # Detractores para el linking semántico
+    nps_slice["NPS Group"] = nps_slice["NPS Group"].astype(str)
+    is_det = (nps_slice["NPS Group"].str.upper() == "DETRACTOR") | (pd.to_numeric(nps_slice["NPS"], errors="coerce") <= 6)
+    det = nps_slice[is_det].copy()
+    if det.empty:
+        st.info("No hay detractores en el rango seleccionado. El linking semántico se activa cuando existan detractores.")
+    else:
+        st.caption(
+            "El análisis usa: (1) contexto determinista, (2) ventana temporal, (3) mapping semántico de incidencias a tópicos NPS, "
+            "y (4) evidencia (links) detractor↔incidencia con similitud."
+        )
+
+    # 1) Linking + asignación de incidencias a tópico NPS
+    assign_df, links_df = link_incidents_to_nps_topics(det, helix_slice, min_similarity=float(min_sim))
+    overall_weekly, by_topic_weekly = weekly_aggregates(nps_slice, helix_slice, assign_df)
+
+    # 2) Timeline causal (global)
+    st.markdown("### Timeline causal (global)")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=overall_weekly["week"], y=overall_weekly["detractor_rate"], name="% detractores", mode="lines+markers"))
+    fig.add_trace(go.Bar(x=overall_weekly["week"], y=overall_weekly["incidents"], name="# incidencias", yaxis="y2", opacity=0.6))
+    fig.update_layout(
+        height=380,
+        margin=dict(l=10, r=10, t=10, b=10),
+        yaxis=dict(title="% detractores", tickformat=".0%"),
+        yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
+        legend=dict(orientation="h"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 3) Ranking causal por tópico NPS
+    st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
+    rank = causal_rank_by_topic(by_topic_weekly)
+    # 3.1) Changepoints en detracción por tópico + lag (incidencias preceden X semanas)
+    cp_by_topic = detect_detractor_changepoints_by_topic(by_topic_weekly, pen=6.0)
+    lag_by_topic = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
+    lead_share = incidents_lead_changepoints_flag(by_topic_weekly, cp_by_topic, window_weeks=4)
+
+    # 3.2) Knowledge Cache (aprendizaje incremental): boost/penalización por confirmaciones previas
+    kc_entries = kc_load_entries(settings.knowledge_dir)
+    kc_adj = kc_score_adjustments(kc_entries, service_origin, service_origin_n1, service_origin_n2)
+
+    if not rank.empty:
+
+        # Enriquecer ranking con changepoints + lag + learning
+        rank2 = rank.merge(cp_by_topic, on="nps_topic", how="left").merge(lag_by_topic, on="nps_topic", how="left").merge(lead_share, on="nps_topic", how="left")
+        if not kc_adj.empty:
+            rank2 = rank2.merge(kc_adj, on="nps_topic", how="left")
+        else:
+            rank2["factor"] = 1.0
+            rank2["confirmed"] = 0
+            rank2["rejected"] = 0
+        rank2["factor"] = rank2.get("factor", 1.0).fillna(1.0).astype(float)
+        rank2["confidence_learned"] = (rank2["score"].astype(float) * rank2["factor"]).clip(0, 1)
+        rank2 = rank2.sort_values(["confidence_learned", "incidents", "responses"], ascending=False).reset_index(drop=True)
+
+        show = rank2.copy()
+
+        show["detractor_rate"] = (show["detractor_rate"] * 100).round(2)
+        show["delta_detractor_rate"] = (show["delta_detractor_rate"] * 100).round(2)
+        show["confidence_learned"] = show["confidence_learned"].round(3)
+        show["factor"] = show["factor"].round(3)
+        show["corr"] = show["corr"].round(3)
+        show["incidents_lead_changepoint_share"] = (show["incidents_lead_changepoint_share"] * 100).round(0)
+        show["score"] = show["score"].round(3)
+        st.dataframe(
+            show[
+                ["nps_topic", "confidence_learned", "score", "factor", "confirmed", "rejected", "best_lag_weeks", "corr", "incidents_lead_changepoint_share", "changepoints", "incidents", "responses", "detractor_rate", "delta_detractor_rate", "weeks"]
+            ].rename(
+                columns={
+                    "nps_topic": "Tópico NPS",
+                    "confidence_learned": "Confidence (learned)",
+                    "score": "Confidence (raw)",
+                    "factor": "Learning factor",
+                    "confirmed": "✓ Confirmed",
+                    "rejected": "✗ Rejected",
+                    "best_lag_weeks": "Lag (semanas)",
+                    "corr": "Corr@Lag",
+                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
+                    "changepoints": "Changepoints",
+                    "incidents": "Incidencias (asignadas)",
+                    "responses": "Respuestas",
+                    "detractor_rate": "% Detractores",
+                    "delta_detractor_rate": "Δ % Detractores (high-inc vs low-inc)",
+                    "weeks": "Semanas",
+                }
+            ),
+            use_container_width=True,
+            height=320,
+        )
+        # Bar chart top 15
+        topn = show.head(15).copy()
+        fig2 = px.bar(topn[::-1], x="confidence_learned", y="nps_topic", orientation="h")
+        fig2.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1]))
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("No hay suficiente señal para rankear tópicos (prueba con un rango más amplio).")
+
+    # 4) Heatmap Tema x Semana (incidencias asignadas)
+    st.markdown("### Heatmap: incidencias asignadas a tópico NPS por semana")
+    if not by_topic_weekly.empty:
+        pivot = (
+            by_topic_weekly.pivot_table(index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0)
+        )
+        if pivot.shape[0] > 0 and pivot.shape[1] > 0:
+            heat = px.imshow(pivot, aspect="auto")
+            heat.update_layout(height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(heat, use_container_width=True)
+
+    
+    # 4.1) Changepoints + Lag (incidencias preceden X semanas)
+    st.markdown("### Changepoints + Lag (incidencias preceden X semanas)")
+    if not by_topic_weekly.empty and 'rank2' in locals() and not rank2.empty:
+        topic_for_lag = st.selectbox("Tópico (para ver lag)", options=rank2["nps_topic"].tolist(), key="lag_topic_sel")
+        g = by_topic_weekly[by_topic_weekly["nps_topic"] == topic_for_lag].sort_values("week").copy()
+        lag_row = rank2[rank2["nps_topic"] == topic_for_lag].head(1)
+        lagw = int(lag_row["best_lag_weeks"].iloc[0]) if not lag_row.empty and pd.notna(lag_row["best_lag_weeks"].iloc[0]) else 0
+        cps = lag_row["changepoints"].iloc[0] if (not lag_row.empty and "changepoints" in lag_row.columns) else []
+        if not isinstance(cps, list):
+            # may be NaN or string
+            cps = [] if pd.isna(cps) else [str(cps)]
+        g["incidents_shifted"] = g["incidents"].shift(lagw)
+        fig_lag = go.Figure()
+        fig_lag.add_trace(go.Scatter(x=g["week"], y=g["detractor_rate"], name="% detractores", mode="lines+markers"))
+        fig_lag.add_trace(go.Bar(x=g["week"], y=g["incidents_shifted"], name=f"# incidencias (shift {lagw}w)", yaxis="y2", opacity=0.55))
+        # changepoint vertical lines
+        for cp in cps[:8]:
+            try:
+                cp_dt = pd.to_datetime(cp)
+                fig_lag.add_vline(x=cp_dt, line_width=1, line_dash="dot")
+            except Exception:
+                pass
+        fig_lag.update_layout(
+            height=380,
+            margin=dict(l=10, r=10, t=10, b=10),
+            yaxis=dict(title="% detractores", tickformat=".0%"),
+            yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(fig_lag, use_container_width=True)
+        st.caption(
+            "Interpretación: el lag se elige maximizando la correlación entre incidencias(t) y detracción(t+lag). "
+            "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico."
+        )
+    else:
+        st.info("No hay datos suficientes para estimar changepoints/lag por tópico.")
+
+# 5) Evidence wall
+    st.markdown("### Evidence wall: detractores ↔ incidencias (links semánticos)")
+    if det.empty or links_df.empty:
+        st.info("No hay links (o no hay detractores) con el umbral actual. Baja el umbral o amplía la ventana.")
+    else:
+        topics = rank["nps_topic"].tolist() if not rank.empty else sorted(det["Palanca"].astype(str).unique().tolist())
+        chosen = st.selectbox("Selecciona tópico NPS", options=rank["nps_topic"].tolist() if not rank.empty else sorted(det["Palanca"].astype(str).unique().tolist()))
+        sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
+        if sub_links.empty:
+            st.info("No hay links para este tópico con el umbral actual.")
+        else:
+            # Join snippets
+            det2 = det.copy()
+            det2["nps_id"] = det2["ID"].astype(str)
+            hel2 = helix_slice.copy()
+            hel2["incident_id"] = hel2.get("Incident Number", hel2.get("ID de la Incidencia", hel2.index)).astype(str)
+
+            det_snip = det2.set_index("nps_id")["Comment"].astype(str).fillna("")
+            inc_snip = (hel2.set_index("incident_id")["summary"].astype(str).fillna("") if "summary" in hel2.columns else pd.Series(dtype=str))
+
+            sub_links["Comentario detractor"] = sub_links["nps_id"].map(det_snip).fillna("").str.slice(0, 220)
+            sub_links["Incidencia (summary)"] = sub_links["incident_id"].map(inc_snip).fillna("").str.slice(0, 220)
+            sub_links["similarity"] = sub_links["similarity"].round(3)
+
+            st.dataframe(
+                sub_links[["similarity", "Comentario detractor", "Incidencia (summary)", "incident_id", "nps_id"]],
+                use_container_width=True,
+                height=420,
+            )
+
+    # 6) Deep-dive pack (Markdown + JSON)
+    st.markdown("### 📦 LLM Deep-Dive Pack (Markdown + JSON)")
+    pack = {
+        "version": "1.0",
+        "context": {
+            "service_origin": service_origin,
+            "service_origin_n1": service_origin_n1,
+            "service_origin_n2": service_origin_n2,
+            "date_start": str(start),
+            "date_end": str(end),
+            "min_similarity": float(min_sim),
+        },
+        "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
+        "ranked_hypotheses": rank.head(20).to_dict(orient="records") if "rank" in locals() else [],
+        "changepoints_by_topic": cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else [],
+        "best_lag_by_topic": lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else [],
+        "knowledge_cache_context_entries": (
+            kc_entries[
+                (kc_entries["service_origin"] == str(service_origin))
+                & (kc_entries["service_origin_n1"] == str(service_origin_n1))
+                & (kc_entries["service_origin_n2"] == str(service_origin_n2 or ""))
+            ].to_dict(orient="records")
+            if "kc_entries" in locals() and not kc_entries.empty
+            else []
+        ),
+
+        "evidence_links_sample": links_df.head(200).to_dict(orient="records") if not links_df.empty else [],
+        "notes": [
+            "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
+            "Los links se basan en similitud TF-IDF; revisar umbral y ejemplos para validar.",
+        ],
+    }
+
+    md_lines = []
+    md_lines.append(f"# Deep-Dive Pack — NPS ↔ Helix ({service_origin} · {service_origin_n1})")
+    if service_origin_n2:
+        md_lines.append(f"**Service origin N2:** {service_origin_n2}")
+    md_lines.append(f"**Ventana:** {start} → {end}")
+    md_lines.append("")
+    md_lines.append("## 1) Resumen ejecutivo")
+    if not rank.empty:
+        top = rank.head(3)
+        for _, r in top.iterrows():
+            md_lines.append(
+                f"- **{r['nps_topic']}** · confidence={r['score']:.3f} · incidencias={int(r['incidents'])} · "
+                f"Δ detractores={float(r['delta_detractor_rate'] or 0)*100:.2f} pp"
+            )
+    else:
+        md_lines.append("- No hay ranking disponible (insuficiente señal).")
+    md_lines.append("")
+    md_lines.append("## 2) Evidencia cuantitativa (semanal)")
+    md_lines.append("**Global:** % detractores vs incidencias")
+    md_lines.append("")
+    md_lines.append("| Semana | Respuestas | Detractores | % detractores | Incidencias |")
+    md_lines.append("|---|---:|---:|---:|---:|")
+    for rec in overall_weekly.sort_values("week").to_dict(orient="records"):
+        md_lines.append(
+            f"| {pd.to_datetime(rec['week']).date()} | {int(rec.get('responses',0))} | {int(rec.get('detractors',0))} | "
+            f"{(float(rec.get('detractor_rate',0))*100):.2f}% | {int(rec.get('incidents',0))} |"
+        )
+    md_lines.append("")
+    md_lines.append("## 3) Evidencia cualitativa (links)")
+    if not links_df.empty:
+        for rec in links_df.head(20).to_dict(orient="records"):
+            md_lines.append(
+                f"- sim={rec['similarity']:.3f} · tópico={rec['nps_topic']} · nps_id={rec['nps_id']} ↔ incident_id={rec['incident_id']}"
+            )
+    else:
+        md_lines.append("- No hay links con el umbral actual.")
+    md_lines.append("")
+    md_lines.append("## 4) Preguntas sugeridas al LLM")
+    md_lines.append("- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?")
+    md_lines.append("- ¿Qué subtemas emergen en los verbatims y en las incidencias? ¿Coinciden?")
+    md_lines.append("- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?")
+    md_lines.append("")
+    md_lines.append("## 5) Trazabilidad técnica")
+    md_lines.append("- Fuente NPS: dataset persistido para el contexto seleccionado.")
+    md_lines.append("- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto.")
+    md_lines.append("- Linking: TF-IDF + cosine similarity, umbral configurable.")
+
+    md = "\n".join(md_lines)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md")
+    with c2:
+        st.download_button("Descargar Pack (JSON)", data=json.dumps(pack, ensure_ascii=False, indent=2).encode("utf-8"), file_name="deep_dive_pack.json")
+
+
 def main() -> None:
     # Streamlit doesn't automatically load .env.
     # This is the source of truth for service_origin_buug / service_origin_n1 / service_origin_n2 options.
@@ -1843,7 +2187,7 @@ def main() -> None:
             "</div>",
             unsafe_allow_html=True,
         )
-        s1, s2, s3 = st.tabs(["Resumen", "Comparativas", "Cohortes"])
+        s1, s2, s3, s4 = st.tabs(["Resumen", "Comparativas", "Cohortes", "NPS ↔ Helix"])
         with s1:
             page_executive(df, theme, store_dir, service_origin, service_origin_n1, service_origin_n2)
         with s2:
