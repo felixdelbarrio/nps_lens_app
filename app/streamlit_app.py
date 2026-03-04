@@ -1792,10 +1792,32 @@ def page_nps_helix_linking(
     if "Fecha" not in helix_df.columns:
         for c in ["bbva_closeddate", "bbva_startdatetime", "Submit Date", "Last Modified Date"]:
             if c in helix_df.columns:
-                helix_df["Fecha"] = pd.to_datetime(helix_df[c], errors="coerce")
+                # Helix/API extracts may encode timestamps as Unix epoch milliseconds.
+                ser = helix_df[c]
+                dt = pd.to_datetime(ser, errors="coerce")
+                if float(dt.notna().mean()) < 0.4:
+                    num = pd.to_numeric(ser, errors="coerce")
+                    if float(num.notna().mean()) >= 0.6:
+                        med = float(num.dropna().median())
+                        if med >= 1e12:
+                            dt = pd.to_datetime(num, unit="ms", errors="coerce")
+                        elif med >= 1e9:
+                            dt = pd.to_datetime(num, unit="s", errors="coerce")
+                helix_df["Fecha"] = dt
                 break
     else:
-        helix_df["Fecha"] = pd.to_datetime(helix_df["Fecha"], errors="coerce")
+        # If already present but poorly parsed (common when epoch-ms was ingested as object), attempt epoch recovery.
+        dt = pd.to_datetime(helix_df["Fecha"], errors="coerce")
+        if float(dt.notna().mean()) < 0.4 and "Submit Date" in helix_df.columns:
+            ser = helix_df["Submit Date"]
+            num = pd.to_numeric(ser, errors="coerce")
+            if float(num.notna().mean()) >= 0.6:
+                med = float(num.dropna().median())
+                if med >= 1e12:
+                    dt = pd.to_datetime(num, unit="ms", errors="coerce")
+                elif med >= 1e9:
+                    dt = pd.to_datetime(num, unit="s", errors="coerce")
+        helix_df["Fecha"] = dt
 
     helix_slice = helix_df[(helix_df["Fecha"].dt.date >= start) & (helix_df["Fecha"].dt.date <= end)].copy()
 

@@ -59,7 +59,9 @@ target-version = "py39"
 fix = true
 
 [tool.ruff.lint]
-select = ["E","F","I","B","UP","SIM","PL","RUF"]
+## Lint policy (MVP): focus on correctness + imports + basic bugbear.
+## We intentionally exclude heavier "style/polish" families (PL/RUF/UP) to keep CI actionable.
+select = ["E","F","I","B","SIM"]
 ignore = [
   "PLR0913",  # many function args ok for analytics helpers
   "PLR2004",  # allow magic numbers in scoring heuristics

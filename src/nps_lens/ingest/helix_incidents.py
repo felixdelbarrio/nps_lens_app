@@ -40,6 +40,10 @@ def _detect_fecha_column(df: pd.DataFrame) -> Optional[str]:
         "Fecha Apertura",
         "Fecha creación",
         "Fecha creacion",
+        "Submit Date",
+        "SubmitDate",
+        "Submitted Date",
+        "SubmittedDate",
         "CreatedDate",
         "Created Date",
         "Open Date",
@@ -54,6 +58,43 @@ def _detect_fecha_column(df: pd.DataFrame) -> Optional[str]:
         if "fecha" in lc or "date" in lc:
             return c
     return None
+
+
+def _parse_helix_datetime(series: pd.Series) -> pd.Series:
+    """Parse Helix datetime values robustly.
+
+    Helix exports (and API/log-derived extracts) commonly encode timestamps as
+    Unix epoch **milliseconds** (e.g. 1767576293000). Pandas' default
+    to_datetime() can misinterpret these depending on dtype.
+
+    Strategy:
+      1) Try regular to_datetime (handles ISO strings, Excel datetimes, etc.).
+      2) If most values are NaT and the series looks numeric, interpret as:
+         - milliseconds if magnitude ~ 1e12 or higher
+         - seconds if magnitude ~ 1e9
+
+    Output is timezone-naive to keep analysis consistent across the app.
+    """
+
+    s = series.copy()
+
+    # First pass: general parser
+    dt = pd.to_datetime(s, errors="coerce")
+    ok_ratio = float(dt.notna().mean()) if len(dt) else 0.0
+    if ok_ratio >= 0.6:
+        return dt
+
+    # Second pass: numeric epoch detection
+    num = pd.to_numeric(s, errors="coerce")
+    if len(num) == 0 or float(num.notna().mean()) < 0.6:
+        return dt
+
+    med = float(num.dropna().median())
+    if med >= 1e12:
+        return pd.to_datetime(num, unit="ms", errors="coerce")
+    if med >= 1e9:
+        return pd.to_datetime(num, unit="s", errors="coerce")
+    return dt
 
 
 def read_helix_incidents_excel(
@@ -197,7 +238,7 @@ def read_helix_incidents_excel(
     # Canonical Fecha (best-effort)
     fecha_col = _detect_fecha_column(d)
     if fecha_col is not None:
-        d["Fecha"] = pd.to_datetime(d[fecha_col], errors="coerce")
+        d["Fecha"] = _parse_helix_datetime(d[fecha_col])
         bad = int(d["Fecha"].isna().sum())
         if bad:
             issues.append(ValidationIssue(level="WARN", message=f"{bad} filas con Fecha inválida (columna '{fecha_col}')"))
