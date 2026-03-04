@@ -57,6 +57,8 @@ REGLA CRÍTICA — SOLO JSON:
 - Tu respuesta debe ser exclusivamente un objeto JSON (sin explicaciones, sin títulos, sin Markdown, sin bloques de código).
 - Usa comillas dobles estándar " (no comillas tipográficas).
 - Sin trailing commas.
+- No incluyas comillas dobles dentro de strings. Si necesitas comillas en un texto, escápalas como \".
+- No envuelvas el JSON en Markdown (sin ```json).
 - No uses NaN/Infinity/None; usa null si aplica.
 - No agregues campos fuera del esquema.
 - Si algún campo no puede completarse con evidencia del pack, usa null o listas vacías según corresponda y explica la carencia en "assumptions" y/o "risks" (sin inventar).
@@ -372,6 +374,53 @@ def _repair_json_text(text: str) -> str:
     for k, v in rep.items():
         s = s.replace(k, v)
 
+
+    def _escape_unescaped_quotes_in_strings(payload: str) -> str:
+        """Escape inner quotes inside JSON strings.
+
+        LLMs sometimes emit unescaped double quotes inside a quoted string, e.g.:
+            "driver \"Funcionamiento\""  (good)
+            "driver "Funcionamiento""    (bad)
+
+        We treat a quote as a string terminator only if the next non-space
+        character is one of: ':', ',', '}', ']', or end-of-input.
+        Otherwise, we escape it as an inner quote.
+        """
+        out: list[str] = []
+        in_str = False
+        esc = False
+        n = len(payload)
+        for i, ch in enumerate(payload):
+            if not in_str:
+                out.append(ch)
+                if ch == '"':
+                    in_str = True
+                continue
+
+            # in string
+            if esc:
+                out.append(ch)
+                esc = False
+                continue
+            if ch == "\\":
+                out.append(ch)
+                esc = True
+                continue
+            if ch == '"':
+                # lookahead
+                j = i + 1
+                while j < n and payload[j].isspace():
+                    j += 1
+                nxt = payload[j] if j < n else ""
+                if nxt in (":", ",", "}", "]", ""):
+                    out.append(ch)
+                    in_str = False
+                else:
+                    out.append('\\"')
+                continue
+            out.append(ch)
+        return "".join(out)
+
     # If the user pasted something that contains JSON but with extra text, extract first balanced {...}
     start = s.find("{")
     if start != -1:
@@ -399,6 +448,9 @@ def _repair_json_text(text: str) -> str:
 
     # Remove trailing commas before } or ]
     s = re.sub(r",\s*([}\]])", r"\1", s)
+
+    # Escape inner quotes inside strings (common LLM mistake)
+    s = _escape_unescaped_quotes_in_strings(s)
 
     return s.strip()
 
