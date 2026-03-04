@@ -167,18 +167,18 @@ def _load_jsonl_subset_cached(
 
 @dataclass(frozen=True)
 class DatasetContext:
-    geo: str
-    channel: str
+    service_origin: str
+    service_origin_n1: str
 
     def key(self) -> str:
-        return f"{self.geo}__{self.channel}"
+        return f"{self.service_origin}__{self.service_origin_n1}"
 
     @staticmethod
     def from_key(key: str) -> "DatasetContext":
         parts = key.split("__", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid context key: {key}")
-        return DatasetContext(geo=parts[0], channel=parts[1])
+        return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1])
 
 
 @dataclass(frozen=True)
@@ -478,7 +478,7 @@ class DatasetStore:
 
         meta = {
             "schema_version": "1.0",
-            "context": {"geo": ctx.geo, "channel": ctx.channel},
+            "context": {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1},
             "rows": int(len(df_out)),
             "cols": int(len(df_out.columns)),
             "source": source,
@@ -575,3 +575,118 @@ class DatasetStore:
         )
         out["nps_classic_pp"] = (out["promoter_rate"] - out["detractor_rate"]) * 100.0
         return out
+
+
+class HelixIncidentStore:
+    """Store for Helix incident exports per context.
+
+    Separate from the NPS dataset store to keep contracts explicit.
+
+    Source of truth: JSONL per context.
+    Derived cache: partitioned Parquet dataset for later cross-source linking.
+    """
+
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _paths_for(self, ctx: DatasetContext) -> tuple[Path, Path, Path]:
+        data_path = self.base_dir / f"helix_incidents__{ctx.key()}.jsonl"
+        meta_path = self.base_dir / f"helix_incidents__{ctx.key()}.meta.json"
+
+        cache_dir = self.base_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        parquet_dir = cache_dir / f"helix_incidents__{ctx.key()}"
+        return data_path, meta_path, parquet_dir
+
+    def list_contexts(self) -> list[DatasetContext]:
+        out: list[DatasetContext] = []
+        for p in sorted(self.base_dir.glob("helix_incidents__*.meta.json")):
+            key = p.name.replace("helix_incidents__", "").replace(".meta.json", "")
+            try:
+                out.append(DatasetContext.from_key(key))
+            except ValueError:
+                continue
+        return out
+
+    def get(self, ctx: DatasetContext) -> Optional[StoredDataset]:
+        data_path, meta_path, _ = self._paths_for(ctx)
+        if not data_path.exists() or not meta_path.exists():
+            return None
+        return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
+
+    def save_df(self, ctx: DatasetContext, df: pd.DataFrame, source: str) -> StoredDataset:
+        data_path, meta_path, parquet_dir = self._paths_for(ctx)
+
+        df_out = df.copy()
+        df_out = df_out.reindex(sorted(df_out.columns), axis=1)
+
+        if "Fecha" in df_out.columns:
+            df_out["Fecha"] = pd.to_datetime(df_out["Fecha"], errors="coerce")
+
+        df_out.to_json(
+            data_path,
+            orient="records",
+            lines=True,
+            force_ascii=False,
+            date_format="iso",
+        )
+
+        stat = data_path.stat()
+
+        # Build/refresh parquet cache
+        partitioning = self._write_parquet_dataset(df_out, parquet_dir)
+
+        meta = {
+            "schema_version": "1.0",
+            "context": {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1},
+            "rows": int(len(df_out)),
+            "cols": int(len(df_out.columns)),
+            "source": source,
+            "updated_at_utc": pd.Timestamp.utcnow().isoformat() + "Z",
+            "jsonl_mtime_ns": int(stat.st_mtime_ns),
+            "jsonl_size": int(stat.st_size),
+            "parquet_dataset": {
+                "path": str(parquet_dir),
+                "rows": int(len(df_out)),
+                "cols": int(len(df_out.columns)),
+                "partitioning": partitioning,
+            },
+        }
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
+
+    def _write_parquet_dataset(self, df: pd.DataFrame, parquet_dir: Path) -> list[str]:
+        # Ensure clean dir
+        if parquet_dir.exists():
+            for p in parquet_dir.rglob("*"):
+                if p.is_file():
+                    p.unlink()
+            for p in sorted([p for p in parquet_dir.rglob("*") if p.is_dir()], reverse=True):
+                try:
+                    p.rmdir()
+                except Exception:
+                    pass
+        parquet_dir.mkdir(parents=True, exist_ok=True)
+
+        d = df.copy()
+        partition_cols: list[str] = []
+
+        if "Fecha" in d.columns and not d["Fecha"].isna().all():
+            d["Fecha_day"] = pd.to_datetime(d["Fecha"], errors="coerce").dt.date.astype("string")
+            partition_cols.append("Fecha_day")
+
+        # Optional partition by BBVA_SourceServiceCompany/N1 (low cardinality)
+        for c in ["BBVA_SourceServiceCompany", "BBVA_SourceServiceN1"]:
+            if c in d.columns:
+                nunique = int(d[c].astype("string").nunique(dropna=True))
+                if nunique <= 50:
+                    d[c] = d[c].astype("string")
+                    partition_cols.append(c)
+
+        if not partition_cols:
+            d.to_parquet(parquet_dir / "part-0.parquet", index=False)
+            return []
+
+        d.to_parquet(parquet_dir, index=False, partition_cols=partition_cols)
+        return partition_cols

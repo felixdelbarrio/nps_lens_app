@@ -25,6 +25,7 @@ src/nps_lens/design/__init__.py
 src/nps_lens/design/tokens.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
+src/nps_lens/ingest/helix_incidents.py
 src/nps_lens/ingest/incidents.py
 src/nps_lens/ingest/nps_thermal.py
 src/nps_lens/ingest/reviews.py
@@ -47,7 +48,9 @@ src/nps_lens/ui/charts.py
 src/nps_lens/ui/components.py
 src/nps_lens/ui/narratives.py
 src/nps_lens/ui/theme.py
+tests/test_config_env.py
 tests/test_drivers.py
+tests/test_helix_ingest_filtering.py
 tests/test_ingest_contracts.py
 tests/test_knowledge_cache.py
 tests/test_text_mining.py

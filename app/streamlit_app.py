@@ -6,11 +6,13 @@ import base64
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
+import shutil
 from typing import Any, Optional
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from dotenv import load_dotenv, find_dotenv
 
 from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.changepoints import detect_nps_changepoints
@@ -19,8 +21,9 @@ from nps_lens.analytics.journey import build_routes
 from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.config import Settings
-from nps_lens.core.store import DatasetContext, DatasetStore
+from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
 from nps_lens.ui.charts import (
     chart_daily_mix_business,
@@ -122,8 +125,9 @@ DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segme
 @st.cache_data(show_spinner=False)
 def load_context_df(
     store_dir: Path,
-    geo: str,
-    channel: str,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
     columns: tuple[str, ...],
     date_start: Optional[str] = None,
     date_end: Optional[str] = None,
@@ -135,7 +139,7 @@ def load_context_df(
     the columns it needs (min CPU/RAM).
     """
     store = DatasetStore(store_dir)
-    stored = store.get(DatasetContext(geo=geo, channel=channel))
+    stored = store.get(DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1))
     if stored is None:
         return pd.DataFrame()
 
@@ -148,6 +152,21 @@ def load_context_df(
     # Convert to pandas only at the edge (Streamlit/Plotly). The Arrow Table is cached
     # as RecordBatches in the store for reuse across charts.
     df = table.to_pandas()
+
+    # Optional filter by service_origin_n2 (comma-separated values).
+    n2_vals = [v.strip() for v in str(service_origin_n2 or "").split(",") if v.strip()]
+    if n2_vals and "service_origin_n2" in df.columns:
+        # Keep rows where any token in the row intersects the selected tokens.
+        sel = set(n2_vals)
+        def _has_any(v: object) -> bool:
+            if v is None:
+                return False
+            s = str(v).strip()
+            if not s:
+                return False
+            toks = {p.strip() for p in s.split(",") if p.strip()}
+            return bool(toks & sel)
+        df = df.loc[df["service_origin_n2"].apply(_has_any)].copy()
 
     # Lightweight dtype optimization (safe even with partial columns)
     if "Fecha" in df.columns:
@@ -230,11 +249,11 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def load_llm_insights_for_context(settings: Settings, geo: str, channel: str) -> list[dict[str, Any]]:
+def load_llm_insights_for_context(settings: Settings, service_origin: str, service_origin_n1: str) -> list[dict[str, Any]]:
     """Load persisted LLM insights for the selected context."""
     from nps_lens.llm import KnowledgeCache
 
-    kc = KnowledgeCache.for_context(settings.knowledge_dir, geo=geo, channel=channel)
+    kc = KnowledgeCache.for_context(settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1)
     data = kc.load()
     entries = data.get("entries", [])
     # entries are dicts; keep as-is
@@ -613,29 +632,44 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
 
 def render_sidebar(  # noqa: PLR0915
     settings: Settings,
-) -> tuple[Optional[Path], int, str, str, Path, str, Optional[str], bool]:
-    """Single-source sidebar: Context (geo/channel) -> dataset -> controls.
+) -> tuple[Optional[Path], int, str, str, str, Path, str, Optional[str], bool]:
+    """Single-source sidebar: Context -> dataset -> controls.
 
-    - Context is the top-level hierarchy.
-    - Only Excel upload is supported (no local path, no examples).
-    - Uploaded data is normalized and persisted as JSONL per (geo, channel).
-    - The app always reads from the persisted JSONL to ensure consistency.
+    Context dimensions:
+      - service_origin (antes: geografía)
+      - service_origin_n1 (antes: canal)
+      - service_origin_n2 (opcional; filtro, puede venir vacío o separado por comas)
     """
     store = DatasetStore(settings.data_dir / "store")
 
-    # Build option sets: prefer existing contexts, but allow expanding the list.
-    existing = store.list_contexts()
-    geo_options = sorted({*(c.geo for c in existing), settings.default_geo, "ES", "CO", "PE", "AR"})
-    channel_options = sorted({*(c.channel for c in existing), settings.default_channel, "Gema"})
+    # IMPORTANT CONTRACT:
+    # Context values MUST come from .env (Settings.from_env). We do not infer
+    # options from stored datasets to avoid silent drift. Advanced users can
+    # add/remove values by editing the .env.
+    existing = store.list_contexts()  # used only for default context + validation UI
+
+    service_origin_options = list(settings.service_origin_values) or [settings.default_service_origin]
+    # Keep current/default selectable even if .env was edited incorrectly.
+    for v in [settings.default_service_origin]:
+        if v and v not in service_origin_options:
+            service_origin_options.append(v)
 
     # Default context: first stored dataset, else Settings defaults.
     if "_ctx" not in st.session_state:
-        ctx0 = store.default_context() or DatasetContext(settings.default_geo, settings.default_channel)
-        st.session_state["_ctx"] = {"geo": ctx0.geo, "channel": ctx0.channel}
+        ctx0 = store.default_context() or DatasetContext(
+            settings.default_service_origin,
+            settings.default_service_origin_n1,
+        )
+        st.session_state["_ctx"] = {
+            "service_origin": ctx0.service_origin,
+            "service_origin_n1": ctx0.service_origin_n1,
+            "service_origin_n2": "",
+        }
 
     ctx_state = st.session_state["_ctx"]
-    cur_geo = str(ctx_state.get("geo", settings.default_geo))
-    cur_channel = str(ctx_state.get("channel", settings.default_channel))
+    cur_so = str(ctx_state.get("service_origin", settings.default_service_origin))
+    cur_n1 = str(ctx_state.get("service_origin_n1", settings.default_service_origin_n1))
+    cur_n2 = str(ctx_state.get("service_origin_n2", ""))
 
     defaults = st.session_state.get(
         "_controls",
@@ -647,39 +681,78 @@ def render_sidebar(  # noqa: PLR0915
 
     with st.sidebar:
         st.header("Contexto")
-        geo = st.selectbox("Geografía", geo_options, index=geo_options.index(cur_geo) if cur_geo in geo_options else 0)
-        channel = st.selectbox(
-            "Canal",
-            channel_options,
-            index=channel_options.index(cur_channel) if cur_channel in channel_options else 0,
+        if cur_so not in service_origin_options:
+            service_origin_options = [cur_so, *service_origin_options]
+        service_origin = st.selectbox(
+            "Service origin",
+            service_origin_options,
+            index=service_origin_options.index(cur_so) if cur_so in service_origin_options else 0,
         )
 
-        # Persist context selection
-        st.session_state["_ctx"] = {"geo": geo, "channel": channel}
+        # service_origin_n1 options are sourced from .env mapping.
+        n1_opts = list(settings.service_origin_n1_map.get(service_origin, []))
+        if not n1_opts:
+            # Safe fallback to keep the UI usable even if the mapping is incomplete.
+            n1_opts = [settings.default_service_origin_n1]
+        if cur_n1 not in n1_opts:
+            n1_opts = [cur_n1, *n1_opts]
+        service_origin_n1 = st.selectbox(
+            "Service origin N1",
+            n1_opts,
+            index=n1_opts.index(cur_n1) if cur_n1 in n1_opts else 0,
+        )
+
+        # service_origin_n2 tokens are sourced from .env (optional). If present,
+        # we use a multiselect to avoid typos and ensure stable filtering.
+        n2_allowed = list(settings.service_origin_n2_values)
+        if n2_allowed:
+            cur_n2_list = [v.strip() for v in (cur_n2 or "").split(",") if v.strip()]
+            selected = st.multiselect(
+                "Service origin N2 (opcional)",
+                options=n2_allowed,
+                default=[v for v in cur_n2_list if v in n2_allowed],
+                help="Opcional. Selecciona uno o varios valores (el dataset puede venir vacío o con múltiples valores separados por comas).",
+            )
+            service_origin_n2 = ", ".join(selected)
+        else:
+            service_origin_n2 = st.text_input(
+                "Service origin N2 (opcional)",
+                value=cur_n2,
+                help="Opcional. Puede venir vacío o con valores separados por comas (ej: SN2A, SN2B).",
+            )
+
+        # Persist context selection (includes n2 filter)
+        st.session_state["_ctx"] = {
+            "service_origin": service_origin,
+            "service_origin_n1": service_origin_n1,
+            "service_origin_n2": service_origin_n2,
+        }
 
         st.divider()
-        st.header("Dataset (Excel)")
-        st.caption("Este Excel pertenece al contexto seleccionado (geografía + canal).")
+        st.header("NPS")
+        st.caption("Sube el Excel de NPS térmico para el contexto seleccionado (service_origin + service_origin_n1).")
 
         up = st.file_uploader("Subir Excel NPS térmico (.xlsx)", type=["xlsx", "xlsm", "xls"])
         sheet_name = (st.text_input("Hoja (opcional)", value="") or None)
 
-        # Show current dataset status if exists
-        ctx = DatasetContext(geo=geo, channel=channel)
+        ctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
         stored = store.get(ctx)
         if stored is not None:
             meta = json.loads(stored.meta_path.read_text(encoding="utf-8"))
-            st.success(f"Dataset activo: {meta.get('rows', '?'):,} filas · actualizado {meta.get('updated_at_utc', '?')}")
+            st.success(
+                f"Dataset activo: {meta.get('rows', '?'):,} filas · actualizado {meta.get('updated_at_utc', '?')}"
+            )
         else:
             st.info("No hay dataset persistido para este contexto. Sube el Excel para empezar.")
 
-        if st.button("Importar / actualizar dataset", type="primary", use_container_width=True):
+        if st.button("Importar / actualizar NPS", type="primary", use_container_width=True):
             if up is None:
                 st.warning("Primero sube un Excel.")
             else:
                 uploads_dir = settings.data_dir / "uploads"
                 uploads_dir.mkdir(parents=True, exist_ok=True)
                 upload_path = uploads_dir / up.name
+
                 # Write only if changed to avoid rerun storms
                 buf = up.getbuffer()
                 if (not upload_path.exists()) or (upload_path.stat().st_size != len(buf)):
@@ -687,22 +760,81 @@ def render_sidebar(  # noqa: PLR0915
 
                 res = read_nps_thermal_excel(
                     str(upload_path),
-                    geo=geo,
-                    channel=channel,
+                    service_origin=service_origin,
+                    service_origin_n1=service_origin_n1,
                     sheet_name=sheet_name,
                 )
-                # Persist normalized dataframe as the single source of truth
                 store.save_df(ctx, res.df, source=f"excel:{upload_path.name}")
                 st.session_state["_last_import_issues"] = [asdict(i) for i in res.issues]
                 st.rerun()
 
-        # Surface validation issues after import (if any)
         issues = st.session_state.get("_last_import_issues") or []
         if issues:
             with st.expander("Avisos / errores del último import", expanded=False):
                 st.json(issues)
 
-        
+        # --------------------
+        # Helix (Incidencias)
+        # --------------------
+        st.divider()
+        st.header("Helix")
+        st.caption(
+            "Sube el Excel de incidencias reportadas al servicio. Se ingestan SOLO las filas que pertenecen al contexto seleccionado."
+        )
+
+        helix_up = st.file_uploader(
+            "Subir Excel Helix (incidencias) (.xlsx)",
+            type=["xlsx", "xlsm", "xls"],
+            key="helix_uploader",
+        )
+        helix_sheet = (st.text_input("Hoja Helix (opcional)", value="", key="helix_sheet") or None)
+
+        helix_store = HelixIncidentStore(settings.data_dir / "helix")
+        hctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+        hstored = helix_store.get(hctx)
+        if hstored is not None:
+            hmeta = json.loads(hstored.meta_path.read_text(encoding="utf-8"))
+            st.success(
+                f"Helix activo: {hmeta.get('rows', '?'):,} filas · actualizado {hmeta.get('updated_at_utc', '?')}"
+            )
+        else:
+            st.info("No hay incidencias Helix persistidas para este contexto. Sube el Excel para ingestar.")
+
+        if st.button("Importar / actualizar Helix", type="secondary", use_container_width=True):
+            if helix_up is None:
+                st.warning("Primero sube un Excel de Helix.")
+            else:
+                uploads_dir = settings.data_dir / "uploads"
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                upload_path = uploads_dir / helix_up.name
+
+                buf = helix_up.getbuffer()
+                if (not upload_path.exists()) or (upload_path.stat().st_size != len(buf)):
+                    upload_path.write_bytes(buf)
+
+                res2 = read_helix_incidents_excel(
+                    str(upload_path),
+                    service_origin=service_origin,
+                    service_origin_n1=service_origin_n1,
+                    service_origin_n2=service_origin_n2,
+                    sheet_name=helix_sheet,
+                )
+
+                st.session_state["_last_helix_import_issues"] = [asdict(i) for i in res2.issues]
+
+                if res2.df is None or res2.df.empty:
+                    st.warning(
+                        "Ingesta NO realizada: el fichero no contiene registros para el contexto seleccionado."
+                    )
+                else:
+                    helix_store.save_df(hctx, res2.df, source=f"excel:{upload_path.name}")
+                    st.rerun()
+
+        helix_issues = st.session_state.get("_last_helix_import_issues") or []
+        if helix_issues:
+            with st.expander("Avisos / errores del último import Helix", expanded=False):
+                st.json(helix_issues)
+
         st.divider()
         st.header("Experiencia")
         theme_mode = st.selectbox(
@@ -710,6 +842,7 @@ def render_sidebar(  # noqa: PLR0915
             ["light", "dark"],
             index=0 if defaults["theme_mode"] == "light" else 1,
         )
+
         st.divider()
         st.header("Controles")
         with st.form("apply_controls", clear_on_submit=False):
@@ -728,22 +861,23 @@ def render_sidebar(  # noqa: PLR0915
                 "min_n": int(min_n),
             }
 
-    # Resolve dataset path for current context
-    stored = store.get(DatasetContext(geo=geo, channel=channel))
-    data_path = stored.path if stored is not None else None
-    data_ready = stored is not None
+    stored2 = store.get(DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1))
+    data_path = stored2.path if stored2 is not None else None
+    data_ready = stored2 is not None
+
     return (
         data_path,
         int(st.session_state.get("_controls", defaults)["min_n"]),
-        geo,
-        channel,
+        service_origin,
+        service_origin_n1,
+        service_origin_n2,
         settings.knowledge_dir,
         theme_mode,
         sheet_name,
         data_ready,
     )
 
-def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, channel: str) -> None:
+def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_origin: str, service_origin_n1: str, service_origin_n2: str) -> None:
     section(
         "Resumen ejecutivo",
         "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
@@ -806,8 +940,9 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, ch
                 start_day = end_day - pd.Timedelta(days=int(days) - 1)
                 df_win = load_context_df(
                     store_dir,
-                    geo,
-                    channel,
+                    service_origin,
+                    service_origin_n1,
+                    service_origin_n2,
                     CHART_COLUMNS["daily_mix"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -838,8 +973,9 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, ch
 
                     df_llm_win = load_context_df(
                         store_dir,
-                        geo,
-                        channel,
+                        service_origin,
+                        service_origin_n1,
+                        service_origin_n2,
                         CHART_COLUMNS["daily_llm"],
                         date_start=str(start_day.date()) if end_day is not None else None,
                         date_end=str(end_day.date()) if end_day is not None else None,
@@ -896,7 +1032,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, ch
                                 "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
                                 "1) Resumen ejecutivo (max 10 líneas)\n"
                                 "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
-                                f"Contexto:\n- geo: MX\n- channel: Senda\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
+                                f"Contexto:\n- service_origin: {service_origin}\n- service_origin_n1: {service_origin_n1}\n- service_origin_n2: {service_origin_n2 or '-'}\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
                                 "Hechos del día (métricas):\n"
                                 f"- n: {int(rr['n'])}\n"
                                 f"- % detractores (0-6): {rr['det_pct']:.1f}%\n"
@@ -950,8 +1086,9 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, geo: str, ch
             if end_day is not None:
                 df_sema = load_context_df(
                     store_dir,
-                    geo,
-                    channel,
+                    service_origin,
+                    service_origin_n1,
+                    service_origin_n2,
                     CHART_COLUMNS["daily_semaforo"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -1290,8 +1427,8 @@ def _llm_build_pack(
     )
 
     context = {
-        "geo": str(settings.default_geo),
-        "channel": str(settings.default_channel),
+        "service_origin": str(settings.default_service_origin),
+        "service_origin_n1": str(settings.default_service_origin_n1),
         "driver_dim": str(selected.dimension),
         "driver_val": str(selected.value),
     }
@@ -1465,9 +1602,9 @@ def _llm_save_to_cache(
 ) -> None:
     from nps_lens.llm import KnowledgeCache, stable_signature
 
-    geo = str(context.get('geo') or settings.default_geo)
-    channel = str(context.get('channel') or settings.default_channel)
-    kc = KnowledgeCache.for_context(settings.knowledge_dir, geo=geo, channel=channel)
+    service_origin = str(context.get("service_origin") or settings.default_service_origin)
+    service_origin_n1 = str(context.get("service_origin_n1") or settings.default_service_origin_n1)
+    kc = KnowledgeCache.for_context(settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1)
     sig = stable_signature(context=context, title=pack.title)
     record = {
         "signature": sig,
@@ -1477,8 +1614,8 @@ def _llm_save_to_cache(
         "llm_answer": answer,
         "created_at_utc": pack.created_at.isoformat() + "Z",
         "tags": [
-            settings.default_geo,
-            settings.default_channel,
+            service_origin,
+            service_origin_n1,
             selected.dimension,
             selected.value,
         ],
@@ -1588,13 +1725,50 @@ def page_quality(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    # Streamlit doesn't automatically load .env.
+    # This is the source of truth for service_origin_buug / service_origin_n1 / service_origin_n2 options.
+    #
+    # Policy:
+    # - If .env does not exist, copy .env.example -> .env automatically (one-time bootstrap).
+    # - Never overwrite an existing .env.
+    # - Then load .env (or, if still missing, rely on runtime-injected env vars and fail-fast).
+    here = Path(__file__).resolve()
+    repo_root = here.parents[1]  # repo_root/app/streamlit_app.py
+    env_path = repo_root / ".env"
+    env_example_path = repo_root / ".env.example"
+    if (not env_path.exists()) and env_example_path.exists():
+        try:
+            shutil.copyfile(str(env_example_path), str(env_path))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to bootstrap .env from .env.example: {exc}"
+            )
+
+    # IMPORTANT: Streamlit may execute with different working directories depending on how it's launched.
+    # We therefore resolve the .env path robustly (cwd + parent directories) and then load it.
+    dotenv_path = find_dotenv(usecwd=True)
+    if not dotenv_path:
+        candidates = [
+            env_path,                 # repo root
+            here.parents[0] / ".env", # app/
+        ]
+        for cand in candidates:
+            if cand.exists():
+                dotenv_path = str(cand)
+                break
+    if dotenv_path:
+        load_dotenv(dotenv_path, override=False)
+    else:
+        # Still allow env vars injected by the runtime; Settings.from_env will fail-fast if missing.
+        load_dotenv(override=False)
     settings = Settings.from_env()
 
     (
         data_path,
         min_n,
-        geo,
-        channel,
+        service_origin,
+        service_origin_n1,
+        service_origin_n2,
         cache_path,
         theme_mode,
         sheet_name,
@@ -1604,10 +1778,10 @@ def main() -> None:
     theme = get_theme(theme_mode)
     apply_theme(theme)
 
-    ctx_key = f"{geo}__{channel}"
+    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
-        st.session_state["llm_insights"] = load_llm_insights_for_context(settings, geo=geo, channel=channel)
+        st.session_state["llm_insights"] = load_llm_insights_for_context(settings, service_origin=service_origin, service_origin_n1=service_origin_n1)
 
     st.markdown(
         """
@@ -1621,7 +1795,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    pills([f"Geo: {geo}", f"Canal: {channel}", f"Modo: {theme_mode}"])
+    pills([f"Service origin: {service_origin}", f"N1: {service_origin_n1}", f"N2: {service_origin_n2 or '-'}", f"Modo: {theme_mode}"])
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 
@@ -1660,7 +1834,7 @@ def main() -> None:
     )
 
     with t_resumen:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["resumen"] or tuple())
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["resumen"] or tuple())
         st.markdown(
             "<div class='nps-card nps-card--flat'>"
             "<b>Cómo leer esta pestaña</b><br/>"
@@ -1671,34 +1845,34 @@ def main() -> None:
         )
         s1, s2, s3 = st.tabs(["Resumen", "Comparativas", "Cohortes"])
         with s1:
-            page_executive(df, theme, store_dir, geo, channel)
+            page_executive(df, theme, store_dir, service_origin, service_origin_n1, service_origin_n2)
         with s2:
             page_comparisons(df, theme)
         with s3:
             page_cohorts(df, theme)
 
     with t_drivers:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["drivers"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["drivers"])
         page_drivers(df, theme, min_n=min_n)
 
     with t_texto:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["texto"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["texto"])
         page_text(df, theme)
 
     with t_journey:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["journey"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["journey"])
         page_journey(df)
 
     with t_alertas:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["alertas"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["alertas"])
         page_changes(df)
 
     with t_llm:
-        df = load_context_df(store_dir, geo, channel, VIEW_COLUMNS["llm"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["llm"])
         page_llm(df, settings=settings, min_n=min_n, cache_path=cache_path)
 
     with t_datos:
-        df = load_context_df(store_dir, geo, channel, tuple())
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, tuple())
         page_quality(df)
 
 

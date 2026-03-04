@@ -21,9 +21,9 @@ class CacheHit:
 class KnowledgeCache:
 
     @classmethod
-    def for_context(cls, base_dir: Path, geo: str, channel: str) -> "KnowledgeCache":
+    def for_context(cls, base_dir: Path, service_origin: str, service_origin_n1: str) -> "KnowledgeCache":
         base_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"insights__{geo}__{channel}.json"
+        fname = f"insights__{service_origin}__{service_origin_n1}.json"
         return cls(base_dir / fname)
 
     def __init__(self, path: Path) -> None:

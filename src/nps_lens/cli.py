@@ -29,13 +29,13 @@ EXCEL_PATH_ARG = typer.Argument(..., exists=True)
 @app.command()
 def profile_nps(
     excel_path: Path = EXCEL_PATH_ARG,
-    geo: str = "MX",
-    channel: str = "Senda",
+    service_origin: str = "BBVA México",
+    service_origin_n1: str = "Senda",
 ) -> None:
     """Ingesta + profiling rápido desde Excel de NPS térmico."""
     load_dotenv()
     setup_logging(Settings.from_env().log_level)
-    res = read_nps_thermal_excel(str(excel_path), geo=geo, channel=channel)
+    res = read_nps_thermal_excel(str(excel_path), service_origin=service_origin, service_origin_n1=service_origin_n1)
     if res.issues:
         rprint(res.issues)
     rprint(res.df.head())
@@ -64,8 +64,8 @@ def build_example_pack(
         control_cols=["Canal", "Palanca", "Subpalanca"],
     )
     context = {
-        "geo": "MX",
-        "channel": "Senda",
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
         "driver_dim": top.dimension,
         "driver_val": top.value,
     }
