@@ -1,18 +1,16 @@
 # NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
 
-[![CI](https://github.com/<ORG>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/ci.yml)
-[![Type Check](https://github.com/<ORG>/<REPO>/actions/workflows/type-check.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/type-check.yml)
-[![Test](https://github.com/<ORG>/<REPO>/actions/workflows/test.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/test.yml)
-[![Build Linux](https://github.com/<ORG>/<REPO>/actions/workflows/build-linux.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-linux.yml)
-[![Build macOS](https://github.com/<ORG>/<REPO>/actions/workflows/build-mac.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-mac.yml)
-[![Build Windows](https://github.com/<ORG>/<REPO>/actions/workflows/build-windows.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-windows.yml)
-[![Release](https://github.com/<ORG>/<REPO>/actions/workflows/release.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/release.yml)
+[![CI](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml)
+[![Type Check](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/type-check.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/type-check.yml)
+[![Test](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml)
+[![Build Linux](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-linux.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-linux.yml)
+[![Build macOS](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-mac.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-mac.yml)
+[![Build Windows](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-windows.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-windows.yml)
+[![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml)
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
 
-> ⚠️ **Antes de publicar**: sustituye `<ORG>/<REPO>` en los badges por el `owner/repo` real.  
-> Ejemplo: `bbva/nps-lens` (o el que corresponda).
 
 ---
 
@@ -142,4 +140,3 @@ Si te aporta valor (o lo estás usando en producción), puedes apoyar el manteni
 ## Licencia
 
 Define la licencia del repo en `LICENSE` (si aplica). En entornos corporativos suele ser privada.
-

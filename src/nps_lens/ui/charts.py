@@ -42,6 +42,42 @@ def _status_colors(theme: Theme) -> tuple[str, str, str]:
     return detr, pas, pro
 
 
+def apply_plotly_template(fig: object, theme: Theme) -> object:
+    """Apply a token-driven Plotly template so dark/light stays consistent (including exports)."""
+
+    # Lazy import to keep cold-start fast in Streamlit.
+    import plotly.io as pio  # type: ignore
+
+    ct = chart_theme(theme)
+    detr, pas, pro = _status_colors(theme)
+
+    template = {
+        "layout": {
+            "paper_bgcolor": ct.paper_bg,
+            "plot_bgcolor": ct.plot_bg,
+            "font": {
+                "color": ct.text,
+                "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
+            },
+            "colorway": [ct.accent, detr, pas, pro],
+            "legend": {"bgcolor": "rgba(0,0,0,0)", "bordercolor": ct.grid},
+            "hoverlabel": {"bgcolor": ct.paper_bg, "font": {"color": ct.text}},
+        }
+    }
+
+    try:
+        # `fig` is a Plotly Figure. We keep signature generic to avoid heavy typing deps.
+        fig.update_layout(template=template)  # type: ignore[attr-defined]
+        fig.update_xaxes(showgrid=True, gridcolor=ct.grid, zerolinecolor=ct.grid, showline=True, linecolor=ct.grid)  # type: ignore[attr-defined]
+        fig.update_yaxes(showgrid=True, gridcolor=ct.grid, zerolinecolor=ct.grid, showline=True, linecolor=ct.grid)  # type: ignore[attr-defined]
+        # Also register a named template so other modules can reuse it if needed.
+        pio.templates["nps_lens"] = template  # type: ignore[index]
+    except Exception:
+        # Best-effort: never crash rendering due to theming.
+        return fig
+    return fig
+
+
 
 
 
@@ -169,7 +205,7 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         showlegend=False,
     )
     _layout_common(fig, th, height=320)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_score_ladder(
@@ -241,7 +277,7 @@ def chart_daily_score_ladder(
         yaxis_title="Score (0-10)",
     )
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def _weekday_letter_es(ts: pd.Timestamp) -> str:
@@ -366,7 +402,7 @@ def chart_daily_score_semaforo(
     fig.update_layout(xaxis_title="Día", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=220)
     _apply_day_ticks(fig, days_list, max_ticks=28)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 
@@ -460,7 +496,7 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
 
     _layout_common(fig, th, height=300)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -570,7 +606,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     _layout_common(fig, th, height=320)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
     fig.update_yaxes(range=[0, 100])
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_volume(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -596,7 +632,7 @@ def chart_daily_volume(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     fig.update_layout(xaxis_title="Día", yaxis_title="Respuestas (n)", showlegend=False)
     _layout_common(fig, th, height=220)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -625,7 +661,7 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         showlegend=False,
     )
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -656,7 +692,7 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     fig.update_traces(marker_color=colors)
     fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_nps_timeseries_with_changepoints(
@@ -703,7 +739,7 @@ def chart_nps_timeseries_with_changepoints(
 
     fig.update_layout(xaxis_title="Fecha", yaxis_title="NPS", showlegend=False)
     _layout_common(fig, th, height=320)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
@@ -724,7 +760,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
     fig.update_traces(marker_color=th.grid)
     fig.update_layout(xaxis_title="Volumen (n comentarios)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -749,7 +785,7 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     fig.update_traces(marker_color=_diverging_colors(theme, d['delta_nps']))
     fig.update_layout(xaxis_title="Delta NPS (actual - base)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_cohort_heatmap(
@@ -794,4 +830,4 @@ def chart_cohort_heatmap(
     )
     fig.update_layout(coloraxis_colorbar=dict(title="NPS"))
     _layout_common(fig, th, height=420)
-    return fig
+    return apply_plotly_template(fig, theme)
