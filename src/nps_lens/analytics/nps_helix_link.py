@@ -16,7 +16,7 @@ def estimate_best_lag_by_topic(
     max_lag_weeks: int = 6,
     min_points: int = 8,
 ) -> pd.DataFrame:
-    """Estimate best positive lag where incidents *precede* detractor_rate.
+    """Estimate best positive lag where incidents *precede* focus_rate.
 
     Returns per topic:
       - best_lag_weeks (0..max_lag_weeks)
@@ -32,7 +32,7 @@ def estimate_best_lag_by_topic(
     for topic, g in df.groupby("nps_topic"):
         g = g.sort_values("week")
         x = g["incidents"].astype(float).values
-        y = g["detractor_rate"].astype(float).values
+        y = g["focus_rate"].astype(float).values
         best = (0, float("nan"), 0)
         for lag in range(0, int(max_lag_weeks) + 1):
             if lag == 0:
@@ -62,10 +62,10 @@ def estimate_best_lag_days_by_topic(
     Expects by_topic_daily with columns:
       - date (datetime-like)
       - nps_topic
-      - detractor_rate
+      - focus_rate
       - incidents
 
-    We search lag in days (0..max_lag_days) maximizing corr(incidents(t), detractor_rate(t+lag)).
+    We search lag in days (0..max_lag_days) maximizing corr(incidents(t), focus_rate(t+lag)).
     """
     if by_topic_daily.empty:
         return pd.DataFrame(columns=["nps_topic", "best_lag_days", "corr", "points"])
@@ -76,7 +76,7 @@ def estimate_best_lag_days_by_topic(
     for topic, g in df.groupby("nps_topic"):
         g = g.sort_values("date")
         x = g["incidents"].astype(float).values
-        y = g["detractor_rate"].astype(float).values
+        y = g["focus_rate"].astype(float).values
         best = (0, float("nan"), 0)
         for lag in range(0, int(max_lag_days) + 1):
             if lag == 0:
@@ -101,7 +101,7 @@ def detect_detractor_changepoints_by_topic(
     model: str = "l2",
     min_points: int = 10,
 ) -> pd.DataFrame:
-    """Detect changepoints on detractor_rate series per topic (weekly).
+    """Detect changepoints on focus_rate series per topic (weekly).
 
     Returns rows:
       - nps_topic
@@ -114,7 +114,7 @@ def detect_detractor_changepoints_by_topic(
     df = by_topic_weekly.copy().sort_values(["nps_topic", "week"])
     for topic, g in df.groupby("nps_topic"):
         g = g.sort_values("week")
-        ts = g["detractor_rate"].astype(float).dropna()
+        ts = g["focus_rate"].astype(float).dropna()
         if len(ts) < int(min_points):
             rows.append({"nps_topic": topic, "changepoints": []})
             continue
@@ -177,7 +177,7 @@ def detect_detractor_changepoints_with_bootstrap(
     df = by_topic_weekly.copy().sort_values(["nps_topic", "week"])
     for topic, g in df.groupby("nps_topic"):
         g = g.sort_values("week")
-        ts = g["detractor_rate"].astype(float).dropna()
+        ts = g["focus_rate"].astype(float).dropna()
         if len(ts) < int(min_points):
             rows.append(
                 {
@@ -489,6 +489,7 @@ def weekly_aggregates(
     incident_assignments: pd.DataFrame,
     date_col_nps: str = "Fecha",
     date_col_helix: str = "Fecha",
+    focus_group: str = "detractor",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return weekly aggregates:
     - overall: detractor_rate + incidents
@@ -506,11 +507,19 @@ def weekly_aggregates(
     nps["week"] = nps[date_col_nps].dt.to_period("W").dt.start_time
     helix["week"] = helix[date_col_helix].dt.to_period("W").dt.start_time
 
-    nps["is_detractor"] = (nps.get("NPS Group", "").astype(str).str.upper() == "DETRACTOR") | (
-        pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce") <= 6
-    )
-    overall_nps = nps.groupby("week").agg(responses=("ID", "count"), detractors=("is_detractor", "sum")).reset_index()
-    overall_nps["detractor_rate"] = overall_nps["detractors"] / overall_nps["responses"].replace({0: np.nan})
+    group = str(focus_group or "detractor").strip().lower()
+    score = pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce")
+    grp = nps.get("NPS Group", "").astype(str).str.upper()
+
+    if group == "promoter":
+        nps["is_focus"] = (grp == "PROMOTER") | (score >= 9)
+    elif group == "passive":
+        nps["is_focus"] = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
+    else:
+        nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
+
+    overall_nps = nps.groupby("week").agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
+    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace({0: np.nan})
 
     overall_helix = helix.groupby("week").agg(incidents=("Incident Number", "count")).reset_index()
     overall = pd.merge(overall_nps, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
@@ -519,10 +528,10 @@ def weekly_aggregates(
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
         nps.groupby(["week", "nps_topic"])
-        .agg(responses=("ID", "count"), detractors=("is_detractor", "sum"))
+        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
         .reset_index()
     )
-    by_topic_nps["detractor_rate"] = by_topic_nps["detractors"] / by_topic_nps["responses"].replace({0: np.nan})
+    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace({0: np.nan})
 
     by_topic = by_topic_nps.copy()
     if not incident_assignments.empty:
@@ -546,6 +555,7 @@ def daily_aggregates(
     incident_assignments: pd.DataFrame,
     date_col_nps: str = "Fecha",
     date_col_helix: str = "Fecha",
+    focus_group: str = "detractor",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Daily aggregates analogous to weekly_aggregates.
 
@@ -562,19 +572,27 @@ def daily_aggregates(
     nps["date"] = nps[date_col_nps].dt.normalize()
     helix["date"] = helix[date_col_helix].dt.normalize()
 
-    nps["is_detractor"] = (nps.get("NPS Group", "").astype(str).str.upper() == "DETRACTOR") | (
-        pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce") <= 6
-    )
-    overall_nps = nps.groupby("date").agg(responses=("ID", "count"), detractors=("is_detractor", "sum")).reset_index()
-    overall_nps["detractor_rate"] = overall_nps["detractors"] / overall_nps["responses"].replace({0: np.nan})
+    group = str(focus_group or "detractor").strip().lower()
+    score = pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce")
+    grp = nps.get("NPS Group", "").astype(str).str.upper()
+
+    if group == "promoter":
+        nps["is_focus"] = (grp == "PROMOTER") | (score >= 9)
+    elif group == "passive":
+        nps["is_focus"] = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
+    else:
+        nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
+
+    overall_nps = nps.groupby("date").agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
+    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace({0: np.nan})
     overall_helix = helix.groupby("date").agg(incidents=("Incident Number", "count")).reset_index()
     overall = pd.merge(overall_nps, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
 
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
-        nps.groupby(["date", "nps_topic"]).agg(responses=("ID", "count"), detractors=("is_detractor", "sum")).reset_index()
+        nps.groupby(["date", "nps_topic"]).agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
     )
-    by_topic_nps["detractor_rate"] = by_topic_nps["detractors"] / by_topic_nps["responses"].replace({0: np.nan})
+    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace({0: np.nan})
     by_topic = by_topic_nps.copy()
     if not incident_assignments.empty:
         ia = incident_assignments.copy()
@@ -623,7 +641,7 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
     """Simple pragmatic causal score per topic from weekly aggregates."""
     if by_topic.empty:
         return pd.DataFrame(
-            columns=["nps_topic", "weeks", "responses", "detractor_rate", "incidents", "delta_detractor_rate", "score"]
+            columns=["nps_topic", "weeks", "responses", "focus_rate", "incidents", "delta_focus_rate", "score"]
         )
 
     df = by_topic.copy()
@@ -631,13 +649,13 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
     agg = df.groupby("nps_topic").agg(
         weeks=("week", "nunique"),
         responses=("responses", "sum"),
-        detractors=("detractors", "sum"),
+        focus_count=("focus_count", "sum"),
         incidents=("incidents", "sum"),
-        avg_detractor_rate=("detractor_rate", "mean"),
+        avg_focus_rate=("focus_rate", "mean"),
         avg_incidents=("incidents", "mean"),
         max_incidents=("incidents", "max"),
     )
-    agg["detractor_rate"] = agg["detractors"] / agg["responses"].replace({0: np.nan})
+    agg["focus_rate"] = agg["focus_count"] / agg["responses"].replace({0: np.nan})
 
     # delta: weeks with high incidents (>= median non-zero) vs low
     deltas = []
@@ -647,17 +665,17 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
             continue
         inc = g["incidents"].values
         thr = np.median(inc)
-        high = g.loc[g["incidents"] >= thr, "detractor_rate"].astype(float)
-        low = g.loc[g["incidents"] < thr, "detractor_rate"].astype(float)
+        high = g.loc[g["incidents"] >= thr, "focus_rate"].astype(float)
+        low = g.loc[g["incidents"] < thr, "focus_rate"].astype(float)
         d = float(high.mean() - low.mean()) if (len(high) and len(low)) else np.nan
         deltas.append((topic, d))
-    delta_df = pd.DataFrame(deltas, columns=["nps_topic", "delta_detractor_rate"]).set_index("nps_topic")
+    delta_df = pd.DataFrame(deltas, columns=["nps_topic", "delta_focus_rate"]).set_index("nps_topic")
 
     out = agg.join(delta_df, how="left").reset_index()
     # Pragmatic score: incidents presence * delta detractor_rate * support
     out["support"] = np.clip(np.log1p(out["responses"]) / 10.0, 0, 1)
     out["inc_signal"] = np.clip(np.log1p(out["incidents"]) / 5.0, 0, 1)
-    out["effect"] = out["delta_detractor_rate"].fillna(0).abs()
+    out["effect"] = out["delta_focus_rate"].fillna(0).abs()
     out["score"] = (0.45 * out["inc_signal"] + 0.35 * out["effect"] + 0.20 * out["support"]).clip(0, 1)
     out = out.sort_values(["score", "incidents", "responses"], ascending=False).reset_index(drop=True)
     return out

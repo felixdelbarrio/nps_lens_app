@@ -75,3 +75,65 @@ def palette(tokens: DesignTokens, mode: str) -> dict[str, str]:
 
 def primary_accent(tokens: DesignTokens, mode: str) -> str:
     return palette(tokens, mode)["color.primary.accent.value-01.default"]
+
+
+def plotly_discrete_sequence(tokens: DesignTokens, mode: str) -> list[str]:
+    """Discrete color sequence aligned to the design tokens.
+
+    Use for categorical series (lines/bars). Order matters.
+    """
+
+    p = palette(tokens, mode)
+    return [
+        p["color.primary.accent.value-01.default"],
+        p["color.primary.accent.value-05.default"],
+        p["color.primary.accent.value-07.default"],
+        p["color.primary.bg.success"],
+        p["color.primary.bg.action.default"],
+    ]
+
+
+def plotly_continuous_scale(tokens: DesignTokens, mode: str) -> list[str]:
+    """Sequential continuous scale (low→high) aligned to tokens.
+
+    Intended for intensity/heatmaps. Uses existing token values only.
+    """
+
+    p = palette(tokens, mode)
+    return [
+        p["color.primary.bg.alternative.default"],
+        p["color.primary.bg.bar"],
+        p["color.primary.accent.value-01.default"],
+        p["color.primary.bg.action.default"],
+    ]
+
+
+def plotly_risk_scale(tokens: DesignTokens, mode: str) -> list[list[object]]:
+    """Risk/intensity continuous scale aligned to status tokens.
+
+    Low values are neutral/background; high values move to warning and alert.
+    Use for heatmaps / confidence / severity where higher == more risk/priority.
+
+    Plotly accepts either a list of colors or a list of (stop, color) pairs.
+    We use explicit stops to make the perceptual jump clear.
+    """
+
+    p = palette(tokens, mode)
+    return [
+        [0.0, p["color.primary.bg.alternative.default"]],
+        [0.25, p["color.primary.bg.bar"]],
+        [0.6, p["color.primary.bg.warning"]],
+        [1.0, p["color.primary.bg.alert"]],
+    ]
+
+
+def cp_level_color(tokens: DesignTokens, mode: str, level: str) -> str:
+    """Color for changepoint significance labels."""
+
+    p = palette(tokens, mode)
+    lv = (level or "").strip().lower()
+    if lv == "high":
+        return p["color.primary.bg.alert"]
+    if lv == "medium":
+        return p["color.primary.bg.warning"]
+    return p["color.primary.bg.bar"]

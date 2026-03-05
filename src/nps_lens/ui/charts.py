@@ -631,6 +631,84 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     return fig
 
 
+def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12):
+    """Bar chart for prioritized opportunities (impact) with confidence intensity."""
+    if opp_df.empty:
+        return None
+    th = chart_theme(theme)
+    import plotly.express as px
+
+    d = opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False]).head(top_k).copy()
+    if "label" not in d.columns:
+        d["label"] = d.apply(lambda r: f"{r.get('dimension')}={r.get('value')}", axis=1)
+
+    # Intensity: mix accent toward background based on confidence
+    conf = pd.to_numeric(d.get("confidence", 0.0), errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    colors: list[str] = []
+    for c in conf.tolist():
+        # higher confidence -> closer to accent
+        colors.append(_shade(th.accent, toward=th.plot_bg, t=0.65 * (1.0 - float(c))))
+
+    fig = px.bar(
+        d,
+        x="potential_uplift",
+        y="label",
+        orientation="h",
+        hover_data={"n": True, "confidence": ":.2f", "potential_uplift": ":.1f"},
+    )
+    fig.update_traces(marker_color=colors)
+    fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
+    _layout_common(fig, th, height=360)
+    return fig
+
+
+def chart_nps_timeseries_with_changepoints(
+    ts: pd.Series,
+    theme: Theme,
+    points: list[pd.Timestamp],
+    levels: list[str],
+):
+    """Line chart with changepoint markers colored by significance levels."""
+    if ts is None or ts.empty:
+        return None
+    th = chart_theme(theme)
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=ts.index,
+            y=ts.values,
+            mode="lines+markers",
+            name="NPS",
+            line={"color": th.accent, "width": 2},
+        )
+    )
+
+    detr_c, warn_c, pro_c = _status_colors(theme)
+    neutral = th.grid
+
+    def _cp_color(lvl: str) -> str:
+        if str(lvl).lower().startswith("high"):
+            return detr_c
+        if str(lvl).lower().startswith("med"):
+            return warn_c
+        return neutral
+
+    for p, lvl in zip(points, levels):
+        fig.add_vline(
+            x=p,
+            line_width=2,
+            line_dash="dot",
+            line_color=_cp_color(lvl),
+            opacity=0.9,
+        )
+
+    fig.update_layout(xaxis_title="Fecha", yaxis_title="NPS", showlegend=False)
+    _layout_common(fig, th, height=320)
+    return fig
+
+
 def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
     """Topic clusters by size."""
     if topics_df.empty:

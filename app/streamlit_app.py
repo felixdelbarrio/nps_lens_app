@@ -38,6 +38,13 @@ from nps_lens.analytics.nps_helix_link import (
 )
 from nps_lens.config import Settings
 from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
+from nps_lens.design.tokens import (
+    DesignTokens,
+    cp_level_color,
+    palette,
+    plotly_continuous_scale,
+    plotly_risk_scale,
+)
 from nps_lens.core.knowledge_cache import add_entry as kc_add_entry, load_entries as kc_load_entries, score_adjustments as kc_score_adjustments
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -77,7 +84,7 @@ REGLA CRÍTICA — SOLO JSON:
 - Tu respuesta debe ser exclusivamente un objeto JSON (sin explicaciones, sin títulos, sin Markdown, sin bloques de código).
 - Usa comillas dobles estándar " (no comillas tipográficas).
 - Sin trailing commas.
-- No incluyas comillas dobles dentro de strings. Si necesitas comillas en un texto, escápalas como \".
+- No incluyas comillas dobles dentro de strings. Si necesitas comillas en un texto, escápalas como ".
 - No envuelvas el JSON en Markdown (sin ```json).
 - No uses NaN/Infinity/None; usa null si aplica.
 - No agregues campos fuera del esquema.
@@ -145,6 +152,7 @@ def load_context_df(
     service_origin: str,
     service_origin_n1: str,
     service_origin_n2: str,
+    nps_group_choice: str,
     columns: tuple[str, ...],
     date_start: Optional[str] = None,
     date_end: Optional[str] = None,
@@ -195,6 +203,13 @@ def load_context_df(
         if c in df.columns:
             df[c] = df[c].astype("category")
 
+    # Global population filter (sidebar): Todos/D/P/N
+    df = filter_df_by_nps_group(df, nps_group_choice)
+
+
+    # Apply global NPS group filter
+    df = filter_nps_by_group(df, nps_group_choice)
+
     return df
 
 VIEW_COLUMNS = {
@@ -230,6 +245,41 @@ VIEW_COLUMNS = {
 }
 
 
+
+
+def filter_nps_by_group(df: pd.DataFrame, group_mode: str) -> pd.DataFrame:
+    """Filter NPS dataframe by selected NPS group.
+
+    group_mode values: Todos | Detractores | Promotores | Neutros
+    """
+    gm = (group_mode or "Todos").strip().lower()
+    if gm in ("todos", "all"):
+        return df
+
+    if df is None or df.empty:
+        return df
+
+    # Normalize group labels if present
+    if "NPS Group" in df.columns:
+        g = df["NPS Group"].astype(str).str.strip().str.lower()
+        if gm.startswith("detr"):
+            return df.loc[g.str.contains("detr", na=False)].copy()
+        if gm.startswith("prom"):
+            return df.loc[g.str.contains("prom", na=False)].copy()
+        if gm.startswith("neu") or gm.startswith("pas"):
+            return df.loc[g.str.contains("pas", na=False) | g.str.contains("neut", na=False)].copy()
+
+    # Fallback to score if group label missing
+    if "NPS" in df.columns:
+        s = pd.to_numeric(df["NPS"], errors="coerce")
+        if gm.startswith("detr"):
+            return df.loc[s <= 6].copy()
+        if gm.startswith("prom"):
+            return df.loc[s >= 9].copy()
+        if gm.startswith("neu") or gm.startswith("pas"):
+            return df.loc[(s >= 7) & (s <= 8)].copy()
+
+    return df
 
 # Column sets per chart (granular manifest). Each chart requests only what it needs.
 CHART_COLUMNS = {
@@ -335,10 +385,10 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     uid = hashlib.sha1(payload_b64.encode("ascii")).hexdigest()[:10]
 
     html = f"""
-    <div style=\"display:flex; gap:12px; align-items:center;\">
+    <div style="display:flex; gap:12px; align-items:center;">
       <button
-        id=\"nps_copy_{uid}\"
-        style=\"
+        id="nps_copy_{uid}"
+        style="
           width: 100%;
           padding: 10px 14px;
           border-radius: 12px;
@@ -347,28 +397,28 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
           font-weight: 650;
           background: var(--nps-accent, #1f77ff);
           color: white;
-        \"
-        title=\"Copiar al portapapeles\"
+        "
+        title="Copiar al portapapeles"
       >{label}</button>
-      <span id=\"nps_copy_msg_{uid}\" style=\"font-size:12px; color: var(--nps-muted, #6b7280);\"></span>
+      <span id="nps_copy_msg_{uid}" style="font-size:12px; color: var(--nps-muted, #6b7280);"></span>
     </div>
     <script>
       (function() {{
-        const btn = document.getElementById(\"nps_copy_{uid}\");
-        const msg = document.getElementById(\"nps_copy_msg_{uid}\");
-        const txt = atob(\"{payload_b64}\");
+        const btn = document.getElementById("nps_copy_{uid}");
+        const msg = document.getElementById("nps_copy_msg_{uid}");
+        const txt = atob("{payload_b64}");
         async function doCopy() {{
           try {{
             await navigator.clipboard.writeText(txt);
-            msg.textContent = \"Copiado ✅\";
+            msg.textContent = "Copiado ✅";
             const old = btn.textContent;
-            btn.textContent = \"Copiado\";
-            setTimeout(() => {{ btn.textContent = old; msg.textContent = \"\"; }}, 1800);
+            btn.textContent = "Copiado";
+            setTimeout(() => {{ btn.textContent = old; msg.textContent = ""; }}, 1800);
           }} catch (e) {{
-            msg.textContent = \"No se pudo copiar. Selecciona el texto y usa Ctrl/Cmd+C.\";
+            msg.textContent = "No se pudo copiar. Selecciona el texto y usa Ctrl/Cmd+C.";
           }}
         }}
-        btn.addEventListener(\"click\", doCopy);
+        btn.addEventListener("click", doCopy);
       }})();
     </script>
     """
@@ -415,7 +465,7 @@ def _repair_json_text(text: str) -> str:
         """Escape inner quotes inside JSON strings.
 
         LLMs sometimes emit unescaped double quotes inside a quoted string, e.g.:
-            "driver \"Funcionamiento\""  (good)
+            "driver "Funcionamiento""  (good)
             "driver "Funcionamiento""    (bad)
 
         We treat a quote as a string terminator only if the next non-space
@@ -452,7 +502,7 @@ def _repair_json_text(text: str) -> str:
                     out.append(ch)
                     in_str = False
                 else:
-                    out.append('\\"')
+                    out.append('\"')
                 continue
             out.append(ch)
         return "".join(out)
@@ -517,6 +567,50 @@ def _parse_json_with_repair(text: str) -> tuple[Optional[dict[str, Any]], Option
 def _try_parse_json(text: str) -> Optional[dict[str, Any]]:
     """Backward-compatible wrapper used in previews."""
     obj, _, _ = _parse_json_with_repair(text)
+    return obj
+
+
+def _json_sanitize(obj: Any) -> Any:
+    """Make objects JSON-serializable (pandas/numpy friendly).
+
+    The Deep-Dive pack contains pandas objects (e.g., Timestamps) which are not
+    serializable by Python's standard json module.
+    """
+
+    # pandas / numpy missing values
+    try:
+        if obj is pd.NaT:
+            return None
+        # pd.isna covers numpy/pandas scalar missing values
+        if not isinstance(obj, (str, int, float, bool)) and pd.isna(obj):
+            return None
+    except Exception:
+        pass
+
+    # datetime-like
+    if isinstance(obj, pd.Timestamp):
+        try:
+            if obj.tzinfo is not None:
+                obj = obj.tz_convert(None)
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+    if isinstance(obj, np.datetime64):
+        try:
+            return pd.to_datetime(obj).to_pydatetime().isoformat()
+        except Exception:
+            return str(obj)
+
+    # numpy scalars
+    if isinstance(obj, (np.integer, np.floating, np.bool_)):
+        return obj.item()
+
+    # containers
+    if isinstance(obj, dict):
+        return {str(k): _json_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_sanitize(v) for v in obj]
+
     return obj
 
 
@@ -649,7 +743,7 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
 
 def render_sidebar(  # noqa: PLR0915
     settings: Settings,
-) -> tuple[Optional[Path], int, str, str, str, Path, str, Optional[str], bool]:
+) -> tuple[Optional[Path], int, str, str, str, str, Path, str, Optional[str], bool]:
     """Single-source sidebar: Context -> dataset -> controls.
 
     Context dimensions:
@@ -744,6 +838,17 @@ def render_sidebar(  # noqa: PLR0915
             "service_origin_n1": service_origin_n1,
             "service_origin_n2": service_origin_n2,
         }
+
+        st.subheader("Población NPS")
+        nps_group_choice = st.selectbox(
+            "Grupo",
+            options=NPS_GROUP_OPTIONS,
+            index=NPS_GROUP_OPTIONS.index(st.session_state.get("_nps_group_choice", "Detractores"))
+            if st.session_state.get("_nps_group_choice") in NPS_GROUP_OPTIONS
+            else 1,
+            help="Selecciona la población sobre la que se calculan TODOS los análisis e insights (Drivers, Texto, Journey, Alertas, Insights LLM, NPS↔Helix, Datos).",
+        )
+        st.session_state["_nps_group_choice"] = nps_group_choice
 
         st.divider()
         st.header("NPS")
@@ -888,6 +993,7 @@ def render_sidebar(  # noqa: PLR0915
         service_origin,
         service_origin_n1,
         service_origin_n2,
+        st.session_state.get("_nps_group_choice", "Detractores"),
         settings.knowledge_dir,
         theme_mode,
         sheet_name,
@@ -960,6 +1066,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                     service_origin,
                     service_origin_n1,
                     service_origin_n2,
+                    st.session_state.get("_nps_group_choice", "Detractores"),
                     CHART_COLUMNS["daily_mix"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -993,6 +1100,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                         service_origin,
                         service_origin_n1,
                         service_origin_n2,
+                        st.session_state.get("_nps_group_choice", "Detractores"),
                         CHART_COLUMNS["daily_llm"],
                         date_start=str(start_day.date()) if end_day is not None else None,
                         date_end=str(end_day.date()) if end_day is not None else None,
@@ -1106,6 +1214,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                     service_origin,
                     service_origin_n1,
                     service_origin_n2,
+                    st.session_state.get("_nps_group_choice", "Detractores"),
                     CHART_COLUMNS["daily_semaforo"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -1299,6 +1408,21 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
         if opp_df.empty:
             st.warning("No se detectaron oportunidades con el umbral actual.")
         else:
+            # Mini chart: impact with confidence intensity (design tokens)
+            try:
+                from nps_lens.ui.charts import chart_opportunities_bar
+
+                cfig = chart_opportunities_bar(
+                    opp_df.assign(label=lambda d: d.apply(lambda r: f"{r['dimension']}={r['value']}", axis=1)),
+                    theme,
+                    top_k=10,
+                )
+                if cfig is not None:
+                    st.plotly_chart(cfig, use_container_width=True)
+            except Exception:
+                # Never block the page on chart errors
+                pass
+
             bullets = explain_opportunities(opp_df, max_items=5)
             st.markdown(
                 (
@@ -1377,7 +1501,7 @@ def page_journey(df: pd.DataFrame) -> None:
     )
 
 
-def page_changes(df: pd.DataFrame) -> None:
+def page_changes(df: pd.DataFrame, theme: Theme) -> None:
     st.subheader("Alertas: cambios relevantes en el tiempo")
     st.markdown(
         "<div class='nps-card nps-muted'>"
@@ -1387,22 +1511,54 @@ def page_changes(df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
+    from nps_lens.analytics.changepoints import detect_nps_changepoints_with_bootstrap
+    from nps_lens.analytics.drivers import compute_nps_from_scores
+    from nps_lens.ui.charts import chart_nps_timeseries_with_changepoints
+    import pandas as pd
+
     levers = sorted(df["Palanca"].astype(str).fillna("(vacío)").unique())[:80]
     lever = st.selectbox("Palanca", levers)
-    cp = detect_nps_changepoints(df, dim_col="Palanca", value=lever, freq="D", pen=8.0)
 
+    cp = detect_nps_changepoints_with_bootstrap(df, dim_col="Palanca", value=lever, freq="D", pen=8.0)
     if cp is None:
         st.info("No hay suficientes datos para detectar cambios para esa selección.")
         return
 
+    # Build time series for plotting
+    tmp = df.copy()
+    tmp["Fecha"] = pd.to_datetime(tmp.get("Fecha"), errors="coerce")
+    tmp = tmp.dropna(subset=["Fecha"])
+    tmp = tmp.loc[tmp["Palanca"] == lever]
+    ts = (
+        tmp.set_index("Fecha")
+        .resample("D")["NPS"]
+        .apply(compute_nps_from_scores)
+        .dropna()
+        .astype(float)
+    )
+
+    pts = [pd.Timestamp(p) for p in cp.points]
+    fig = chart_nps_timeseries_with_changepoints(ts, theme=theme, points=pts, levels=cp.level)
+    if fig is not None:
+        st.plotly_chart(fig, use_container_width=True)
+
+    cp_rows = [
+        {"date": str(p), "stability": float(s), "level": str(l)}
+        for p, s, l in zip(cp.points, cp.stability, cp.level)
+    ]
+
     st.markdown(
         "<div class='nps-card'>"
         f"<div><b>Palanca:</b> {cp.value}</div>"
-        f"<div><b>Puntos detectados:</b> {', '.join([str(p) for p in cp.points])}</div>"
+        f"<div><b>Método:</b> {cp.method}</div>"
         f"<div class='nps-muted' style='margin-top:6px'>{cp.note}</div>"
         "</div>",
         unsafe_allow_html=True,
     )
+    if cp_rows:
+        st.dataframe(pd.DataFrame(cp_rows), use_container_width=True)
+    else:
+        st.info("No se detectaron changepoints con los parámetros actuales.")
 
 
 
@@ -1703,7 +1859,55 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
 
 
 
-def page_quality(df: pd.DataFrame) -> None:
+def _normalize_empty_n2(n2: str) -> str:
+    v = str(n2 or "").strip()
+    if v in {"-", "—", "–"}:
+        return ""
+    return v
+
+
+
+NPS_GROUP_OPTIONS = ["Todos", "Detractores", "Neutros", "Promotores"]
+
+
+def _norm_group_value(v: object) -> str:
+    return str(v or "").strip().lower()
+
+
+def filter_df_by_nps_group(df: pd.DataFrame, group_choice: str) -> pd.DataFrame:
+    """Filter NPS dataframe by selected population.
+
+    group_choice values: Todos | Detractores | Neutros | Promotores.
+    Robust to Spanish/English labels in the dataset.
+    """
+    choice = (group_choice or "Todos").strip().lower()
+    if choice == "todos":
+        return df
+    if "NPS Group" not in df.columns:
+        return df
+
+    target = {
+        "detractores": "detractor",
+        "neutros": "passive",
+        "promotores": "promoter",
+    }.get(choice)
+    if target is None:
+        return df
+
+    def _bucket(val: object) -> str:
+        s = _norm_group_value(val)
+        if "det" in s or "detr" in s:
+            return "detractor"
+        if "pas" in s or "neut" in s or "pass" in s:
+            return "passive"
+        if "pro" in s or "promo" in s:
+            return "promoter"
+        return "unknown"
+
+    mask = df["NPS Group"].apply(_bucket) == target
+    return df.loc[mask].copy()
+
+def page_quality(df: pd.DataFrame, helix_df: Optional[pd.DataFrame] = None) -> None:
     st.subheader("Datos & calidad")
     st.markdown(
         "<div class='nps-card nps-muted'>"
@@ -1713,32 +1917,57 @@ def page_quality(df: pd.DataFrame) -> None:
         unsafe_allow_html=True,
     )
 
-    st.caption(f"Filas: {len(df):,} · Columnas: {len(df.columns)}")
+    tabs = st.tabs(["NPS", "Helix"] if helix_df is not None else ["NPS"])
 
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        show_full = st.toggle(
-            "Mostrar dataset completo",
-            value=False,
-            help="Por rendimiento, por defecto se muestra una muestra. "
-            "Actívalo si quieres ver todas las filas (puede tardar).",
+    with tabs[0]:
+        st.caption(f"Filas: {len(df):,} · Columnas: {len(df.columns)}")
+
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            show_full = st.toggle(
+                "Mostrar dataset completo",
+                value=False,
+                help="Por rendimiento, por defecto se muestra una muestra. "
+                "Actívalo si quieres ver todas las filas (puede tardar).",
+            )
+        with c2:
+            sample_n = st.selectbox(
+                "Tamaño de muestra",
+                options=[50, 100, 200, 500, 1000],
+                index=2,
+                disabled=show_full,
+                help="Número de filas a mostrar cuando no está activado el dataset completo.",
+            )
+
+        view_df = df if show_full else df.head(int(sample_n))
+        st.dataframe(view_df, use_container_width=True, height=520)
+
+        st.caption(
+            "Nota: la tabla es desplazable. Si activas el dataset completo, "
+            "Streamlit renderiza una vista virtualizada: verás todas las filas al hacer scroll."
         )
-    with c2:
-        sample_n = st.selectbox(
-            "Tamaño de muestra",
-            options=[50, 100, 200, 500, 1000],
-            index=2,
-            disabled=show_full,
-            help="Número de filas a mostrar cuando no está activado el dataset completo.",
-        )
 
-    view_df = df if show_full else df.head(int(sample_n))
-    st.dataframe(view_df, use_container_width=True, height=520)
-
-    st.caption(
-        "Nota: la tabla es desplazable. Si activas el dataset completo, "
-        "Streamlit renderiza una vista virtualizada: verás todas las filas al hacer scroll."
-    )
+    if helix_df is not None:
+        with tabs[1]:
+            st.caption(f"Filas: {len(helix_df):,} · Columnas: {len(helix_df.columns)}")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                show_full_h = st.toggle(
+                    "Mostrar Helix completo",
+                    value=False,
+                    help="Por rendimiento, por defecto se muestra una muestra.",
+                    key="helix_show_full",
+                )
+            with c2:
+                sample_n_h = st.selectbox(
+                    "Tamaño de muestra Helix",
+                    options=[50, 100, 200, 500, 1000],
+                    index=1,
+                    disabled=show_full_h,
+                    key="helix_sample_n",
+                )
+            view_h = helix_df if show_full_h else helix_df.head(int(sample_n_h))
+            st.dataframe(view_h, use_container_width=True, height=520)
 
 
 
@@ -1748,12 +1977,20 @@ def page_nps_helix_linking(
     service_origin: str,
     service_origin_n1: str,
     service_origin_n2: str,
+    nps_group_choice: str,
     settings: Settings,
+    theme_mode: str,
 ) -> None:
     st.subheader("🔗 NPS ↔ Helix — causalidad pragmática (multi-fuente)")
 
+    # IMPORTANT: context is only used to load the already-ingested population.
+    # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
     helix_store = HelixIncidentStore(settings.data_dir / "helix")
-    hctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+    hctx = DatasetContext(
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+        service_origin_n2=_normalize_empty_n2(service_origin_n2),
+    )
     hstored = helix_store.get(hctx)
     if hstored is None:
         st.info("No hay incidencias Helix persistidas para este contexto. Súbelas en la barra lateral para activar el análisis.")
@@ -1761,17 +1998,8 @@ def page_nps_helix_linking(
 
     helix_df = helix_store.load_df(hstored)
 
-    # Filtro estricto por N2 solo si el contexto tiene N2.
-    n2_ctx = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
-    if n2_ctx and "BBVA_SourceServiceN2" in helix_df.columns:
-        ctx_set = tuple(sorted(n2_ctx))
-        helix_df = helix_df[helix_df["BBVA_SourceServiceN2"].apply(lambda x: tokenset(x) == ctx_set)].copy()
-
     if helix_df.empty:
-        st.warning(
-            "No hay incidencias Helix para el contexto seleccionado (tras aplicar el filtro estricto de N2). "
-            "Si el Excel no pertenece al contexto, la ingesta no debió persistir; revisa el fichero subido."
-        )
+        st.warning("No hay incidencias Helix persistidas para este contexto.")
         return
 
     # Ventana temporal: usa el rango del NPS cargado (y deja afinar).
@@ -1786,7 +2014,25 @@ def page_nps_helix_linking(
     with colw[2]:
         min_sim = st.slider("Umbral similitud (link)", min_value=0.10, max_value=0.60, value=0.22, step=0.02, key="nh_sim")
 
+    # Población global (sidebar): rige TODO el contenido de esta pestaña.
+    st.caption(f"Población activa: **{nps_group_choice}** (control global en la barra lateral)")
+
+    choice_norm = (nps_group_choice or "Todos").strip().lower()
+    show_all_groups = choice_norm == "todos"
+
+    focus_group = {
+        "detractores": "detractor",
+        "neutros": "passive",
+        "promotores": "promoter",
+    }.get(choice_norm, "detractor")
+
     nps_slice = nps_df[(nps_df["Fecha"].dt.date >= start) & (nps_df["Fecha"].dt.date <= end)].copy()
+
+    # Global population filter (sidebar). This governs *all* analysis inside this page.
+    # We keep the legacy variable name `det` used downstream (evidence wall/linking) to
+    # avoid a large refactor; it now represents the selected group population.
+    focus_df = filter_nps_by_group(nps_slice, nps_group_choice)
+    det = focus_df
     helix_df = helix_df.copy()
     # Canonical date col for helix store is 'Fecha' (set in ingestion); if missing, fallback to bbva_closeddate/startdatetime.
     if "Fecha" not in helix_df.columns:
@@ -1828,12 +2074,23 @@ def page_nps_helix_linking(
         st.warning("No hay incidencias Helix en el rango seleccionado.")
         return
 
-    # Detractores para el linking semántico
-    nps_slice["NPS Group"] = nps_slice["NPS Group"].astype(str)
-    is_det = (nps_slice["NPS Group"].str.upper() == "DETRACTOR") | (pd.to_numeric(nps_slice["NPS"], errors="coerce") <= 6)
-    det = nps_slice[is_det].copy()
-    if det.empty:
-        st.info("No hay detractores en el rango seleccionado. El linking semántico se activa cuando existan detractores.")
+    # Grupo foco para el linking semántico (por defecto: detractores)
+    nps_slice["NPS Group"] = nps_slice.get("NPS Group", "").astype(str)
+    score = pd.to_numeric(nps_slice.get("NPS", np.nan), errors="coerce")
+    grp = nps_slice["NPS Group"].str.upper()
+    if focus_group == "promoter":
+        mask_focus = (grp == "PROMOTER") | (score >= 9)
+        focus_name = "promotores"
+    elif focus_group == "passive":
+        mask_focus = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
+        focus_name = "pasivos"
+    else:
+        mask_focus = (grp == "DETRACTOR") | (score <= 6)
+        focus_name = "detractores"
+
+    focus_df = nps_slice[mask_focus].copy()
+    if focus_df.empty:
+        st.info(f"No hay {focus_name} en el rango seleccionado. El linking semántico se activa cuando existan registros de ese grupo.")
     else:
         st.caption(
             "El análisis usa: (1) contexto determinista, (2) ventana temporal, (3) mapping semántico de incidencias a tópicos NPS, "
@@ -1841,14 +2098,76 @@ def page_nps_helix_linking(
         )
 
     # 1) Linking + asignación de incidencias a tópico NPS
-    assign_df, links_df = link_incidents_to_nps_topics(det, helix_slice, min_similarity=float(min_sim))
-    overall_weekly, by_topic_weekly = weekly_aggregates(nps_slice, helix_slice, assign_df)
+    assign_df, links_df = link_incidents_to_nps_topics(focus_df, helix_slice, min_similarity=float(min_sim))
+    overall_weekly, by_topic_weekly = weekly_aggregates(nps_slice, helix_slice, assign_df, focus_group=focus_group)
+
+    # Design tokens (Plotly colors)
+    dtokens = DesignTokens.default()
+    pal = palette(dtokens, theme_mode)
+    # Continuous scales aligned to design tokens
+    cont_scale = plotly_continuous_scale(dtokens, theme_mode)
+    risk_scale = plotly_risk_scale(dtokens, theme_mode)
 
     # 2) Timeline causal (global)
     st.markdown("### Timeline causal (global)")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=overall_weekly["week"], y=overall_weekly["detractor_rate"], name="% detractores", mode="lines+markers"))
-    fig.add_trace(go.Bar(x=overall_weekly["week"], y=overall_weekly["incidents"], name="# incidencias", yaxis="y2", opacity=0.6))
+    if show_all_groups:
+        # Show the 3 group rates on the same plot (comparison mode)
+        empty_assign = pd.DataFrame(columns=["incident_id", "nps_topic"])
+        ow_det, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="detractor")
+        ow_pas, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="passive")
+        ow_pro, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="promoter")
+        fig.add_trace(
+            go.Scatter(
+                x=ow_det["week"],
+                y=ow_det["focus_rate"],
+                name="% detractores",
+                mode="lines+markers",
+                line=dict(color=pal["color.status.danger.value-07.default"], width=2),
+                marker=dict(color=pal["color.status.danger.value-07.default"], size=6),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=ow_pas["week"],
+                y=ow_pas["focus_rate"],
+                name="% pasivos",
+                mode="lines+markers",
+                line=dict(color=pal["color.status.warning.value-07.default"], width=2),
+                marker=dict(color=pal["color.status.warning.value-07.default"], size=6),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=ow_pro["week"],
+                y=ow_pro["focus_rate"],
+                name="% promotores",
+                mode="lines+markers",
+                line=dict(color=pal["color.status.success.value-07.default"], width=2),
+                marker=dict(color=pal["color.status.success.value-07.default"], size=6),
+            )
+        )
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=overall_weekly["week"],
+                y=overall_weekly["focus_rate"],
+                name=f"% {focus_name}",
+                mode="lines+markers",
+                line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
+                marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
+            )
+        )
+    fig.add_trace(
+        go.Bar(
+            x=overall_weekly["week"],
+            y=overall_weekly["incidents"],
+            name="# incidencias",
+            yaxis="y2",
+            opacity=0.75,
+            marker=dict(color=pal["color.primary.accent.value-01.default"]),
+        )
+    )
     fig.update_layout(
         height=380,
         margin=dict(l=10, r=10, t=10, b=10),
@@ -1893,8 +2212,8 @@ def page_nps_helix_linking(
 
         show = rank2.copy()
 
-        show["detractor_rate"] = (show["detractor_rate"] * 100).round(2)
-        show["delta_detractor_rate"] = (show["delta_detractor_rate"] * 100).round(2)
+        show["focus_rate"] = (show["focus_rate"] * 100).round(2)
+        show["delta_focus_rate"] = (show["delta_focus_rate"] * 100).round(2)
         show["confidence_learned"] = show["confidence_learned"].round(3)
         show["factor"] = show["factor"].round(3)
         show["corr"] = show["corr"].round(3)
@@ -1918,8 +2237,8 @@ def page_nps_helix_linking(
                     "changepoints",
                     "incidents",
                     "responses",
-                    "detractor_rate",
-                    "delta_detractor_rate",
+                    "focus_rate",
+                    "delta_focus_rate",
                     "weeks",
                 ]
             ].rename(
@@ -1938,8 +2257,8 @@ def page_nps_helix_linking(
                     "changepoints": "Changepoints",
                     "incidents": "Incidencias (asignadas)",
                     "responses": "Respuestas",
-                    "detractor_rate": "% Detractores",
-                    "delta_detractor_rate": "Δ % Detractores (high-inc vs low-inc)",
+                    "focus_rate": f"% {focus_name.capitalize()}",
+                    "delta_focus_rate": f"Δ % {focus_name.capitalize()} (high-inc vs low-inc)",
                     "weeks": "Semanas",
                 }
             ),
@@ -1948,7 +2267,16 @@ def page_nps_helix_linking(
         )
         # Bar chart top 15
         topn = show.head(15).copy()
-        fig2 = px.bar(topn[::-1], x="confidence_learned", y="nps_topic", orientation="h")
+        # Confidence is a priority/risk proxy -> use status-aligned scale (neutral→warning→alert)
+        fig2 = px.bar(
+            topn[::-1],
+            x="confidence_learned",
+            y="nps_topic",
+            orientation="h",
+            color="confidence_learned",
+            color_continuous_scale=risk_scale,
+            range_color=[0, 1],
+        )
         fig2.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1]))
         st.plotly_chart(fig2, use_container_width=True)
     else:
@@ -1961,7 +2289,15 @@ def page_nps_helix_linking(
             by_topic_weekly.pivot_table(index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0)
         )
         if pivot.shape[0] > 0 and pivot.shape[1] > 0:
-            heat = px.imshow(pivot, aspect="auto")
+            heat = px.imshow(
+                pivot,
+                aspect="auto",
+                zmin=0,
+                zmax=float(np.nanpercentile(pivot.values.astype(float), 95)) if pivot.values.size else None,
+            )
+            heat.update_traces(coloraxis="coloraxis")
+            # Incidence intensity -> status-aligned scale
+            heat.update_layout(coloraxis=dict(colorscale=risk_scale))
             heat.update_layout(height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(heat, use_container_width=True)
 
@@ -1979,19 +2315,39 @@ def page_nps_helix_linking(
             cps = [] if pd.isna(cps) else [str(cps)]
         g["incidents_shifted"] = g["incidents"].shift(lagw)
         fig_lag = go.Figure()
-        fig_lag.add_trace(go.Scatter(x=g["week"], y=g["detractor_rate"], name="% detractores", mode="lines+markers"))
-        fig_lag.add_trace(go.Bar(x=g["week"], y=g["incidents_shifted"], name=f"# incidencias (shift {lagw}w)", yaxis="y2", opacity=0.55))
+        fig_lag.add_trace(
+            go.Scatter(
+                x=g["week"],
+                y=g["focus_rate"],
+                name=f"% {focus_name}",
+                mode="lines+markers",
+                line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
+                marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
+            )
+        )
+        fig_lag.add_trace(
+            go.Bar(
+                x=g["week"],
+                y=g["incidents_shifted"],
+                name=f"# incidencias (shift {lagw}w)",
+                yaxis="y2",
+                opacity=0.70,
+                marker=dict(color=pal["color.primary.accent.value-01.default"]),
+            )
+        )
         # changepoint vertical lines
+        cp_level = str(lag_row["max_cp_level"].iloc[0]) if (not lag_row.empty and "max_cp_level" in lag_row.columns) else ""
+        cp_color = cp_level_color(dtokens, theme_mode, cp_level)
         for cp in cps[:8]:
             try:
                 cp_dt = pd.to_datetime(cp)
-                fig_lag.add_vline(x=cp_dt, line_width=1, line_dash="dot")
+                fig_lag.add_vline(x=cp_dt, line_width=2, line_dash="dot", line_color=cp_color)
             except Exception:
                 pass
         fig_lag.update_layout(
             height=380,
             margin=dict(l=10, r=10, t=10, b=10),
-            yaxis=dict(title="% detractores", tickformat=".0%"),
+            yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
             yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
             legend=dict(orientation="h"),
         )
@@ -2006,7 +2362,7 @@ def page_nps_helix_linking(
 
     # 4.2) Lag en días (si la densidad de NPS permite daily resample)
     st.markdown("### Lag en días (cuando la densidad de NPS lo permite)")
-    overall_daily, by_topic_daily = daily_aggregates(nps_slice, helix_slice, assign_df)
+    overall_daily, by_topic_daily = daily_aggregates(nps_slice, helix_slice, assign_df, focus_group=focus_group)
     if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45):
         lag_days = estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
         if not lag_days.empty and 'rank2' in locals() and not rank2.empty:
@@ -2037,12 +2393,29 @@ def page_nps_helix_linking(
             gd = by_topic_daily[by_topic_daily["nps_topic"] == topic_sel].sort_values("date").copy()
             gd["incidents_shifted"] = gd["incidents"].shift(lagd)
             figd = go.Figure()
-            figd.add_trace(go.Scatter(x=gd["date"], y=gd["detractor_rate"], name="% detractores", mode="lines"))
-            figd.add_trace(go.Bar(x=gd["date"], y=gd["incidents_shifted"], name=f"# incidencias (shift {lagd}d)", yaxis="y2", opacity=0.5))
+            figd.add_trace(
+                go.Scatter(
+                    x=gd["date"],
+                    y=gd["focus_rate"],
+                    name=f"% {focus_name}",
+                    mode="lines",
+                    line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
+                )
+            )
+            figd.add_trace(
+                go.Bar(
+                    x=gd["date"],
+                    y=gd["incidents_shifted"],
+                    name=f"# incidencias (shift {lagd}d)",
+                    yaxis="y2",
+                    opacity=0.70,
+                    marker=dict(color=pal["color.primary.accent.value-01.default"]),
+                )
+            )
             figd.update_layout(
                 height=360,
                 margin=dict(l=10, r=10, t=10, b=10),
-                yaxis=dict(title="% detractores", tickformat=".0%"),
+                yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
                 yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
                 legend=dict(orientation="h"),
             )
@@ -2134,20 +2507,20 @@ def page_nps_helix_linking(
         for _, r in top.iterrows():
             md_lines.append(
                 f"- **{r['nps_topic']}** · confidence={r['score']:.3f} · incidencias={int(r['incidents'])} · "
-                f"Δ detractores={float(r['delta_detractor_rate'] or 0)*100:.2f} pp"
+                f"Δ {focus_name}={float(r.get('delta_focus_rate', 0) or 0)*100:.2f} pp"
             )
     else:
         md_lines.append("- No hay ranking disponible (insuficiente señal).")
     md_lines.append("")
     md_lines.append("## 2) Evidencia cuantitativa (semanal)")
-    md_lines.append("**Global:** % detractores vs incidencias")
+    md_lines.append(f"**Global:** % {focus_name} vs incidencias")
     md_lines.append("")
-    md_lines.append("| Semana | Respuestas | Detractores | % detractores | Incidencias |")
+    md_lines.append(f"| Semana | Respuestas | {focus_name.capitalize()} | % {focus_name} | Incidencias |")
     md_lines.append("|---|---:|---:|---:|---:|")
     for rec in overall_weekly.sort_values("week").to_dict(orient="records"):
         md_lines.append(
-            f"| {pd.to_datetime(rec['week']).date()} | {int(rec.get('responses',0))} | {int(rec.get('detractors',0))} | "
-            f"{(float(rec.get('detractor_rate',0))*100):.2f}% | {int(rec.get('incidents',0))} |"
+            f"| {pd.to_datetime(rec['week']).date()} | {int(rec.get('responses',0))} | {int(rec.get('focus_count',0))} | "
+            f"{(float(rec.get('focus_rate',0))*100):.2f}% | {int(rec.get('incidents',0))} |"
         )
     md_lines.append("")
     if "lag_days" in locals() and (not lag_days.empty):
@@ -2184,7 +2557,12 @@ def page_nps_helix_linking(
     with c1:
         st.download_button("Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md")
     with c2:
-        st.download_button("Descargar Pack (JSON)", data=json.dumps(pack, ensure_ascii=False, indent=2).encode("utf-8"), file_name="deep_dive_pack.json")
+        pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
+        st.download_button(
+            "Descargar Pack (JSON)",
+            data=pack_json.encode("utf-8"),
+            file_name="deep_dive_pack.json",
+        )
 
 
 def main() -> None:
@@ -2232,6 +2610,7 @@ def main() -> None:
         service_origin,
         service_origin_n1,
         service_origin_n2,
+        nps_group_choice,
         cache_path,
         theme_mode,
         sheet_name,
@@ -2241,7 +2620,7 @@ def main() -> None:
     theme = get_theme(theme_mode)
     apply_theme(theme)
 
-    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}"
+    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{nps_group_choice}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
         st.session_state["llm_insights"] = load_llm_insights_for_context(settings, service_origin=service_origin, service_origin_n1=service_origin_n1)
@@ -2297,7 +2676,7 @@ def main() -> None:
     )
 
     with t_resumen:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["resumen"] or tuple())
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["resumen"] or tuple())
         st.markdown(
             "<div class='nps-card nps-card--flat'>"
             "<b>Cómo leer esta pestaña</b><br/>"
@@ -2321,32 +2700,42 @@ def main() -> None:
                 service_origin=service_origin,
                 service_origin_n1=service_origin_n1,
                 service_origin_n2=service_origin_n2,
+                nps_group_choice=nps_group_choice,
                 settings=settings,
+                theme_mode=theme_mode,
             )
 
     with t_drivers:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["drivers"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["drivers"])
         page_drivers(df, theme, min_n=min_n)
 
     with t_texto:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["texto"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["texto"])
         page_text(df, theme)
 
     with t_journey:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["journey"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["journey"])
         page_journey(df)
 
     with t_alertas:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["alertas"])
-        page_changes(df)
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["alertas"])
+        page_changes(df, theme)
 
     with t_llm:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, VIEW_COLUMNS["llm"])
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["llm"])
         page_llm(df, settings=settings, min_n=min_n, cache_path=cache_path)
 
     with t_datos:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, tuple())
-        page_quality(df)
+        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, tuple())
+        helix_store = HelixIncidentStore(settings.data_dir / "helix")
+        hctx = DatasetContext(
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=_normalize_empty_n2(service_origin_n2),
+        )
+        hstored = helix_store.get(hctx)
+        helix_df = helix_store.load_df(hstored) if hstored is not None else None
+        page_quality(df, helix_df=helix_df)
 
 
 

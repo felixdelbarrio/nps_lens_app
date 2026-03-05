@@ -169,16 +169,47 @@ def _load_jsonl_subset_cached(
 class DatasetContext:
     service_origin: str
     service_origin_n1: str
+    # Optional third context dimension. Empty string means "not set".
+    service_origin_n2: str = ""
+
+    @staticmethod
+    def _norm_n2(raw: str) -> str:
+        """Normalize N2 as a stable, comparable token-set string.
+
+        - Accepts comma-separated values.
+        - Trims whitespace.
+        - Sorts tokens.
+        - Joins with comma.
+
+        Empty/None-like -> "".
+        """
+        if raw is None:
+            return ""
+        s = str(raw).strip()
+        if not s:
+            return ""
+        tokens = [t.strip() for t in s.split(",") if t.strip()]
+        if not tokens:
+            return ""
+        tokens = sorted(set(tokens))
+        return ",".join(tokens)
 
     def key(self) -> str:
+        n2 = self._norm_n2(self.service_origin_n2)
+        if n2:
+            return f"{self.service_origin}__{self.service_origin_n1}__{n2}"
         return f"{self.service_origin}__{self.service_origin_n1}"
 
     @staticmethod
     def from_key(key: str) -> "DatasetContext":
-        parts = key.split("__", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid context key: {key}")
-        return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1])
+        parts = key.split("__")
+        if len(parts) == 2:
+            return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2="")
+        if len(parts) >= 3:
+            # N2 itself may contain "__" in theory, but our normalizer does not emit it.
+            n2 = "__".join(parts[2:])
+            return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2=n2)
+        raise ValueError(f"Invalid context key: {key}")
 
 
 @dataclass(frozen=True)
@@ -679,17 +710,85 @@ class HelixIncidentStore:
         except ValueError:
             return pd.DataFrame()
 
+        def _looks_like_datetime_col(col: str) -> bool:
+            lc = str(col).lower()
+            if "fecha" in lc or "date" in lc or "datetime" in lc or "timestamp" in lc:
+                return True
+            if "datt" in lc or lc.endswith("_date") or lc.endswith("_datetime"):
+                return True
+            return False
+
+        def _recover_epoch_ms(series: pd.Series) -> pd.Series:
+            s = series
+
+            def _epoch_to_dt(num: pd.Series) -> pd.Series:
+                n = pd.to_numeric(num, errors="coerce")
+                if len(n) == 0:
+                    return pd.to_datetime(n, errors="coerce")
+                if float(n.notna().mean()) < 0.6:
+                    return pd.to_datetime(n, errors="coerce")
+                med = float(n.dropna().median())
+                if med >= 1e12:
+                    return pd.to_datetime(n, unit="ms", utc=True, errors="coerce").dt.tz_localize(None)
+                if med >= 1e9:
+                    return pd.to_datetime(n, unit="s", utc=True, errors="coerce").dt.tz_localize(None)
+                return pd.to_datetime(n, errors="coerce")
+
+            # If numeric, treat as epoch first (avoid pandas default ns parsing)
+            if pd.api.types.is_numeric_dtype(s):
+                return _epoch_to_dt(s)
+
+            # Try numeric epoch from strings (handles thousand separators)
+            try:
+                cleaned = s.astype("string").str.replace(r"[^0-9\\-]", "", regex=True)
+                num = pd.to_numeric(cleaned, errors="coerce")
+                if len(num) and float(num.notna().mean()) >= 0.6:
+                    return _epoch_to_dt(num)
+            except Exception:
+                pass
+
+            # Fallback: normal parse for ISO strings
+            return pd.to_datetime(s, errors="coerce")
+
         if columns:
             keep = [c for c in columns if c in df.columns]
             if keep:
                 df = df[keep]
 
         if "Fecha" in df.columns:
-            df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+            df["Fecha"] = _recover_epoch_ms(df["Fecha"])
+
+        # Best-effort: convert any other date-like columns from epoch/strings to datetime
+        for c in list(df.columns):
+            if c == "Fecha":
+                continue
+            if not _looks_like_datetime_col(str(c)):
+                continue
+            try:
+                dt = _recover_epoch_ms(df[c])
+                if len(dt) and float(dt.notna().mean()) >= 0.6:
+                    df[c] = dt
+            except Exception:
+                continue
+
+        # Fallback: if Fecha is missing or poorly parsed, attempt to recover from common timestamp columns.
+        if ("Fecha" not in df.columns) or ("Fecha" in df.columns and float(df["Fecha"].notna().mean()) < 0.4):
+            for c in ["Submit Date", "SubmitDate", "Submitted Date", "Last Modified Date", "bbva_startdatetime", "bbva_closeddate"]:
+                if c in df.columns:
+                    dt = _recover_epoch_ms(df[c])
+                    if float(dt.notna().mean()) >= 0.4:
+                        df["Fecha"] = dt
+                        break
+
+        if "Fecha" in df.columns:
             if date_start is not None:
                 df = df[df["Fecha"] >= pd.to_datetime(date_start)]
             if date_end is not None:
-                df = df[df["Fecha"] <= pd.to_datetime(date_end)]
+                end_ts = pd.to_datetime(date_end)
+                # If a pure date (00:00:00), interpret as inclusive end-of-day
+                if end_ts.hour == 0 and end_ts.minute == 0 and end_ts.second == 0 and end_ts.microsecond == 0:
+                    end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+                df = df[df["Fecha"] <= end_ts]
 
         return df
 
