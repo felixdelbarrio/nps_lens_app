@@ -77,6 +77,7 @@ from nps_lens.ui.narratives import (
     explain_opportunities,
     explain_topics,
 )
+from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme, apply_theme, get_theme
 
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
@@ -1249,7 +1250,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig is None:
                 st.info("No hay suficientes datos para construir una tendencia.")
             else:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
         with tab_dm:
             days = st.slider(
@@ -1295,16 +1296,16 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig_mix is None:
                 st.info("No hay suficientes datos para construir la vista diaria.")
             else:
-                st.plotly_chart(fig_mix, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 fig_vol = chart_daily_volume(df_win, theme, days=int(days))
                 if fig_vol is not None:
-                    st.plotly_chart(fig_vol, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 st.caption("Lectura ejecutiva diaria: NPS clásico (promotores - detractores) y % detractores.")
                 fig_k = chart_daily_kpis(df_win, theme, days=int(days))
                 if fig_k is not None:
-                    st.plotly_chart(fig_k, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
 
                 with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
                     st.caption(
@@ -1443,7 +1444,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig2 is None:
                 st.info("No hay suficientes datos para construir la escalera.")
             else:
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
 
 
     with col_b:
@@ -1557,7 +1558,7 @@ def page_comparisons(df: pd.DataFrame, theme: Theme) -> None:
         return
     fig = chart_driver_delta(delta, theme)
     if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
     with st.expander("Ver tabla de deltas"):
         st.dataframe(delta.head(30), use_container_width=True)
 
@@ -1584,7 +1585,7 @@ def page_cohorts(df: pd.DataFrame, theme: Theme) -> None:
             "(revisa columnas y N mínimo)."
         )
         return
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     st.markdown(
         "<div class='nps-card'>"
@@ -1612,7 +1613,7 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
             stats_df = stats_df.sort_values("gap_vs_overall", ascending=True)
             fig = chart_driver_bar(stats_df, theme)
             if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
         with st.expander("Ver tabla detallada"):
             st.dataframe(stats_df.head(30), use_container_width=True)
@@ -1635,7 +1636,7 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
                     top_k=10,
                 )
                 if cfig is not None:
-                    st.plotly_chart(cfig, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(cfig, theme), use_container_width=True)
             except Exception:
                 # Never block the page on chart errors
                 pass
@@ -1670,7 +1671,7 @@ def page_text(df: pd.DataFrame, theme: Theme) -> None:
         if fig is None:
             st.info("No hay texto suficiente para extraer temas.")
         else:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     with c2:
         section("Explicación en lenguaje natural", "Resumen de lo que significan los temas.")
@@ -1757,7 +1758,7 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
     pts = [pd.Timestamp(p) for p in cp.points]
     fig = chart_nps_timeseries_with_changepoints(ts, theme=theme, points=pts, levels=cp.level)
     if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     cp_rows = [
         {"date": str(p), "stability": float(s), "level": str(level)}
@@ -2239,6 +2240,9 @@ def page_nps_helix_linking(
 ) -> None:
     st.subheader("🔗 NPS ↔ Helix — causalidad pragmática (multi-fuente)")
 
+    # Use the global app theme for any Plotly figures built directly in this page.
+    theme = get_theme(theme_mode)
+
     # IMPORTANT: context is only used to load the already-ingested population.
     # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
     helix_store = HelixIncidentStore(settings.data_dir / "helix")
@@ -2432,7 +2436,7 @@ def page_nps_helix_linking(
         yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
         legend=dict(orientation="h"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     # 3) Ranking causal por tópico NPS
     st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
@@ -2536,7 +2540,7 @@ def page_nps_helix_linking(
             range_color=[0, 1],
         )
         fig2.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1]))
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
     else:
         st.info("No hay suficiente señal para rankear tópicos (prueba con un rango más amplio).")
 
@@ -2558,7 +2562,7 @@ def page_nps_helix_linking(
             # Incidence intensity -> status-aligned scale
             heat.update_layout(coloraxis=dict(colorscale=risk_scale))
             heat.update_layout(height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(heat, use_container_width=True)
+            st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
 
     
     # 4.1) Changepoints + Lag (incidencias preceden X semanas)
@@ -2611,7 +2615,7 @@ def page_nps_helix_linking(
             yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(fig_lag, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig_lag, theme), use_container_width=True)
         st.caption(
             "Interpretación: el lag se elige maximizando la correlación entre incidencias(t) y detracción(t+lag). "
             "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico. "
@@ -2680,7 +2684,7 @@ def page_nps_helix_linking(
                 yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(figd, use_container_width=True)
+            st.plotly_chart(apply_plotly_theme(figd, theme), use_container_width=True)
             st.caption(
                 "Se activa el lag diario cuando hay suficiente densidad de respuestas por día (cobertura) y puntos válidos. "
                 "El lag se elige maximizando corr(incidencias(t), detracción(t+lag))."

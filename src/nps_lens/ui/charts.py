@@ -1,81 +1,17 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
 
 import pandas as pd
 
-from nps_lens.design.tokens import DesignTokens, primary_accent
+from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
 
 
-@dataclass(frozen=True)
-class ChartTheme:
-    accent: str
-    text: str
-    grid: str
-    paper_bg: str
-    plot_bg: str
-
-
-def chart_theme(theme: Theme) -> ChartTheme:
-    toks = DesignTokens.default()
-    return ChartTheme(
-        accent=primary_accent(toks, theme.mode),
-        text=theme.text,
-        grid=theme.border,
-        # Use solid hex backgrounds so downstream color utilities can safely
-        # blend shades (Plotly also accepts hex).
-        paper_bg=theme.bg,
-        plot_bg=theme.bg,
-    )
-
-
-def _status_colors(theme: Theme) -> tuple[str, str, str]:
-    """Return (detractor, passive, promoter) colors from tokens."""
-
-    toks = DesignTokens.default()
-    pal = toks.colors_dark if theme.mode == "dark" else toks.colors_light
-    detr = pal["color.primary.bg.alert"]
-    pas = pal["color.primary.bg.warning"]
-    pro = pal["color.primary.bg.success"]
-    return detr, pas, pro
-
-
 def apply_plotly_template(fig: object, theme: Theme) -> object:
-    """Apply a token-driven Plotly template so dark/light stays consistent (including exports)."""
+    """Apply the project Plotly template (token-driven)."""
 
-    # Lazy import to keep cold-start fast in Streamlit.
-    import plotly.io as pio  # type: ignore
-
-    ct = chart_theme(theme)
-    detr, pas, pro = _status_colors(theme)
-
-    template = {
-        "layout": {
-            "paper_bgcolor": ct.paper_bg,
-            "plot_bgcolor": ct.plot_bg,
-            "font": {
-                "color": ct.text,
-                "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
-            },
-            "colorway": [ct.accent, detr, pas, pro],
-            "legend": {"bgcolor": "rgba(0,0,0,0)", "bordercolor": ct.grid},
-            "hoverlabel": {"bgcolor": ct.paper_bg, "font": {"color": ct.text}},
-        }
-    }
-
-    try:
-        # `fig` is a Plotly Figure. We keep signature generic to avoid heavy typing deps.
-        fig.update_layout(template=template)  # type: ignore[attr-defined]
-        fig.update_xaxes(showgrid=True, gridcolor=ct.grid, zerolinecolor=ct.grid, showline=True, linecolor=ct.grid)  # type: ignore[attr-defined]
-        fig.update_yaxes(showgrid=True, gridcolor=ct.grid, zerolinecolor=ct.grid, showline=True, linecolor=ct.grid)  # type: ignore[attr-defined]
-        # Also register a named template so other modules can reuse it if needed.
-        pio.templates["nps_lens"] = template  # type: ignore[index]
-    except Exception:
-        # Best-effort: never crash rendering due to theming.
-        return fig
-    return fig
+    return apply_plotly_theme(fig, theme)
 
 
 

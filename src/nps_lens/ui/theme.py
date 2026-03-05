@@ -349,20 +349,20 @@ div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly text {{
 
 
 /* Tabs (BaseWeb) */
-.stTabs [data-baseweb="tab"] {
+.stTabs [data-baseweb="tab"] {{
   color: var(--nps-text-muted) !important;
-}
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
+}}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {{
   color: var(--nps-text) !important;
-}
-.stTabs [data-baseweb="tab-highlight"] {
+}}
+.stTabs [data-baseweb="tab-highlight"] {{
   background: var(--nps-accent) !important;
-}
+}}
 
 /* Plotly container background (extra safety for embedded mode) */
-.js-plotly-plot .plotly {
+.js-plotly-plot .plotly {{
   background: var(--nps-surface) !important;
-}
+}}
 
 </style>
 """,
