@@ -5,10 +5,9 @@ from typing import Optional, Union
 
 import pandas as pd
 
-from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.core.store import DatasetContext
+from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.ingest.features import add_precomputed_features
-
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -80,7 +79,9 @@ def read_nps_thermal_excel(
 
     # Resolve context (either from args or infer from columns)
     if "service_origin" in df.columns and service_origin is None:
-        vals = [v for v in df["service_origin"].astype(str).dropna().unique().tolist() if str(v).strip()]
+        vals = [
+            v for v in df["service_origin"].astype(str).dropna().unique().tolist() if str(v).strip()
+        ]
         if len(vals) == 1:
             service_origin = str(vals[0])
         elif len(vals) > 1:
@@ -94,7 +95,11 @@ def read_nps_thermal_excel(
                 )
             )
     if "service_origin_n1" in df.columns and service_origin_n1 is None:
-        vals = [v for v in df["service_origin_n1"].astype(str).dropna().unique().tolist() if str(v).strip()]
+        vals = [
+            v
+            for v in df["service_origin_n1"].astype(str).dropna().unique().tolist()
+            if str(v).strip()
+        ]
         if len(vals) == 1:
             service_origin_n1 = str(vals[0])
         elif len(vals) > 1:
@@ -160,7 +165,9 @@ def read_nps_thermal_excel(
     df_out["Fecha"] = pd.to_datetime(df_out["Fecha"], errors="coerce")
     bad_dates = int(df_out["Fecha"].isna().sum())
     if bad_dates:
-        issues.append(ValidationIssue(level="WARN", message=f"{bad_dates} filas con Fecha inválida"))
+        issues.append(
+            ValidationIssue(level="WARN", message=f"{bad_dates} filas con Fecha inválida")
+        )
 
     df_out["NPS"] = pd.to_numeric(df_out["NPS"], errors="coerce")
     bad_nps = int(df_out["NPS"].isna().sum())
@@ -170,7 +177,9 @@ def read_nps_thermal_excel(
     df_out["ID"] = df_out["ID"].astype(str)
 
     # Normalize service_origin_n2 formatting (stable, no stray spaces)
-    df_out["service_origin_n2"] = df_out["service_origin_n2"].apply(lambda v: ", ".join(_split_csvish(v)))
+    df_out["service_origin_n2"] = df_out["service_origin_n2"].apply(
+        lambda v: ", ".join(_split_csvish(v))
+    )
 
     # Optional filter by service_origin_n2 (strict token-set equality)
     if service_origin_n2 is not None:
@@ -198,7 +207,9 @@ def read_nps_thermal_excel(
     # Precompute stable derived columns used across the app (performance + determinism)
     df_out, added = add_precomputed_features(df_out)
     if added:
-        issues.append(ValidationIssue(level="INFO", message=f"Features precomputadas: {', '.join(added)}"))
+        issues.append(
+            ValidationIssue(level="INFO", message=f"Features precomputadas: {', '.join(added)}")
+        )
 
     return IngestResult(
         df=df_out,

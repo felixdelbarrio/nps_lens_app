@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
-
-from nps_lens.analytics.drivers import compute_nps_from_scores
 
 
 @dataclass(frozen=True)
@@ -62,7 +59,9 @@ def daily_mix(df: pd.DataFrame, date_col: str = "Fecha", score_col: str = "NPS")
 
     d["bucket"] = d[score_col].map(bucket)
     pivot = (
-        d.pivot_table(index=date_col, columns="bucket", values=score_col, aggfunc="size", fill_value=0)
+        d.pivot_table(
+            index=date_col, columns="bucket", values=score_col, aggfunc="size", fill_value=0
+        )
         .sort_index()
         .rename_axis(None, axis=0)
         .reset_index()

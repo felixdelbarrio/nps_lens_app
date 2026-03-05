@@ -36,7 +36,9 @@ def get_theme(mode: str) -> Theme:
     muted = p["color.primary.text.disabled"]
     border = p["color.primary.bg.bar"]
     accent = p["color.primary.accent.value-01.default"]
-    on_accent = p.get("color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text))
+    on_accent = p.get(
+        "color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text)
+    )
     danger = p["color.primary.bg.alert"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]

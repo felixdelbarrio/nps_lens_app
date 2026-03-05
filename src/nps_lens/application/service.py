@@ -51,7 +51,9 @@ class AppService:
         profile_dir = Path("data") / "cache" / "profiles"
         with self.perf.timer(namespace), profile_if_enabled(profile_dir, tag=namespace):
             out = compute()
-        self.disk_cache.set(key, out, meta={"namespace": namespace, **(meta or {}), "params": params})
+        self.disk_cache.set(
+            key, out, meta={"namespace": namespace, **(meta or {}), "params": params}
+        )
         return out, False
 
     # ----------------------------
@@ -76,7 +78,9 @@ class AppService:
             namespace="topics",
             dataset_sig=ds_sig,
             params=params,
-            compute=lambda: extract_topics(texts, n_clusters=int(n_clusters), max_features=int(max_features)),
+            compute=lambda: extract_topics(
+                texts, n_clusters=int(n_clusters), max_features=int(max_features)
+            ),
             meta={"n_texts": int(len(texts))},
         )
         return out

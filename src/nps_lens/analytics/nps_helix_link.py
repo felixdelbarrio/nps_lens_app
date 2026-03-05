@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+import ruptures as rpt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-import ruptures as rpt
 
 
 def estimate_best_lag_by_topic(
@@ -47,7 +46,9 @@ def estimate_best_lag_by_topic(
                 continue
             if (not np.isfinite(best[1])) or (c > best[1]):
                 best = (lag, c, int(mask.sum()))
-        rows.append({"nps_topic": topic, "best_lag_weeks": best[0], "corr": best[1], "points": best[2]})
+        rows.append(
+            {"nps_topic": topic, "best_lag_weeks": best[0], "corr": best[1], "points": best[2]}
+        )
     out = pd.DataFrame(rows)
     return out
 
@@ -91,7 +92,9 @@ def estimate_best_lag_days_by_topic(
                 continue
             if (not np.isfinite(best[1])) or (c > best[1]):
                 best = (lag, c, int(mask.sum()))
-        rows.append({"nps_topic": topic, "best_lag_days": best[0], "corr": best[1], "points": best[2]})
+        rows.append(
+            {"nps_topic": topic, "best_lag_days": best[0], "corr": best[1], "points": best[2]}
+        )
     return pd.DataFrame(rows)
 
 
@@ -296,8 +299,12 @@ def incidents_lead_changepoints_flag(
             cp = pd.to_datetime(cp_s, errors="coerce")
             if pd.isna(cp):
                 continue
-            pre = g[(g["week"] >= cp - pd.Timedelta(days=7*window_weeks)) & (g["week"] < cp)]["incidents"].astype(float)
-            post = g[(g["week"] > cp) & (g["week"] <= cp + pd.Timedelta(days=7*window_weeks))]["incidents"].astype(float)
+            pre = g[(g["week"] >= cp - pd.Timedelta(days=7 * window_weeks)) & (g["week"] < cp)][
+                "incidents"
+            ].astype(float)
+            post = g[(g["week"] > cp) & (g["week"] <= cp + pd.Timedelta(days=7 * window_weeks))][
+                "incidents"
+            ].astype(float)
             if pre.empty or post.empty:
                 continue
             leads.append(float(pre.max()) >= float(post.max()))
@@ -329,9 +336,15 @@ def build_nps_topic(df: pd.DataFrame) -> pd.Series:
 
 
 def build_incident_topic(df: pd.DataFrame) -> pd.Series:
-    t1 = df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index)).astype(str)
-    t2 = df.get("Product Categorization Tier 2", pd.Series([""] * len(df), index=df.index)).astype(str)
-    t3 = df.get("Product Categorization Tier 3", pd.Series([""] * len(df), index=df.index)).astype(str)
+    t1 = df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index)).astype(
+        str
+    )
+    t2 = df.get("Product Categorization Tier 2", pd.Series([""] * len(df), index=df.index)).astype(
+        str
+    )
+    t3 = df.get("Product Categorization Tier 3", pd.Series([""] * len(df), index=df.index)).astype(
+        str
+    )
     base = (
         t1.fillna("").str.strip()
         + " > "
@@ -341,8 +354,18 @@ def build_incident_topic(df: pd.DataFrame) -> pd.Series:
     ).str.replace(r"\s*>\s*>\s*", " > ", regex=True)
     base = base.str.replace(r"^>\s*", "", regex=True).str.replace(r"\s*>$", "", regex=True)
     # fallback to service / summary
-    svc = df.get("service", pd.Series([""] * len(df), index=df.index)).astype(str).fillna("").str.strip()
-    summ = df.get("summary", pd.Series([""] * len(df), index=df.index)).astype(str).fillna("").str.strip()
+    svc = (
+        df.get("service", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
+    summ = (
+        df.get("summary", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     base = base.where(base.str.len() > 0, svc.where(svc.str.len() > 0, summ))
     return base.fillna("")
 
@@ -395,7 +418,9 @@ def link_incidents_to_nps_topics(
     if nps_detractors.empty or helix_incidents.empty:
         return (
             pd.DataFrame(columns=["incident_id", "nps_topic", "similarity"]),
-            pd.DataFrame(columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]),
+            pd.DataFrame(
+                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+            ),
         )
 
     nps = nps_detractors.copy()
@@ -403,7 +428,10 @@ def link_incidents_to_nps_topics(
 
     nps["nps_id"] = _safe_id(nps.get("ID", pd.Series(nps.index, index=nps.index)))
     helix["incident_id"] = _safe_id(
-        helix.get("Incident Number", helix.get("ID de la Incidencia", pd.Series(helix.index, index=helix.index)))
+        helix.get(
+            "Incident Number",
+            helix.get("ID de la Incidencia", pd.Series(helix.index, index=helix.index)),
+        )
     )
 
     nps["nps_topic"] = build_nps_topic(nps)
@@ -508,7 +536,9 @@ def weekly_aggregates(
     helix["week"] = helix[date_col_helix].dt.to_period("W").dt.start_time
 
     group = str(focus_group or "detractor").strip().lower()
-    score = pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce")
+    score = pd.to_numeric(
+        nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce"
+    )
     grp = nps.get("NPS Group", "").astype(str).str.upper()
 
     if group == "promoter":
@@ -518,11 +548,19 @@ def weekly_aggregates(
     else:
         nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
 
-    overall_nps = nps.groupby("week").agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
-    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace({0: np.nan})
+    overall_nps = (
+        nps.groupby("week")
+        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .reset_index()
+    )
+    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
+        {0: np.nan}
+    )
 
     overall_helix = helix.groupby("week").agg(incidents=("Incident Number", "count")).reset_index()
-    overall = pd.merge(overall_nps, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
+    overall = (
+        pd.merge(overall_nps, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
+    )
 
     # By topic (NPS topics)
     nps["nps_topic"] = build_nps_topic(nps)
@@ -531,7 +569,9 @@ def weekly_aggregates(
         .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
         .reset_index()
     )
-    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace({0: np.nan})
+    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace(
+        {0: np.nan}
+    )
 
     by_topic = by_topic_nps.copy()
     if not incident_assignments.empty:
@@ -543,7 +583,9 @@ def weekly_aggregates(
             right_on="Incident Number",
             how="left",
         )
-        by_topic_inc = ia.groupby(["week", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+        by_topic_inc = (
+            ia.groupby(["week", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+        )
         by_topic = by_topic.merge(by_topic_inc, on=["week", "nps_topic"], how="left")
     # Ensure incidents column exists even when there are no incident assignments.
     # NOTE: DataFrame.get("incidents", 0) returns an int when missing, which does not
@@ -579,7 +621,9 @@ def daily_aggregates(
     helix["date"] = helix[date_col_helix].dt.normalize()
 
     group = str(focus_group or "detractor").strip().lower()
-    score = pd.to_numeric(nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce")
+    score = pd.to_numeric(
+        nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce"
+    )
     grp = nps.get("NPS Group", "").astype(str).str.upper()
 
     if group == "promoter":
@@ -589,16 +633,28 @@ def daily_aggregates(
     else:
         nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
 
-    overall_nps = nps.groupby("date").agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
-    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace({0: np.nan})
+    overall_nps = (
+        nps.groupby("date")
+        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .reset_index()
+    )
+    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
+        {0: np.nan}
+    )
     overall_helix = helix.groupby("date").agg(incidents=("Incident Number", "count")).reset_index()
-    overall = pd.merge(overall_nps, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
+    overall = (
+        pd.merge(overall_nps, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
+    )
 
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
-        nps.groupby(["date", "nps_topic"]).agg(responses=("ID", "count"), focus_count=("is_focus", "sum")).reset_index()
+        nps.groupby(["date", "nps_topic"])
+        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .reset_index()
     )
-    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace({0: np.nan})
+    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace(
+        {0: np.nan}
+    )
     by_topic = by_topic_nps.copy()
     if not incident_assignments.empty:
         ia = incident_assignments.copy()
@@ -608,7 +664,9 @@ def daily_aggregates(
             right_on="Incident Number",
             how="left",
         )
-        by_topic_inc = ia.groupby(["date", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+        by_topic_inc = (
+            ia.groupby(["date", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+        )
         by_topic = by_topic.merge(by_topic_inc, on=["date", "nps_topic"], how="left")
     # Defensive: if there are no Helix incidents (or linking is disabled), the
     # merge above won't create an "incidents" column. Ensure it always exists
@@ -653,7 +711,15 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
     """Simple pragmatic causal score per topic from weekly aggregates."""
     if by_topic.empty:
         return pd.DataFrame(
-            columns=["nps_topic", "weeks", "responses", "focus_rate", "incidents", "delta_focus_rate", "score"]
+            columns=[
+                "nps_topic",
+                "weeks",
+                "responses",
+                "focus_rate",
+                "incidents",
+                "delta_focus_rate",
+                "score",
+            ]
         )
 
     df = by_topic.copy()
@@ -681,13 +747,19 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
         low = g.loc[g["incidents"] < thr, "focus_rate"].astype(float)
         d = float(high.mean() - low.mean()) if (len(high) and len(low)) else np.nan
         deltas.append((topic, d))
-    delta_df = pd.DataFrame(deltas, columns=["nps_topic", "delta_focus_rate"]).set_index("nps_topic")
+    delta_df = pd.DataFrame(deltas, columns=["nps_topic", "delta_focus_rate"]).set_index(
+        "nps_topic"
+    )
 
     out = agg.join(delta_df, how="left").reset_index()
     # Pragmatic score: incidents presence * delta detractor_rate * support
     out["support"] = np.clip(np.log1p(out["responses"]) / 10.0, 0, 1)
     out["inc_signal"] = np.clip(np.log1p(out["incidents"]) / 5.0, 0, 1)
     out["effect"] = out["delta_focus_rate"].fillna(0).abs()
-    out["score"] = (0.45 * out["inc_signal"] + 0.35 * out["effect"] + 0.20 * out["support"]).clip(0, 1)
-    out = out.sort_values(["score", "incidents", "responses"], ascending=False).reset_index(drop=True)
+    out["score"] = (0.45 * out["inc_signal"] + 0.35 * out["effect"] + 0.20 * out["support"]).clip(
+        0, 1
+    )
+    out = out.sort_values(["score", "incidents", "responses"], ascending=False).reset_index(
+        drop=True
+    )
     return out

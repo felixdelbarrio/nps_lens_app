@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import Optional
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
-
 
 REVIEWS_REQUIRED = ["store", "date", "rating", "text", "app_version", "geo"]
 

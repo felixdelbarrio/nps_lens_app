@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Plotly theming utilities.
 
 Single source of truth for Plotly styling (dark/light) driven by DesignTokens.
@@ -10,6 +8,8 @@ Design goals:
 - Lazy Plotly imports for fast Streamlit cold-start.
 - Best-effort application: theming must never crash rendering.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional

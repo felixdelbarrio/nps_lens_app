@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from typing import Optional
 
 import numpy as np
@@ -55,7 +54,9 @@ def compare_periods(df_current: pd.DataFrame, df_baseline: pd.DataFrame) -> Peri
     d0b = pd.to_datetime(base.get("Fecha"), errors="coerce").min() if n_base else None
     d1b = pd.to_datetime(base.get("Fecha"), errors="coerce").max() if n_base else None
 
-    delta_nps = float(nps_cur - nps_base) if pd.notna(nps_cur) and pd.notna(nps_base) else float("nan")
+    delta_nps = (
+        float(nps_cur - nps_base) if pd.notna(nps_cur) and pd.notna(nps_base) else float("nan")
+    )
     return PeriodComparison(
         label_current=_date_range_label(d0c, d1c),
         label_baseline=_date_range_label(d0b, d1b),
@@ -180,7 +181,9 @@ def build_executive_story(
         lines.append(
             f"- Periodo base: **{comparison.label_baseline}** (n={comparison.n_baseline:,})"
         )
-        d_nps = "—" if comparison.delta_nps != comparison.delta_nps else f"{comparison.delta_nps:+.2f}"
+        d_nps = (
+            "—" if comparison.delta_nps != comparison.delta_nps else f"{comparison.delta_nps:+.2f}"
+        )
         lines.append(
             f"- Variación: **Δ NPS {d_nps}** · **Δ detractores {comparison.delta_detr_pp:+.1f} pp**"
         )
