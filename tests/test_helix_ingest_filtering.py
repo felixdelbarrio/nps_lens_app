@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 
 

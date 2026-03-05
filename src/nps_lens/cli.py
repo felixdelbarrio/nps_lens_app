@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import typer
@@ -10,19 +8,15 @@ from dotenv import load_dotenv
 from rich import print as rprint
 
 from nps_lens.analytics.causal import best_effort_ate_logit
-from nps_lens.analytics.changepoints import detect_nps_changepoints
-from nps_lens.analytics.journey import build_routes
-from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.application.service import AppService
 from nps_lens.config import Settings
-from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
-from nps_lens.llm.knowledge_cache import KnowledgeCache
-from nps_lens.llm.pack import build_insight_pack, export_pack
-from nps_lens.logging import setup_logging
-from nps_lens.core.store import DatasetStore
 from nps_lens.core.disk_cache import DiskCache
 from nps_lens.core.perf import PerfTracker
-from nps_lens.application.service import AppService
+from nps_lens.core.store import DatasetStore
+from nps_lens.ingest import read_nps_thermal_excel
+from nps_lens.llm.pack import build_insight_pack, export_pack
+from nps_lens.logging import setup_logging
 from nps_lens.platform.batch import load_batch_config, run_platform_batch
 
 app = typer.Typer(add_completion=False)
@@ -30,7 +24,6 @@ app = typer.Typer(add_completion=False)
 EXCEL_PATH_ARG = typer.Argument(..., exists=True)
 CONFIG_PATH_ARG = typer.Argument(..., exists=True, help="Path to batch config JSON")
 OUT_ROOT_OPT = typer.Option(Path("artifacts"), help="Root directory for exported artifacts")
-
 
 
 @app.command()
@@ -42,7 +35,9 @@ def profile_nps(
     """Ingesta + profiling rápido desde Excel de NPS térmico."""
     load_dotenv()
     setup_logging(Settings.from_env().log_level)
-    res = read_nps_thermal_excel(str(excel_path), service_origin=service_origin, service_origin_n1=service_origin_n1)
+    res = read_nps_thermal_excel(
+        str(excel_path), service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
     if res.issues:
         rprint(res.issues)
     rprint(res.df.head())
@@ -98,7 +93,9 @@ def platform_batch(
     setup_logging(settings.log_level)
 
     store = DatasetStore(settings.data_dir)
-    app_svc = AppService(disk_cache=DiskCache(settings.data_dir / "cache" / "compute"), perf=PerfTracker())
+    app_svc = AppService(
+        disk_cache=DiskCache(settings.data_dir / "cache" / "compute"), perf=PerfTracker()
+    )
 
     specs = load_batch_config(config_path)
     summary = run_platform_batch(specs=specs, store=store, app=app_svc, out_root=out_root)

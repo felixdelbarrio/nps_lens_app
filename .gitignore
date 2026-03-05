@@ -1,15 +1,90 @@
+# -----------------------------
+# Python / Virtualenv
+# -----------------------------
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyd
+*.so
+
+# -----------------------------
+# Tooling caches
+# -----------------------------
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
 .coverage
 htmlcov/
+.cache/
+.tox/
+.nox/
+
+# -----------------------------
+# Build / packaging
+# -----------------------------
 dist/
 build/
-.env
-.DS_Store
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+.wheels/
 
+# -----------------------------
+# Environment / secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Streamlit secrets (DO NOT COMMIT)
+.streamlit/secrets.toml
+
+# Cookies / auth artifacts (Helix etc.)
+cookies*.json
+cookie*.json
+auth*.json
+secrets*.json
+
+# -----------------------------
+# OS / IDE
+# -----------------------------
+.DS_Store
+__MACOSX/
+Thumbs.db
+
+.vscode/
+.idea/
+.python-version
+
+# -----------------------------
 # Local datasets / caches (do not commit)
+# -----------------------------
 data/
+*.csv
+*.xlsx
+*.xlsm
+*.parquet
+*.jsonl
+
+# -----------------------------
+# Knowledge cache (incremental learning)
+# -----------------------------
+knowledge/*.json
+knowledge/*.jsonl
+
+# -----------------------------
+# Generated reports / outputs
+# (keep examples committed)
+# -----------------------------
+reports/*
+!reports/examples/
+!reports/examples/**
+*.log
+logs/
+tmp/
+temp/

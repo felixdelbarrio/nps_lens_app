@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import pandas as pd
 
@@ -27,7 +27,17 @@ def _cache_file(knowledge_dir: Path) -> Path:
 def load_entries(knowledge_dir: Path) -> pd.DataFrame:
     path = _cache_file(knowledge_dir)
     if not path.exists():
-        return pd.DataFrame(columns=["ts", "service_origin", "service_origin_n1", "service_origin_n2", "nps_topic", "outcome", "note"])
+        return pd.DataFrame(
+            columns=[
+                "ts",
+                "service_origin",
+                "service_origin_n1",
+                "service_origin_n2",
+                "nps_topic",
+                "outcome",
+                "note",
+            ]
+        )
     rows: List[Dict[str, str]] = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -41,7 +51,15 @@ def load_entries(knowledge_dir: Path) -> pd.DataFrame:
             except Exception:
                 continue
     df = pd.DataFrame(rows)
-    for c in ["ts", "service_origin", "service_origin_n1", "service_origin_n2", "nps_topic", "outcome", "note"]:
+    for c in [
+        "ts",
+        "service_origin",
+        "service_origin_n1",
+        "service_origin_n2",
+        "nps_topic",
+        "outcome",
+        "note",
+    ]:
         if c not in df.columns:
             df[c] = ""
     return df
@@ -105,6 +123,7 @@ def score_adjustments(
             "rejected": rejected.reindex(grp.index, fill_value=0).astype(int).values,
         }
     )
+
     # Factor: boost confirmed, penalize rejected. Cap to keep scores interpretable.
     def _factor(c: int, r: int) -> float:
         if c == 0 and r == 0:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -38,9 +38,7 @@ def profile_dataframe(df: pd.DataFrame, max_samples: int = 5) -> list[ColumnProf
     return profiles
 
 
-def detect_outliers_zscore(
-    df: pd.DataFrame, column: str, z: float = 4.0
-) -> pd.DataFrame:
+def detect_outliers_zscore(df: pd.DataFrame, column: str, z: float = 4.0) -> pd.DataFrame:
     if column not in df.columns:
         return df.iloc[0:0].copy()
     x = pd.to_numeric(df[column], errors="coerce")

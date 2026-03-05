@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
@@ -50,7 +49,9 @@ def compute_routes(
     )
 
 
-def compute_changepoints(df: pd.DataFrame, dim_col: str, value: str, freq: str = "D", pen: float = 8.0) -> Optional[ChangePoint]:
+def compute_changepoints(
+    df: pd.DataFrame, dim_col: str, value: str, freq: str = "D", pen: float = 8.0
+) -> Optional[ChangePoint]:
     return detect_nps_changepoints(df, dim_col=dim_col, value=value, freq=freq, pen=pen)
 
 

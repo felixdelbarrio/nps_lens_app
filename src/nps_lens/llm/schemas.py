@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
-from typing_extensions import Literal
-
 from pydantic import BaseModel, Field
+from typing_extensions import Literal
 
 
 class InsightPackV1(BaseModel):

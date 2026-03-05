@@ -116,7 +116,6 @@ def run_platform_batch(
             rev_res = read_reviews_csv(str(spec.reviews_csv))
             reviews_df = rev_res.df
 
-
         # --- Persist dataset (canonical storage + meta with dataset_id) ---
         _stored = store.save_df(ctx, nps_df, source=str(spec.excel_path))
         meta = store.read_meta(ctx)
@@ -155,8 +154,8 @@ def run_platform_batch(
             routes_out = {"error": str(e)}
 
         # --- Build top-k packs (rank opportunities) ---
-        from nps_lens.analytics.opportunities import rank_opportunities
         from nps_lens.analytics.causal import best_effort_ate_logit
+        from nps_lens.analytics.opportunities import rank_opportunities
 
         opps = rank_opportunities(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
         exported_packs: List[Dict[str, str]] = []
@@ -176,7 +175,9 @@ def run_platform_batch(
                 causal=causal,
             )
             out = export_pack(pack, paths.insights_dir)
-            exported_packs.append({"insight_id": pack.insight_id, "md": str(out["md"]), "json": str(out["json"])})
+            exported_packs.append(
+                {"insight_id": pack.insight_id, "md": str(out["md"]), "json": str(out["json"])}
+            )
 
         # --- Write KPI + manifest ---
         payload = {

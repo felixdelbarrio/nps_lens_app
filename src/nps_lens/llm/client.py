@@ -4,7 +4,7 @@ import json
 import os
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)

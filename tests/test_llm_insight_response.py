@@ -10,7 +10,7 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
         "title": "Un insight",
         "executive_summary": "Resumen",
         "confidence": 1.7,  # should clamp to 1.0
-        "severity": 9,      # should clamp to 5
+        "severity": 9,  # should clamp to 5
         "journey_route": "palanca>sub",
         "segments_most_affected": ["seg1"],
         "root_causes": [

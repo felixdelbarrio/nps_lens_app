@@ -30,7 +30,7 @@ def default_windows(
         return None, None
     max_d = dts.max().date()
     cur_end = max_d
-    cur_start = (max_d - timedelta(days=days - 1))
+    cur_start = max_d - timedelta(days=days - 1)
     base_end = cur_start - timedelta(days=1)
     base_start = base_end - timedelta(days=days - 1)
     return PeriodWindow(cur_start, cur_end), PeriodWindow(base_start, base_end)
@@ -76,8 +76,7 @@ def driver_delta_table(
     )
     merged = cur_agg.merge(base_agg, on=dimension, how="inner")
     merged = merged.loc[
-        (merged["n_current"] >= int(min_n))
-        & (merged["n_baseline"] >= int(min_n))
+        (merged["n_current"] >= int(min_n)) & (merged["n_baseline"] >= int(min_n))
     ].copy()
     if merged.empty:
         return pd.DataFrame()

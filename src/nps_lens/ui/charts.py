@@ -5,44 +5,56 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from nps_lens.design.tokens import DesignTokens, primary_accent
+from nps_lens.design.tokens import DesignTokens, palette, primary_accent
+from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
+
+
+def apply_plotly_template(fig: object, theme: Theme) -> object:
+    """Apply the project Plotly template (token-driven)."""
+
+    return apply_plotly_theme(fig, theme)
 
 
 @dataclass(frozen=True)
 class ChartTheme:
-    accent: str
-    text: str
-    grid: str
+    """Minimal layout theme used by a few chart helpers.
+
+    Plotly visuals are primarily styled via the token-driven template in
+    ``nps_lens.ui.plotly_theme``. This dataclass only provides a small set of
+    colors for layout defaults in charts that still apply explicit layout.
+    """
+
     paper_bg: str
     plot_bg: str
+    text: str
+    grid: str
+    accent: str
 
 
 def chart_theme(theme: Theme) -> ChartTheme:
-    toks = DesignTokens.default()
+    """Derive minimal layout colors from design tokens."""
+
+    tokens = DesignTokens.default()
+    p = palette(tokens, theme.mode)
     return ChartTheme(
-        accent=primary_accent(toks, theme.mode),
-        text=theme.text,
-        grid=theme.border,
-        # Use solid hex backgrounds so downstream color utilities can safely
-        # blend shades (Plotly also accepts hex).
-        paper_bg=theme.bg,
-        plot_bg=theme.bg,
+        paper_bg=p["color.app.surface.default"],
+        plot_bg=p["color.app.surface.raised"],
+        text=p["color.primary.text.primary"],
+        grid=p["color.primary.bg.bar"],
+        accent=primary_accent(tokens, theme.mode),
     )
 
 
 def _status_colors(theme: Theme) -> tuple[str, str, str]:
-    """Return (detractor, passive, promoter) colors from tokens."""
+    """Return semantic status colors (detractor, passive/warn, promoter)."""
 
-    toks = DesignTokens.default()
-    pal = toks.colors_dark if theme.mode == "dark" else toks.colors_light
-    detr = pal["color.primary.bg.alert"]
-    pas = pal["color.primary.bg.warning"]
-    pro = pal["color.primary.bg.success"]
-    return detr, pas, pro
-
-
-
+    tokens = DesignTokens.default()
+    p = palette(tokens, theme.mode)
+    detr = p["color.primary.bg.alert"]
+    warn = p["color.primary.bg.warning"]
+    prom = p["color.primary.bg.success"]
+    return detr, warn, prom
 
 
 def _to_hex(color: str) -> str:
@@ -99,6 +111,8 @@ def _mix_hex(a: str, b: str, t: float) -> str:
 def _shade(base: str, *, toward: str, t: float) -> str:
     """Lighten/darken base by mixing towards another color."""
     return _mix_hex(base, toward, max(0.0, min(1.0, float(t))))
+
+
 def _diverging_colors(theme: Theme, values: pd.Series) -> list[str]:
     """Map signed values to semantic colors (red/yellow/green) with intensity.
 
@@ -131,6 +145,7 @@ def _colorscale_rgy(theme: Theme) -> list[list[object]]:
     detr_c, pas_c, pro_c = _status_colors(theme)
     return [[0.0, detr_c], [0.5, pas_c], [1.0, pro_c]]
 
+
 def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
     fig.update_layout(
         height=height,
@@ -151,6 +166,7 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
 
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
+
     tmp["period"] = tmp["Fecha"].dt.to_period(freq).dt.start_time
     agg = tmp.groupby("period", as_index=False).agg(n=("NPS", "size"), nps=("NPS", "mean"))
     fig = px.line(
@@ -169,7 +185,7 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         showlegend=False,
     )
     _layout_common(fig, th, height=320)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_score_ladder(
@@ -216,11 +232,7 @@ def chart_daily_score_ladder(
     if tmp.empty:
         return None
 
-    agg = (
-        tmp.groupby(["day", "score"], as_index=False)
-        .size()
-        .rename(columns={"size": "count"})
-    )
+    agg = tmp.groupby(["day", "score"], as_index=False).size().rename(columns={"size": "count"})
     # Ensure stable 0..10 columns.
     pivot = agg.pivot(index="day", columns="score", values="count").fillna(0.0)
     for s in range(0, 11):
@@ -241,7 +253,7 @@ def chart_daily_score_ladder(
         yaxis_title="Score (0-10)",
     )
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def _weekday_letter_es(ts: pd.Timestamp) -> str:
@@ -357,18 +369,14 @@ def chart_daily_score_semaforo(
                     [1.0, color],
                 ],
                 showscale=False,
-                hovertemplate=(
-                    "Día=%{x|%Y-%m-%d}<br>" + grp + "=%{z}<extra></extra>"
-                ),
+                hovertemplate=("Día=%{x|%Y-%m-%d}<br>" + grp + "=%{z}<extra></extra>"),
             )
         )
 
     fig.update_layout(xaxis_title="Día", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=220)
     _apply_day_ticks(fig, days_list, max_ticks=28)
-    return fig
-
-
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -413,8 +421,8 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     agg["det_pct"] = agg["det"] * 100.0
 
     th = chart_theme(theme)
-    from plotly.subplots import make_subplots  # lazy import
     import plotly.graph_objects as go  # lazy import
+    from plotly.subplots import make_subplots  # lazy import
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(
@@ -424,9 +432,7 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
             mode="lines+markers",
             name="NPS clásico",
             hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>"
-                "NPS clásico=%{y:.1f}<br>"
-                "n=%{customdata}<extra></extra>"
+                "Día=%{x|%Y-%m-%d}<br>" "NPS clásico=%{y:.1f}<br>" "n=%{customdata}<extra></extra>"
             ),
             customdata=agg["n"],
         ),
@@ -460,7 +466,7 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
 
     _layout_common(fig, th, height=300)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -470,7 +476,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     - Detractors (0-6) penalize NPS
     - Passives (7-8) are neutral
     - Promoters (9-10) are favorable
-    
+
     Output: 100% stacked bars by day.
     """
 
@@ -540,9 +546,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
             marker_color=pas_c,
             customdata=agg[["n"]],
             hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>"
-                "Pasivos=%{y:.1f}%<br>"
-                "n=%{customdata[0]}<extra></extra>"
+                "Día=%{x|%Y-%m-%d}<br>" "Pasivos=%{y:.1f}%<br>" "n=%{customdata[0]}<extra></extra>"
             ),
         )
     )
@@ -570,7 +574,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     _layout_common(fig, th, height=320)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
     fig.update_yaxes(range=[0, 100])
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_daily_volume(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -596,7 +600,7 @@ def chart_daily_volume(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     fig.update_layout(xaxis_title="Día", yaxis_title="Respuestas (n)", showlegend=False)
     _layout_common(fig, th, height=220)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -608,6 +612,7 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         return None
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
+
     d = driver_df.head(top_k).copy()
     if "gap_vs_overall" not in d.columns:
         raise ValueError("driver_df must include gap_vs_overall")
@@ -618,14 +623,14 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         orientation="h",
         hover_data={"n": True, "nps": ":.2f", "gap_vs_overall": ":.2f"},
     )
-    fig.update_traces(marker_color=_diverging_colors(theme, d['gap_vs_overall']))
+    fig.update_traces(marker_color=_diverging_colors(theme, d["gap_vs_overall"]))
     fig.update_layout(
         xaxis_title="Diferencia vs NPS global (puntos)",
         yaxis_title="",
         showlegend=False,
     )
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -635,7 +640,11 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     th = chart_theme(theme)
     import plotly.express as px
 
-    d = opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False]).head(top_k).copy()
+    d = (
+        opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False])
+        .head(top_k)
+        .copy()
+    )
     if "label" not in d.columns:
         d["label"] = d.apply(lambda r: f"{r.get('dimension')}={r.get('value')}", axis=1)
 
@@ -656,7 +665,7 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     fig.update_traces(marker_color=colors)
     fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_nps_timeseries_with_changepoints(
@@ -703,7 +712,7 @@ def chart_nps_timeseries_with_changepoints(
 
     fig.update_layout(xaxis_title="Fecha", yaxis_title="NPS", showlegend=False)
     _layout_common(fig, th, height=320)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
@@ -712,6 +721,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
         return None
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
+
     d = topics_df.sort_values("n", ascending=False).head(top_k).copy()
 
     def _topic_label(row: pd.Series) -> str:
@@ -724,7 +734,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
     fig.update_traces(marker_color=th.grid)
     fig.update_layout(xaxis_title="Volumen (n comentarios)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
@@ -733,6 +743,7 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         return None
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
+
     d = delta_df.head(top_k).copy()
     fig = px.bar(
         d,
@@ -746,10 +757,10 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
             "nps_baseline": ":.2f",
         },
     )
-    fig.update_traces(marker_color=_diverging_colors(theme, d['delta_nps']))
+    fig.update_traces(marker_color=_diverging_colors(theme, d["delta_nps"]))
     fig.update_layout(xaxis_title="Delta NPS (actual - base)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
-    return fig
+    return apply_plotly_template(fig, theme)
 
 
 def chart_cohort_heatmap(
@@ -768,6 +779,7 @@ def chart_cohort_heatmap(
         return None
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
+
     tmp = df.dropna(subset=[row_dim, col_dim, score_col]).copy()
     if tmp.empty:
         return None
@@ -794,4 +806,4 @@ def chart_cohort_heatmap(
     )
     fig.update_layout(coloraxis_colorbar=dict(title="NPS"))
     _layout_common(fig, th, height=420)
-    return fig
+    return apply_plotly_template(fig, theme)

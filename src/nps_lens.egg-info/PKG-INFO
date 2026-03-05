@@ -1,3 +1,40 @@
+Metadata-Version: 2.4
+Name: nps-lens
+Version: 0.1.0
+Summary: NPS Lens — análisis avanzado de NPS térmico + VoC multi-fuente (MVP Senda MX).
+Author: NPS Lens
+License: Proprietary
+Requires-Python: <3.10,>=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: pandas<2.3,>=2.0
+Requires-Dist: numpy<2.0,>=1.24
+Requires-Dist: pyarrow<16.0,>=14.0
+Requires-Dist: pydantic<3.0,>=2.0
+Requires-Dist: python-dotenv<2.0,>=1.0
+Requires-Dist: typer<0.13,>=0.12
+Requires-Dist: rich<14.0,>=13.0
+Requires-Dist: plotly<6.0,>=5.18
+Requires-Dist: scikit-learn<1.6,>=1.3
+Requires-Dist: statsmodels<0.15,>=0.14
+Requires-Dist: networkx<3.4,>=3.1
+Requires-Dist: ruptures<2.0,>=1.1.8
+Requires-Dist: streamlit<1.40,>=1.31
+Requires-Dist: watchdog<5.0,>=3.0
+Requires-Dist: openpyxl<3.2,>=3.1
+Requires-Dist: typing_extensions<5.0,>=4.7
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.0; extra == "dev"
+Requires-Dist: pytest-cov<6.0,>=5.0; extra == "dev"
+Requires-Dist: mypy<1.12,>=1.8; extra == "dev"
+Requires-Dist: types-python-dateutil; extra == "dev"
+Requires-Dist: pandas-stubs==2.2.2.240807; extra == "dev"
+Requires-Dist: ruff<0.7,>=0.3; extra == "dev"
+Requires-Dist: black<25.0,>=24.2; extra == "dev"
+Requires-Dist: pre-commit<4.0,>=3.6; extra == "dev"
+Requires-Dist: watchdog<5.0,>=3.0; extra == "dev"
+Provides-Extra: build
+Requires-Dist: pyinstaller<7.0,>=6.0; extra == "build"
+
 # NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
 
 [![CI](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml/badge.svg)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml)
