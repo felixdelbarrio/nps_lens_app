@@ -38,6 +38,9 @@ from nps_lens.analytics.nps_helix_link import (
 )
 from nps_lens.config import Settings
 from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
+from nps_lens.core.disk_cache import DiskCache
+from nps_lens.core.perf import PerfTracker
+from nps_lens.application.service import AppService
 from nps_lens.design.tokens import (
     DesignTokens,
     cp_level_color,
@@ -46,6 +49,7 @@ from nps_lens.design.tokens import (
     plotly_risk_scale,
 )
 from nps_lens.core.knowledge_cache import add_entry as kc_add_entry, load_entries as kc_load_entries, score_adjustments as kc_score_adjustments
+from nps_lens.llm.insight_response import validate_insight_response
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
@@ -73,6 +77,22 @@ from nps_lens.ui.theme import Theme, apply_theme, get_theme
 st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CACHE_RESULTS_DIR = REPO_ROOT / "data" / "cache" / "results"
+
+# Session-wide performance tracker (timings)
+if "_perf" not in st.session_state:
+    st.session_state["_perf"] = PerfTracker()
+
+# Deterministic disk cache for compute artifacts
+if "_disk_cache" not in st.session_state:
+    st.session_state["_disk_cache"] = DiskCache(CACHE_RESULTS_DIR)
+
+# Application service (use-cases). Centralizes compute + caching + timings.
+if "_app_service" not in st.session_state:
+    st.session_state["_app_service"] = AppService(
+        disk_cache=st.session_state["_disk_cache"],  # type: ignore
+        perf=st.session_state["_perf"],  # type: ignore
+    )
 
 LLM_SYSTEM_PROMPT = """Eres el analista oficial de Insights para BBVA Banca de Empresas. Tu trabajo es:
 
@@ -179,19 +199,18 @@ def load_context_df(
     df = table.to_pandas()
 
     # Optional filter by service_origin_n2 (comma-separated values).
-    n2_vals = [v.strip() for v in str(service_origin_n2 or "").split(",") if v.strip()]
-    if n2_vals and "service_origin_n2" in df.columns:
-        # Keep rows where any token in the row intersects the selected tokens.
-        sel = set(n2_vals)
-        def _has_any(v: object) -> bool:
-            if v is None:
-                return False
-            s = str(v).strip()
-            if not s:
-                return False
-            toks = {p.strip() for p in s.split(",") if p.strip()}
-            return bool(toks & sel)
-        df = df.loc[df["service_origin_n2"].apply(_has_any)].copy()
+    # IMPORTANT: strict token-set equality.
+    # - Selecting "SN2X" must NOT include rows like "SN2X, SN2Y".
+    # - Selecting "SN2X, SN2Y" matches rows with the same set (order-insensitive).
+    # Prefer precomputed token-set key when available (faster than per-row tokenset())
+    n2_key = DatasetContext._norm_n2(service_origin_n2)
+    if n2_key:
+        if "_service_origin_n2_key" in df.columns:
+            df = df.loc[df["_service_origin_n2_key"].astype(str) == n2_key].copy()
+        elif "service_origin_n2" in df.columns:
+            # Backward compatible fallback
+            n2_sel = tokenset(service_origin_n2)
+            df = df.loc[df["service_origin_n2"].map(tokenset) == n2_sel].copy()
 
     # Lightweight dtype optimization (safe even with partial columns)
     if "Fecha" in df.columns:
@@ -203,11 +222,7 @@ def load_context_df(
         if c in df.columns:
             df[c] = df[c].astype("category")
 
-    # Global population filter (sidebar): Todos/D/P/N
-    df = filter_df_by_nps_group(df, nps_group_choice)
-
-
-    # Apply global NPS group filter
+    # Apply global NPS group filter (sidebar): Todos / Detractores / Neutros / Promotores
     df = filter_nps_by_group(df, nps_group_choice)
 
     return df
@@ -318,7 +333,7 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_llm_insights_for_context(settings: Settings, service_origin: str, service_origin_n1: str) -> list[dict[str, Any]]:
     """Load persisted LLM insights for the selected context."""
-    from nps_lens.llm import KnowledgeCache
+    from nps_lens.llm.knowledge_cache import KnowledgeCache
 
     kc = KnowledgeCache.for_context(settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1)
     data = kc.load()
@@ -326,31 +341,105 @@ def load_llm_insights_for_context(settings: Settings, service_origin: str, servi
     # entries are dicts; keep as-is
     return list(entries)
 
-@st.cache_data(show_spinner=False)
+def _df_fingerprint(df: pd.DataFrame, *, cols: Optional[list[str]] = None, sample_rows: int = 1500) -> str:
+    """Cheap-ish fingerprint for deterministic caching.
+
+    We avoid hashing full DataFrames (slow). Instead we combine:
+      - shape + columns + dtypes
+      - Fecha min/max (if present)
+      - hash of a small head() sample on selected columns
+    """
+    from hashlib import sha1
+
+    if df is None:
+        return "empty"
+    use_cols = cols or list(df.columns)
+    use_cols = [c for c in use_cols if c in df.columns]
+
+    parts = [f"r={len(df)}", f"c={len(use_cols)}"]
+    parts.append(",".join(use_cols))
+    try:
+        dtypes = [f"{c}:{str(df[c].dtype)}" for c in use_cols[:40]]
+        parts.append("|".join(dtypes))
+    except Exception:
+        pass
+
+    if "Fecha" in df.columns:
+        try:
+            s = pd.to_datetime(df["Fecha"], errors="coerce").dropna()
+            if not s.empty:
+                parts.append(f"fmin={s.min().date().isoformat()}")
+                parts.append(f"fmax={s.max().date().isoformat()}")
+        except Exception:
+            pass
+
+    try:
+        sample = df[use_cols].head(int(sample_rows)).copy()
+        # pandas util hash is stable for given values
+        h = pd.util.hash_pandas_object(sample, index=True).values
+        parts.append(sha1(h.tobytes()).hexdigest())
+    except Exception:
+        pass
+
+    raw = "|".join(parts)
+    return sha1(raw.encode("utf-8")).hexdigest()
+
+
 def cached_driver_table(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
-    stats = driver_table(df, dimension=dimension)
-    stats_df = pd.DataFrame([s.__dict__ for s in stats])
+    svc: AppService = st.session_state.get("_app_service")  # type: ignore
+    stats_df = svc.driver_stats(df, dimension=dimension)
     if "gap_vs_overall" not in stats_df.columns:
         raise KeyError("gap_vs_overall missing from driver_table output")
     return stats_df
 
-@st.cache_data(show_spinner=False)
+
 def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
+    perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
+    cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
+
+    fp = _df_fingerprint(df, cols=["NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"])
     dims = [d for d in DEFAULT_OPP_DIMS if d in df.columns]
-    return rank_opportunities(df, dimensions=dims, min_n=min_n)
+    key = cache.make_key(namespace="opps", dataset_sig=fp, params={"min_n": int(min_n), "dims": dims})
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
 
-@st.cache_data(show_spinner=False)
+    with perf.track("opportunities"):
+        out = rank_opportunities(df, dimensions=dims, min_n=min_n)
+    cache.set(key, out, meta={"namespace": "opps"})
+    return out
+
+
 def cached_extract_topics(texts, n_clusters: int = 8):
-    return extract_topics(texts, n_clusters=n_clusters)
+    svc: AppService = st.session_state.get("_app_service")  # type: ignore
 
-@st.cache_data(show_spinner=False)
+    try:
+        s = pd.Series(texts).astype(str).fillna("")
+    except Exception:
+        s = pd.Series([], dtype=str)
+
+    return svc.topics(s, n_clusters=int(n_clusters))
+
+
 def cached_build_routes(df: pd.DataFrame):
-    return build_routes(df)
+    svc: AppService = st.session_state.get("_app_service")  # type: ignore
+    return svc.routes(df)
 
-@st.cache_data(show_spinner=False)
+
 def cached_detect_changepoints(df: pd.DataFrame):
-    return detect_nps_changepoints(df)
+    perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
+    cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
 
+    fp = _df_fingerprint(df, cols=["Fecha", "NPS", "Palanca"], sample_rows=2500)
+    key = cache.make_key(namespace="changepoints", dataset_sig=fp, params={})
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+
+    with perf.track("changepoints"):
+        out = detect_nps_changepoints(df)
+    cache.set(key, out, meta={"namespace": "changepoints"})
+    return out
 
 
 def _copy_to_clipboard(payload: str, *, toast: str = "Copiado") -> None:
@@ -406,7 +495,11 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
       (function() {{
         const btn = document.getElementById("nps_copy_{uid}");
         const msg = document.getElementById("nps_copy_msg_{uid}");
-        const txt = atob("{payload_b64}");
+        // Base64 -> UTF-8 (avoid mojibake like "MÃ©xico" / "raÃ­z")
+        const b64 = "{payload_b64}";
+        const bin = atob(b64);
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        const txt = new TextDecoder("utf-8").decode(bytes);
         async function doCopy() {{
           try {{
             await navigator.clipboard.writeText(txt);
@@ -502,7 +595,8 @@ def _repair_json_text(text: str) -> str:
                     out.append(ch)
                     in_str = False
                 else:
-                    out.append('\"')
+                    # Emit an escaped quote (\") so the resulting JSON stays valid.
+                    out.append('\\"')
                 continue
             out.append(ch)
         return "".join(out)
@@ -547,6 +641,7 @@ def _parse_json_with_repair(text: str) -> tuple[Optional[dict[str, Any]], Option
     Returns: (obj, repaired_json_text, error_message)
     """
     import json
+    import re
 
     if not text or not text.strip():
         return None, None, None
@@ -636,29 +731,10 @@ def _json_sanitize(obj: Any) -> Any:
 
 
 def _validate_insight_schema(obj: dict[str, Any]) -> tuple[bool, list[str]]:
-    required = [
-        "schema_version",
-        "insight_id",
-        "title",
-        "executive_summary",
-        "confidence",
-        "severity",
-        "root_causes",
-        "segments_most_affected",
-        "journey_route",
-        "assumptions",
-        "risks",
-        "next_questions",
-        "tags",
-    ]
-    missing = [k for k in required if k not in obj]
-    if missing:
-        return False, [f"Faltan campos: {', '.join(missing)}"]
-
-    if not isinstance(obj.get("root_causes"), list) or len(obj["root_causes"]) == 0:
-        return False, ["root_causes debe ser una lista no vacía"]
-
-    return True, []
+    ok, errs, _norm = validate_insight_response(obj)
+    if ok:
+        return True, []
+    return False, errs
 
 
 def _render_llm_insights(theme: Theme) -> None:
@@ -1003,6 +1079,38 @@ def render_sidebar(  # noqa: PLR0915
                 "theme_mode": theme_mode,
                 "min_n": int(min_n),
             }
+
+
+
+        st.divider()
+        st.header("⚡ Performance")
+        perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
+        rows = perf.summary() if perf is not None else []
+        with st.expander("Ver timings (últimos cálculos)", expanded=False):
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            else:
+                st.caption("Aún no hay timings. Navega por el dashboard para generar cálculos.")
+            cpa, cpb = st.columns(2)
+            with cpa:
+                if st.button("Reset timings", use_container_width=True):
+                    try:
+                        perf.reset()
+                    except Exception:
+                        pass
+                    st.rerun()
+            with cpb:
+                # Clear deterministic compute cache
+                if st.button("Vaciar cache compute", use_container_width=True):
+                    cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
+                    try:
+                        if cache is not None and cache.base_dir.exists():
+                            for pp in cache.base_dir.rglob("*"):
+                                if pp.is_file():
+                                    pp.unlink()
+                    except Exception:
+                        pass
+                    st.rerun()
 
     stored2 = store.get(DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1))
     data_path = stored2.path if stored2 is not None else None
@@ -1627,7 +1735,7 @@ def _llm_build_pack(
 ):
     """Build the Deep-Dive Pack + files to support manual LLM workflow."""
     # Lazy import: LLM stack is heavy; only load when this page is opened.
-    from nps_lens.llm import build_insight_pack, export_pack, render_pack_markdown
+    from nps_lens.llm.pack import build_insight_pack, export_pack, render_pack_markdown
 
     # If the slice is empty (data quality / labeling mismatch), fall back to a lightweight
     # sample so the user can still copy/paste a prompt and iterate.
@@ -1810,14 +1918,14 @@ def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]], *, rerun: bool = Fal
         st.error("Pega un JSON valido para poder integrarlo en el dashboard.")
         return
 
-    ok, errs = _validate_insight_schema(parsed)
-    if not ok:
+    ok, errs, norm = validate_insight_response(parsed)
+    if not ok or norm is None:
         st.error("El JSON no cumple el esquema: " + "; ".join(errs))
         return
 
     insights = list(st.session_state.get("llm_insights", []))
-    insights = [i for i in insights if i.get("insight_id") != parsed.get("insight_id")]
-    insights.insert(0, parsed)
+    insights = [i for i in insights if i.get("insight_id") != norm.get("insight_id")]
+    insights.insert(0, norm)
     st.session_state["llm_insights"] = insights[:20]
     st.success("Listo. Ya forma parte del discurso en Resumen.")
     if rerun:
@@ -1832,7 +1940,7 @@ def _llm_save_to_cache(
     settings: Settings,
     selected,
 ) -> None:
-    from nps_lens.llm import KnowledgeCache, stable_signature
+    from nps_lens.llm.knowledge_cache import KnowledgeCache, stable_signature
 
     service_origin = str(context.get("service_origin") or settings.default_service_origin)
     service_origin_n1 = str(context.get("service_origin_n1") or settings.default_service_origin_n1)

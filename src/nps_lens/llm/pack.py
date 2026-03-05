@@ -181,5 +181,10 @@ def export_pack(pack: InsightPackV1, out_dir: Path) -> dict[str, Path]:
     md_path = out_dir / f"{pack.insight_id}__pack.md"
     json_path = out_dir / f"{pack.insight_id}__pack.json"
     md_path.write_text(render_pack_markdown(pack), encoding="utf-8")
-    json_path.write_text(pack.json(ensure_ascii=False, indent=2), encoding="utf-8")
+    # Pydantic v2: prefer model_dump_json; keep backward compatibility.
+    if hasattr(pack, "model_dump_json"):
+        json_str = pack.model_dump_json(indent=2)
+    else:  # pragma: no cover
+        json_str = pack.json(ensure_ascii=False, indent=2)
+    json_path.write_text(json_str, encoding="utf-8")
     return {"md": md_path, "json": json_path}

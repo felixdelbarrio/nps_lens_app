@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "created_at": "2026-03-05T12:38:29.714361",
+  "created_at": "2026-03-05T15:59:13.718660",
   "insight_id": "78687fc60307",
   "title": "Oportunidad priorizada: Palanca=Funcionamiento Continuo",
   "context": {
@@ -41,8 +41,8 @@
     {
       "title": "Tratamiento asociado a detractores (best-effort)",
       "treatment": "Palanca == Funcionamiento Continuo",
-      "effect": NaN,
-      "p_value": NaN,
+      "effect": null,
+      "p_value": null,
       "n": 71479,
       "method": "logit_failed",
       "confidence": 0.2,
@@ -76,6 +76,6 @@
       "driver_dim": "Palanca",
       "driver_val": "Funcionamiento Continuo"
     },
-    "created_at_utc": "2026-03-05T12:38:29.714318Z"
+    "created_at_utc": "2026-03-05T15:59:13.718609Z"
   }
 }

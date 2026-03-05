@@ -507,9 +507,34 @@ class DatasetStore:
         except Exception:
             idx_df = pd.DataFrame()
 
+        # Dataset identity (stable across sessions) for deterministic caching and traceability.
+        # NOTE: we avoid hashing full contents for speed; mtime+size is enough for our source-of-truth JSONL.
+        dataset_id = sha1(f"{ctx.key()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}".encode("utf-8")).hexdigest()[:16]
+
+        # Best-effort date range (for debugging / reproducibility)
+        date_min = None
+        date_max = None
+        if "Fecha" in df_out.columns:
+            try:
+                s = pd.to_datetime(df_out["Fecha"], errors="coerce").dropna()
+                if not s.empty:
+                    date_min = s.min().isoformat()
+                    date_max = s.max().isoformat()
+            except Exception:
+                pass
+
+        from nps_lens import PIPELINE_VERSION
+
         meta = {
             "schema_version": "1.0",
-            "context": {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1},
+            "dataset_id": dataset_id,
+            "pipeline_version": PIPELINE_VERSION,
+            "context": {
+                "service_origin": ctx.service_origin,
+                "service_origin_n1": ctx.service_origin_n1,
+                "service_origin_n2": ctx.service_origin_n2,
+            },
+            "date_range": {"min": date_min, "max": date_max},
             "rows": int(len(df_out)),
             "cols": int(len(df_out.columns)),
             "source": source,

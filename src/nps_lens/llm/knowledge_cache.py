@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Optional, cast
 
 
@@ -56,4 +57,9 @@ class KnowledgeCache:
         if not updated:
             entries.append(record)
         data["entries"] = entries
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        # Atomic write to avoid corruption if the process is interrupted.
+        with NamedTemporaryFile("w", delete=False, encoding="utf-8", dir=str(self.path.parent)) as tmp:
+            tmp.write(payload)
+            tmp_path = Path(tmp.name)
+        tmp_path.replace(self.path)

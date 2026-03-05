@@ -178,8 +178,8 @@ def read_helix_incidents_excel(
           service_origin == BBVA_SourceServiceCompany
           service_origin_n1 == BBVA_SourceServiceN1
       - Only if the selected context has service_origin_n2 tokens (non-empty),
-        then ALSO filter by membership (IN): keep rows whose BBVA_SourceServiceN2 tokens
-        intersect the selected token-set.
+        then ALSO filter by *strict token-set equality*: keep rows whose
+        BBVA_SourceServiceN2 token-set equals the selected token-set.
 
     If after filtering there are no rows, return empty df (ingestion is not performed).
     """
@@ -258,24 +258,24 @@ def read_helix_incidents_excel(
         )
 
     # Optional N2 filter ONLY when selected context has tokens.
-    # Semantics: IN (intersection), not strict equality.
+    # Semantics: strict token-set equality (order-insensitive).
     sel_n2 = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
     if sel_n2:
-        sel = set(sel_n2)
+        sel = {v.strip() for v in sel_n2 if v.strip()}
 
-        def _row_has_any(v: object) -> bool:
+        def _row_matches_exact(v: object) -> bool:
             toks = {p.strip() for p in str(v or "").split(",") if p.strip()}
-            return bool(toks.intersection(sel))
+            return toks == sel
 
         before = len(d)
-        d = d.loc[d["BBVA_SourceServiceN2"].apply(_row_has_any)]
+        d = d.loc[d["BBVA_SourceServiceN2"].apply(_row_matches_exact)]
         dropped = before - len(d)
         if dropped:
             issues.append(
                 ValidationIssue(
                     level="INFO",
                     message=(
-                        f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN2 IN {{{', '.join(sorted(sel))}}}."
+                        f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN2 == {{{', '.join(sorted(sel))}}}."
                     ),
                 )
             )

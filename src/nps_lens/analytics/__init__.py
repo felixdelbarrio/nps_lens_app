@@ -1,22 +1,14 @@
-from nps_lens.analytics.causal import CausalHypothesis, best_effort_ate_logit
-from nps_lens.analytics.changepoints import ChangePoint, detect_nps_changepoints
-from nps_lens.analytics.drivers import DriverStat, driver_table
-from nps_lens.analytics.journey import RouteCandidate, build_routes
-from nps_lens.analytics.opportunities import Opportunity, rank_opportunities
-from nps_lens.analytics.text_mining import TopicCluster, classify_tone, extract_topics
+"""Analytics namespace.
 
-__all__ = [
-    "DriverStat",
-    "driver_table",
-    "ChangePoint",
-    "detect_nps_changepoints",
-    "TopicCluster",
-    "extract_topics",
-    "classify_tone",
-    "Opportunity",
-    "rank_opportunities",
-    "CausalHypothesis",
-    "best_effort_ate_logit",
-    "RouteCandidate",
-    "build_routes",
-]
+This package intentionally avoids eager imports.
+
+Some modules (e.g. changepoint detection) may rely on optional / heavy
+dependencies. Importing them here would make *any* import of
+`nps_lens.analytics` slower and more fragile.
+
+Import concrete modules/functions instead:
+
+    from nps_lens.analytics.drivers import driver_table
+"""
+
+__all__ = []

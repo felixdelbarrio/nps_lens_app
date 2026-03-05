@@ -18,8 +18,14 @@ from nps_lens.analytics import (
 )
 from nps_lens.config import Settings
 from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
-from nps_lens.llm import KnowledgeCache, build_insight_pack, export_pack
+from nps_lens.llm.knowledge_cache import KnowledgeCache
+from nps_lens.llm.pack import build_insight_pack, export_pack
 from nps_lens.logging import setup_logging
+from nps_lens.core.store import DatasetStore
+from nps_lens.core.disk_cache import DiskCache
+from nps_lens.core.perf import PerfTracker
+from nps_lens.application.service import AppService
+from nps_lens.platform.batch import load_batch_config, run_platform_batch
 
 app = typer.Typer(add_completion=False)
 
@@ -78,6 +84,24 @@ def build_example_pack(
     )
     exported = export_pack(pack, out_dir)
     rprint(exported)
+
+
+@app.command()
+def platform_batch(
+    config_path: Path = typer.Argument(..., exists=True, help="Path to batch config JSON"),
+    out_root: Path = typer.Option(Path("artifacts"), help="Root directory for exported artifacts"),
+) -> None:
+    """Run the project as a platform (batch mode) and export versioned artifacts."""
+    load_dotenv()
+    settings = Settings.from_env()
+    setup_logging(settings.log_level)
+
+    store = DatasetStore(settings.data_dir)
+    app_svc = AppService(disk_cache=DiskCache(settings.data_dir / "cache" / "compute"), perf=PerfTracker())
+
+    specs = load_batch_config(config_path)
+    summary = run_platform_batch(specs=specs, store=store, app=app_svc, out_root=out_root)
+    rprint(summary)
 
 
 if __name__ == "__main__":

@@ -35,10 +35,71 @@ make ci
 make run
 ```
 
+> **Performance tip (Streamlit)**: la app cachea cargas/joins pesados por contexto con `st.cache_data`.
+> Si actualizas datasets en disco y quieres invalidar cache, reinicia Streamlit.
+
+### Performance extremo: DiskCache + features precomputadas + profiling
+
+- **DiskCache determinista**: artefactos de compute pesado se guardan en `data/cache/results/` para evitar recomputes incluso si Streamlit invalida caches.
+- **Features precomputadas en ingest** (prefijo `_`):
+  - `_service_origin_n2_key`: normalización order-insensitive de `service_origin_n2` para filtros correctos y rápidos.
+  - `_text_norm`: texto normalizado barato para mining/muestreo.
+- **Profiling por etapa (debug)**:
+  - Activa con `export NPS_LENS_PROFILE=1`
+  - Se generan `.prof` en `data/cache/profiles/` (por namespace: topics/routes/drivers/etc.)
+
 4) *(Opcional)* Generar un ejemplo de Deep‑Dive Pack por CLI:
 ```bash
 .venv/bin/nps-lens build-example-pack
 ```
+
+---
+
+## Modo plataforma (batch, sin UI)
+
+Además de Streamlit, el repo puede ejecutarse como **plataforma** para generar artefactos versionados (packs, KPIs, manifest) de forma determinista.
+
+### 1) Crear un config de batch
+
+Crea `configs/batch.json`:
+
+```json
+{
+  "runs": [
+    {
+      "excel_path": "data/raw/NPS Térmico Senda - 01Enero-02Febrero.xlsx",
+      "service_origin": "BBVA México",
+      "service_origin_n1": "Senda",
+      "service_origin_n2": "",
+      "top_k_packs": 5,
+      "min_n": 200,
+      "dimensions": ["Palanca", "Subpalanca", "Canal"]
+    }
+  ]
+}
+```
+
+### 2) Ejecutar batch
+
+```bash
+.venv/bin/nps-lens platform-batch configs/batch.json --out-root artifacts
+```
+
+### 3) Layout de salida
+
+Los artefactos se exportan como:
+
+```
+artifacts/
+  <dataset_id>/<pipeline_version>/<ctx_sig>/
+    kpis.json
+    manifest.json
+    insights/
+      <insight_id>__pack.md
+      <insight_id>__pack.json
+```
+
+`manifest.json` incluye meta del dataset, parámetros de run y un snapshot de timings.
 
 ---
 
@@ -74,7 +135,7 @@ Ejemplo:
 
 ## Arquitectura (src layout)
 
-- `src/nps_lens/models/`: modelo canónico (Pydantic v1)
+- `src/nps_lens/models/`: modelo canónico (Pydantic v2 compatible)
 - `src/nps_lens/ingest/`: contratos de esquema + normalización por fuente
 - `src/nps_lens/quality/`: profiling y reglas de calidad (missing/outliers/duplicados)
 - `src/nps_lens/analytics/`: drivers, texto, change-points, causal best-effort, journey

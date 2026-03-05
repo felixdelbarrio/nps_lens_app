@@ -6,6 +6,7 @@ from typing import Optional, Union
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
+from nps_lens.ingest.features import add_precomputed_features
 
 
 NPS_THERMAL_REQUIRED = [
@@ -175,6 +176,11 @@ def read_nps_thermal_excel(
     dropped = before - len(df_out)
     if dropped:
         issues.append(ValidationIssue(level="WARN", message=f"Eliminados {dropped} IDs duplicados"))
+
+    # Precompute stable derived columns used across the app (performance + determinism)
+    df_out, added = add_precomputed_features(df_out)
+    if added:
+        issues.append(ValidationIssue(level="INFO", message=f"Features precomputadas: {', '.join(added)}"))
 
     return IngestResult(
         df=df_out,

@@ -5,7 +5,11 @@ from datetime import date
 from typing import List, Optional
 
 import pandas as pd
-import ruptures as rpt
+
+try:  # optional heavy dependency
+    import ruptures as rpt  # type: ignore
+except Exception:  # pragma: no cover
+    rpt = None
 
 from nps_lens.analytics.drivers import compute_nps_from_scores
 
@@ -45,6 +49,11 @@ def detect_nps_changepoints(
     model: str = "l2",
     pen: float = 8.0,
 ) -> Optional[ChangePoint]:
+    if rpt is None:
+        raise ImportError(
+            "Optional dependency 'ruptures' is required for changepoint detection. "
+            "Install it with: pip install ruptures"
+        )
     if date_col not in df.columns or dim_col not in df.columns or "NPS" not in df.columns:
         return None
 
