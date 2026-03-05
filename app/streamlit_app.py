@@ -551,14 +551,35 @@ def _parse_json_with_repair(text: str) -> tuple[Optional[dict[str, Any]], Option
     if not text or not text.strip():
         return None, None, None
 
-    # First try: strict parse after minimal normalization
+    def _canonical(obj_any: Any) -> str:
+        """Return canonical JSON text for a parsed object."""
+        try:
+            return json.dumps(_json_sanitize(obj_any), ensure_ascii=False, indent=2)
+        except Exception:
+            return json.dumps(obj_any, ensure_ascii=False, indent=2, default=str)
+
+    # First try: strict JSON parse after minimal normalization
     candidate = _repair_json_text(text)
     try:
         obj = json.loads(candidate)
         if isinstance(obj, dict):
-            return obj, candidate, None
-        return None, None, "El JSON detectado no es un objeto (dict)."
+            return obj, _canonical(obj), None
+        return None, candidate, "El JSON detectado no es un objeto (dict)."
     except json.JSONDecodeError as e:
+        # Fallback: python-literal parsing (handles single quotes, trailing commas, etc.)
+        try:
+            import ast
+
+            py_candidate = candidate
+            # Convert JSON literals back to Python literals for literal_eval
+            py_candidate = re.sub(r"\bnull\b", "None", py_candidate)
+            py_candidate = re.sub(r"\btrue\b", "True", py_candidate)
+            py_candidate = re.sub(r"\bfalse\b", "False", py_candidate)
+            py_obj = ast.literal_eval(py_candidate)
+            if isinstance(py_obj, dict):
+                return py_obj, _canonical(py_obj), None
+        except Exception:
+            pass
         return None, candidate, f"JSON invalido (linea {e.lineno}, col {e.colno}): {e.msg}"
     except Exception as e:
         return None, candidate, f"JSON invalido: {e}"
@@ -1577,7 +1598,23 @@ def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
     ]
     choice = st.selectbox("Oportunidad priorizada", labels)
     selected = opps[labels.index(choice)]
-    slice_df = df.loc[df[selected.dimension].astype(str) == selected.value].copy()
+    # Defensive slicing: labels may differ from raw df values by whitespace/casing.
+    # If we fail to slice, the LLM section looks "empty" after selecting an opportunity.
+    dim = str(selected.dimension)
+    val = str(selected.value)
+    if dim in df.columns:
+        ser = df[dim].astype(str)
+        slice_df = df.loc[ser.str.strip() == val.strip()].copy()
+        if slice_df.empty:
+            slice_df = df.loc[ser.str.strip().str.lower() == val.strip().lower()].copy()
+    else:
+        slice_df = df.iloc[0:0].copy()
+
+    if slice_df.empty:
+        st.warning(
+            "No se encontraron filas para la oportunidad seleccionada tras normalizar valores. "
+            "Se mostrará el prompt igualmente, pero el pack tendrá evidencia limitada."
+        )
     return selected, slice_df, opps
 
 
@@ -1591,6 +1628,11 @@ def _llm_build_pack(
     """Build the Deep-Dive Pack + files to support manual LLM workflow."""
     # Lazy import: LLM stack is heavy; only load when this page is opened.
     from nps_lens.llm import build_insight_pack, export_pack, render_pack_markdown
+
+    # If the slice is empty (data quality / labeling mismatch), fall back to a lightweight
+    # sample so the user can still copy/paste a prompt and iterate.
+    if slice_df is None or slice_df.empty:
+        slice_df = df.head(0).copy()
 
     causal = best_effort_ate_logit(
         df=df,
@@ -1648,17 +1690,29 @@ def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
         f"{md}"
     )
 
+    # IMPORTANT UX:
+    # Some corporate browsers / Streamlit hosting environments may block JS clipboard APIs or
+    # even hide HTML components. Therefore we always render the prompt in a plain text widget
+    # (copyable via Ctrl/Cmd+C), and optionally also show the JS copy button.
     c1, c2 = st.columns([2, 1])
     with c1:
-        # Use a browser-side button to guarantee clipboard copy (requires user gesture).
-        _clipboard_copy_widget(prompt, label="Copiar prompt")
-        with st.expander("Ver prompt (fallback manual)", expanded=False):
-            st.text_area(
-                "Prompt",
-                value=prompt,
-                height=220,
-                help="Si el navegador bloquea la copia automática, selecciona el texto y usa Ctrl/Cmd+C.",
-            )
+        try:
+            _clipboard_copy_widget(prompt, label="Copiar prompt")
+        except Exception:
+            # Defensive: if components are blocked, we still provide the prompt below.
+            pass
+
+        st.text_area(
+            "Prompt (copia y pega en tu ChatGPT)",
+            value=prompt,
+            height=260,
+            help="Selecciona el texto y usa Ctrl/Cmd+C para copiar.",
+        )
+
+        with st.expander("Ver prompt en bloque de código", expanded=False):
+            # Streamlit's code blocks often include a built-in copy icon.
+            st.code(prompt)
+
     with c2:
         st.download_button(
             "Descargar pack .md",
@@ -1688,6 +1742,11 @@ def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[s
     # If we always supply a `value`, Streamlit will overwrite user edits on each rerun
     # (paste appears to do nothing, which feels like a disabled input).
     # We persist the value via session_state using `key=`.
+    # If we repaired JSON on a previous run, apply it *before* the widget is instantiated.
+    # Streamlit forbids mutating a widget's session_state key after the widget exists.
+    if "llm_answer_pending" in st.session_state:
+        st.session_state["llm_answer"] = str(st.session_state.pop("llm_answer_pending") or "")
+
     if "llm_answer" not in st.session_state:
         st.session_state["llm_answer"] = default_text or ""
     elif (default_text or "") and not str(st.session_state.get("llm_answer", "")).strip():
@@ -1831,9 +1890,10 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
                     st.code(repaired, language="json")
             return
 
-        # If we repaired anything, update the textbox so the user sees the canonical JSON.
+        # If we repaired anything, schedule the textbox update for the next rerun.
+        # (We cannot modify st.session_state['llm_answer'] after the widget is instantiated.)
         if repaired and repaired.strip() and repaired.strip() != raw.strip():
-            st.session_state["llm_answer"] = repaired
+            st.session_state["llm_answer_pending"] = repaired
 
         ok, errs = _validate_insight_schema(obj)
         if not ok:
@@ -1854,6 +1914,9 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
             settings=settings,
             selected=selected,
         )
+
+        # Apply the repaired JSON back into the text area and refresh.
+        st.rerun()
 # Refresh UI so the integrated insights section updates immediately.
         st.rerun()
 
@@ -2123,8 +2186,8 @@ def page_nps_helix_linking(
                 y=ow_det["focus_rate"],
                 name="% detractores",
                 mode="lines+markers",
-                line=dict(color=pal["color.status.danger.value-07.default"], width=2),
-                marker=dict(color=pal["color.status.danger.value-07.default"], size=6),
+                line=dict(color=pal["color.primary.bg.alert"], width=2),
+                marker=dict(color=pal["color.primary.bg.alert"], size=6),
             )
         )
         fig.add_trace(
@@ -2133,8 +2196,8 @@ def page_nps_helix_linking(
                 y=ow_pas["focus_rate"],
                 name="% pasivos",
                 mode="lines+markers",
-                line=dict(color=pal["color.status.warning.value-07.default"], width=2),
-                marker=dict(color=pal["color.status.warning.value-07.default"], size=6),
+                line=dict(color=pal["color.primary.bg.warning"], width=2),
+                marker=dict(color=pal["color.primary.bg.warning"], size=6),
             )
         )
         fig.add_trace(
@@ -2143,8 +2206,8 @@ def page_nps_helix_linking(
                 y=ow_pro["focus_rate"],
                 name="% promotores",
                 mode="lines+markers",
-                line=dict(color=pal["color.status.success.value-07.default"], width=2),
-                marker=dict(color=pal["color.status.success.value-07.default"], size=6),
+                line=dict(color=pal["color.primary.bg.success"], width=2),
+                marker=dict(color=pal["color.primary.bg.success"], size=6),
             )
         )
     else:

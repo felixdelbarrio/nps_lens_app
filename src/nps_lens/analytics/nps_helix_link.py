@@ -545,7 +545,13 @@ def weekly_aggregates(
         )
         by_topic_inc = ia.groupby(["week", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
         by_topic = by_topic.merge(by_topic_inc, on=["week", "nps_topic"], how="left")
-    by_topic["incidents"] = by_topic.get("incidents", 0).fillna(0)
+    # Ensure incidents column exists even when there are no incident assignments.
+    # NOTE: DataFrame.get("incidents", 0) returns an int when missing, which does not
+    # support .fillna; hence this explicit branch.
+    if "incidents" not in by_topic.columns:
+        by_topic["incidents"] = 0
+    else:
+        by_topic["incidents"] = by_topic["incidents"].fillna(0)
     return overall, by_topic
 
 
