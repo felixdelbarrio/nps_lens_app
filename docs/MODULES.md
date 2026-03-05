@@ -1,0 +1,105 @@
+# Módulos del proyecto (mapa de código)
+
+Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perderte.
+
+> Regla para contribuciones: si añades un módulo nuevo, actualiza este mapa.
+
+---
+
+## 1) Árbol de paquetes (resumen)
+
+- `nps_lens/`
+  - `application/` — orquestación (servicios / casos de uso)
+  - `analytics/` — drivers, texto, causalidad, changepoints, linking NPS↔Helix
+  - `core/` — stores, caching, perf, profiling, métricas
+  - `design/` — tokens/escala de colores (design system)
+  - `ingest/` — ingesta + normalización + validación
+  - `llm/` — contratos/validación y generación de packs
+  - `models/` — modelos canónicos (Pydantic)
+  - `platform/` — ejecución batch + artefactos versionados
+  - `quality/` — utilidades de calidad/perf (dev)
+  - `ui/` — componentes de UI (charts, theme, narratives, population)
+
+---
+
+## 2) Descripción por módulo (qué hace y qué no)
+
+### `nps_lens.config`
+- Carga `.env` y define `Settings`.
+- Normaliza listas y mapas (ej. `service_origin_n1_map`).
+- **No** debe leer datasets ni tocar Streamlit.
+
+### `nps_lens.core.store`
+- Persistencia de datasets por contexto (Parquet + meta).
+- APIs:
+  - `save_df(ctx, df, meta=...)`
+  - `get(ctx)`
+  - `load_table(ctx, cols=..., date_start=..., date_end=..., ...)`
+- Incluye subset cache “hot” (best‑effort).
+
+### `nps_lens.core.disk_cache`
+- Cache determinista de resultados pesados.
+- Escritura atómica (anti‑corrupción).
+
+### `nps_lens.core.perf` / `nps_lens.core.profiling`
+- Timers por namespace
+- Profiling opcional (cProfile) y resumen
+
+### `nps_lens.ingest.nps_thermal`
+- Lectura Excel NPS térmico (openpyxl)
+- Normalización de columnas mínimas
+- Validación (issues con nivel INFO/WARN/ERROR)
+
+### `nps_lens.ingest.helix_incidents`
+- Lectura Excel Helix
+- Normalización de fechas (epoch robusto) y columnas (incl. variantes ES/EN)
+- Filtrado por contexto (Company/N1/N2) con tolerancia cuando el extract viene filtrado
+
+### `nps_lens.ingest.features`
+- Precomputes que reducen CPU:
+  - `_service_origin_n2_key` (token-set normalizado)
+  - `_text_norm` (texto barato)
+- **Regla**: la UI asume que estas features existen (sin retrocompat).
+
+### `nps_lens.analytics.*`
+- `drivers.py`: ranking de palancas/subpalancas por impacto/volumen
+- `text_mining.py`: tópicos / keywords (MVP)
+- `nps_helix_link.py`: linking y agregados NPS↔Helix (diario/semanal)
+- `causal.py`: score causal best‑effort con logit / heurísticas
+- `changepoints.py`: detección de cambios (ruptures opcional)
+
+### `nps_lens.llm.*`
+- `insight_response.py`: schema + validador del JSON de respuesta del LLM
+- `knowledge_cache.py`: persistencia y recuperación de aprendizajes
+- `pack.py`: generación y export de packs (Markdown + JSON)
+
+### `nps_lens.platform.*`
+- `batch.py`: ejecución headless según config JSON
+- `artifacts.py`: layout de artefactos versionados
+
+### `nps_lens.ui.*`
+- `theme.py`: tema tokenizado (light/dark) + CSS quirúrgico
+- `population.py`: Año/Mes/Grupo como control global (y window temporal)
+- `charts.py`: charts y tablas (Plotly/Streamlit)
+- `narratives.py`: textos ejecutivos (explicaciones)
+- `business.py`: utilidades de slicing y ventanas
+
+---
+
+## 3) Convenciones de nombres (para coherencia)
+- Columns canónicas:
+  - `Fecha`, `NPS`, `NPS Group`, `Comment`, `Palanca`, `Subpalanca`, `Canal`
+- Features internas:
+  - prefijo `_` (ej. `_service_origin_n2_key`)
+- Context keys:
+  - `service_origin`, `service_origin_n1`, `service_origin_n2`
+
+---
+
+## 4) Dónde tocar si quieres cambiar X
+
+- **Cambiar contrato de ingest** → `docs/DATA_CONTRACTS.md` + `ingest/*`
+- **Cambiar UI (diseño)** → `design/tokens.py` + `ui/theme.py`
+- **Cambiar ranking causal** → `analytics/causal.py` + `analytics/nps_helix_link.py`
+- **Cambiar plataforma batch** → `platform/batch.py` + `platform/artifacts.py`
+

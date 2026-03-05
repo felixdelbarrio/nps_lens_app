@@ -1,0 +1,108 @@
+# Contratos de datos (Fuentes) y modelo canónico
+
+Este documento define:
+- columnas mínimas por Fuente
+- normalización
+- validación
+- modelo canónico (entidades) para análisis multi‑fuente
+
+---
+
+## 1) Fuente: NPS Térmico (Excel)
+
+### Columnas mínimas esperadas
+- `Fecha` (o equivalente; se normaliza a `Fecha`)
+- `ID` (si existe; recomendable)
+- `NPS` (score numérico)
+- `NPS Group` (Promotor/Pasivo/Detractor) o derivable
+- `Comment` (texto)
+- `Canal`
+- `Palanca`
+- `Subpalanca`
+- Opcionales: `Segmento`, `UsuarioDecisión`, etc.
+
+### Normalización
+- `Fecha` → datetime naive
+- strings → `str.strip()` + normalización ligera
+- columnas de control internas:
+  - `_text_norm`
+  - `_service_origin_n2_key`
+
+---
+
+## 2) Fuente: Incidencias Helix (Excel)
+
+### Columnas típicas (varían por export)
+Soportadas (mapeadas a canónico):
+- `BBVA_SourceServiceCompany` (o `Servicio Origen - BU/UG`)
+- `BBVA_SourceServiceN1` (o `Servicio Origen - Servicio N1`)
+- `BBVA_SourceServiceN2` (o `Servicio Origen - Servicio N2`)
+- `incident_id` / `ID incidencia` (si existe)
+- `Descripción` / `summary` / `Description`
+- timestamps:
+  - `Fecha` canónica (se intenta derivar de `Submit Date`, `Last Modified Date`, `bbva_startdatetime`, etc.)
+  - epochs ms/us/ns/s detectados por magnitud
+
+### Reglas de filtrado por contexto
+- Si existen columnas Company/N1/N2: filtrar estrictamente por contexto.
+- Si el extract ya viene filtrado y faltan columnas: se ingesta bajo el contexto seleccionado con WARN (para no mezclar).
+
+---
+
+## 3) Fuente: Reviews (CSV/Store) — opcional
+- `Store`, `Fecha`, `Rating`, `Texto`, `Versión App`, `Geo`
+- Normalización similar (fecha/texto)
+
+---
+
+## 4) Modelo canónico (entidades)
+
+```mermaid
+classDiagram
+  class NpsResponse {
+    +date: datetime
+    +score: float
+    +group: str
+    +comment: str
+    +lever: str
+    +sublever: str
+    +channel: str
+    +geo: str
+    +segment: str?
+  }
+  class Incident {
+    +incident_id: str
+    +date: datetime
+    +severity: str?
+    +system: str?
+    +category: str?
+    +summary: str
+    +channel: str?
+    +geo: str?
+  }
+  class Review {
+    +store: str
+    +date: datetime
+    +rating: float
+    +text: str
+    +app_version: str?
+    +geo: str?
+  }
+  class EvidenceLink {
+    +left_id: str
+    +right_id: str
+    +score: float
+    +explanation: str
+  }
+
+  NpsResponse --> EvidenceLink
+  Incident --> EvidenceLink
+```
+
+---
+
+## 5) Validación (principios)
+- Si faltan columnas mínimas: **ERROR** y no se persiste.
+- Si hay degradación recuperable: **WARN** (se persiste pero se informa).
+- Los issues se devuelven siempre al caller (UI/Batch) para trazabilidad.
+

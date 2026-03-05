@@ -9,7 +9,7 @@ MYPY = $(VENV)/bin/mypy
 PYTEST = $(VENV)/bin/pytest
 STREAMLIT = $(VENV)/bin/streamlit
 
-.PHONY: ci clean format help lint run setup test typecheck check-python platform
+.PHONY: ci clean format help lint run setup test typecheck check-python platform build build-linux build-mac
 
 check-python: ## Fail fast if not running on Python 3.9.x (corp target)
 	@$(PYTHON) -c "import sys; v=sys.version_info; ok=(v.major==3 and v.minor==9);\
@@ -44,6 +44,44 @@ run: ## Run Streamlit app
 platform: ## Run platform batch (requires CONFIG=path/to/batch.json)
 	@test -n "$(CONFIG)" || (echo "Usage: make platform CONFIG=configs/batch.json" && exit 2)
 	$(VENV)/bin/nps-lens platform-batch $(CONFIG) --out-root artifacts
+
+build: setup ## Build native executable with PyInstaller (macOS/Linux). Windows builds run in GitHub Actions.
+	@uname_s=$$(uname -s); \
+	if [ "$$uname_s" = "Darwin" ]; then \
+		$(MAKE) build-mac; \
+	elif [ "$$uname_s" = "Linux" ]; then \
+		$(MAKE) build-linux; \
+	else \
+		echo "Unsupported OS for local build: $$uname_s"; \
+		echo "Use GitHub Actions workflow build-windows.yml for Windows builds."; \
+		exit 1; \
+	fi
+
+build-linux: setup
+	$(PIP) install -e ".[build]"
+	@out=build/pyinstaller/linux; \
+	mkdir -p $$out/dist $$out/work $$out/spec; \
+	$(VENV)/bin/pyinstaller --clean --noconfirm \
+		--name nps-lens \
+		--onefile \
+		--distpath $$out/dist \
+		--workpath $$out/work \
+		--specpath $$out/spec \
+		-m nps_lens.cli
+	@echo "Built: build/pyinstaller/linux/dist/nps-lens"
+
+build-mac: setup
+	$(PIP) install -e ".[build]"
+	@out=build/pyinstaller/macos; \
+	mkdir -p $$out/dist $$out/work $$out/spec; \
+	$(VENV)/bin/pyinstaller --clean --noconfirm \
+		--name nps-lens \
+		--onefile \
+		--distpath $$out/dist \
+		--workpath $$out/work \
+		--specpath $$out/spec \
+		-m nps_lens.cli
+	@echo "Built: build/pyinstaller/macos/dist/nps-lens"
 
 ci: check-python format lint typecheck test ## Run full CI pipeline locally
 

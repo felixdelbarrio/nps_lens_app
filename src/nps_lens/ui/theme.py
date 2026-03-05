@@ -97,8 +97,25 @@ html, body, [data-testid="stAppViewContainer"] {{
 }}
 
 /* Typography */
-h1, h2, h3, h4 {{
+h1, h2, h3, h4, h5, h6 {{
   letter-spacing: -0.02em;
+  color: var(--nps-text);
+}}
+
+/* Markdown containers sometimes get default colors; enforce tokens */
+div[data-testid="stMarkdownContainer"],
+div[data-testid="stMarkdownContainer"] * {{
+  color: var(--nps-text);
+}}
+
+/* Tabs (BaseWeb) */
+button[data-baseweb="tab"] {{
+  color: var(--nps-muted) !important;
+  background: transparent !important;
+}}
+button[data-baseweb="tab"][aria-selected="true"] {{
+  color: var(--nps-text) !important;
+  border-bottom: 2px solid var(--nps-accent) !important;
 }}
 
 /* Hide Streamlit default header chrome */
@@ -173,6 +190,32 @@ button[kind="secondary"] {{
   border: 1px solid var(--nps-border-soft);
 }}
 
+/* Streamlit DataFrame uses AG-Grid under the hood */
+div[data-testid="stDataFrame"] .ag-root-wrapper,
+div[data-testid="stDataFrame"] .ag-root-wrapper-body,
+div[data-testid="stDataFrame"] .ag-center-cols-viewport,
+div[data-testid="stDataFrame"] .ag-body-viewport {{
+  background: var(--nps-surface) !important;
+}}
+div[data-testid="stDataFrame"] .ag-header,
+div[data-testid="stDataFrame"] .ag-header-row,
+div[data-testid="stDataFrame"] .ag-header-cell {{
+  background: var(--nps-surface-2) !important;
+  color: var(--nps-text) !important;
+  border-color: var(--nps-border-soft) !important;
+}}
+div[data-testid="stDataFrame"] .ag-row {{
+  background: var(--nps-surface) !important;
+  color: var(--nps-text) !important;
+}}
+div[data-testid="stDataFrame"] .ag-row:hover {{
+  background: var(--nps-accent-soft) !important;
+}}
+div[data-testid="stDataFrame"] .ag-cell {{
+  color: var(--nps-text) !important;
+  border-color: var(--nps-border-softer) !important;
+}}
+
 /* Controls (BaseWeb) — keep contrast in dark mode */
 div[data-baseweb="select"] > div {{
   background: var(--nps-surface-2) !important;
@@ -188,6 +231,25 @@ div[data-baseweb="select"] input::placeholder {{
 }}
 div[data-baseweb="popover"] * {{
   color: var(--nps-text) !important;
+}}
+/* BaseWeb popover container (Streamlit renders menus in a portal) */
+div[data-baseweb="popover"] {{
+  background: var(--nps-surface-2) !important;
+}}
+/* Ensure all nested popover layers inherit the dark surface */
+div[data-baseweb="popover"] div {{
+  background: var(--nps-surface-2) !important;
+}}
+div[data-baseweb="popover"] > div {{
+  background: var(--nps-surface-2) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 14px !important;
+}}
+div[data-baseweb="popover"] ul {{
+  background: var(--nps-surface-2) !important;
+}}
+div[data-baseweb="popover"] [role="option"]:hover {{
+  background: var(--nps-accent-soft) !important;
 }}
 ul[role="listbox"] {{
   background: var(--nps-surface-2) !important;
@@ -231,6 +293,30 @@ section[data-testid="stSidebar"] > div {{
 /* Inputs */
 input, textarea {{
   color: var(--nps-text) !important;
+  background: var(--nps-surface-2) !important;
+  border: 1px solid var(--nps-border-strong) !important;
+  border-radius: 12px !important;
+}}
+
+/* Some Streamlit widgets set inline styles; override aggressively */
+textarea[style], input[style] {{
+  background: var(--nps-surface-2) !important;
+  color: var(--nps-text) !important;
+}}
+
+/* Text areas in Streamlit (executive report, prompts, etc.) */
+div[data-testid="stTextArea"] textarea {{
+  background: var(--nps-surface-2) !important;
+  color: var(--nps-text) !important;
+}}
+
+div[data-testid="stTextArea"] > div > textarea {{
+  background: var(--nps-surface-2) !important;
+  color: var(--nps-text) !important;
+}}
+
+div[data-testid="stTextArea"] textarea::placeholder {{
+  color: var(--nps-muted) !important;
 }}
 
 
@@ -245,6 +331,19 @@ div[data-testid="stFileUploaderDropzone"] * {{
 }}
 div[data-testid="stFileUploader"] small {{
   color: var(--nps-muted) !important;
+}}
+
+/* Plotly: force dark surfaces + readable text in dark mode */
+div[data-testid="stPlotlyChart"] {{
+  background: var(--nps-surface) !important;
+  border-radius: var(--nps-radius);
+  border: 1px solid var(--nps-border-soft);
+}}
+div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly .main-svg .bg {{
+  fill: var(--nps-bg) !important;
+}}
+div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly text {{
+  fill: var(--nps-text) !important;
 }}
 
 </style>

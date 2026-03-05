@@ -1,224 +1,145 @@
-# NPS Lens — MVP (Senda · México)
+# NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
 
-Aplicación en **Python 3.9.13** para análisis avanzado de **NPS térmico** + VoC, con arquitectura **multi-fuente** y extensible a más **geografías** (ES/CO/PE/AR/…) y **canales** (Senda/Gema/…).
+[![CI](https://github.com/<ORG>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/ci.yml)
+[![Type Check](https://github.com/<ORG>/<REPO>/actions/workflows/type-check.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/type-check.yml)
+[![Test](https://github.com/<ORG>/<REPO>/actions/workflows/test.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/test.yml)
+[![Build Linux](https://github.com/<ORG>/<REPO>/actions/workflows/build-linux.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-linux.yml)
+[![Build macOS](https://github.com/<ORG>/<REPO>/actions/workflows/build-mac.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-mac.yml)
+[![Build Windows](https://github.com/<ORG>/<REPO>/actions/workflows/build-windows.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/build-windows.yml)
+[![Release](https://github.com/<ORG>/<REPO>/actions/workflows/release.yml/badge.svg)](https://github.com/<ORG>/<REPO>/actions/workflows/release.yml)
 
-Incluye:
-- Ingesta + validación + normalización (NPS térmico Excel/CSV, Incidencias, Reviews)
-- Drivers / segmentación (gap vs NPS global)
-- Detección de cambios (change-points) *(ruptures)*
-- Minería de texto (topic clustering TF‑IDF + KMeans; tono pragmático rule-based)
-- Journey routes (palanca → subpalanca → topic)
-- **WoW**: generación de **LLM Deep‑Dive Pack** (Markdown + JSON) + **Knowledge Cache** (dedup + aprendizaje incremental)
-- UI: **Streamlit** (rápido, productivo, portátil)
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
+[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
 
-> **Diseño**: la app sigue el *patrón de tokens BBVA Experience* con estilos **centralizados**.
-> - Motor de tema (light/dark) y CSS variables: `src/nps_lens/ui/theme.py`
-> - Tokens (subset) en código: `src/nps_lens/design/tokens.py`
-> No se distribuyen PDFs, tipografías ni packs de iconos en el repo.
+> ⚠️ **Antes de publicar**: sustituye `<ORG>/<REPO>` en los badges por el `owner/repo` real.  
+> Ejemplo: `bbva/nps-lens` (o el que corresponda).
 
 ---
 
-## Quickstart (3–6 pasos)
+## Qué es NPS Lens
 
-1) **Crear entorno**
+**NPS Lens** es una plataforma para convertir señales de Voz del Cliente en **insights accionables**, combinando:
+
+- **NPS térmico** (score + texto + palanca/subpalanca/canal/segmento)
+- **Incidencias Helix** (tickets/bugs) para correlación y causalidad pragmática
+- (Opcional) **Reviews** (stores) / **Feedback in‑app** (roadmap)
+
+La aplicación une métricas + verbatims + evidencias multi‑fuente y genera un **LLM Deep‑Dive Pack** “copy/paste ready” para investigación asistida por LLM, con trazabilidad y versión de pipeline.
+
+---
+
+## Para qué sirve (valor de negocio)
+
+- Detectar **drivers reales** de detracción (y también de promoción) por palanca/subpalanca/canal.
+- Priorizar **causas raíz plausibles** con *causalidad pragmática* (no solo correlación).
+- Construir **journeys de caída** (ruta: palanca → subpalanca → tópico → incidencia → impacto NPS).
+- Operar como **plataforma**: UI para exploración + Batch para generación de artefactos versionados.
+- Entregar un “paquete ejecutivo” reproducible: KPIs, hipótesis, evidencias, acciones sugeridas, trazabilidad.
+
+---
+
+## Demo mental: cómo fluye el insight
+
+```mermaid
+flowchart LR
+  A[NPS térmico
+(score + texto)] -->|normaliza| C[(Modelo canónico)]
+  B[Helix
+(incidencias)] -->|normaliza| C
+  C --> D[Mining tópicos + drivers]
+  C --> E[Linking semántico
+NPS↔Helix]
+  D --> F[Hipótesis causales
+ranked]
+  E --> F
+  F --> G[LLM Deep‑Dive Pack
+(Markdown + JSON)]
+  F --> H[Acciones / Experimentos]
+  G --> I[Knowledge Cache
+(aprendizaje incremental)]
+  I --> F
+```
+
+---
+
+## Quickstart
+
+### Requisitos
+- **Python 3.9.13** (entorno corporativo)
+- `make` (macOS / Linux)
+- (Opcional) `xcode-select --install` en macOS para `watchdog` (Streamlit performance)
+
+### Setup
 ```bash
 make setup
 ```
 
-2) **Ejecutar tests y calidad**
-```bash
-make ci
-```
-
-3) **Lanzar la app**
+### Ejecutar UI (Streamlit)
 ```bash
 make run
 ```
 
-> **Performance tip (Streamlit)**: la app cachea cargas/joins pesados por contexto con `st.cache_data`.
-> Si actualizas datasets en disco y quieres invalidar cache, reinicia Streamlit.
-
-### Performance extremo: DiskCache + features precomputadas + profiling
-
-- **DiskCache determinista**: artefactos de compute pesado se guardan en `data/cache/results/` para evitar recomputes incluso si Streamlit invalida caches.
-- **Features precomputadas en ingest** (prefijo `_`):
-  - `_service_origin_n2_key`: normalización order-insensitive de `service_origin_n2` para filtros correctos y rápidos.
-  - `_text_norm`: texto normalizado barato para mining/muestreo.
-- **Profiling por etapa (debug)**:
-  - Activa con `export NPS_LENS_PROFILE=1`
-  - Se generan `.prof` en `data/cache/profiles/` (por namespace: topics/routes/drivers/etc.)
-
-4) *(Opcional)* Generar un ejemplo de Deep‑Dive Pack por CLI:
+### Ejecutar CI local
 ```bash
-.venv/bin/nps-lens build-example-pack
+make ci
 ```
 
----
-
-## Modo plataforma (batch, sin UI)
-
-Además de Streamlit, el repo puede ejecutarse como **plataforma** para generar artefactos versionados (packs, KPIs, manifest) de forma determinista.
-
-### 1) Crear un config de batch
-
-Crea `configs/batch.json`:
-
-```json
-{
-  "runs": [
-    {
-      "excel_path": "data/raw/NPS Térmico Senda - 01Enero-02Febrero.xlsx",
-      "service_origin": "BBVA México",
-      "service_origin_n1": "Senda",
-      "service_origin_n2": "",
-      "top_k_packs": 5,
-      "min_n": 200,
-      "dimensions": ["Palanca", "Subpalanca", "Canal"]
-    }
-  ]
-}
-```
-
-### 2) Ejecutar batch
-
+### Ejecutar en modo plataforma (batch)
 ```bash
-.venv/bin/nps-lens platform-batch configs/batch.json --out-root artifacts
+make platform CONFIG=configs/batch.json
 ```
 
-### 3) Layout de salida
-
-Los artefactos se exportan como:
-
-```
-artifacts/
-  <dataset_id>/<pipeline_version>/<ctx_sig>/
-    kpis.json
-    manifest.json
-    insights/
-      <insight_id>__pack.md
-      <insight_id>__pack.json
-```
-
-`manifest.json` incluye meta del dataset, parámetros de run y un snapshot de timings.
-
----
-
-## UI (orientada a negocio)
-
-Páginas principales:
-
-- **Resumen ejecutivo**: KPIs, tendencia y un **informe ejecutivo** listo para copiar/pegar.
-- **Comparativas**: periodo actual vs periodo base (qué cambió y dónde).
-- **Cohortes**: matriz por segmento/usuario para localizar bolsas de fricción.
-- **Drivers & oportunidades**: priorización por impacto + confianza.
-- **Texto & temas**: qué se repite y cómo suena (lenguaje natural).
-
----
-
-## Datos (MVP)
-
-- Muestra de NPS térmico (Senda MX) en:
-  - `data/examples/nps_thermal_senda_mx_sample.csv`
-- Ejemplos de Incidencias y Reviews:
-  - `data/examples/incidents_sample.csv`
-  - `data/examples/reviews_sample.csv`
-
-### Ingesta del Excel real
-El pipeline está en `src/nps_lens/ingest/nps_thermal.py`.
-
-Ejemplo:
+### Build binaria (PyInstaller)
+- macOS / Linux (local):
 ```bash
-.venv/bin/nps-lens profile-nps "path/to/NPS Térmico.xlsx" --geo MX --channel Senda
+make build
 ```
 
----
-
-## Arquitectura (src layout)
-
-- `src/nps_lens/models/`: modelo canónico (Pydantic v2 compatible)
-- `src/nps_lens/ingest/`: contratos de esquema + normalización por fuente
-- `src/nps_lens/quality/`: profiling y reglas de calidad (missing/outliers/duplicados)
-- `src/nps_lens/analytics/`: drivers, texto, change-points, causal best-effort, journey
-- `src/nps_lens/llm/`: Deep‑Dive Pack + Knowledge Cache
-- `src/nps_lens/design/`: tokens (subset) centralizados en código
-- `src/nps_lens/ui/`: theme (light/dark), componentes y gráficos
-- `app/streamlit_app.py`: UI
+- Windows: vía GitHub Actions (PyInstaller no cross-compila)
 
 ---
 
-## Causalidad pragmática (MVP)
+## Documentación imprescindible (léela en este orden)
 
-`src/nps_lens/analytics/causal.py` implementa un modo **best-effort** basado en:
-- Outcome: detractor (NPS <= 6)
-- Treatment: pertenecer a un driver (p.ej. `Palanca == X`)
-- Controles observables: canal/palanca/subpalanca (y extensible a segmento/periodo/geo)
-
-Salida: `CausalHypothesis` con **supuestos** y **warnings** explícitos.
-
----
-
-## Journey routes (MVP)
-
-`src/nps_lens/analytics/journey.py` genera rutas:
-`palanca → subpalanca → topic`
-
-- Topics: clustering ligero TF‑IDF + KMeans (por corpus)
-- Asignación a filas: heurística best‑effort por términos top
-- Ranking: concentración de detractores × volumen
+1. **Arquitectura** → `ARCHITECTURE.md`  
+2. **Módulos del código** → `docs/MODULES.md`  
+3. **Contratos de datos (Fuentes y modelo canónico)** → `docs/DATA_CONTRACTS.md`  
+4. **Operación y troubleshooting** → `docs/OPERATIONS.md`  
+5. **Release y builds** → `docs/RELEASE.md`  
+6. **Desarrollo / contribución** → `docs/DEVELOPMENT.md`
 
 ---
 
-## WoW — LLM Deep‑Dive Pack + Knowledge Cache
+## Estructura del repo (alto nivel)
 
-- Exporta pack a:
-  - `reports/examples/<id>__pack.md`
-  - `reports/examples/<id>__pack.json`
-- Cache de conocimiento:
-  - `knowledge/insights_cache.json`
-
-Política de deduplicación:
-- `signature = sha1(title + context)` estable (ver `stable_signature()`).
-
-La UI permite:
-1) Generar pack (copy/paste),
-2) Pegar respuesta del LLM,
-3) Guardar en cache para:
-   - evitar repetir insights,
-   - enriquecer explicación futura,
-   - registrar decisiones/acciones.
+- `app/` → UI Streamlit (exploración interactiva)
+- `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, LLM packs)
+- `tests/` → tests unitarios y de plataforma
+- `docs/` → documentación técnica y operativa
+- `.github/workflows/` → CI, typecheck, test, builds y release
 
 ---
 
-## Sistema de diseño (BBVA Experience)
+## Principios de diseño (para mantenerlo “nivel empresa”)
 
-Esta versión es **design-token-first**:
-
-- Tokens (subset) y mapeo semántico centralizado: `src/nps_lens/design/tokens.py`
-- Tema Light/Dark + CSS variables centralizadas: `src/nps_lens/ui/theme.py`
-- Componentes UI (cards/KPIs/sections): `src/nps_lens/ui/components.py`
-
-No se incluyen assets propietarios (PDFs, tipografías o packs de iconos) dentro del repo.
-Si tu organización tiene el paquete oficial, reemplaza únicamente los valores en `tokens.py`.
+- **Contrato de datos**: ingesta validable + normalización + versionado → sin “magia silenciosa”.
+- **Trazabilidad**: cada insight debe incluir evidencia cuantitativa y cualitativa y referencias cruzadas.
+- **Performance**: caching determinista + pushdown temporal (Año/Mes) + precomputes en ingest.
+- **Robustez**: fail‑fast (boot‑check) + writes atómicos + logs accionables.
+- **Plataforma**: la UI no “hace magia”; consume casos de uso / servicios del core.
 
 ---
 
-## Roadmap (siguiente iteración)
+## Donaciones
 
-1) Multi-fuente real:
-- Conectores corporativos a Incidencias y Stores (Apple/Google), con versionado de datasets.
-2) Linking (EvidenceLinks):
-- similitud semántica + heurísticas por ventana temporal/geo/canal/palanca.
-3) Scoring causal:
-- temporalidad + consistencia por cohortes + dose-response (si hay datos).
-4) Journey graph:
-- grafo completo con pesos y rutas emergentes.
-5) UI avanzada:
-- vistas comparativas multi-geo/canal, alerts, export a PowerPoint.
+Si te aporta valor (o lo estás usando en producción), puedes apoyar el mantenimiento:
+
+- GitHub Sponsors: https://github.com/sponsors/felixdelbarrio  
+- PayPal: https://paypal.me/felixdelbarrio
 
 ---
 
-## Licencia / Uso
-Uso interno. Ajusta `pyproject.toml` según tu política corporativa.
+## Licencia
 
+Define la licencia del repo en `LICENSE` (si aplica). En entornos corporativos suele ser privada.
 
-**Nota**: el soporte Excel (.xlsx) requiere `openpyxl` y ya viene incluido en dependencias.

@@ -730,12 +730,17 @@ def _json_sanitize(obj: Any) -> Any:
     """
 
     # pandas / numpy missing values
+    # Only evaluate scalar missingness. Calling pd.isna() on arrays/Series returns
+    # array-like and NumPy deprecates truthiness of empty arrays.
     try:
+        from pandas.api.types import is_scalar
+
         if obj is pd.NaT:
             return None
-        # pd.isna covers numpy/pandas scalar missing values
-        if not isinstance(obj, (str, int, float, bool)) and pd.isna(obj):
-            return None
+        if is_scalar(obj) and not isinstance(obj, (str, int, float, bool)):
+            na = pd.isna(obj)
+            if isinstance(na, (bool, np.bool_)) and bool(na):
+                return None
     except Exception:
         pass
 
