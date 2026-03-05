@@ -11,4 +11,4 @@ Import concrete modules/functions instead:
     from nps_lens.analytics.drivers import driver_table
 """
 
-__all__ = []
+__all__: list[str] = []

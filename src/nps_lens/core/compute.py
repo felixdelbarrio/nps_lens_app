@@ -26,7 +26,11 @@ def compute_opportunities(df: pd.DataFrame, dimensions: list[str], min_n: int) -
     return rank_opportunities(df, dimensions=dimensions, min_n=min_n)
 
 
-def compute_topics(texts: pd.Series, n_clusters: int = 10, max_features: int = 3000) -> list[TopicCluster]:
+def compute_topics(
+    texts: pd.Series[str],
+    n_clusters: int = 10,
+    max_features: int = 3000,
+) -> list[TopicCluster]:
     return extract_topics(texts=texts, n_clusters=n_clusters, max_features=max_features)
 
 

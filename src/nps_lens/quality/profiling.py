@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -49,4 +49,5 @@ def detect_outliers_zscore(
     if sigma == 0.0 or np.isnan(sigma):
         return df.iloc[0:0].copy()
     zscores = (x - mu) / sigma
-    return df.loc[np.abs(zscores) >= z].copy()
+    out = df.loc[np.abs(zscores) >= z].copy()
+    return cast(pd.DataFrame, out)

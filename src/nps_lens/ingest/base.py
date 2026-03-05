@@ -12,6 +12,9 @@ class ValidationIssue:
     message: str
     column: Optional[str] = None
 
+    def to_dict(self) -> dict[str, object]:
+        return {"level": self.level, "message": self.message, "column": self.column}
+
 
 @dataclass(frozen=True)
 class IngestResult:

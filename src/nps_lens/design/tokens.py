@@ -31,6 +31,9 @@ class DesignTokens:
             "color.primary.accent.value-07.default": "#ff5252",
             # Backgrounds / surfaces
             "color.primary.bg.alternative.default": "#ffffff",
+            # App semantic surfaces (centralized; avoid hardcoding in pages)
+            "color.app.surface.default": "#ffffff",
+            "color.app.surface.raised": "#f7f8fa",
             "color.primary.bg.action.default": "#001391",
             "color.primary.bg.action.active": "#070e46",
             "color.primary.bg.selection.default": "#85c8ff",
@@ -40,6 +43,8 @@ class DesignTokens:
             "color.primary.text.disabled": "#adb8c2",
             "color.primary.text.main-inverse.default": "#ffffff",
             "color.primary.text.action.default": "#001391",
+            # Text on accent backgrounds
+            "color.app.text.on-accent": "#070e46",
             # Status
             "color.primary.bg.success": "#42a64c",
             "color.primary.bg.warning": "#ffe761",
@@ -53,6 +58,8 @@ class DesignTokens:
             "color.primary.accent.value-05.default": "#ffe761",
             "color.primary.accent.value-07.default": "#ff5252",
             "color.primary.bg.alternative.default": "#11192d",
+            "color.app.surface.default": "#11192d",
+            "color.app.surface.raised": "#16203a",
             "color.primary.bg.action.default": "#001391",
             "color.primary.bg.action.active": "#070e46",
             "color.primary.bg.selection.default": "#334056",
@@ -61,6 +68,7 @@ class DesignTokens:
             "color.primary.text.disabled": "#46536d",
             "color.primary.text.main-inverse.default": "#ffffff",
             "color.primary.text.action.default": "#85c8ff",
+            "color.app.text.on-accent": "#070e46",
             "color.primary.bg.success": "#42a64c",
             "color.primary.bg.warning": "#ffe761",
             "color.primary.bg.alert": "#c30a0a",

@@ -49,9 +49,8 @@ class AppService:
         from pathlib import Path
 
         profile_dir = Path("data") / "cache" / "profiles"
-        with self.perf.timer(namespace):
-            with profile_if_enabled(profile_dir, tag=namespace):
-                out = compute()
+        with self.perf.timer(namespace), profile_if_enabled(profile_dir, tag=namespace):
+            out = compute()
         self.disk_cache.set(key, out, meta={"namespace": namespace, **(meta or {}), "params": params})
         return out, False
 

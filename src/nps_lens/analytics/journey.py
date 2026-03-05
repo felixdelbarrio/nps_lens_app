@@ -58,7 +58,8 @@ def build_routes(
     # In that case, count rows via a stable existing column.
     count_col = "ID" if "ID" in data.columns else "is_detractor"
     grouped = (
-        data.groupby([lever_col, sublever_col, "topic"], dropna=False)
+        # Pandas groupby observed default is changing; be explicit and keep output small.
+        data.groupby([lever_col, sublever_col, "topic"], dropna=False, observed=True)
         .agg(n=(count_col, "count"), detractor_rate=("is_detractor", "mean"))
         .reset_index()
     )

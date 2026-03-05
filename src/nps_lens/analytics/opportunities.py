@@ -31,7 +31,8 @@ def rank_opportunities(
     for dim in dimensions:
         if dim not in df.columns:
             continue
-        for val, g in df.groupby(dim, dropna=False):
+        # Pandas groupby observed default is changing; be explicit and keep output small.
+        for val, g in df.groupby(dim, dropna=False, observed=True):
             n = int(len(g))
             if n < min_n:
                 continue

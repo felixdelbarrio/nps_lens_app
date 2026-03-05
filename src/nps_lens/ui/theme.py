@@ -17,6 +17,7 @@ class Theme:
     muted: str
     border: str
     accent: str
+    on_accent: str
     danger: str
     warning: str
     success: str
@@ -26,22 +27,16 @@ def get_theme(mode: str) -> Theme:
     toks = DesignTokens.default()
     p = palette(toks, mode)
 
-    # Map token subset to app-level semantics.
-    # Map token subset to app-level semantics.
+    # Map tokens to app-level semantics (no hardcoded colors outside tokens).
     bg = p["color.primary.bg.alternative.default"]
-    if mode == "dark":
-        # Dark: keep surfaces close to bg for a premium "navy dark" look.
-        surface = p["color.primary.bg.alternative.default"]
-        surface_2 = "#16203a"
-    else:
-        # Light: neutral surfaces; avoid using action colors as backgrounds.
-        surface = "#ffffff"
-        surface_2 = "#f7f8fa"
+    surface = p.get("color.app.surface.default", bg)
+    surface_2 = p.get("color.app.surface.raised", surface)
 
     text = p["color.primary.text.primary"]
     muted = p["color.primary.text.disabled"]
     border = p["color.primary.bg.bar"]
     accent = p["color.primary.accent.value-01.default"]
+    on_accent = p.get("color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text))
     danger = p["color.primary.bg.alert"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
@@ -54,6 +49,7 @@ def get_theme(mode: str) -> Theme:
         muted=muted,
         border=border,
         accent=accent,
+        on_accent=on_accent,
         danger=danger,
         warning=warning,
         success=success,
@@ -80,6 +76,7 @@ def apply_theme(t: Theme) -> None:
   --nps-muted: {t.muted};
   --nps-border: {t.border};
   --nps-accent: {t.accent};
+  --nps-on-accent: {t.on_accent};
   --nps-shadow-color: color-mix(in srgb, #000 10%, transparent);
   --nps-border-softer: color-mix(in srgb, var(--nps-text) 18%, transparent);
   --nps-border-soft: color-mix(in srgb, var(--nps-text) 22%, transparent);
@@ -157,7 +154,7 @@ div.stButton > button {{
 
 div.stButton > button[kind="primary"] {{
   background: var(--nps-accent);
-  color: #070e46;
+  color: var(--nps-on-accent);
   border: none;
 }}
 
@@ -181,26 +178,40 @@ div[data-baseweb="select"] > div {{
   background: var(--nps-surface-2) !important;
   color: var(--nps-text) !important;
   border-color: var(--nps-border) !important;
+  box-shadow: none !important;
 }}
 div[data-baseweb="select"] span, div[data-baseweb="select"] input {{
   color: var(--nps-text) !important;
+}}
+div[data-baseweb="select"] input::placeholder {{
+  color: var(--nps-muted) !important;
 }}
 div[data-baseweb="popover"] * {{
   color: var(--nps-text) !important;
 }}
 ul[role="listbox"] {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-surface-2) !important;
+  border-radius: 14px;
+  border: 1px solid var(--nps-border-soft) !important;
 }}
-div[data-baseweb="menu"], div[role="listbox"] {{{{
-  background: var(--nps-surface) !important;
-  border: 1px solid var(--nps-border) !important;
-}}}}
-div[data-baseweb="menu"] *, div[role="listbox"] * {{{{
+div[data-baseweb="menu"], div[role="listbox"] {{
+  background: var(--nps-surface-2) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+}}
+div[data-baseweb="menu"] *, div[role="listbox"] * {{
   color: var(--nps-text) !important;
-}}}}
+}}
+div[data-baseweb="menu"] [role="option"],
+div[role="listbox"] [role="option"],
+ul[role="listbox"] [role="option"] {{
+  color: var(--nps-text) !important;
+}}
 
 ul[role="listbox"] li {{
   background: transparent !important;
+}}
+ul[role="listbox"] li:hover {{
+  background: var(--nps-accent-soft) !important;
 }}
 ul[role="listbox"] li[aria-selected="true"] {{
   background: var(--nps-accent-soft) !important;

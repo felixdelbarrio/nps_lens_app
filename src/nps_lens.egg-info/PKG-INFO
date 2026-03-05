@@ -19,6 +19,7 @@ Requires-Dist: statsmodels<0.15,>=0.14
 Requires-Dist: networkx<3.4,>=3.1
 Requires-Dist: ruptures<2.0,>=1.1.8
 Requires-Dist: streamlit<1.40,>=1.31
+Requires-Dist: watchdog<5.0,>=3.0
 Requires-Dist: openpyxl<3.2,>=3.1
 Requires-Dist: typing_extensions<5.0,>=4.7
 Provides-Extra: dev

@@ -9,13 +9,11 @@ import typer
 from dotenv import load_dotenv
 from rich import print as rprint
 
-from nps_lens.analytics import (
-    best_effort_ate_logit,
-    build_routes,
-    detect_nps_changepoints,
-    driver_table,
-    rank_opportunities,
-)
+from nps_lens.analytics.causal import best_effort_ate_logit
+from nps_lens.analytics.changepoints import detect_nps_changepoints
+from nps_lens.analytics.journey import build_routes
+from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.config import Settings
 from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
 from nps_lens.llm.knowledge_cache import KnowledgeCache
@@ -30,6 +28,9 @@ from nps_lens.platform.batch import load_batch_config, run_platform_batch
 app = typer.Typer(add_completion=False)
 
 EXCEL_PATH_ARG = typer.Argument(..., exists=True)
+CONFIG_PATH_ARG = typer.Argument(..., exists=True, help="Path to batch config JSON")
+OUT_ROOT_OPT = typer.Option(Path("artifacts"), help="Root directory for exported artifacts")
+
 
 
 @app.command()
@@ -88,8 +89,8 @@ def build_example_pack(
 
 @app.command()
 def platform_batch(
-    config_path: Path = typer.Argument(..., exists=True, help="Path to batch config JSON"),
-    out_root: Path = typer.Option(Path("artifacts"), help="Root directory for exported artifacts"),
+    config_path: Path = CONFIG_PATH_ARG,
+    out_root: Path = OUT_ROOT_OPT,
 ) -> None:
     """Run the project as a platform (batch mode) and export versioned artifacts."""
     load_dotenv()

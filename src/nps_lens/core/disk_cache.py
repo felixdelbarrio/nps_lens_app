@@ -56,14 +56,12 @@ class DiskCache:
                 return pickle.load(f)
         except Exception:
             # Corrupt cache entry -> delete best-effort.
-            try:
+            import contextlib
+
+            with contextlib.suppress(Exception):
                 obj_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 meta_path.unlink(missing_ok=True)
-            except Exception:
-                pass
             return None
 
     def get_with_meta(self, key: str) -> Optional[CacheHit]:

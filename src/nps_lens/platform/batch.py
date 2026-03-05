@@ -116,6 +116,7 @@ def run_platform_batch(
             rev_res = read_reviews_csv(str(spec.reviews_csv))
             reviews_df = rev_res.df
 
+
         # --- Persist dataset (canonical storage + meta with dataset_id) ---
         _stored = store.save_df(ctx, nps_df, source=str(spec.excel_path))
         meta = store.read_meta(ctx)
@@ -190,6 +191,9 @@ def run_platform_batch(
                 "nps_excel": str(spec.excel_path),
                 "incidents_csv": str(spec.incidents_csv) if spec.incidents_csv else "",
                 "reviews_csv": str(spec.reviews_csv) if spec.reviews_csv else "",
+            },
+            "reviews": {
+                "rows": int(len(reviews_df)) if reviews_df is not None else 0,
             },
             "issues": {
                 "nps": [i.to_dict() for i in (nps_res.issues or [])],

@@ -11,12 +11,17 @@ from typing import Any, Optional
 
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+
+from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL, month_format_es, population_date_window
+
+
+
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv, find_dotenv
 
+# Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
+# (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.changepoints import detect_nps_changepoints
 from nps_lens.analytics.drivers import driver_table
@@ -73,6 +78,28 @@ from nps_lens.ui.narratives import (
     explain_topics,
 )
 from nps_lens.ui.theme import Theme, apply_theme, get_theme
+
+# Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
+# (Plotly triggers a NumPy alias deprecation warning in some versions.)
+def _plotly():
+    """Lazy import Plotly.
+
+    Plotly versions that still reference `np.bool8` can emit a NumPy DeprecationWarning
+    at import-time (NumPy >= 1.24). This is upstream noise, so we silence that specific
+    warning *only* around the import.
+    """
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message=r'.*np\.bool8.*deprecated.*',
+            category=DeprecationWarning,
+        )
+        import plotly.express as px  # type: ignore
+        import plotly.graph_objects as go  # type: ignore
+    return px, go
+
 
 st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
 
@@ -176,6 +203,7 @@ def load_context_df(
     columns: tuple[str, ...],
     date_start: Optional[str] = None,
     date_end: Optional[str] = None,
+    month_filter: Optional[str] = None,
 ) -> pd.DataFrame:
     """Load dataset for a context with column projection.
 
@@ -198,6 +226,14 @@ def load_context_df(
     # as RecordBatches in the store for reuse across charts.
     df = table.to_pandas()
 
+    # Cross-year month filter (used only when pop_year == "Todos" and pop_month != "Todos").
+    if month_filter and "Fecha" in df.columns:
+        try:
+            dt = pd.to_datetime(df["Fecha"], errors="coerce")
+            df = df.loc[dt.dt.month.astype(int) == int(month_filter)].copy()
+        except Exception:
+            pass
+
     # Optional filter by service_origin_n2 (comma-separated values).
     # IMPORTANT: strict token-set equality.
     # - Selecting "SN2X" must NOT include rows like "SN2X, SN2Y".
@@ -205,12 +241,12 @@ def load_context_df(
     # Prefer precomputed token-set key when available (faster than per-row tokenset())
     n2_key = DatasetContext._norm_n2(service_origin_n2)
     if n2_key:
-        if "_service_origin_n2_key" in df.columns:
-            df = df.loc[df["_service_origin_n2_key"].astype(str) == n2_key].copy()
-        elif "service_origin_n2" in df.columns:
-            # Backward compatible fallback
-            n2_sel = tokenset(service_origin_n2)
-            df = df.loc[df["service_origin_n2"].map(tokenset) == n2_sel].copy()
+        if "_service_origin_n2_key" not in df.columns:
+            raise KeyError(
+                "Dataset missing required derived column '_service_origin_n2_key'. "
+                "Re-import the Excel to rebuild derived features."
+            )
+        df = df.loc[df["_service_origin_n2_key"].astype(str) == n2_key].copy()
 
     # Lightweight dtype optimization (safe even with partial columns)
     if "Fecha" in df.columns:
@@ -738,8 +774,20 @@ def _validate_insight_schema(obj: dict[str, Any]) -> tuple[bool, list[str]]:
 
 
 def _render_llm_insights(theme: Theme) -> None:
-    insights = st.session_state.get("llm_insights", [])
-    if not insights:
+    insights = st.session_state.get("llm_insights")
+    # Avoid NumPy truthiness warnings (empty array truth value is deprecated).
+    is_empty = False
+    if insights is None:
+        is_empty = True
+    elif isinstance(insights, np.ndarray):
+        is_empty = insights.size == 0
+    else:
+        try:
+            is_empty = len(insights) == 0  # type: ignore[arg-type]
+        except TypeError:
+            is_empty = False
+
+    if is_empty:
         st.info(
             "Aún no has añadido insights del LLM. Ve a la pestaña **✨ Insights LLM** "
             "para pegarlos aquí."
@@ -805,42 +853,9 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
     agg["classic_nps"] = (agg["pro"] - agg["det"]) * 100.0
     return agg[["day", "n", "det_pct", "pas_pct", "pro_pct", "classic_nps"]].copy()
 
-    for ins in insights:
-        actions_html = ""
-        try:
-            actions = []
-            for rc in ins.get("root_causes", [])[:3]:
-                for a in rc.get("actions", [])[:2]:
-                    action_txt = (
-                        f"• {a.get('action', '')} "
-                        f"<span class='nps-muted'>({a.get('owner', '')}, {a.get('eta', '')})</span>"
-                    )
-                    actions.append(action_txt)
-            if actions:
-                actions_html = (
-                    "<div style='margin-top:10px'><b>Acciones sugeridas</b><br/>"
-                    + "<br/>".join(actions)
-                    + "</div>"
-                )
-        except Exception:
-            actions_html = ""
-
-        body = (
-            f"<div style='font-size:18px; font-weight:800'>{ins.get('title','')}</div>"
-            f"<div class='nps-muted' style='margin-top:6px'>{ins.get('executive_summary','')}</div>"
-            f"{actions_html}"
-        )
-        card("Insight LLM", body, flat=False)
-
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    if st.button("🧹 Limpiar insights integrados", use_container_width=True):
-        st.session_state["llm_insights"] = []
-        st.rerun()
-
-
 def render_sidebar(  # noqa: PLR0915
     settings: Settings,
-) -> tuple[Optional[Path], int, str, str, str, str, Path, str, Optional[str], bool]:
+) -> tuple[Optional[Path], int, str, str, str, str, str, str, Path, str, Optional[str], bool]:
     """Single-source sidebar: Context -> dataset -> controls.
 
     Context dimensions:
@@ -854,7 +869,6 @@ def render_sidebar(  # noqa: PLR0915
     # Context values MUST come from .env (Settings.from_env). We do not infer
     # options from stored datasets to avoid silent drift. Advanced users can
     # add/remove values by editing the .env.
-    existing = store.list_contexts()  # used only for default context + validation UI
 
     service_origin_options = list(settings.service_origin_values) or [settings.default_service_origin]
     # Keep current/default selectable even if .env was edited incorrectly.
@@ -937,6 +951,75 @@ def render_sidebar(  # noqa: PLR0915
         }
 
         st.subheader("Población NPS")
+
+        # Global time population: Año/Mes (transversal a TODO el dashboard).
+        # Defaults: last available year/month from the persisted dataset for the selected context.
+        pop_year_default = POP_ALL
+        pop_month_default = POP_ALL
+
+        ctx_base = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+        meta_pop = store.read_meta(ctx_base)
+        dataset_id = str(meta_pop.get("dataset_id") or "")
+        years_available, months_by_year = store.available_year_month(ctx_base.key())
+
+        # Determine default from meta.date_range.max (authoritative)
+        try:
+            dr = meta_pop.get("date_range") or {}
+            max_s = dr.get("max")
+            ts = pd.to_datetime(max_s, errors="coerce") if max_s else None
+            if ts is not None and not pd.isna(ts):
+                pop_year_default = str(int(ts.year))
+                pop_month_default = str(int(ts.month)).zfill(2)
+        except Exception:
+            pass
+
+        # If dataset changed (new upload), reset population defaults deterministically.
+        if dataset_id and st.session_state.get("_pop_dataset_id") != dataset_id:
+            st.session_state["_pop_dataset_id"] = dataset_id
+            st.session_state["_pop_year"] = pop_year_default
+            st.session_state["_pop_month"] = pop_month_default
+
+        year_options = [POP_ALL] + years_available
+        cur_pop_year = str(st.session_state.get("_pop_year", pop_year_default))
+        if cur_pop_year not in year_options:
+            cur_pop_year = pop_year_default if pop_year_default in year_options else POP_ALL
+
+        pop_year = st.selectbox(
+            "Año",
+            options=year_options,
+            index=year_options.index(cur_pop_year) if cur_pop_year in year_options else 0,
+            help="Filtro global temporal que aplica a todo el dashboard (datos, topics, drivers, journey, alertas, NPS↔Helix, LLM packs).",
+        )
+        st.session_state["_pop_year"] = pop_year
+
+        # Month options depend on year selection.
+        if pop_year != POP_ALL and pop_year in months_by_year:
+            month_options = [POP_ALL] + months_by_year.get(pop_year, [])
+        else:
+            # Union of months that actually exist in the dataset (avoid showing empty months).
+            months_union: set[str] = set()
+            for _yy, mlist in months_by_year.items():
+                months_union.update(mlist)
+            month_options = [POP_ALL] + sorted(months_union)
+
+        cur_pop_month = str(st.session_state.get("_pop_month", pop_month_default))
+        # If user changed year, ensure month is still valid.
+        if cur_pop_month not in month_options:
+            cur_pop_month = (
+                pop_month_default
+                if pop_year == pop_year_default and pop_month_default in month_options
+                else POP_ALL
+            )
+
+        pop_month = st.selectbox(
+            "Mes",
+            options=month_options,
+            index=month_options.index(cur_pop_month) if cur_pop_month in month_options else 0,
+            format_func=month_format_es,
+            help="Filtro global temporal. Si seleccionas Año=Todos y Mes=Marzo, se analiza Marzo en todos los años disponibles.",
+        )
+        st.session_state["_pop_month"] = pop_month
+
         nps_group_choice = st.selectbox(
             "Grupo",
             options=NPS_GROUP_OPTIONS,
@@ -1094,10 +1177,8 @@ def render_sidebar(  # noqa: PLR0915
             cpa, cpb = st.columns(2)
             with cpa:
                 if st.button("Reset timings", use_container_width=True):
-                    try:
+                    with contextlib.suppress(Exception):
                         perf.reset()
-                    except Exception:
-                        pass
                     st.rerun()
             with cpb:
                 # Clear deterministic compute cache
@@ -1122,6 +1203,8 @@ def render_sidebar(  # noqa: PLR0915
         service_origin,
         service_origin_n1,
         service_origin_n2,
+        pop_year,
+        pop_month,
         st.session_state.get("_nps_group_choice", "Detractores"),
         settings.knowledge_dir,
         theme_mode,
@@ -1672,8 +1755,8 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
         st.plotly_chart(fig, use_container_width=True)
 
     cp_rows = [
-        {"date": str(p), "stability": float(s), "level": str(l)}
-        for p, s, l in zip(cp.points, cp.stability, cp.level)
+        {"date": str(p), "stability": float(s), "level": str(level)}
+        for p, s, level in zip(cp.points, cp.stability, cp.level)
     ]
 
     st.markdown(
@@ -1804,11 +1887,8 @@ def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
     # (copyable via Ctrl/Cmd+C), and optionally also show the JS copy button.
     c1, c2 = st.columns([2, 1])
     with c1:
-        try:
+        with contextlib.suppress(Exception):
             _clipboard_copy_widget(prompt, label="Copiar prompt")
-        except Exception:
-            # Defensive: if components are blocked, we still provide the prompt below.
-            pass
 
         st.text_area(
             "Prompt (copia y pega en tu ChatGPT)",
@@ -2281,6 +2361,7 @@ def page_nps_helix_linking(
 
     # 2) Timeline causal (global)
     st.markdown("### Timeline causal (global)")
+    px, go = _plotly()
     fig = go.Figure()
     if show_all_groups:
         # Show the 3 group rates on the same plot (comparison mode)
@@ -2439,6 +2520,7 @@ def page_nps_helix_linking(
         # Bar chart top 15
         topn = show.head(15).copy()
         # Confidence is a priority/risk proxy -> use status-aligned scale (neutral→warning→alert)
+        px, go = _plotly()
         fig2 = px.bar(
             topn[::-1],
             x="confidence_learned",
@@ -2460,6 +2542,7 @@ def page_nps_helix_linking(
             by_topic_weekly.pivot_table(index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0)
         )
         if pivot.shape[0] > 0 and pivot.shape[1] > 0:
+            px, go = _plotly()
             heat = px.imshow(
                 pivot,
                 aspect="auto",
@@ -2485,6 +2568,7 @@ def page_nps_helix_linking(
             # may be NaN or string
             cps = [] if pd.isna(cps) else [str(cps)]
         g["incidents_shifted"] = g["incidents"].shift(lagw)
+        px, go = _plotly()
         fig_lag = go.Figure()
         fig_lag.add_trace(
             go.Scatter(
@@ -2563,6 +2647,7 @@ def page_nps_helix_linking(
             lagd = int(lag_days.set_index("nps_topic").loc[topic_sel, "best_lag_days"]) if topic_sel in lag_days["nps_topic"].values else 0
             gd = by_topic_daily[by_topic_daily["nps_topic"] == topic_sel].sort_values("date").copy()
             gd["incidents_shifted"] = gd["incidents"].shift(lagd)
+            px, go = _plotly()
             figd = go.Figure()
             figd.add_trace(
                 go.Scatter(
@@ -2754,7 +2839,7 @@ def main() -> None:
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to bootstrap .env from .env.example: {exc}"
-            )
+            ) from exc
 
     # IMPORTANT: Streamlit may execute with different working directories depending on how it's launched.
     # We therefore resolve the .env path robustly (cwd + parent directories) and then load it.
@@ -2781,6 +2866,8 @@ def main() -> None:
         service_origin,
         service_origin_n1,
         service_origin_n2,
+        pop_year,
+        pop_month,
         nps_group_choice,
         cache_path,
         theme_mode,
@@ -2791,7 +2878,7 @@ def main() -> None:
     theme = get_theme(theme_mode)
     apply_theme(theme)
 
-    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{nps_group_choice}"
+    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{pop_year}__{pop_month}__{nps_group_choice}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
         st.session_state["llm_insights"] = load_llm_insights_for_context(settings, service_origin=service_origin, service_origin_n1=service_origin_n1)
@@ -2808,7 +2895,15 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    pills([f"Service origin: {service_origin}", f"N1: {service_origin_n1}", f"N2: {service_origin_n2 or '-'}", f"Modo: {theme_mode}"])
+    pills(
+        [
+            f"Service origin: {service_origin}",
+            f"N1: {service_origin_n1}",
+            f"N2: {service_origin_n2 or '-'}",
+            f"Año: {pop_year}",
+            f"Mes: {month_format_es(pop_month)}",
+        ]
+    )
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
 
@@ -2820,6 +2915,9 @@ def main() -> None:
         st.stop()
 
     store_dir = settings.data_dir / "store"
+
+    # Global population time window (Año/Mes) applied everywhere.
+    pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
 
     st.divider()
@@ -2847,7 +2945,17 @@ def main() -> None:
     )
 
     with t_resumen:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["resumen"] or tuple())
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["resumen"] or tuple(),
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         st.markdown(
             "<div class='nps-card nps-card--flat'>"
             "<b>Cómo leer esta pestaña</b><br/>"
@@ -2877,27 +2985,87 @@ def main() -> None:
             )
 
     with t_drivers:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["drivers"])
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["drivers"],
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         page_drivers(df, theme, min_n=min_n)
 
     with t_texto:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["texto"])
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["texto"],
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         page_text(df, theme)
 
     with t_journey:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["journey"])
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["journey"],
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         page_journey(df)
 
     with t_alertas:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["alertas"])
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["alertas"],
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         page_changes(df, theme)
 
     with t_llm:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, VIEW_COLUMNS["llm"])
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["llm"],
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         page_llm(df, settings=settings, min_n=min_n, cache_path=cache_path)
 
     with t_datos:
-        df = load_context_df(store_dir, service_origin, service_origin_n1, service_origin_n2, nps_group_choice, tuple())
+        df = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            tuple(),
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
         helix_store = HelixIncidentStore(settings.data_dir / "helix")
         hctx = DatasetContext(
             service_origin=service_origin,

@@ -31,7 +31,8 @@ def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> li
         return []
     overall = compute_nps_from_scores(df[score_col])
     out: list[DriverStat] = []
-    for value, g in df.groupby(dimension, dropna=False):
+    # Pandas groupby observed default is changing; be explicit and keep output small.
+    for value, g in df.groupby(dimension, dropna=False, observed=True):
         n = int(len(g))
         nps = compute_nps_from_scores(g[score_col])
         s = pd.to_numeric(g[score_col], errors="coerce").dropna()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 
 import pandas as pd
@@ -195,10 +196,8 @@ def chart_daily_score_ladder(
     # Normalize to day and keep a bounded window for UI performance.
     day = pd.to_datetime(tmp[date_col], errors="coerce")
     # Strip timezone to avoid window comparisons dropping all rows.
-    try:
+    with contextlib.suppress(Exception):
         day = day.dt.tz_localize(None)
-    except Exception:
-        pass
     tmp["day"] = day.dt.floor("D")
     tmp = tmp.dropna(subset=["day"]).copy()
     if tmp.empty:
@@ -294,10 +293,8 @@ def chart_daily_score_semaforo(
 
     day = pd.to_datetime(tmp[date_col], errors="coerce")
     # Strip timezone to avoid window comparisons dropping all rows.
-    try:
+    with contextlib.suppress(Exception):
         day = day.dt.tz_localize(None)
-    except Exception:
-        pass
     tmp["day"] = day.dt.floor("D")
     tmp = tmp.dropna(subset=["day"]).copy()
     if tmp.empty:

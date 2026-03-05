@@ -610,7 +610,13 @@ def daily_aggregates(
         )
         by_topic_inc = ia.groupby(["date", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
         by_topic = by_topic.merge(by_topic_inc, on=["date", "nps_topic"], how="left")
-    by_topic["incidents"] = by_topic.get("incidents", 0).fillna(0)
+    # Defensive: if there are no Helix incidents (or linking is disabled), the
+    # merge above won't create an "incidents" column. Ensure it always exists
+    # and is numeric to keep downstream charts stable.
+    if "incidents" not in by_topic.columns:
+        by_topic["incidents"] = 0
+    else:
+        by_topic["incidents"] = by_topic["incidents"].fillna(0)
     return overall, by_topic
 
 

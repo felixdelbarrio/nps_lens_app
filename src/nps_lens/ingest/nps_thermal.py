@@ -6,6 +6,7 @@ from typing import Optional, Union
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
+from nps_lens.core.store import DatasetContext
 from nps_lens.ingest.features import add_precomputed_features
 
 
@@ -40,6 +41,7 @@ def read_nps_thermal_excel(
     path: str,
     service_origin: Optional[str] = None,
     service_origin_n1: Optional[str] = None,
+    service_origin_n2: Optional[str] = None,
     sheet_name: Optional[Union[str, int]] = None,
 ) -> IngestResult:
     """Read + normalize NPS térmico Excel.
@@ -53,7 +55,7 @@ def read_nps_thermal_excel(
       2) not contain them, in which case the caller must provide service_origin/service_origin_n1
     """
 
-    sn: Union[str, int] = 0 if not sheet_name else sheet_name
+    sn: Union[str, int] = sheet_name if sheet_name else 0
     df = pd.read_excel(path, sheet_name=sn, engine="openpyxl")
     if isinstance(df, dict):
         df = list(df.values())[0]
@@ -169,6 +171,22 @@ def read_nps_thermal_excel(
 
     # Normalize service_origin_n2 formatting (stable, no stray spaces)
     df_out["service_origin_n2"] = df_out["service_origin_n2"].apply(lambda v: ", ".join(_split_csvish(v)))
+
+    # Optional filter by service_origin_n2 (strict token-set equality)
+    if service_origin_n2 is not None:
+        want = ", ".join(_split_csvish(service_origin_n2))
+        want_key = DatasetContext._norm_n2(want)
+        have_key = df_out["service_origin_n2"].apply(DatasetContext._norm_n2)
+        before = len(df_out)
+        df_out = df_out.loc[have_key == want_key]
+        dropped = before - len(df_out)
+        if dropped:
+            issues.append(
+                ValidationIssue(
+                    level="WARN",
+                    message=f"Filtradas {dropped} filas fuera de service_origin_n2={want or '∅'}.",
+                )
+            )
 
     # basic de-dup
     before = len(df_out)

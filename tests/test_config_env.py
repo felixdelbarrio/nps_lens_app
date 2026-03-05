@@ -1,3 +1,4 @@
+import pytest
 from nps_lens.config import Settings
 
 
@@ -38,11 +39,9 @@ def test_settings_fails_fast_when_required_env_missing(monkeypatch):
     monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N1", raising=False)
     monkeypatch.delenv("SERVICE_ORIGIN_N1", raising=False)
 
-    try:
+    with pytest.raises(RuntimeError) as e:
         Settings.from_env()
-        assert False, "Expected Settings.from_env() to raise"
-    except RuntimeError as e:
-        assert "NPS_LENS_SERVICE_ORIGIN_N1" in str(e)
+    assert "NPS_LENS_SERVICE_ORIGIN_N1" in str(e.value)
 
 
 def test_settings_fails_fast_when_n1_map_incomplete(monkeypatch):
@@ -50,9 +49,8 @@ def test_settings_fails_fast_when_n1_map_incomplete(monkeypatch):
     # Map only defines México
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"BBVA México": ["Senda"]}')
 
-    try:
+    with pytest.raises(RuntimeError) as e:
         Settings.from_env()
-        assert False, "Expected Settings.from_env() to raise"
-    except RuntimeError as e:
-        assert "missing entries" in str(e)
-        assert "BBVA España" in str(e)
+    msg = str(e.value)
+    assert "missing entries" in msg
+    assert "BBVA España" in msg

@@ -58,6 +58,7 @@ src/nps_lens/ui/business.py
 src/nps_lens/ui/charts.py
 src/nps_lens/ui/components.py
 src/nps_lens/ui/narratives.py
+src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_config_env.py
 tests/test_drivers.py
@@ -69,3 +70,4 @@ tests/test_llm_insight_response.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py
 tests/test_text_mining.py
+tests/test_ui_population.py

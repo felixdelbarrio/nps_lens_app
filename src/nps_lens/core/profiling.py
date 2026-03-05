@@ -7,13 +7,13 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, cast
 
 
 @dataclass
 class ProfileSummary:
     path: Path
-    top: List[dict]
+    top: List[Dict[str, object]]
 
 
 def profiling_enabled() -> bool:
@@ -24,10 +24,13 @@ def profiling_enabled() -> bool:
 def load_profile_summary(path: Path, *, top_n: int = 15) -> ProfileSummary:
     stats = pstats.Stats(str(path))
     stats.strip_dirs().sort_stats("cumulative")
-    top: List[dict] = []
+    top: List[Dict[str, object]] = []
+
+    # pstats.Stats has a runtime attribute `stats`, but type stubs may miss it.
+    stats_any = cast(Any, stats)
 
     # stats.stats: (filename, line, func) -> (cc, nc, tt, ct, callers)
-    for (fn, line, func), (_cc, nc, tt, ct, _callers) in stats.stats.items():
+    for (fn, line, func), (_cc, nc, tt, ct, _callers) in stats_any.stats.items():
         top.append(
             {
                 "func": f"{func} ({Path(fn).name}:{line})",
@@ -36,7 +39,10 @@ def load_profile_summary(path: Path, *, top_n: int = 15) -> ProfileSummary:
                 "self_s": float(tt),
             }
         )
-    top = sorted(top, key=lambda r: r["cum_s"], reverse=True)[: int(top_n)]
+    def _cum_key(r: Dict[str, object]) -> float:
+        return float(cast(float, r["cum_s"]))
+
+    top = sorted(top, key=_cum_key, reverse=True)[: int(top_n)]
     return ProfileSummary(path=path, top=top)
 
 
@@ -68,7 +74,7 @@ def profile_if_enabled(out_dir: Path, *, tag: str = "run") -> Iterator[List[Prof
         with tempfile.NamedTemporaryFile(dir=str(out_dir), delete=False, suffix=f"_{tag}.prof") as tf:
             tmp_path = Path(tf.name)
         pr.dump_stats(str(tmp_path))
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             summaries.append(load_profile_summary(tmp_path))
-        except Exception:
-            pass

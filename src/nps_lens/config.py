@@ -70,6 +70,7 @@ class Settings:
                         if not key:
                             continue
                         if isinstance(vals, list):
+                            # JSON list is already structured; never re-parse its string representation.
                             out[key] = [str(x).strip() for x in vals if str(x).strip()]
                         else:
                             out[key] = _split_csv(str(vals))
@@ -86,10 +87,7 @@ class Settings:
                 key = k.strip()
                 if not key:
                     continue
-                if "|" in rest:
-                    vals = [p.strip() for p in rest.split("|") if p.strip()]
-                else:
-                    vals = _split_csv(rest)
+                vals = [p.strip() for p in rest.split("|") if p.strip()] if "|" in rest else _split_csv(rest)
                 out2[key] = vals
             return out2
 

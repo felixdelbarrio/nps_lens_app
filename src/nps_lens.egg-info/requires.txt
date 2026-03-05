@@ -11,6 +11,7 @@ statsmodels<0.15,>=0.14
 networkx<3.4,>=3.1
 ruptures<2.0,>=1.1.8
 streamlit<1.40,>=1.31
+watchdog<5.0,>=3.0
 openpyxl<3.2,>=3.1
 typing_extensions<5.0,>=4.7
 

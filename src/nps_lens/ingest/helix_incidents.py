@@ -8,10 +8,11 @@ import pandas as pd
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 
 
+# Canonical context columns used by the app.
+# We require N1 (channel) to be present. Company/N2 are optional because some
+# Helix extracts are already pre-filtered or omit those fields.
 HELIX_REQUIRED = [
-    "BBVA_SourceServiceCompany",
     "BBVA_SourceServiceN1",
-    "BBVA_SourceServiceN2",
 ]
 
 
@@ -79,25 +80,50 @@ def _parse_helix_datetime(series: pd.Series) -> pd.Series:
     s = series.copy()
 
     def _epoch_to_dt(num: pd.Series) -> pd.Series:
-        """Convert numeric epoch series to datetime.
+        """Convert numeric epoch series to datetime (robust to mixed units).
 
-        NOTE: pandas.to_datetime() on integers without specifying `unit`
-        assumes **nanoseconds**. Helix commonly provides **milliseconds**.
-        If we parse millisecond epochs as nanoseconds we get 1970-era dates
-        (the bug you observed).
+        Helix extracts are usually **epoch milliseconds**, but in practice we
+        also see seconds, microseconds or nanoseconds (e.g. logs / API joins).
+        Passing a nanosecond value with unit='ms' triggers overflow.
+
+        Strategy:
+          - Coerce to numeric.
+          - If the column is "mostly numeric", detect unit by magnitude.
+          - Handle mixed magnitudes by converting subsets with different units.
+
+        Output is timezone-naive.
         """
 
         n = pd.to_numeric(num, errors="coerce")
-        if len(n) == 0:
+        if len(n) == 0 or float(n.notna().mean()) < 0.6:
             return pd.to_datetime(n, errors="coerce")
-        if float(n.notna().mean()) < 0.6:
-            return pd.to_datetime(n, errors="coerce")
-        med = float(n.dropna().median())
-        if med >= 1e12:
-            return pd.to_datetime(n, unit="ms", utc=True, errors="coerce").dt.tz_localize(None)
-        if med >= 1e9:
-            return pd.to_datetime(n, unit="s", utc=True, errors="coerce").dt.tz_localize(None)
-        return pd.to_datetime(n, errors="coerce")
+
+        abs_n = n.abs()
+        # Heuristic thresholds (order matters):
+        #   ns ~ 1e18, us ~ 1e15, ms ~ 1e12, s ~ 1e9
+        mask_ns = abs_n >= 1e17
+        mask_us = (abs_n >= 1e14) & ~mask_ns
+        mask_ms = (abs_n >= 1e11) & ~(mask_ns | mask_us)
+        mask_s = (abs_n >= 1e9) & ~(mask_ns | mask_us | mask_ms)
+
+        out = pd.Series(pd.NaT, index=n.index)
+
+        def _convert(mask: pd.Series, unit: str) -> None:
+            if not bool(mask.any()):
+                return
+            out.loc[mask] = pd.to_datetime(n.loc[mask], unit=unit, utc=True, errors="coerce").dt.tz_localize(None)
+
+        _convert(mask_ns, "ns")
+        _convert(mask_us, "us")
+        _convert(mask_ms, "ms")
+        _convert(mask_s, "s")
+
+        # If some numeric values are too small for epoch heuristics, try generic.
+        mask_rest = n.notna() & out.isna()
+        if bool(mask_rest.any()):
+            out.loc[mask_rest] = pd.to_datetime(n.loc[mask_rest], errors="coerce")
+
+        return out
 
     # 1) If already numeric -> treat as epoch first (avoid ns default)
     if pd.api.types.is_numeric_dtype(s):
@@ -118,12 +144,15 @@ def _parse_helix_datetime(series: pd.Series) -> pd.Series:
 
 def _looks_like_datetime_col(col: str) -> bool:
     lc = str(col).lower()
-    if "fecha" in lc or "date" in lc or "datetime" in lc or "timestamp" in lc:
-        return True
-    # Common Helix/BBVA exports
-    if "datt" in lc or lc.endswith("_date") or lc.endswith("_datetime"):
-        return True
-    return False
+    return (
+        "fecha" in lc
+        or "date" in lc
+        or "datetime" in lc
+        or "timestamp" in lc
+        or "datt" in lc
+        or lc.endswith("_date")
+        or lc.endswith("_datetime")
+    )
 
 
 def _auto_parse_epoch_datetime_columns(d: pd.DataFrame, issues: List[ValidationIssue]) -> pd.DataFrame:
@@ -213,12 +242,15 @@ def read_helix_incidents_excel(
             "BBVA_SourceServiceCompany": "BBVA_SourceServiceCompany",
             "BBVA Source Service Company": "BBVA_SourceServiceCompany",
             "SourceServiceCompany": "BBVA_SourceServiceCompany",
+            "Servicio Origen - BU/UG": "BBVA_SourceServiceCompany",
             "BBVA_SourceServiceN1": "BBVA_SourceServiceN1",
             "BBVA Source Service N1": "BBVA_SourceServiceN1",
             "SourceServiceN1": "BBVA_SourceServiceN1",
+            "Servicio Origen - Servicio N1": "BBVA_SourceServiceN1",
             "BBVA_SourceServiceN2": "BBVA_SourceServiceN2",
             "BBVA Source Service N2": "BBVA_SourceServiceN2",
             "SourceServiceN2": "BBVA_SourceServiceN2",
+            "Servicio Origen - Servicio N2": "BBVA_SourceServiceN2",
         },
     )
 
@@ -228,23 +260,40 @@ def read_helix_incidents_excel(
     if any(i.level == "ERROR" for i in issues):
         return IngestResult(df=df, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1))
 
+    # Ensure optional canonical context columns exist.
+    if "BBVA_SourceServiceCompany" not in df.columns:
+        df["BBVA_SourceServiceCompany"] = str(service_origin)
+        issues.append(
+            ValidationIssue(
+                level="WARN",
+                message=(
+                    "Columna de contexto 'BBVA_SourceServiceCompany' no encontrada en el fichero Helix. "
+                    "Se asume que el fichero ya viene filtrado para el service_origin seleccionado."
+                ),
+            )
+        )
+    if "BBVA_SourceServiceN2" not in df.columns:
+        df["BBVA_SourceServiceN2"] = ""
+
     # Normalize N2 column to stable CSV-ish string
     d = df.copy()
     d["BBVA_SourceServiceCompany"] = d["BBVA_SourceServiceCompany"].astype(str)
     d["BBVA_SourceServiceN1"] = d["BBVA_SourceServiceN1"].astype(str)
     d["BBVA_SourceServiceN2"] = d["BBVA_SourceServiceN2"].apply(lambda v: ", ".join(_split_csvish(v)))
 
-    # Mandatory filters
-    before = len(d)
-    d = d.loc[d["BBVA_SourceServiceCompany"].astype(str) == str(service_origin)]
-    dropped = before - len(d)
-    if dropped:
-        issues.append(
-            ValidationIssue(
-                level="INFO",
-                message=f"Filtradas {dropped} filas fuera de BBVA_SourceServiceCompany={service_origin}.",
+    # Context filters
+    # Company filter is best-effort: if the column was missing we filled it with the selected origin.
+    if "BBVA_SourceServiceCompany" in d.columns:
+        before = len(d)
+        d = d.loc[d["BBVA_SourceServiceCompany"].astype(str) == str(service_origin)]
+        dropped = before - len(d)
+        if dropped:
+            issues.append(
+                ValidationIssue(
+                    level="INFO",
+                    message=f"Filtradas {dropped} filas fuera de BBVA_SourceServiceCompany={service_origin}.",
+                )
             )
-        )
 
     before = len(d)
     d = d.loc[d["BBVA_SourceServiceN1"].astype(str) == str(service_origin_n1)]

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+import contextlib
 from dataclasses import dataclass
 from hashlib import sha1
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
+from functools import lru_cache
 
 import pandas as pd
 
@@ -237,6 +238,8 @@ class DatasetStore:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        # Small in-memory cache for available year/month per context (safe for Streamlit reruns).
+        self._avail_year_month_cache: dict[str, tuple[list[str], dict[str, list[str]]]] = {}
 
     def _paths_for(self, ctx: DatasetContext) -> tuple[Path, Path, Path, Path, Path]:
         data_path = self.base_dir / f"nps__{ctx.key()}.jsonl"
@@ -270,6 +273,79 @@ class DatasetStore:
         if not data_path.exists() or not meta_path.exists():
             return None
         return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
+
+    def read_meta(self, ctx: DatasetContext) -> dict:
+        """Read the persisted metadata for a context.
+
+        This is the single source of truth for dataset identity/date-range and is intentionally
+        cheap (small JSON read). Callers should *not* parse meta files ad-hoc.
+        """
+
+        stored = self.get(ctx)
+        if stored is None:
+            return {}
+        try:
+            return json.loads(stored.meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def available_year_month(self, ctx_key: str) -> tuple[list[str], dict[str, list[str]]]:
+        """Return available years and months for a context.
+
+        - Years are returned as strings, sorted ascending.
+        - Months are 2-digit strings ("01".."12"), sorted ascending, grouped by year.
+
+        Uses the compact index parquet (Fecha_day x Palanca x Canal) when available.
+        Falls back to meta.date_range when the index is missing.
+
+        Note: ctx_key is used to make the function cacheable across Streamlit reruns.
+        """
+
+        cached = self._avail_year_month_cache.get(ctx_key)
+        if cached is not None:
+            return cached
+
+        ctx = DatasetContext.from_key(ctx_key)
+        _data_path, meta_path, _parquet_dir, index_path, _hot_dir = self._paths_for(ctx)
+
+        years: set[str] = set()
+        months_by_year: dict[str, set[str]] = {}
+
+        if index_path.exists():
+            try:
+                d = pd.read_parquet(index_path, columns=["Fecha_day"])
+                if not d.empty and "Fecha_day" in d.columns:
+                    s = d["Fecha_day"].astype(str)
+                    # Fast parse via slicing: YYYY-MM-DD
+                    y = s.str.slice(0, 4)
+                    m = s.str.slice(5, 7)
+                    for yy, mm in zip(y.tolist(), m.tolist()):
+                        if not yy or not mm:
+                            continue
+                        years.add(yy)
+                        months_by_year.setdefault(yy, set()).add(mm)
+            except Exception:
+                pass
+
+        # Fallback: infer from date_range only (months unknown → empty months list)
+        if not years:
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                dr = meta.get("date_range") or {}
+                max_s = dr.get("max")
+                if max_s:
+                    ts = pd.to_datetime(max_s, errors="coerce")
+                    if not pd.isna(ts):
+                        years.add(str(int(ts.year)))
+                        months_by_year.setdefault(str(int(ts.year)), set()).add(str(int(ts.month)).zfill(2))
+            except Exception:
+                pass
+
+        years_sorted = sorted(years)
+        months_sorted: dict[str, list[str]] = {
+            yy: sorted(mset) for yy, mset in months_by_year.items() if yy in years
+        }
+        return years_sorted, months_sorted
 
     def default_context(self) -> Optional[DatasetContext]:
         ctxs = self.list_contexts()
@@ -409,10 +485,8 @@ class DatasetStore:
         subset_hash = _subset_key(str(parquet_dir), cols_t, _norm_date(date_start), _norm_date(date_end), _norm_values(lever_values), dsig)
         hot_path = hot_dir / f"subset__{stored.context.key()}__{subset_hash}.parquet"
         if hot_path.exists():
-            try:
+            with contextlib.suppress(Exception):
                 return pd.read_parquet(hot_path).copy()
-            except Exception:
-                pass
 
         if cache_ok:
             try:
@@ -427,10 +501,8 @@ class DatasetStore:
                 out = dfp.copy()
                 # Persist a "hot" subset when it is small enough (best-effort).
                 if len(out) <= 300_000 and len(out.columns) <= 25:
-                    try:
+                    with contextlib.suppress(Exception):
                         out.to_parquet(hot_path, index=False)
-                    except Exception:
-                        pass
                 return out
             except Exception:
                 # Fall back to JSONL
@@ -447,10 +519,8 @@ class DatasetStore:
         ).copy()
 
         if len(df) <= 300_000 and len(df.columns) <= 25:
-            try:
+            with contextlib.suppress(Exception):
                 df.to_parquet(hot_path, index=False)
-            except Exception:
-                pass
 
         # Best-effort cache rebuild
         try:
@@ -563,10 +633,8 @@ class DatasetStore:
                 if p.is_file():
                     p.unlink()
             for p in sorted([p for p in parquet_dir.rglob("*") if p.is_dir()], reverse=True):
-                try:
+                with contextlib.suppress(Exception):
                     p.rmdir()
-                except Exception:
-                    pass
         parquet_dir.mkdir(parents=True, exist_ok=True)
 
         d = df.copy()
@@ -645,6 +713,8 @@ class HelixIncidentStore:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        # Small in-memory cache for available year/month per context (safe for Streamlit reruns).
+        self._avail_year_month_cache: dict[str, tuple[list[str], dict[str, list[str]]]] = {}
 
     def _paths_for(self, ctx: DatasetContext) -> tuple[Path, Path, Path]:
         data_path = self.base_dir / f"helix_incidents__{ctx.key()}.jsonl"
@@ -737,11 +807,15 @@ class HelixIncidentStore:
 
         def _looks_like_datetime_col(col: str) -> bool:
             lc = str(col).lower()
-            if "fecha" in lc or "date" in lc or "datetime" in lc or "timestamp" in lc:
-                return True
-            if "datt" in lc or lc.endswith("_date") or lc.endswith("_datetime"):
-                return True
-            return False
+            return (
+                "fecha" in lc
+                or "date" in lc
+                or "datetime" in lc
+                or "timestamp" in lc
+                or "datt" in lc
+                or lc.endswith("_date")
+                or lc.endswith("_datetime")
+            )
 
         def _recover_epoch_ms(series: pd.Series) -> pd.Series:
             s = series
@@ -824,10 +898,8 @@ class HelixIncidentStore:
                 if p.is_file():
                     p.unlink()
             for p in sorted([p for p in parquet_dir.rglob("*") if p.is_dir()], reverse=True):
-                try:
+                with contextlib.suppress(Exception):
                     p.rmdir()
-                except Exception:
-                    pass
         parquet_dir.mkdir(parents=True, exist_ok=True)
 
         d = df.copy()

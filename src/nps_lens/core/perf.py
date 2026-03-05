@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List
 
 
 @dataclass
@@ -31,7 +31,7 @@ class PerfTracker:
             self.events.append(PerfEvent(name=name, seconds=float(dt)))
 
     # Backward-compatible alias (older code used `timer`).
-    def timer(self, name: str) -> contextlib.AbstractContextManager:
+    def timer(self, name: str) -> contextlib.AbstractContextManager[None]:
         return self.track(name)
 
     def summary(self) -> List[Dict[str, object]]:

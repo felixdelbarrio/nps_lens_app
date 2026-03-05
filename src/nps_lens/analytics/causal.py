@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import warnings
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,10 @@ def best_effort_ate_logit(
         warnings.append("Low sample size for stable estimates (<500).")
 
     try:
-        model = sm.Logit(y2, X2).fit(disp=False, maxiter=200)
+        # Statsmodels may emit ConvergenceWarning for difficult fits; treat as a soft signal.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+            model = sm.Logit(y2, X2).fit(disp=False, maxiter=400)
         coef = float(model.params["treat"])
         pval = float(model.pvalues["treat"])
         # convert log-odds to approx risk diff at mean baseline
