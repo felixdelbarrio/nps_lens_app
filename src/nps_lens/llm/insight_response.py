@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from typing_extensions import Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator
+from typing_extensions import Literal
 
 
 class ActionV1(BaseModel):

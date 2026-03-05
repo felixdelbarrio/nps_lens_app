@@ -12,7 +12,6 @@ import calendar
 from datetime import date
 from typing import Dict, Optional, Tuple
 
-
 # Global option used across selectors.
 POP_ALL = "Todos"
 

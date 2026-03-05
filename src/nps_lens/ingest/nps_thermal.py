@@ -5,10 +5,9 @@ from typing import Optional, Union
 
 import pandas as pd
 
-from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.core.store import DatasetContext
+from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.ingest.features import add_precomputed_features
-
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",

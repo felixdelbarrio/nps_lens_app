@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import Field, validator
 
 from nps_lens.models.common import CanonicalBase
 

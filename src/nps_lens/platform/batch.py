@@ -155,8 +155,8 @@ def run_platform_batch(
             routes_out = {"error": str(e)}
 
         # --- Build top-k packs (rank opportunities) ---
-        from nps_lens.analytics.opportunities import rank_opportunities
         from nps_lens.analytics.causal import best_effort_ate_logit
+        from nps_lens.analytics.opportunities import rank_opportunities
 
         opps = rank_opportunities(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
         exported_packs: List[Dict[str, str]] = []

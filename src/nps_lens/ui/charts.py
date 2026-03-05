@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 
 import pandas as pd
 
+from nps_lens.design.tokens import DesignTokens, palette
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
 
@@ -12,6 +14,45 @@ def apply_plotly_template(fig: object, theme: Theme) -> object:
     """Apply the project Plotly template (token-driven)."""
 
     return apply_plotly_theme(fig, theme)
+
+
+@dataclass(frozen=True)
+class ChartTheme:
+    """Minimal layout theme used by a few chart helpers.
+
+    Plotly visuals are primarily styled via the token-driven template in
+    ``nps_lens.ui.plotly_theme``. This dataclass only provides a small set of
+    colors for layout defaults in charts that still apply explicit layout.
+    """
+
+    paper_bg: str
+    plot_bg: str
+    text: str
+    grid: str
+
+
+def chart_theme(theme: Theme) -> ChartTheme:
+    """Derive minimal layout colors from design tokens."""
+
+    tokens = DesignTokens.default()
+    p = palette(tokens, theme.mode)
+    return ChartTheme(
+        paper_bg=p["color.app.surface.default"],
+        plot_bg=p["color.app.surface.raised"],
+        text=p["color.primary.text.primary"],
+        grid=p["color.primary.bg.bar"],
+    )
+
+
+def _status_colors(theme: Theme) -> tuple[str, str, str]:
+    """Return semantic status colors (detractor, passive/warn, promoter)."""
+
+    tokens = DesignTokens.default()
+    p = palette(tokens, theme.mode)
+    detr = p["color.primary.bg.alert"]
+    warn = p["color.primary.bg.warning"]
+    prom = p["color.primary.bg.success"]
+    return detr, warn, prom
 
 
 
@@ -385,8 +426,8 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     agg["det_pct"] = agg["det"] * 100.0
 
     th = chart_theme(theme)
-    from plotly.subplots import make_subplots  # lazy import
     import plotly.graph_objects as go  # lazy import
+    from plotly.subplots import make_subplots  # lazy import
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(

@@ -1,7 +1,7 @@
 import pandas as pd
 
-from nps_lens.ingest.features import add_precomputed_features
 from nps_lens.core.store import DatasetContext
+from nps_lens.ingest.features import add_precomputed_features
 
 
 def test_add_precomputed_features_n2_key_and_text_norm():

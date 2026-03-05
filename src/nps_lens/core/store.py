@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import json
 import contextlib
+import json
 from dataclasses import dataclass
+from functools import lru_cache
 from hashlib import sha1
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
-from functools import lru_cache
 
 import pandas as pd
-
 
 # ---------------------------
 # In-process dataset cache
@@ -369,7 +368,6 @@ class DatasetStore:
           - RecordBatch scanning (lower peak memory)
           - in-process LRU caching keyed by projection+filters+dataset signature
         """
-        import pyarrow as pa  # type: ignore
 
         data_path, meta_path, parquet_dir, index_path, hot_dir = self._paths_for(stored.context)
         stat = data_path.stat()

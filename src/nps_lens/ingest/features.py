@@ -7,7 +7,6 @@ import pandas as pd
 
 from nps_lens.core.store import DatasetContext
 
-
 _WS_RE = re.compile(r"\s+")
 
 

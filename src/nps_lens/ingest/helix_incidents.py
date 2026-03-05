@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from hashlib import sha1
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
-
 
 # Canonical context columns used by the app.
 # We require N1 (channel) to be present. Company/N2 are optional because some

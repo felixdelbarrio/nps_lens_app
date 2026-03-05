@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
+import ruptures as rpt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-import ruptures as rpt
 
 
 def estimate_best_lag_by_topic(

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
-
-from nps_lens.analytics.drivers import compute_nps_from_scores
 
 
 @dataclass(frozen=True)

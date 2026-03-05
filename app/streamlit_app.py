@@ -1,51 +1,44 @@
 from __future__ import annotations
 
-import contextlib
-import json
 import base64
+import contextlib
 import hashlib
+import json
+import shutil
 from dataclasses import asdict
 from pathlib import Path
-import shutil
 from typing import Any, Optional
 
-import pandas as pd
 import numpy as np
-
-from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL, month_format_es, population_date_window
-
-
-
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.changepoints import detect_nps_changepoints
-from nps_lens.analytics.drivers import driver_table
-from nps_lens.analytics.journey import build_routes
-from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.analytics.nps_helix_link import (
-    causal_rank_by_topic,
-    link_incidents_to_nps_topics,
-    tokenset,
-    weekly_aggregates,
-    daily_aggregates,
     can_use_daily_resample,
+    causal_rank_by_topic,
+    daily_aggregates,
     detect_detractor_changepoints_with_bootstrap,
     estimate_best_lag_by_topic,
     estimate_best_lag_days_by_topic,
     incidents_lead_changepoints_flag,
-
+    link_incidents_to_nps_topics,
+    weekly_aggregates,
 )
-from nps_lens.config import Settings
-from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
-from nps_lens.core.disk_cache import DiskCache
-from nps_lens.core.perf import PerfTracker
+from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.application.service import AppService
+from nps_lens.config import Settings
+from nps_lens.core.disk_cache import DiskCache
+from nps_lens.core.knowledge_cache import load_entries as kc_load_entries
+from nps_lens.core.knowledge_cache import score_adjustments as kc_score_adjustments
+from nps_lens.core.perf import PerfTracker
+from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
 from nps_lens.design.tokens import (
     DesignTokens,
     cp_level_color,
@@ -53,17 +46,16 @@ from nps_lens.design.tokens import (
     plotly_continuous_scale,
     plotly_risk_scale,
 )
-from nps_lens.core.knowledge_cache import add_entry as kc_add_entry, load_entries as kc_load_entries, score_adjustments as kc_score_adjustments
-from nps_lens.llm.insight_response import validate_insight_response
-from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+from nps_lens.llm.insight_response import validate_insight_response
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
 from nps_lens.ui.charts import (
-    chart_daily_mix_business,
-    chart_daily_kpis,
-    chart_daily_volume,
-    chart_daily_score_semaforo,
     chart_cohort_heatmap,
+    chart_daily_kpis,
+    chart_daily_mix_business,
+    chart_daily_score_semaforo,
+    chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
     chart_nps_trend,
@@ -78,7 +70,9 @@ from nps_lens.ui.narratives import (
     explain_topics,
 )
 from nps_lens.ui.plotly_theme import apply_plotly_theme
+from nps_lens.ui.population import POP_ALL, month_format_es, population_date_window
 from nps_lens.ui.theme import Theme, apply_theme, get_theme
+
 
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
@@ -1729,10 +1723,11 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
         unsafe_allow_html=True,
     )
 
+    import pandas as pd
+
     from nps_lens.analytics.changepoints import detect_nps_changepoints_with_bootstrap
     from nps_lens.analytics.drivers import compute_nps_from_scores
     from nps_lens.ui.charts import chart_nps_timeseries_with_changepoints
-    import pandas as pd
 
     levers = sorted(df["Palanca"].astype(str).fillna("(vacío)").unique())[:80]
     lever = st.selectbox("Palanca", levers)

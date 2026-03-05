@@ -8,7 +8,6 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-
 STOPWORDS_ES = {
     "de","la","que","el","en","y","a","los","del","se","las","por","un","para","con",
     "no","una","su","al","lo","como","más","pero","sus","le","ya","o","este","sí",

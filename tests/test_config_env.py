@@ -1,4 +1,5 @@
 import pytest
+
 from nps_lens.config import Settings
 
 
