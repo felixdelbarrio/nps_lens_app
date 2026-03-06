@@ -18,6 +18,7 @@ src/nps_lens/analytics/drivers.py
 src/nps_lens/analytics/hotspot_metrics.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/journey.py
+src/nps_lens/analytics/linking_policy.py
 src/nps_lens/analytics/nps_helix_link.py
 src/nps_lens/analytics/opportunities.py
 src/nps_lens/analytics/text_mining.py
@@ -68,6 +69,7 @@ src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_config_env.py
+tests/test_desktop_port_reclaim.py
 tests/test_drivers.py
 tests/test_helix_ingest_filtering.py
 tests/test_hotspot_metrics.py
