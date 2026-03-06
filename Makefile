@@ -20,7 +20,7 @@ MYPY = $(VENV)/bin/mypy
 PYTEST = $(VENV)/bin/pytest
 STREAMLIT = $(VENV)/bin/streamlit
 
-.PHONY: ci clean format help lint run run-web setup ensure-venv test typecheck check-python platform build build-linux build-mac prepare-icons
+.PHONY: ci clean format format-check help lint run run-web setup ensure-venv test typecheck check-python platform build build-linux build-mac prepare-icons
 
 check-python: ## Fail fast if not running on Python 3.9.x (corp target)
 	@$(PYTHON) -c "import sys; v=sys.version_info; ok=(v.major==3 and v.minor==9);\
@@ -43,8 +43,11 @@ format: ## Auto-fix lint + format code
 	$(RUFF) check --fix .
 	$(BLACK) .
 
+format-check: ## Check formatting only (no changes)
+	$(BLACK) --check .
+
 lint: ## Run ruff lint checks
-	$(RUFF) check .
+	$(RUFF) check --no-fix .
 
 typecheck: ## Run mypy type checking
 	$(MYPY) .
@@ -128,7 +131,7 @@ build-mac: ensure-venv
 prepare-icons: ensure-venv ## Generate .png/.ico/.icns from assets/logo.png
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 
-ci: check-python format lint typecheck test ## Run full CI pipeline locally
+ci: check-python ensure-venv lint format-check typecheck test ## Run full CI checks locally
 
 clean: ## Remove virtualenv and caches
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache dist build .coverage htmlcov

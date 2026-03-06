@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import inspect
 import os
 import signal
@@ -38,11 +39,12 @@ def _set_macos_app_icon(icon_path: Optional[Path]) -> None:
     if not icon_path or sys.platform != "darwin":
         return
     try:
-        from AppKit import NSApplication, NSImage  # type: ignore[import-untyped]
-
-        image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+        appkit = importlib.import_module("AppKit")
+        ns_image = appkit.NSImage
+        ns_application = appkit.NSApplication
+        image = ns_image.alloc().initWithContentsOfFile_(str(icon_path))
         if image:
-            NSApplication.sharedApplication().setApplicationIconImage_(image)
+            ns_application.sharedApplication().setApplicationIconImage_(image)
     except Exception:
         # Best-effort only: pyobjc/AppKit may be unavailable in some runtimes.
         pass
