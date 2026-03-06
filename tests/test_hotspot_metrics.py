@@ -72,7 +72,9 @@ def test_hotspot_metrics_bundle_keeps_timeline_counts_coherent() -> None:
     assert not timeline.empty
     assert not summary.empty
 
-    transfer_row = summary[summary["hot_term"].astype(str).str.contains("transfer", na=False)].head(1)
+    transfer_row = summary[summary["hot_term"].astype(str).str.contains("transfer", na=False)].head(
+        1
+    )
     assert not transfer_row.empty
 
     row = transfer_row.iloc[0]
@@ -80,7 +82,9 @@ def test_hotspot_metrics_bundle_keeps_timeline_counts_coherent() -> None:
     assert int(row["chart_helix_records"]) >= 2
     assert int(row["chart_nps_comments"]) >= 2
 
-    hot_rows = timeline[(timeline["incident_id"].astype(str) == "") & (timeline["hot_term"] == row["hot_term"])]
+    hot_rows = timeline[
+        (timeline["incident_id"].astype(str) == "") & (timeline["hot_term"] == row["hot_term"])
+    ]
     assert not hot_rows.empty
     assert int(hot_rows["helix_records"].sum()) == int(row["chart_helix_records"])
     assert int(hot_rows["nps_comments"].sum()) == int(row["chart_nps_comments"])
@@ -106,7 +110,9 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
         {
             "incident_id": ["INC1", "INC2", "INC3", "", ""],
             "hot_term": ["", "", "", "transferencias", "token"],
-            "date": pd.to_datetime(["2026-02-02", "2026-02-05", "2026-02-05", "2026-02-05", "2026-02-05"]),
+            "date": pd.to_datetime(
+                ["2026-02-02", "2026-02-05", "2026-02-05", "2026-02-05", "2026-02-05"]
+            ),
             "helix_records": [1, 2, 1, 1, 1],
             "nps_comments": [0, 1, 1, 1, 1],
         }
@@ -265,7 +271,15 @@ def test_select_best_business_axis_for_hotspots_prefers_axis_with_higher_helix_c
         {
             "Incident Number": [f"INC{i}" for i in range(1, 8)],
             "Fecha": pd.to_datetime(
-                ["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-07"]
+                [
+                    "2026-02-01",
+                    "2026-02-02",
+                    "2026-02-03",
+                    "2026-02-04",
+                    "2026-02-05",
+                    "2026-02-06",
+                    "2026-02-07",
+                ]
             ),
             "Detailed Description": [
                 "Falla en pagos y transferencias en banca empresas",

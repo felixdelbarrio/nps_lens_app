@@ -186,7 +186,7 @@ def _patch_kaleido_executable_for_space_paths() -> None:
     shim_dir.mkdir(parents=True, exist_ok=True)
     shim_path = shim_dir / "kaleido-shim"
     shim_path.write_text(
-        f"#!/bin/sh\ncd \"{exec_dir}\" || exit 1\nexec \"./bin/kaleido\" \"$@\"\n",
+        f'#!/bin/sh\ncd "{exec_dir}" || exit 1\nexec "./bin/kaleido" "$@"\n',
         encoding="utf-8",
     )
     with contextlib.suppress(Exception):
@@ -462,7 +462,9 @@ def _prepare_daily_signals(
         nps_estimated = True
 
     if responses_col:
-        d["responses"] = pd.to_numeric(d[responses_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+        d["responses"] = (
+            pd.to_numeric(d[responses_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+        )
     else:
         d["responses"] = 1.0
 
@@ -471,7 +473,10 @@ def _prepare_daily_signals(
     if period_end is not None:
         d = d[d["date"] <= pd.Timestamp(period_end)]
     if d.empty:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), nps_estimated
+        return (
+            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
+            nps_estimated,
+        )
 
     d["_w"] = np.maximum(pd.to_numeric(d["responses"], errors="coerce").fillna(0.0), 1.0)
     d["_nps_w"] = pd.to_numeric(d["nps_mean"], errors="coerce").fillna(0.0) * d["_w"]
@@ -494,7 +499,10 @@ def _prepare_daily_signals(
     start_d = pd.Timestamp(period_start) if period_start is not None else agg["date"].min()
     end_d = pd.Timestamp(period_end) if period_end is not None else agg["date"].max()
     if pd.isna(start_d) or pd.isna(end_d) or start_d > end_d:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), nps_estimated
+        return (
+            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
+            nps_estimated,
+        )
 
     idx = pd.date_range(start=start_d.normalize(), end=end_d.normalize(), freq="D")
     out = agg.set_index("date").reindex(idx).rename_axis("date").reset_index()
@@ -695,7 +703,9 @@ def _top_hotspots_fig(
     d["hot_rank"] = pd.to_numeric(d.get("hot_rank"), errors="coerce").fillna(999).astype(int)
     d["mention_comments"] = pd.to_numeric(d.get("mention_comments"), errors="coerce").fillna(0.0)
     d["hotspot_comments"] = pd.to_numeric(d.get("hotspot_comments"), errors="coerce").fillna(0.0)
-    d["chart_nps_comments"] = pd.to_numeric(d.get("chart_nps_comments"), errors="coerce").fillna(0.0)
+    d["chart_nps_comments"] = pd.to_numeric(d.get("chart_nps_comments"), errors="coerce").fillna(
+        0.0
+    )
     d["impact"] = d["chart_nps_comments"].clip(lower=0.0)
     d.loc[d["impact"] <= 0.0, "impact"] = d["hotspot_comments"].clip(lower=0.0)
     d.loc[d["impact"] <= 0.0, "impact"] = d["mention_comments"].clip(lower=0.0)
@@ -784,8 +794,12 @@ def _hotspot_matches_by_day(
     if t.empty:
         return pd.DataFrame(columns=cols)
 
-    t["helix_records"] = pd.to_numeric(t["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
-    t["nps_comments"] = pd.to_numeric(t["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    t["helix_records"] = (
+        pd.to_numeric(t["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
+    t["nps_comments"] = (
+        pd.to_numeric(t["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
 
     # Prefer hotspot-level rows (hot_term pre-aggregated in the app payload).
     top_terms: list[str] = []
@@ -841,7 +855,11 @@ def _month_overlap_fig(
         return None
 
     d = month_daily.sort_values("date").copy()
-    m = matched_daily.copy() if matched_daily is not None else pd.DataFrame(columns=["date", "matched_incidents"])
+    m = (
+        matched_daily.copy()
+        if matched_daily is not None
+        else pd.DataFrame(columns=["date", "matched_incidents"])
+    )
     m["date"] = pd.to_datetime(m.get("date"), errors="coerce")
     m = m.dropna(subset=["date"])
     m = m.groupby("date", as_index=False).agg(matched_incidents=("matched_incidents", "sum"))
@@ -926,7 +944,9 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
         return pd.DataFrame(columns=cols)
 
     d = incident_evidence_df.copy()
-    id_col = _pick_first_col(d, ["incident_id", "incident number", "incident_number", "id de la incidencia"])
+    id_col = _pick_first_col(
+        d, ["incident_id", "incident number", "incident_number", "id de la incidencia"]
+    )
     topic_col = _pick_first_col(d, ["nps_topic", "topic", "topico", "tópico"]) or ""
     date_col = _pick_first_col(d, ["incident_date", "fecha", "date", "opened_at"])
     summary_candidates = [
@@ -1005,7 +1025,9 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
             "nps_topic": d[topic_col].astype(str) if topic_col else "",
             "incident_summary": incident_summary,
             "detractor_comment": d[comment_col].astype(str) if comment_col else "",
-            "similarity": pd.to_numeric(d[sim_col], errors="coerce").fillna(0.0) if sim_col else 0.0,
+            "similarity": (
+                pd.to_numeric(d[sim_col], errors="coerce").fillna(0.0) if sim_col else 0.0
+            ),
             "hot_term": d[hot_term_col].astype(str) if hot_term_col else "",
             "hot_rank": pd.to_numeric(d[hot_rank_col], errors="coerce") if hot_rank_col else np.nan,
             "mention_incidents": (
@@ -1050,7 +1072,9 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
         pd.to_numeric(out["hotspot_links"], errors="coerce").fillna(0.0).astype(int)
     )
     out = out[(out["incident_id"] != "") | (out["nps_topic"] != "")].copy()
-    out = out.sort_values(["hot_rank", "similarity"], ascending=[True, False], na_position="last").reset_index(drop=True)
+    out = out.sort_values(
+        ["hot_rank", "similarity"], ascending=[True, False], na_position="last"
+    ).reset_index(drop=True)
     return out[cols]
 
 
@@ -1115,7 +1139,12 @@ def _select_zoom_incidents(
         if not ranked.empty:
             for (rk, term), g in ranked.groupby(["hot_rank", "hot_term"], dropna=False):
                 hotspots.append((float(rk), str(term or "").strip(), g.copy()))
-            hotspots.sort(key=lambda x: (x[0], -float(pd.to_numeric(x[2]["similarity"], errors="coerce").fillna(0.0).mean())))
+            hotspots.sort(
+                key=lambda x: (
+                    x[0],
+                    -float(pd.to_numeric(x[2]["similarity"], errors="coerce").fillna(0.0).mean()),
+                )
+            )
         else:
             for topic in top_topics:
                 g = ev[ev["nps_topic"].astype(str) == str(topic)].copy()
@@ -1229,9 +1258,7 @@ def _hotspot_summary_row(
     if "hot_rank" in hotspot_summary.columns:
         ranked = pd.to_numeric(hotspot_summary["hot_rank"], errors="coerce")
         if np.isfinite(ranked).any():
-            order = hotspot_summary.assign(_rank=ranked).sort_values(
-                ["_rank"], na_position="last"
-            )
+            order = hotspot_summary.assign(_rank=ranked).sort_values(["_rank"], na_position="last")
             return order.head(1).iloc[0]
     return None
 
@@ -1261,7 +1288,9 @@ def _parse_changepoints(value: object) -> list[pd.Timestamp]:
     return out
 
 
-def _changepoints_map(changepoints_by_topic: Optional[pd.DataFrame]) -> dict[str, list[pd.Timestamp]]:
+def _changepoints_map(
+    changepoints_by_topic: Optional[pd.DataFrame],
+) -> dict[str, list[pd.Timestamp]]:
     if changepoints_by_topic is None or changepoints_by_topic.empty:
         return {}
     if "nps_topic" not in changepoints_by_topic.columns:
@@ -1349,8 +1378,12 @@ def _incident_related_timeline(
     if d.empty:
         return pd.DataFrame(columns=cols)
 
-    d["helix_records"] = pd.to_numeric(d["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
-    d["nps_comments"] = pd.to_numeric(d["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    d["helix_records"] = (
+        pd.to_numeric(d["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
+    d["nps_comments"] = (
+        pd.to_numeric(d["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
     sev_mod = (
         d["nps_comments_moderate"]
         if "nps_comments_moderate" in d.columns
@@ -1366,12 +1399,8 @@ def _incident_related_timeline(
         if "nps_comments_critical" in d.columns
         else pd.Series([0.0] * len(d), index=d.index)
     )
-    d["nps_comments_moderate"] = (
-        pd.to_numeric(sev_mod, errors="coerce").fillna(0.0).clip(lower=0.0)
-    )
-    d["nps_comments_high"] = (
-        pd.to_numeric(sev_high, errors="coerce").fillna(0.0).clip(lower=0.0)
-    )
+    d["nps_comments_moderate"] = pd.to_numeric(sev_mod, errors="coerce").fillna(0.0).clip(lower=0.0)
+    d["nps_comments_high"] = pd.to_numeric(sev_high, errors="coerce").fillna(0.0).clip(lower=0.0)
     d["nps_comments_critical"] = (
         pd.to_numeric(sev_critical, errors="coerce").fillna(0.0).clip(lower=0.0)
     )
@@ -1440,9 +1469,7 @@ def _zoom_incident_fig(
             .clip(lower=0.0)
         )
         rel["nps_comments_high"] = (
-            pd.to_numeric(rel.get("nps_comments_high"), errors="coerce")
-            .fillna(0.0)
-            .clip(lower=0.0)
+            pd.to_numeric(rel.get("nps_comments_high"), errors="coerce").fillna(0.0).clip(lower=0.0)
         )
         rel["nps_comments_critical"] = (
             pd.to_numeric(rel.get("nps_comments_critical"), errors="coerce")
@@ -1496,15 +1523,13 @@ def _zoom_incident_fig(
     z = scope.merge(rel, on="date", how="left")
     z["helix_records"] = pd.to_numeric(z.get("helix_records"), errors="coerce").fillna(0.0)
     z["nps_comments"] = pd.to_numeric(z.get("nps_comments"), errors="coerce").fillna(0.0)
-    z["nps_comments_moderate"] = (
-        pd.to_numeric(z.get("nps_comments_moderate"), errors="coerce").fillna(0.0)
-    )
-    z["nps_comments_high"] = (
-        pd.to_numeric(z.get("nps_comments_high"), errors="coerce").fillna(0.0)
-    )
-    z["nps_comments_critical"] = (
-        pd.to_numeric(z.get("nps_comments_critical"), errors="coerce").fillna(0.0)
-    )
+    z["nps_comments_moderate"] = pd.to_numeric(
+        z.get("nps_comments_moderate"), errors="coerce"
+    ).fillna(0.0)
+    z["nps_comments_high"] = pd.to_numeric(z.get("nps_comments_high"), errors="coerce").fillna(0.0)
+    z["nps_comments_critical"] = pd.to_numeric(
+        z.get("nps_comments_critical"), errors="coerce"
+    ).fillna(0.0)
     z["incident_ids"] = z.get("incident_ids", "").astype(str).fillna("")
     nps_series = pd.DataFrame(columns=["date", "nps_mean"])
     if (
@@ -1715,7 +1740,15 @@ def generate_business_review_ppt(
     hotspot_focus_note: str = "",
 ) -> BusinessPptResult:
     """Build a business deck focused on daily NPS, matched incidents and top-3 zooms."""
-    del by_topic_daily, by_topic_weekly, story_md, script_8slides_md, template_name, corporate_fixed, logo_path
+    del (
+        by_topic_daily,
+        by_topic_weekly,
+        story_md,
+        script_8slides_md,
+        template_name,
+        corporate_fixed,
+        logo_path,
+    )
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -1931,7 +1964,9 @@ def generate_business_review_ppt(
             else "n/d"
         )
         incident_date_txt = (
-            str(incident.incident_date.date()) if incident.incident_date is not None else "sin fecha"
+            str(incident.incident_date.date())
+            if incident.incident_date is not None
+            else "sin fecha"
         )
         hot_label = str(incident.hot_term or "").strip() or incident.incident_id
 
@@ -1993,4 +2028,6 @@ def generate_business_review_ppt(
 
     buff = BytesIO()
     prs.save(buff)
-    return BusinessPptResult(file_name=file_name, content=buff.getvalue(), slide_count=len(prs.slides))
+    return BusinessPptResult(
+        file_name=file_name, content=buff.getvalue(), slide_count=len(prs.slides)
+    )

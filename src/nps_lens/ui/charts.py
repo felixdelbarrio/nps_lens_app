@@ -682,7 +682,11 @@ def chart_incident_priority_matrix(
     if not required.issubset(set(rationale_df.columns)):
         return None
 
-    d = rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False).head(top_k).copy()
+    d = (
+        rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False)
+        .head(top_k)
+        .copy()
+    )
     if d.empty:
         return None
 
@@ -698,7 +702,11 @@ def chart_incident_priority_matrix(
     d = d.reset_index(drop=True)
     d["rank"] = np.arange(1, len(d) + 1)
     d["topic_label"] = d.apply(
-        lambda r: f"TOP {int(r['rank'])} · {r['short_topic']}" if int(r["rank"]) <= 3 else str(r["short_topic"]),
+        lambda r: (
+            f"TOP {int(r['rank'])} · {r['short_topic']}"
+            if int(r["rank"]) <= 3
+            else str(r["short_topic"])
+        ),
         axis=1,
     )
     d = d.iloc[::-1].copy()

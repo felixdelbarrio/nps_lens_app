@@ -1380,7 +1380,9 @@ def page_executive(
                 if fig_vol is not None:
                     st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                st.caption("Lectura diaria: NPS clásico (promotores - detractores) y % detractores.")
+                st.caption(
+                    "Lectura diaria: NPS clásico (promotores - detractores) y % detractores."
+                )
                 fig_k = chart_daily_kpis(df_win, theme, days=int(days))
                 if fig_k is not None:
                     st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
@@ -1774,6 +1776,7 @@ def page_text(df: pd.DataFrame, theme: Theme) -> None:
 
     with st.expander("Ver clusters (incluye ejemplos)"):
         st.dataframe(topics_df, use_container_width=True)
+
 
 def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
     opps = cached_rank_opportunities(df, min_n=min_n)
@@ -2481,7 +2484,11 @@ def page_nps_helix_linking(
                     marker=dict(color=pal["color.primary.bg.success"], size=6),
                 )
             )
-            bar_x = trend_df["date"] if use_daily_trend and "date" in trend_df.columns else trend_df["week"]
+            bar_x = (
+                trend_df["date"]
+                if use_daily_trend and "date" in trend_df.columns
+                else trend_df["week"]
+            )
         else:
             if use_daily_trend and "date" in trend_df.columns:
                 dline = trend_df.sort_values("date").copy()
@@ -2655,9 +2662,11 @@ def page_nps_helix_linking(
             px, go = _plotly()
             topn["rank"] = np.arange(1, len(topn) + 1)
             topn["topic_label"] = topn.apply(
-                lambda r: f"TOP {int(r['rank'])} · {r['nps_topic']}"
-                if int(r["rank"]) <= 3
-                else str(r["nps_topic"]),
+                lambda r: (
+                    f"TOP {int(r['rank'])} · {r['nps_topic']}"
+                    if int(r["rank"]) <= 3
+                    else str(r["nps_topic"])
+                ),
                 axis=1,
             )
             topn["topic_label"] = topn["topic_label"].astype(str).str.slice(0, 72)
@@ -2686,9 +2695,7 @@ def page_nps_helix_linking(
                     marker=dict(color=colors),
                     text=[f"{float(v):.2f}" for v in topn_plot["confidence_learned"].tolist()],
                     textposition="outside",
-                    hovertemplate=(
-                        "Tópico=%{y}<br>confidence learned=%{x:.2f}<extra></extra>"
-                    ),
+                    hovertemplate=("Tópico=%{y}<br>confidence learned=%{x:.2f}<extra></extra>"),
                 )
             )
             fig2.update_layout(
@@ -2798,7 +2805,9 @@ def page_nps_helix_linking(
             show_df["priority"] = show_df["priority"].astype(float).round(3)
             show_df["confidence"] = show_df["confidence"].astype(float).round(3)
             show_df["nps_points_at_risk"] = show_df["nps_points_at_risk"].astype(float).round(2)
-            show_df["nps_points_recoverable"] = show_df["nps_points_recoverable"].astype(float).round(2)
+            show_df["nps_points_recoverable"] = (
+                show_df["nps_points_recoverable"].astype(float).round(2)
+            )
             show_df["delta_focus_rate_pp"] = show_df["delta_focus_rate_pp"].astype(float).round(2)
             show_df["incident_rate_per_100_responses"] = (
                 show_df["incident_rate_per_100_responses"].astype(float).round(2)
@@ -2902,7 +2911,9 @@ def page_nps_helix_linking(
                 helix_hist["Fecha"] = pd.to_datetime(helix_hist.get("Fecha"), errors="coerce")
                 helix_hist = helix_hist.dropna(subset=["Fecha"]).copy()
 
-                def _attach_daily_nps_mean(base_df: pd.DataFrame, nps_df: pd.DataFrame) -> pd.DataFrame:
+                def _attach_daily_nps_mean(
+                    base_df: pd.DataFrame, nps_df: pd.DataFrame
+                ) -> pd.DataFrame:
                     """Attach daily mean NPS to a date-based aggregate dataframe."""
                     if base_df is None or base_df.empty:
                         return pd.DataFrame()
@@ -2970,11 +2981,7 @@ def page_nps_helix_linking(
                     )
                     axis = str(axis_info.get("best_axis", "Palanca"))
                     red_map = axis_info.get("red_labels", {})
-                    labels = (
-                        list(red_map.get(axis, []))
-                        if isinstance(red_map, dict)
-                        else []
-                    )
+                    labels = list(red_map.get(axis, [])) if isinstance(red_map, dict) else []
                     aligned = align_hotspot_evidence_to_axis(
                         evidence_src,
                         axis=axis,
@@ -2983,20 +2990,26 @@ def page_nps_helix_linking(
                     )
                     ratios = axis_info.get("axis_ratios", {})
                     r_pal = float(ratios.get("Palanca", 0.0)) if isinstance(ratios, dict) else 0.0
-                    r_sub = float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    r_sub = (
+                        float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    )
                     note = (
                         f"Eje seleccionado para el racional: {axis} "
                         f"(cobertura Helix en rojos: Palanca {r_pal*100:.1f}% · "
                         f"Subpalanca {r_sub*100:.1f}%)."
                     )
-                    return (aligned if aligned is not None and not aligned.empty else evidence_src), note
+                    return (
+                        aligned if aligned is not None and not aligned.empty else evidence_src
+                    ), note
 
                 # Safe fallback to current view payload if historical payload can't be built.
                 overall_weekly_ppt = overall_daily if not overall_daily.empty else overall_weekly
                 overall_weekly_ppt = _attach_daily_nps_mean(overall_weekly_ppt, nps_slice)
                 by_topic_daily_ppt = by_topic_daily
                 by_topic_weekly_ppt = by_topic_weekly
-                ranking_df_ppt = rank2 if "rank2" in locals() and not rank2.empty else rank_for_rationale
+                ranking_df_ppt = (
+                    rank2 if "rank2" in locals() and not rank2.empty else rank_for_rationale
+                )
                 rationale_df_ppt = rationale_df
                 rationale_summary_ppt = rationale_summary
                 ppt_story_md_ppt = ppt_story_md
@@ -3075,9 +3088,7 @@ def page_nps_helix_linking(
                         tol_periods=1,
                     )
                     lag_hist = estimate_best_lag_by_topic(btw_hist, max_lag_weeks=6)
-                    lead_hist = incidents_lead_changepoints_flag(
-                        btw_hist, cp_hist, window_weeks=4
-                    )
+                    lead_hist = incidents_lead_changepoints_flag(btw_hist, cp_hist, window_weeks=4)
                     rank2_hist = (
                         rank_hist.merge(cp_hist, on="nps_topic", how="left")
                         .merge(lag_hist, on="nps_topic", how="left")
@@ -3241,9 +3252,7 @@ def page_nps_helix_linking(
                     f"Presentación generada correctamente ({int(ppt_out.slide_count)} diapositivas)."
                 )
                 saved_folder = saved_path.parent.resolve()
-                st.markdown(
-                    f"Copia local guardada en: [{saved_path}]({saved_folder.as_uri()})"
-                )
+                st.markdown(f"Copia local guardada en: [{saved_path}]({saved_folder.as_uri()})")
                 if downloads_path is not None:
                     st.caption(f"Copia en Descargas: {downloads_path}")
                 elif downloads_error:
@@ -3314,9 +3323,7 @@ def page_nps_helix_linking(
                 )
 
             local_folder = (
-                Path(saved_path_raw).expanduser().resolve().parent
-                if saved_path_raw
-                else None
+                Path(saved_path_raw).expanduser().resolve().parent if saved_path_raw else None
             )
             downloads_folder = (
                 Path(downloads_path_raw).expanduser().resolve().parent
@@ -3327,7 +3334,9 @@ def page_nps_helix_linking(
             with f1:
                 if local_folder is not None:
                     with contextlib.suppress(Exception):
-                        st.markdown(f"[Abrir carpeta de exportación local]({local_folder.as_uri()})")
+                        st.markdown(
+                            f"[Abrir carpeta de exportación local]({local_folder.as_uri()})"
+                        )
                     if st.button(
                         "Abrir carpeta local",
                         use_container_width=True,
@@ -3368,7 +3377,9 @@ def page_nps_helix_linking(
                 key="nh_save_downloads_pptx",
             ):
                 try:
-                    file_name = str(cached_ppt.get("file_name", "presentacion_nps_incidencias.pptx"))
+                    file_name = str(
+                        cached_ppt.get("file_name", "presentacion_nps_incidencias.pptx")
+                    )
                     payload = bytes(cached_ppt.get("content", b""))
                     downloads_dir = Path.home() / "Downloads"
                     downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -3392,12 +3403,7 @@ def page_nps_helix_linking(
         hdf = by_topic_daily.copy()
         hdf["block"] = hdf["nps_topic"].astype(str).str.split(">").str[0].str.strip()
         hdf["topic_short"] = (
-            hdf["nps_topic"]
-            .astype(str)
-            .str.split(">", n=1)
-            .str[-1]
-            .str.strip()
-            .str.slice(0, 42)
+            hdf["nps_topic"].astype(str).str.split(">", n=1).str[-1].str.strip().str.slice(0, 42)
         )
         hdf["topic_short"] = hdf["topic_short"].where(
             hdf["topic_short"].str.len() <= 42, hdf["topic_short"] + "…"
@@ -3427,8 +3433,14 @@ def page_nps_helix_linking(
             px, go = _plotly()
             y_positions = list(range(pivot.shape[0]))
             tick_labels = [label_map.get(str(t), str(t)) for t in pivot.index.tolist()]
-            zmax = float(np.nanpercentile(pivot.values.astype(float), 95)) if pivot.values.size else 1.0
-            hover_topics = np.tile(np.array(tick_labels, dtype=object).reshape(-1, 1), (1, pivot.shape[1]))
+            zmax = (
+                float(np.nanpercentile(pivot.values.astype(float), 95))
+                if pivot.values.size
+                else 1.0
+            )
+            hover_topics = np.tile(
+                np.array(tick_labels, dtype=object).reshape(-1, 1), (1, pivot.shape[1])
+            )
             heat = go.Figure(
                 data=[
                     go.Heatmap(
@@ -3497,7 +3509,9 @@ def page_nps_helix_linking(
                 "Cada fila muestra: bloque | tópico. Las franjas y separadores agrupan visualmente por bloque para ubicar cada incidencia con rapidez."
             )
         else:
-            st.info("No hay datos suficientes para construir el heatmap en el periodo seleccionado.")
+            st.info(
+                "No hay datos suficientes para construir el heatmap en el periodo seleccionado."
+            )
 
     # 4.1) Changepoints + Lag (incidencias preceden X semanas)
     if show_priorities:
@@ -3825,9 +3839,7 @@ def page_nps_helix_linking(
             )
         md_lines.append("")
     md_lines.append("## 3) Racional de negocio (riesgo -> recuperacion)")
-    md_lines.append(
-        f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**"
-    )
+    md_lines.append(f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**")
     md_lines.append(
         f"- NPS recuperable estimado: **{rationale_summary.nps_points_recoverable:.2f} pts**"
     )
@@ -3917,6 +3929,7 @@ def page_nps_helix_linking(
             value=wow_prompt,
             height=320,
         )
+
 
 def main() -> None:
     # Streamlit doesn't automatically load .env.
@@ -4103,7 +4116,9 @@ def main() -> None:
         with p3:
             page_cohorts(df_prior, theme)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            section("Comparativa de periodos", "Evolución frente al periodo base para validar avance.")
+            section(
+                "Comparativa de periodos", "Evolución frente al periodo base para validar avance."
+            )
             page_comparisons(df_prior, theme)
 
     with t_llm:

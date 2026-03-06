@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from nps_lens.analytics.nps_helix_link import build_incident_display_text, link_incidents_to_nps_topics
+from nps_lens.analytics.nps_helix_link import (
+    build_incident_display_text,
+    link_incidents_to_nps_topics,
+)
 
 
 def test_link_incidents_to_nps_topics_sparse_chunked_path() -> None:

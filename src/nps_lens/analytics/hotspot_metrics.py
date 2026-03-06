@@ -167,11 +167,7 @@ def _norm_phrase(v: object) -> str:
 
 
 def _phrase_tokens(v: object) -> set[str]:
-    return {
-        t
-        for t in re.findall(r"[a-z0-9]{3,}", _norm_phrase(v))
-        if t not in _AXIS_STOPWORDS
-    }
+    return {t for t in re.findall(r"[a-z0-9]{3,}", _norm_phrase(v)) if t not in _AXIS_STOPWORDS}
 
 
 def _topic_axis_value(topic: object, axis: str) -> str:
@@ -248,7 +244,9 @@ def _prepare_nps_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame:
 
 def _prepare_helix_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     if helix_df is None or helix_df.empty:
-        return pd.DataFrame(columns=["incident_id", "incident_date", "incident_summary", "summary_norm"])
+        return pd.DataFrame(
+            columns=["incident_id", "incident_date", "incident_summary", "summary_norm"]
+        )
 
     helix_ref = helix_df.copy()
     helix_ref["incident_id"] = helix_ref.get(
@@ -258,7 +256,9 @@ def _prepare_helix_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     helix_ref["incident_date"] = pd.to_datetime(helix_ref.get("Fecha"), errors="coerce")
     helix_ref = helix_ref[helix_ref["incident_id"] != ""].copy()
     if helix_ref.empty:
-        return pd.DataFrame(columns=["incident_id", "incident_date", "incident_summary", "summary_norm"])
+        return pd.DataFrame(
+            columns=["incident_id", "incident_date", "incident_summary", "summary_norm"]
+        )
 
     helix_ref["incident_summary"] = build_incident_display_text(helix_ref).astype(str).fillna("")
     helix_ref["summary_norm"] = helix_ref["incident_summary"].map(_norm_txt)
@@ -280,12 +280,16 @@ def _strict_term_links(
     max_days_apart: int | None,
 ) -> pd.DataFrame:
     if links_enriched is None or links_enriched.empty or not term_pattern:
-        return pd.DataFrame(columns=list(links_enriched.columns) if links_enriched is not None else [])
+        return pd.DataFrame(
+            columns=list(links_enriched.columns) if links_enriched is not None else []
+        )
 
     d = links_enriched.copy()
     inc_match = d["incident_summary_norm"].str.contains(term_pattern, regex=True, na=False)
     com_match = d["detractor_comment_norm"].str.contains(term_pattern, regex=True, na=False)
-    sim_ok = pd.to_numeric(d.get("similarity"), errors="coerce").fillna(0.0) >= float(min_similarity)
+    sim_ok = pd.to_numeric(d.get("similarity"), errors="coerce").fillna(0.0) >= float(
+        min_similarity
+    )
     keep = inc_match & com_match & sim_ok
 
     if max_days_apart is not None:
@@ -306,7 +310,11 @@ def _month_slice(helix_ref: pd.DataFrame, system_date: Optional[date]) -> pd.Dat
     if helix_ref.empty:
         return helix_ref
 
-    ref = pd.Timestamp(system_date) if system_date is not None else pd.Timestamp.now().tz_localize(None)
+    ref = (
+        pd.Timestamp(system_date)
+        if system_date is not None
+        else pd.Timestamp.now().tz_localize(None)
+    )
     month_start = pd.Timestamp(ref.date().replace(day=1))
     month_end = (month_start + pd.offsets.MonthEnd(0)).normalize()
 
@@ -361,7 +369,9 @@ def _select_hot_terms(
     if not hot_counter:
         return []
 
-    candidate_terms = [str(t) for t, cnt in hot_counter.items() if int(cnt) >= int(min_term_occurrences)]
+    candidate_terms = [
+        str(t) for t, cnt in hot_counter.items() if int(cnt) >= int(min_term_occurrences)
+    ]
     if not candidate_terms:
         candidate_terms = [str(t) for t, _ in hot_counter.most_common(20)]
 
@@ -377,7 +387,11 @@ def _select_hot_terms(
             nps_term_counts[str(term)] = 0
             continue
         tpat = rf"\b{re.escape(tnorm)}\b"
-        nh = int(nps_ref["comment_norm"].str.contains(tpat, regex=True, na=False).sum()) if not nps_ref.empty else 0
+        nh = (
+            int(nps_ref["comment_norm"].str.contains(tpat, regex=True, na=False).sum())
+            if not nps_ref.empty
+            else 0
+        )
         nps_term_counts[str(term)] = nh
 
     scored_terms = sorted(
@@ -479,11 +493,7 @@ def select_best_business_axis_for_hotspots(
             best_score = 0.0
             for lab, nlab, ltoks in label_rows:
                 phrase_hit = bool(nlab and (nlab in txt_norm))
-                tok_ratio = (
-                    float(len(tok_set & ltoks)) / float(len(ltoks))
-                    if ltoks
-                    else 0.0
-                )
+                tok_ratio = float(len(tok_set & ltoks)) / float(len(ltoks)) if ltoks else 0.0
                 hit = phrase_hit or (tok_ratio >= float(min_token_ratio))
                 if not hit:
                     continue
@@ -527,22 +537,23 @@ def align_hotspot_evidence_to_axis(
 
     d["hot_term"] = d["hot_term"].astype(str).str.strip()
     d["hot_rank"] = pd.to_numeric(d.get("hot_rank"), errors="coerce").fillna(999).astype(int)
-    d["mention_incidents"] = pd.to_numeric(d.get("mention_incidents"), errors="coerce").fillna(0).astype(int)
-    d["mention_comments"] = pd.to_numeric(d.get("mention_comments"), errors="coerce").fillna(0).astype(int)
+    d["mention_incidents"] = (
+        pd.to_numeric(d.get("mention_incidents"), errors="coerce").fillna(0).astype(int)
+    )
+    d["mention_comments"] = (
+        pd.to_numeric(d.get("mention_comments"), errors="coerce").fillna(0).astype(int)
+    )
     d["nps_topic"] = d.get("nps_topic", "").astype(str)
     d["_axis_value"] = d["nps_topic"].map(lambda v: _topic_axis_value(v, axis))
     d["_axis_norm"] = d["_axis_value"].map(_norm_phrase)
     d["_aligned"] = d["_axis_norm"].isin(norm_labels)
 
-    grp = (
-        d.groupby("hot_term", as_index=False)
-        .agg(
-            orig_rank=("hot_rank", "min"),
-            aligned=("_aligned", "max"),
-            aligned_rows=("_aligned", "sum"),
-            mention_comments=("mention_comments", "max"),
-            mention_incidents=("mention_incidents", "max"),
-        )
+    grp = d.groupby("hot_term", as_index=False).agg(
+        orig_rank=("hot_rank", "min"),
+        aligned=("_aligned", "max"),
+        aligned_rows=("_aligned", "sum"),
+        mention_comments=("mention_comments", "max"),
+        mention_incidents=("mention_incidents", "max"),
     )
     if grp.empty:
         return d
@@ -559,7 +570,9 @@ def align_hotspot_evidence_to_axis(
     term_rank = {term: idx for idx, term in enumerate(selected_terms, start=1)}
     out = d[d["hot_term"].astype(str).isin(set(selected_terms))].copy()
     out["hot_rank"] = out["hot_term"].map(term_rank).astype(int)
-    out = out.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(drop=True)
+    out = out.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(
+        drop=True
+    )
     cols = [c for c in HOTSPOT_EVIDENCE_COLUMNS if c in out.columns]
     return out[cols].copy()
 
@@ -634,12 +647,16 @@ def build_hotspot_evidence(
     out["_has_comment"] = out["detractor_comment"].astype(str).str.strip() != ""
 
     incident_topic_map = (
-        out.groupby("incident_id", as_index=False)["nps_topic"].first().set_index("incident_id")["nps_topic"]
+        out.groupby("incident_id", as_index=False)["nps_topic"]
+        .first()
+        .set_index("incident_id")["nps_topic"]
         if not out.empty
         else pd.Series(dtype=str)
     )
     incident_sim_map = (
-        out.groupby("incident_id", as_index=False)["similarity"].max().set_index("incident_id")["similarity"]
+        out.groupby("incident_id", as_index=False)["similarity"]
+        .max()
+        .set_index("incident_id")["similarity"]
         if not out.empty
         else pd.Series(dtype=float)
     )
@@ -658,7 +675,9 @@ def build_hotspot_evidence(
             max_days_apart=max_days_apart,
         )
 
-        helix_term_all = helix_ref[helix_ref["summary_norm"].str.contains(tpat, regex=True, na=False)].copy()
+        helix_term_all = helix_ref[
+            helix_ref["summary_norm"].str.contains(tpat, regex=True, na=False)
+        ].copy()
         if not helix_term_all.empty:
             helix_term_all = helix_term_all.sort_values(["incident_date"], ascending=False)
 
@@ -669,7 +688,12 @@ def build_hotspot_evidence(
         )
 
         mention_incidents = int(
-            helix_term_all["incident_id"].astype(str).str.strip().replace("", np.nan).dropna().nunique()
+            helix_term_all["incident_id"]
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
         )
         mention_comments = int(
             nps_term["nps_id"].astype(str).str.strip().replace("", np.nan).dropna().nunique()
@@ -698,7 +722,11 @@ def build_hotspot_evidence(
             )
         if not helix_term_all.empty:
             rep_incidents.extend(
-                [iid for iid in helix_term_all["incident_id"].astype(str).str.strip().tolist() if iid]
+                [
+                    iid
+                    for iid in helix_term_all["incident_id"].astype(str).str.strip().tolist()
+                    if iid
+                ]
             )
 
         dedup_rep: list[str] = []
@@ -768,10 +796,18 @@ def build_hotspot_evidence(
     res["mention_comments"] = (
         pd.to_numeric(res.get("mention_comments"), errors="coerce").fillna(0).astype(int)
     )
-    res["hotspot_incidents"] = pd.to_numeric(res.get("hotspot_incidents"), errors="coerce").fillna(0).astype(int)
-    res["hotspot_comments"] = pd.to_numeric(res.get("hotspot_comments"), errors="coerce").fillna(0).astype(int)
-    res["hotspot_links"] = pd.to_numeric(res.get("hotspot_links"), errors="coerce").fillna(0).astype(int)
-    res = res.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(drop=True)
+    res["hotspot_incidents"] = (
+        pd.to_numeric(res.get("hotspot_incidents"), errors="coerce").fillna(0).astype(int)
+    )
+    res["hotspot_comments"] = (
+        pd.to_numeric(res.get("hotspot_comments"), errors="coerce").fillna(0).astype(int)
+    )
+    res["hotspot_links"] = (
+        pd.to_numeric(res.get("hotspot_links"), errors="coerce").fillna(0).astype(int)
+    )
+    res = res.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(
+        drop=True
+    )
     return res[cols].copy()
 
 
@@ -829,17 +865,18 @@ def build_hotspot_timeline(
         nps_daily = nps_daily.dropna(subset=["date"])
         if not nps_daily.empty:
             nps_daily = nps_daily.drop_duplicates(["incident_id", "nps_id", "date"])
-            nps_daily["sev_moderate"] = (nps_daily["severity"].astype(str) == "moderate").astype(int)
+            nps_daily["sev_moderate"] = (nps_daily["severity"].astype(str) == "moderate").astype(
+                int
+            )
             nps_daily["sev_high"] = (nps_daily["severity"].astype(str) == "high").astype(int)
-            nps_daily["sev_critical"] = (nps_daily["severity"].astype(str) == "critical").astype(int)
-            nps_daily = (
-                nps_daily.groupby(["incident_id", "date"], as_index=False)
-                .agg(
-                    nps_comments=("nps_id", "nunique"),
-                    nps_comments_moderate=("sev_moderate", "sum"),
-                    nps_comments_high=("sev_high", "sum"),
-                    nps_comments_critical=("sev_critical", "sum"),
-                )
+            nps_daily["sev_critical"] = (nps_daily["severity"].astype(str) == "critical").astype(
+                int
+            )
+            nps_daily = nps_daily.groupby(["incident_id", "date"], as_index=False).agg(
+                nps_comments=("nps_id", "nunique"),
+                nps_comments_moderate=("sev_moderate", "sum"),
+                nps_comments_high=("sev_high", "sum"),
+                nps_comments_critical=("sev_critical", "sum"),
             )
 
     out = helix_daily.merge(nps_daily, on=["incident_id", "date"], how="left")
@@ -874,7 +911,9 @@ def build_hotspot_timeline(
         if "hot_rank" in ev.columns:
             ev["hot_rank"] = pd.to_numeric(ev["hot_rank"], errors="coerce")
             ev = ev.sort_values(["hot_rank"], na_position="last")
-        top_terms = ev[ev["hot_term"] != ""]["hot_term"].drop_duplicates().head(int(max_hotspots)).tolist()
+        top_terms = (
+            ev[ev["hot_term"] != ""]["hot_term"].drop_duplicates().head(int(max_hotspots)).tolist()
+        )
 
     hot_rows: list[pd.DataFrame] = []
     for term in top_terms:
@@ -905,22 +944,30 @@ def build_hotspot_timeline(
             ]
         )
         if not nps_ref.empty:
-            severity_map = nps_ref.set_index("nps_id")["severity"] if "nps_id" in nps_ref.columns else pd.Series(dtype=str)
-            nps_term = nps_ref[nps_ref["comment_norm"].str.contains(tpat, regex=True, na=False)].copy()
+            severity_map = (
+                nps_ref.set_index("nps_id")["severity"]
+                if "nps_id" in nps_ref.columns
+                else pd.Series(dtype=str)
+            )
+            nps_term = nps_ref[
+                nps_ref["comment_norm"].str.contains(tpat, regex=True, na=False)
+            ].copy()
             if not nps_term.empty:
                 nps_term = nps_term.drop_duplicates(["date", "nps_id"])[["nps_id", "date"]].copy()
             if not nps_term.empty:
                 nps_term["severity"] = nps_term["nps_id"].map(severity_map).fillna("moderate")
-                nps_term["sev_moderate"] = (nps_term["severity"].astype(str) == "moderate").astype(int)
+                nps_term["sev_moderate"] = (nps_term["severity"].astype(str) == "moderate").astype(
+                    int
+                )
                 nps_term["sev_high"] = (nps_term["severity"].astype(str) == "high").astype(int)
-                nps_term["sev_critical"] = (nps_term["severity"].astype(str) == "critical").astype(int)
-                nps_term_daily = (
-                    nps_term.groupby("date", as_index=False).agg(
-                        nps_comments=("nps_id", "nunique"),
-                        nps_comments_moderate=("sev_moderate", "sum"),
-                        nps_comments_high=("sev_high", "sum"),
-                        nps_comments_critical=("sev_critical", "sum"),
-                    )
+                nps_term["sev_critical"] = (nps_term["severity"].astype(str) == "critical").astype(
+                    int
+                )
+                nps_term_daily = nps_term.groupby("date", as_index=False).agg(
+                    nps_comments=("nps_id", "nunique"),
+                    nps_comments_moderate=("sev_moderate", "sum"),
+                    nps_comments_high=("sev_high", "sum"),
+                    nps_comments_critical=("sev_critical", "sum"),
                 )
 
         # Enforce cross-source evidence for hotspot timeline rows.
@@ -953,7 +1000,9 @@ def build_hotspot_timeline(
             .astype(int)
         )
         term_daily["incident_ids"] = term_daily.get("incident_ids", "").astype(str).fillna("")
-        term_daily = term_daily[(term_daily["helix_records"] > 0) | (term_daily["nps_comments"] > 0)].copy()
+        term_daily = term_daily[
+            (term_daily["helix_records"] > 0) | (term_daily["nps_comments"] > 0)
+        ].copy()
         if term_daily.empty:
             continue
 
@@ -988,13 +1037,18 @@ def summarize_hotspot_counts(
         e["hot_term"] = e["hot_term"].astype(str).str.strip()
         e["hot_rank"] = pd.to_numeric(e.get("hot_rank"), errors="coerce").fillna(999).astype(int)
         ee = e[e["hot_term"] != ""].sort_values(["hot_rank"])
-        for _, r in ee[["hot_rank", "hot_term"]].drop_duplicates().head(int(max_hotspots)).iterrows():
+        for _, r in (
+            ee[["hot_rank", "hot_term"]].drop_duplicates().head(int(max_hotspots)).iterrows()
+        ):
             terms.append((int(r["hot_rank"]), str(r["hot_term"])))
 
     if not terms and not t.empty and "hot_term" in t.columns:
         t2 = t.copy()
         t2["hot_term"] = t2["hot_term"].astype(str).str.strip()
-        for idx, term in enumerate(t2[t2["hot_term"] != ""]["hot_term"].drop_duplicates().head(int(max_hotspots)).tolist(), start=1):
+        for idx, term in enumerate(
+            t2[t2["hot_term"] != ""]["hot_term"].drop_duplicates().head(int(max_hotspots)).tolist(),
+            start=1,
+        ):
             terms.append((idx, str(term)))
 
     if not terms:
@@ -1002,8 +1056,16 @@ def summarize_hotspot_counts(
 
     rows: list[dict[str, int | str]] = []
     for rank, term in terms:
-        ev = e[e.get("hot_term", "").astype(str).str.strip() == str(term)] if not e.empty else pd.DataFrame()
-        tl = t[t.get("hot_term", "").astype(str).str.strip() == str(term)] if not t.empty else pd.DataFrame()
+        ev = (
+            e[e.get("hot_term", "").astype(str).str.strip() == str(term)]
+            if not e.empty
+            else pd.DataFrame()
+        )
+        tl = (
+            t[t.get("hot_term", "").astype(str).str.strip() == str(term)]
+            if not t.empty
+            else pd.DataFrame()
+        )
         has_hotspot_inc_col = bool(not ev.empty and "hotspot_incidents" in ev.columns)
         has_hotspot_com_col = bool(not ev.empty and "hotspot_comments" in ev.columns)
         has_hotspot_lnk_col = bool(not ev.empty and "hotspot_links" in ev.columns)
@@ -1073,10 +1135,29 @@ def summarize_hotspot_counts(
             mention_incidents = int(hotspot_incidents)
         if mention_comments <= 0 and hotspot_comments > 0:
             mention_comments = int(hotspot_comments)
-        if (not has_hotspot_inc_col) and hotspot_incidents <= 0 and not ev.empty and "incident_id" in ev.columns:
-            hotspot_incidents = int(ev["incident_id"].astype(str).str.strip().replace("", np.nan).dropna().nunique())
-        if (not has_hotspot_com_col) and hotspot_comments <= 0 and not ev.empty and "detractor_comment" in ev.columns:
-            hotspot_comments = int(ev["detractor_comment"].astype(str).str.strip().replace("", np.nan).dropna().nunique())
+        if (
+            (not has_hotspot_inc_col)
+            and hotspot_incidents <= 0
+            and not ev.empty
+            and "incident_id" in ev.columns
+        ):
+            hotspot_incidents = int(
+                ev["incident_id"].astype(str).str.strip().replace("", np.nan).dropna().nunique()
+            )
+        if (
+            (not has_hotspot_com_col)
+            and hotspot_comments <= 0
+            and not ev.empty
+            and "detractor_comment" in ev.columns
+        ):
+            hotspot_comments = int(
+                ev["detractor_comment"]
+                .astype(str)
+                .str.strip()
+                .replace("", np.nan)
+                .dropna()
+                .nunique()
+            )
         if (not has_hotspot_lnk_col) and hotspot_links <= 0 and not ev.empty:
             hotspot_links = int(len(ev))
 
@@ -1089,7 +1170,12 @@ def summarize_hotspot_counts(
             chart_helix = int(helix_s.sum())
             chart_comments = int(comm_s.sum())
             day_mask = (helix_s > 0) | (comm_s > 0)
-            days = int(pd.to_datetime(tl.loc[day_mask, "date"], errors="coerce").dropna().dt.normalize().nunique())
+            days = int(
+                pd.to_datetime(tl.loc[day_mask, "date"], errors="coerce")
+                .dropna()
+                .dt.normalize()
+                .nunique()
+            )
 
         rows.append(
             {
@@ -1132,7 +1218,9 @@ def build_hotspot_daily_breakdown(
         return pd.DataFrame(columns=cols), {}
 
     base["date"] = base["date"].dt.normalize()
-    base["incidents"] = pd.to_numeric(base["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    base["incidents"] = (
+        pd.to_numeric(base["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
     base = (
         base.groupby("date", as_index=False)
         .agg(incidents=("incidents", "sum"))
@@ -1154,11 +1242,9 @@ def build_hotspot_daily_breakdown(
         e = e[e["incident_id"] != ""]
 
         if not e.empty:
-            term_rank = (
-                e.sort_values(["hot_rank", "similarity"], ascending=[True, False])
-                [["hot_rank", "hot_term"]]
-                .drop_duplicates(["hot_rank"]) 
-            )
+            term_rank = e.sort_values(["hot_rank", "similarity"], ascending=[True, False])[
+                ["hot_rank", "hot_term"]
+            ].drop_duplicates(["hot_rank"])
             for _, r in term_rank.iterrows():
                 rk = int(float(r["hot_rank"]))
                 if 1 <= rk <= int(max_hotspots):
@@ -1166,8 +1252,7 @@ def build_hotspot_daily_breakdown(
 
             rank_map = (
                 e.sort_values(["hot_rank", "similarity"], ascending=[True, False])
-                .drop_duplicates(["incident_id"])
-                [["incident_id", "hot_rank", "hot_term"]]
+                .drop_duplicates(["incident_id"])[["incident_id", "hot_rank", "hot_term"]]
                 .copy()
             )
             rank_map["hot_rank"] = rank_map["hot_rank"].astype(int)
@@ -1195,7 +1280,9 @@ def build_hotspot_daily_breakdown(
         t["helix_records"] = pd.to_numeric(t.get("helix_records"), errors="coerce").fillna(0.0)
         t = t[t["helix_records"] > 0].dropna(subset=["date"])
 
-        term_to_rank = {str(v).strip().lower(): int(k) for k, v in term_by_rank.items() if str(v).strip()}
+        term_to_rank = {
+            str(v).strip().lower(): int(k) for k, v in term_by_rank.items() if str(v).strip()
+        }
         base_inc = t[t["incident_id"] != ""][["date", "incident_id", "helix_records"]].copy()
 
         if not base_inc.empty and term_to_rank:
@@ -1222,15 +1309,18 @@ def build_hotspot_daily_breakdown(
                     )
 
             if mapping_rows:
-                map_df = pd.DataFrame(mapping_rows).drop_duplicates(["date", "incident_id", "hot_rank"])
-                map_df = map_df.sort_values(["hot_rank"]).drop_duplicates(["date", "incident_id"], keep="first")
+                map_df = pd.DataFrame(mapping_rows).drop_duplicates(
+                    ["date", "incident_id", "hot_rank"]
+                )
+                map_df = map_df.sort_values(["hot_rank"]).drop_duplicates(
+                    ["date", "incident_id"], keep="first"
+                )
                 assigned = base_inc.merge(map_df, on=["date", "incident_id"], how="left")
                 hot = assigned.dropna(subset=["hot_rank"]).copy()
                 if not hot.empty:
                     hot["hot_rank"] = hot["hot_rank"].astype(int)
-                    hot = (
-                        hot.groupby(["date", "hot_rank"], as_index=False)
-                        .agg(cnt=("helix_records", "sum"))
+                    hot = hot.groupby(["date", "hot_rank"], as_index=False).agg(
+                        cnt=("helix_records", "sum")
                     )
                     pivot = (
                         hot.pivot(index="date", columns="hot_rank", values="cnt")
@@ -1250,11 +1340,12 @@ def build_hotspot_daily_breakdown(
         if (not used_term_timeline) and (not rank_map.empty):
             t_inc = t[t["incident_id"] != ""].copy()
             if not t_inc.empty:
-                hot = t_inc.merge(rank_map[["incident_id", "hot_rank"]], on="incident_id", how="inner")
+                hot = t_inc.merge(
+                    rank_map[["incident_id", "hot_rank"]], on="incident_id", how="inner"
+                )
                 if not hot.empty:
-                    hot = (
-                        hot.groupby(["date", "hot_rank"], as_index=False)
-                        .agg(cnt=("helix_records", "sum"))
+                    hot = hot.groupby(["date", "hot_rank"], as_index=False).agg(
+                        cnt=("helix_records", "sum")
                     )
                     pivot = (
                         hot.pivot(index="date", columns="hot_rank", values="cnt")

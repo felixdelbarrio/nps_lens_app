@@ -28,9 +28,27 @@ def _check_business_ppt() -> None:
 
     overall_weekly = pd.DataFrame(
         [
-            {"week": "2026-01-05", "focus_rate": 0.19, "incidents": 31, "responses": 820, "focus_count": 156},
-            {"week": "2026-01-12", "focus_rate": 0.17, "incidents": 27, "responses": 790, "focus_count": 134},
-            {"week": "2026-01-19", "focus_rate": 0.15, "incidents": 22, "responses": 775, "focus_count": 116},
+            {
+                "week": "2026-01-05",
+                "focus_rate": 0.19,
+                "incidents": 31,
+                "responses": 820,
+                "focus_count": 156,
+            },
+            {
+                "week": "2026-01-12",
+                "focus_rate": 0.17,
+                "incidents": 27,
+                "responses": 790,
+                "focus_count": 134,
+            },
+            {
+                "week": "2026-01-19",
+                "focus_rate": 0.15,
+                "incidents": 22,
+                "responses": 775,
+                "focus_count": 116,
+            },
         ]
     )
     rationale_df = pd.DataFrame(
@@ -115,9 +133,7 @@ def main() -> int:
             print(f"[FAIL] {label}: {exc}")
 
     if failed:
-        print(
-            "\nValidation failed. Re-run `make setup` and verify your active environment/venv."
-        )
+        print("\nValidation failed. Re-run `make setup` and verify your active environment/venv.")
         return 1
 
     print("\nAll runtime checks passed.")

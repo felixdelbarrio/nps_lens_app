@@ -24,13 +24,13 @@ def _sample_payload() -> dict:
     by_topic_daily = pd.DataFrame(
         {
             "date": pd.date_range("2026-01-01", periods=40, freq="D").tolist() * 3,
-            "nps_topic": (["Pagos > SPEI"] * 40) + (["Acceso > Login"] * 40) + (["Tarjetas > Bloqueo"] * 40),
+            "nps_topic": (["Pagos > SPEI"] * 40)
+            + (["Acceso > Login"] * 40)
+            + (["Tarjetas > Bloqueo"] * 40),
             "focus_rate": ([0.24, 0.23, 0.26, 0.27, 0.25] * 8)
             + ([0.20, 0.19, 0.21, 0.22, 0.20] * 8)
             + ([0.18, 0.17, 0.19, 0.20, 0.18] * 8),
-            "incidents": ([2, 3, 4, 2, 1] * 8)
-            + ([1, 2, 2, 1, 0] * 8)
-            + ([1, 1, 2, 1, 1] * 8),
+            "incidents": ([2, 3, 4, 2, 1] * 8) + ([1, 2, 2, 1, 0] * 8) + ([1, 1, 2, 1, 1] * 8),
         }
     )
 
@@ -234,7 +234,14 @@ def test_top_hotspots_fig_uses_top3_colors_and_inbar_labels() -> None:
     evidence = pd.DataFrame(
         {
             "hot_rank": [1, 1, 2, 2, 3, 3],
-            "hot_term": ["pagos", "pagos", "movimientos", "movimientos", "transferencias", "transferencias"],
+            "hot_term": [
+                "pagos",
+                "pagos",
+                "movimientos",
+                "movimientos",
+                "transferencias",
+                "transferencias",
+            ],
             "mention_incidents": [60, 60, 45, 45, 30, 30],
             "mention_comments": [114, 114, 98, 98, 85, 85],
             "hotspot_comments": [114, 114, 98, 98, 85, 85],

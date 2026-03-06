@@ -272,7 +272,9 @@ def build_incident_ppt_story(
     lines.append("## 3) Plan operativo 30-60-90")
     lines.append("- 30 días: activar quick wins y cerrar brechas de instrumentación.")
     lines.append("- 60 días: desplegar fixes estructurales en tópicos P1 con mayor NPS en riesgo.")
-    lines.append("- 90 días: consolidar aprendizaje (confirmado/rechazado) y recalibrar prioridades.")
+    lines.append(
+        "- 90 días: consolidar aprendizaje (confirmado/rechazado) y recalibrar prioridades."
+    )
 
     lines.append("")
     lines.append("## 4) KPI de seguimiento semanal")
@@ -354,9 +356,7 @@ def build_ppt_8slide_script(
     lines.append(
         f"- Potencial recuperable estimado: **{summary.nps_points_recoverable:.2f} pts NPS**."
     )
-    lines.append(
-        f"- Concentración top-3 incidencias: **{summary.top3_incident_share*100:.1f}%**."
-    )
+    lines.append(f"- Concentración top-3 incidencias: **{summary.top3_incident_share*100:.1f}%**.")
     lines.append("- Decisión sugerida: activar plan semanal en tópicos P1.")
     lines.append("")
 
@@ -390,7 +390,9 @@ def build_ppt_8slide_script(
         rec_top = float(
             pd.to_numeric(top["nps_points_recoverable"], errors="coerce").fillna(0).sum()
         )
-        lines.append(f"- Top temas analizados: riesgo={risk_top:.2f} pts | recuperable={rec_top:.2f} pts.")
+        lines.append(
+            f"- Top temas analizados: riesgo={risk_top:.2f} pts | recuperable={rec_top:.2f} pts."
+        )
     lines.append("- Mensaje clave: impacto económico esperado de corregir tópicos P1.")
     lines.append("")
 
@@ -416,7 +418,9 @@ def build_ppt_8slide_script(
 
     lines.append("## Slide 7 — Gobierno y métricas")
     lines.append(f"- KPI leading: incidencias por tópico P1, SLA de resolución, % {focus_name}.")
-    lines.append("- KPI lagging: NPS térmico, NPS en riesgo (pts), NPS recuperable realizado (pts).")
+    lines.append(
+        "- KPI lagging: NPS térmico, NPS en riesgo (pts), NPS recuperable realizado (pts)."
+    )
     lines.append("- Cadencia: comité semanal con owners de producto, tecnología y operaciones.")
     lines.append("")
 
