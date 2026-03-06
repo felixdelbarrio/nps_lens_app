@@ -8,6 +8,34 @@ import pandas as pd
 import ruptures as rpt
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from nps_lens.analytics.linking_policy import (
+    LINK_MAX_DAYS_APART,
+    LINK_MIN_SIMILARITY,
+    LINK_TOP_K_PER_INCIDENT,
+)
+
+
+def _safe_corr(xx: np.ndarray, yy: np.ndarray) -> float:
+    """Numerically stable Pearson correlation for finite arrays."""
+    if xx.size == 0 or yy.size == 0:
+        return float("nan")
+    x = np.asarray(xx, dtype=float)
+    y = np.asarray(yy, dtype=float)
+    if x.size != y.size:
+        return float("nan")
+    if x.size < 2:
+        return float("nan")
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    x0 = x - x_mean
+    y0 = y - y_mean
+    x_var = float(np.dot(x0, x0))
+    y_var = float(np.dot(y0, y0))
+    denom = float(np.sqrt(x_var * y_var))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return float("nan")
+    return float(np.dot(x0, y0) / denom)
+
 
 def estimate_best_lag_by_topic(
     by_topic_weekly: pd.DataFrame,
@@ -40,7 +68,7 @@ def estimate_best_lag_by_topic(
             mask = np.isfinite(xx) & np.isfinite(yy)
             if mask.sum() < int(min_points):
                 continue
-            c = float(np.corrcoef(xx[mask], yy[mask])[0, 1])
+            c = _safe_corr(xx[mask], yy[mask])
             if not np.isfinite(c):
                 continue
             if (not np.isfinite(best[1])) or (c > best[1]):
@@ -86,7 +114,7 @@ def estimate_best_lag_days_by_topic(
             mask = np.isfinite(xx) & np.isfinite(yy)
             if mask.sum() < int(min_points):
                 continue
-            c = float(np.corrcoef(xx[mask], yy[mask])[0, 1])
+            c = _safe_corr(xx[mask], yy[mask])
             if not np.isfinite(c):
                 continue
             if (not np.isfinite(best[1])) or (c > best[1]):
@@ -487,11 +515,12 @@ def _sample_positions(total: int, target: int) -> np.ndarray:
 def link_incidents_to_nps_topics(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
-    min_similarity: float = 0.22,
+    min_similarity: float = LINK_MIN_SIMILARITY,
     max_features: int = 50000,
-    top_k_per_incident: int = 3,
+    top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
     max_nps_rows_for_evidence: int = 12000,
     evidence_chunk_size: int = 128,
+    max_days_apart: int | None = LINK_MAX_DAYS_APART,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return:
     - assignments per incident to best NPS topic (and similarity)
@@ -516,6 +545,14 @@ def link_incidents_to_nps_topics(
             helix.get("ID de la Incidencia", pd.Series(helix.index, index=helix.index)),
         )
     )
+    nps["nps_date"] = pd.to_datetime(
+        nps.get("Fecha", pd.Series([pd.NaT] * len(nps), index=nps.index)),
+        errors="coerce",
+    ).dt.normalize()
+    helix["incident_date"] = pd.to_datetime(
+        helix.get("Fecha", pd.Series([pd.NaT] * len(helix), index=helix.index)),
+        errors="coerce",
+    ).dt.normalize()
 
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
@@ -602,22 +639,31 @@ def link_incidents_to_nps_topics(
 
     links: List[EvidenceLink] = []
     chunk = max(1, int(evidence_chunk_size))
+    per_incident_k = max(1, int(top_k_per_incident))
+    max_days = int(max_days_apart) if max_days_apart is not None else None
     for start in range(0, X_inc.shape[0], chunk):
         end = min(start + chunk, X_inc.shape[0])
         sim_block = X_inc[start:end] @ X_nps_ev.T
         for bi in range(sim_block.shape[0]):
             row = sim_block.getrow(bi)
-            idx, vals = _sparse_row_topk(row, int(top_k_per_incident))
+            idx, vals = _sparse_row_topk(row, per_incident_k)
             if len(idx) == 0:
                 continue
             inc_row = start + bi
             inc_id = str(helix.iloc[inc_row]["incident_id"])
             inc_topic = str(helix.iloc[inc_row]["incident_topic"])
+            inc_date = pd.to_datetime(helix.iloc[inc_row].get("incident_date"), errors="coerce")
             for j, sim in zip(idx.tolist(), vals.tolist()):
                 s = float(sim)
                 if s < float(min_similarity):
                     continue
                 nps_row = nps_ev.iloc[int(j)]
+                if max_days is not None:
+                    nps_date = pd.to_datetime(nps_row.get("nps_date"), errors="coerce")
+                    if pd.isna(inc_date) or pd.isna(nps_date):
+                        continue
+                    if int(abs((inc_date - nps_date).days)) > max_days:
+                        continue
                 links.append(
                     EvidenceLink(
                         nps_id=str(nps_row["nps_id"]),

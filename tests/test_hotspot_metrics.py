@@ -5,9 +5,11 @@ from datetime import date
 import pandas as pd
 
 from nps_lens.analytics.hotspot_metrics import (
+    align_hotspot_evidence_to_axis,
     build_hotspot_daily_breakdown,
     build_hotspot_evidence,
     build_hotspot_timeline,
+    select_best_business_axis_for_hotspots,
     summarize_hotspot_counts,
 )
 
@@ -132,6 +134,75 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
     assert float(day5["no_hotspot"]) == 0.0
 
 
+def test_build_hotspot_daily_breakdown_uses_full_timeline_scope_not_only_representatives() -> None:
+    daily = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-02-10", "2026-02-11"]),
+            "incidents": [3, 2],
+        }
+    )
+    # Evidence keeps only representative incidents for each hotspot.
+    evidence = pd.DataFrame(
+        {
+            "incident_id": ["INC1", "INC4"],
+            "hot_rank": [1, 2],
+            "hot_term": ["transferencias", "token"],
+            "similarity": [0.9, 0.8],
+        }
+    )
+    # Timeline carries all incidents by day and hotspot-level incident_ids for full assignment.
+    timeline = pd.DataFrame(
+        {
+            "incident_id": ["INC1", "INC2", "INC3", "INC4", "INC5", "", "", ""],
+            "hot_term": ["", "", "", "", "", "transferencias", "transferencias", "token"],
+            "date": pd.to_datetime(
+                [
+                    "2026-02-10",
+                    "2026-02-10",
+                    "2026-02-10",
+                    "2026-02-11",
+                    "2026-02-11",
+                    "2026-02-10",
+                    "2026-02-11",
+                    "2026-02-11",
+                ]
+            ),
+            "helix_records": [1, 1, 1, 1, 1, 3, 1, 1],
+            "incident_ids": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "INC1 | INC2 | INC3",
+                "INC5",
+                "INC4",
+            ],
+        }
+    )
+
+    out, term_by_rank = build_hotspot_daily_breakdown(
+        daily,
+        evidence,
+        timeline,
+        max_hotspots=3,
+    )
+
+    assert term_by_rank[1] == "transferencias"
+    assert term_by_rank[2] == "token"
+
+    day10 = out[out["date"] == pd.Timestamp("2026-02-10")].iloc[0]
+    day11 = out[out["date"] == pd.Timestamp("2026-02-11")].iloc[0]
+
+    assert float(day10["hotspot_1"]) == 3.0
+    assert float(day10["hotspot_2"]) == 0.0
+    assert float(day10["no_hotspot"]) == 0.0
+
+    assert float(day11["hotspot_1"]) == 1.0
+    assert float(day11["hotspot_2"]) == 1.0
+    assert float(day11["no_hotspot"]) == 0.0
+
+
 def test_summarize_hotspot_counts_keeps_evidence_and_chart_totals_separate() -> None:
     evidence = pd.DataFrame(
         {
@@ -162,3 +233,94 @@ def test_summarize_hotspot_counts_keeps_evidence_and_chart_totals_separate() -> 
     assert int(row["chart_helix_records"]) == 3
     assert int(row["chart_nps_comments"]) == 7
     assert int(row["days_with_evidence"]) == 2
+
+
+def test_select_best_business_axis_for_hotspots_prefers_axis_with_higher_helix_coverage() -> None:
+    nps_df = pd.DataFrame(
+        {
+            "NPS": [2, 3, 4, 8, 9, 2, 4, 5],
+            "Palanca": [
+                "Pagos/ Transferencias",
+                "Pagos/ Transferencias",
+                "Seguridad",
+                "Uso",
+                "Uso",
+                "Pagos/ Transferencias",
+                "Seguridad",
+                "Banca",
+            ],
+            "Subpalanca": [
+                "Problemas con transferencias",
+                "Límite de transferencias",
+                "Robo en la cuenta",
+                "Diseño UX",
+                "Diseño UX",
+                "Problemas con transferencias",
+                "Robo en la cuenta",
+                "Atención personalizada",
+            ],
+        }
+    )
+    helix_df = pd.DataFrame(
+        {
+            "Incident Number": [f"INC{i}" for i in range(1, 8)],
+            "Fecha": pd.to_datetime(
+                ["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-07"]
+            ),
+            "Detailed Description": [
+                "Falla en pagos y transferencias en banca empresas",
+                "Error en transferencias SPEI",
+                "Rechazo de pagos intermitente",
+                "Problema de seguridad en token",
+                "Transferencias con error",
+                "Intermitencia general",
+                "Pagos no procesados",
+            ],
+        }
+    )
+    out = select_best_business_axis_for_hotspots(
+        nps_df,
+        helix_df,
+        min_n=1,
+        min_token_ratio=0.6,
+    )
+    assert out["best_axis"] in {"Palanca", "Subpalanca"}
+    ratios = out["axis_ratios"]
+    assert float(ratios["Palanca"]) >= float(ratios["Subpalanca"])
+
+
+def test_align_hotspot_evidence_to_axis_prioritizes_aligned_terms() -> None:
+    evidence = pd.DataFrame(
+        {
+            "incident_id": ["INC1", "INC2", "INC3"],
+            "incident_date": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-03"]),
+            "nps_topic": [
+                "Pagos/ Transferencias > Problemas con transferencias",
+                "Seguridad > Robo en la cuenta",
+                "Pagos/ Transferencias > Límite de transferencias",
+            ],
+            "incident_summary": ["s1", "s2", "s3"],
+            "detractor_comment": ["c1", "c2", "c3"],
+            "similarity": [0.7, 0.6, 0.8],
+            "hot_term": ["pagos", "seguridad", "transferencias"],
+            "hot_rank": [2, 1, 3],
+            "mention_incidents": [10, 4, 8],
+            "mention_comments": [11, 5, 9],
+            "hotspot_incidents": [2, 1, 2],
+            "hotspot_comments": [2, 1, 2],
+            "hotspot_links": [2, 1, 2],
+        }
+    )
+
+    out = align_hotspot_evidence_to_axis(
+        evidence,
+        axis="Palanca",
+        red_labels=["Pagos/ Transferencias"],
+        max_hotspots=2,
+    )
+
+    assert not out.empty
+    kept_terms = set(out["hot_term"].astype(str).tolist())
+    assert "seguridad" not in kept_terms
+    assert {"pagos", "transferencias"}.issubset(kept_terms)
+    assert set(out["hot_rank"].astype(int).tolist()).issubset({1, 2})

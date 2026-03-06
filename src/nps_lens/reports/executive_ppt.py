@@ -24,8 +24,10 @@ from pptx.util import Inches, Pt
 
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
-    build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
     summarize_hotspot_counts,
+)
+from nps_lens.analytics.hotspot_metrics import (
+    build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
 )
 
 BBVA_COLORS = {
@@ -65,6 +67,8 @@ class ZoomIncident:
     detractor_comment: str
     similarity: float
     hot_term: str
+    mention_incidents: int = 0
+    mention_comments: int = 0
     hotspot_incidents: int = 0
     hotspot_comments: int = 0
     hotspot_links: int = 0
@@ -318,6 +322,80 @@ def _add_chart_slide(
         p.font.name = BBVA_FONT_BODY
         p.font.size = Pt(12)
         p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+
+def _add_period_summary_slide(
+    prs: Presentation,
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    period_start: date,
+    period_end: date,
+) -> None:
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title="Resumen del periodo",
+        subtitle="Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
+    )
+
+    month_txt = _month_label_es(period_end)
+    p_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    cards = [
+        ("SERVICE ORIGEN", _clip(service_origin or "N/D", 38), "Ámbito analizado"),
+        ("NIVEL N1", _clip(service_origin_n1 or "N/D", 38), "Segmentación principal"),
+        ("NIVEL N2", _clip(service_origin_n2 or "N/D", 38), "Segmentación secundaria"),
+        ("MES EN CURSO", _clip(month_txt.title(), 38), f"Ventana: {p_label}"),
+    ]
+
+    left0 = 0.65
+    top = 1.55
+    card_w = 3.18
+    gap = 0.35
+    card_h = 3.05
+
+    for i, (label, value, caption) in enumerate(cards):
+        left = Inches(left0 + i * (card_w + gap))
+        card = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+            left,
+            Inches(top),
+            Inches(card_w),
+            Inches(card_h),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = _rgb(BBVA_COLORS["bg_light"])
+        card.line.color.rgb = _rgb(BBVA_COLORS["line"])
+
+        tf = card.text_frame
+        tf.clear()
+
+        p1 = tf.paragraphs[0]
+        r1 = p1.add_run()
+        r1.text = label
+        r1.font.name = BBVA_FONT_MEDIUM
+        r1.font.bold = True
+        r1.font.size = Pt(13)
+        r1.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+        p2 = tf.add_paragraph()
+        p2.space_before = Pt(18)
+        r2 = p2.add_run()
+        r2.text = value
+        r2.font.name = BBVA_FONT_HEAD
+        r2.font.bold = True
+        r2.font.size = Pt(30)
+        r2.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+        p3 = tf.add_paragraph()
+        p3.space_before = Pt(8)
+        r3 = p3.add_run()
+        r3.text = caption
+        r3.font.name = BBVA_FONT_BODY
+        r3.font.size = Pt(12)
+        r3.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
 def _pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str:
@@ -592,6 +670,98 @@ def _hotspot_stack_fig(
     return fig
 
 
+def _top_hotspots_fig(
+    incident_evidence_df: Optional[pd.DataFrame],
+    incident_timeline_df: Optional[pd.DataFrame],
+    *,
+    top_k: int = 3,
+) -> Optional[go.Figure]:
+    hs = summarize_hotspot_counts(
+        incident_evidence_df,
+        incident_timeline_df,
+        max_hotspots=max(1, int(top_k)),
+    )
+    if hs is None or hs.empty:
+        return None
+
+    d = hs.copy()
+    d["hot_term"] = d.get("hot_term", "").astype(str).str.strip()
+    d = d[d["hot_term"] != ""].copy()
+    if d.empty:
+        return None
+
+    # Keep strict coherence with centralized hotspot summary:
+    # rank and totals come directly from summarize_hotspot_counts.
+    d["hot_rank"] = pd.to_numeric(d.get("hot_rank"), errors="coerce").fillna(999).astype(int)
+    d["mention_comments"] = pd.to_numeric(d.get("mention_comments"), errors="coerce").fillna(0.0)
+    d["hotspot_comments"] = pd.to_numeric(d.get("hotspot_comments"), errors="coerce").fillna(0.0)
+    d["chart_nps_comments"] = pd.to_numeric(d.get("chart_nps_comments"), errors="coerce").fillna(0.0)
+    d["impact"] = d["chart_nps_comments"].clip(lower=0.0)
+    d.loc[d["impact"] <= 0.0, "impact"] = d["hotspot_comments"].clip(lower=0.0)
+    d.loc[d["impact"] <= 0.0, "impact"] = d["mention_comments"].clip(lower=0.0)
+    d = d.sort_values(["hot_rank"]).head(int(top_k)).copy()
+    if d.empty:
+        return None
+
+    d["label"] = d["hot_term"].astype(str).str.upper().str.slice(0, 44)
+    rank_color = {
+        1: "#" + BBVA_COLORS["red"],
+        2: "#" + BBVA_COLORS["orange"],
+        3: "#" + BBVA_COLORS["yellow"],
+    }
+    d["bar_color"] = d["hot_rank"].map(rank_color).fillna("#" + BBVA_COLORS["red"])
+    d["inbar"] = [
+        f"#{int(r)}  {lbl}  ·  {int(v)}"
+        for r, lbl, v in zip(d["hot_rank"], d["label"], d["impact"])
+    ]
+    d = d.iloc[::-1].copy()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=d["impact"],
+            y=d["label"],
+            orientation="h",
+            marker=dict(color=d["bar_color"].tolist()),
+            text=d["inbar"].tolist(),
+            textposition="inside",
+            insidetextanchor="start",
+            textfont=dict(size=19, color="#" + BBVA_COLORS["white"]),
+            customdata=d[
+                [
+                    "hot_rank",
+                    "mention_incidents",
+                    "mention_comments",
+                    "hotspot_links",
+                    "chart_nps_comments",
+                ]
+            ].to_numpy(),
+            hovertemplate=(
+                "Hotspot #%{customdata[0]:.0f}=%{y}<br>"
+                "Comentarios del gráfico=%{customdata[4]:.0f}<br>"
+                "Comentarios negativos=%{customdata[2]:.0f}<br>"
+                "Incidencias Helix=%{customdata[1]:.0f}<br>"
+                "Links validados=%{customdata[3]:.0f}<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        margin=dict(l=24, r=24, t=22, b=24),
+        uniformtext=dict(minsize=16, mode="show"),
+        xaxis=dict(
+            title="",
+            showticklabels=False,
+            showgrid=False,
+            zeroline=False,
+            visible=False,
+        ),
+        yaxis=dict(title=""),
+        showlegend=False,
+    )
+    return fig
+
+
 def _hotspot_matches_by_day(
     incident_timeline_df: Optional[pd.DataFrame],
     incident_evidence_df: Optional[pd.DataFrame],
@@ -785,6 +955,14 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
     sim_col = _pick_first_col(d, ["similarity", "sim", "score"])
     hot_term_col = _pick_first_col(d, ["hot_term", "termino_caliente", "term"])
     hot_rank_col = _pick_first_col(d, ["hot_rank", "hotterm_rank", "rank"])
+    mention_inc_col = _pick_first_col(
+        d,
+        ["mention_incidents", "hotspot_incidents_mentions", "mentions_incidents"],
+    )
+    mention_com_col = _pick_first_col(
+        d,
+        ["mention_comments", "hotspot_comments_mentions", "mentions_comments"],
+    )
     hot_inc_col = _pick_first_col(d, ["hotspot_incidents", "cluster_incidents", "incidents_count"])
     hot_com_col = _pick_first_col(d, ["hotspot_comments", "cluster_comments", "comments_count"])
     hot_lnk_col = _pick_first_col(d, ["hotspot_links", "cluster_links", "links_count"])
@@ -830,6 +1008,16 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
             "similarity": pd.to_numeric(d[sim_col], errors="coerce").fillna(0.0) if sim_col else 0.0,
             "hot_term": d[hot_term_col].astype(str) if hot_term_col else "",
             "hot_rank": pd.to_numeric(d[hot_rank_col], errors="coerce") if hot_rank_col else np.nan,
+            "mention_incidents": (
+                pd.to_numeric(d[mention_inc_col], errors="coerce").fillna(0.0)
+                if mention_inc_col
+                else 0.0
+            ),
+            "mention_comments": (
+                pd.to_numeric(d[mention_com_col], errors="coerce").fillna(0.0)
+                if mention_com_col
+                else 0.0
+            ),
             "hotspot_incidents": (
                 pd.to_numeric(d[hot_inc_col], errors="coerce").fillna(0.0) if hot_inc_col else 0.0
             ),
@@ -846,6 +1034,12 @@ def _prepare_incident_evidence(incident_evidence_df: Optional[pd.DataFrame]) -> 
     out["incident_summary"] = out["incident_summary"].astype(str).str.strip()
     out["detractor_comment"] = out["detractor_comment"].astype(str).str.strip()
     out["hot_term"] = out["hot_term"].astype(str).str.strip()
+    out["mention_incidents"] = (
+        pd.to_numeric(out["mention_incidents"], errors="coerce").fillna(0.0).astype(int)
+    )
+    out["mention_comments"] = (
+        pd.to_numeric(out["mention_comments"], errors="coerce").fillna(0.0).astype(int)
+    )
     out["hotspot_incidents"] = (
         pd.to_numeric(out["hotspot_incidents"], errors="coerce").fillna(0.0).astype(int)
     )
@@ -941,15 +1135,15 @@ def _select_zoom_incidents(
             topic = str(rep.get("nps_topic", "")).strip() or "Tópico sin etiqueta"
             hot_term = _clip(term or rep.get("hot_term", ""), 48)
 
+            mention_inc = _safe_int(g.get("mention_incidents", pd.Series([0])).max(), default=0)
+            mention_com = _safe_int(g.get("mention_comments", pd.Series([0])).max(), default=0)
             hotspot_inc = _safe_int(g.get("hotspot_incidents", pd.Series([0])).max(), default=0)
             hotspot_com = _safe_int(g.get("hotspot_comments", pd.Series([0])).max(), default=0)
             hotspot_lnk = _safe_int(g.get("hotspot_links", pd.Series([0])).max(), default=0)
-            if hotspot_inc <= 0:
-                hotspot_inc = int(g["incident_id"].astype(str).str.strip().replace("", np.nan).nunique())
-            if hotspot_com <= 0:
-                hotspot_com = int(g["detractor_comment"].astype(str).str.strip().replace("", np.nan).nunique())
-            if hotspot_lnk <= 0:
-                hotspot_lnk = int(len(g))
+            if mention_inc <= 0:
+                mention_inc = int(hotspot_inc)
+            if mention_com <= 0:
+                mention_com = int(hotspot_com)
 
             sample_incidents = (
                 g["incident_id"]
@@ -981,6 +1175,8 @@ def _select_zoom_incidents(
                     detractor_comment=_clip(rep.get("detractor_comment", ""), 220),
                     similarity=_safe_float(rep.get("similarity", 0.0), default=0.0),
                     hot_term=hot_term,
+                    mention_incidents=mention_inc,
+                    mention_comments=mention_com,
                     hotspot_incidents=hotspot_inc,
                     hotspot_comments=hotspot_com,
                     hotspot_links=hotspot_lnk,
@@ -1000,9 +1196,11 @@ def _select_zoom_incidents(
                 incident_date=None,
                 nps_topic=topic,
                 incident_summary="No se encontró descripción de incidencia para este tópico en el periodo.",
-                detractor_comment="No se encontró comentario detractor vinculado con el umbral actual.",
+                detractor_comment="No se encontró comentario detractor validado con la política estricta activa.",
                 similarity=0.0,
                 hot_term="",
+                mention_incidents=0,
+                mention_comments=0,
                 hotspot_incidents=0,
                 hotspot_comments=0,
                 hotspot_links=0,
@@ -1120,7 +1318,15 @@ def _incident_related_timeline(
     hot_term: str = "",
     incident_timeline_df: Optional[pd.DataFrame],
 ) -> pd.DataFrame:
-    cols = ["date", "helix_records", "nps_comments"]
+    cols = [
+        "date",
+        "helix_records",
+        "nps_comments",
+        "nps_comments_moderate",
+        "nps_comments_high",
+        "nps_comments_critical",
+        "incident_ids",
+    ]
     if incident_timeline_df is None or incident_timeline_df.empty:
         return pd.DataFrame(columns=cols)
     req = {"incident_id", "date", "helix_records", "nps_comments"}
@@ -1145,9 +1351,60 @@ def _incident_related_timeline(
 
     d["helix_records"] = pd.to_numeric(d["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
     d["nps_comments"] = pd.to_numeric(d["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    sev_mod = (
+        d["nps_comments_moderate"]
+        if "nps_comments_moderate" in d.columns
+        else pd.Series([0.0] * len(d), index=d.index)
+    )
+    sev_high = (
+        d["nps_comments_high"]
+        if "nps_comments_high" in d.columns
+        else pd.Series([0.0] * len(d), index=d.index)
+    )
+    sev_critical = (
+        d["nps_comments_critical"]
+        if "nps_comments_critical" in d.columns
+        else pd.Series([0.0] * len(d), index=d.index)
+    )
+    d["nps_comments_moderate"] = (
+        pd.to_numeric(sev_mod, errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
+    d["nps_comments_high"] = (
+        pd.to_numeric(sev_high, errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
+    d["nps_comments_critical"] = (
+        pd.to_numeric(sev_critical, errors="coerce").fillna(0.0).clip(lower=0.0)
+    )
+    if "incident_ids" not in d.columns:
+        d["incident_ids"] = d.get("incident_id", "").astype(str)
+    d["incident_ids"] = d["incident_ids"].astype(str).fillna("")
+
+    def _merge_ids(values: pd.Series) -> str:
+        raw: list[str] = []
+        for v in values.astype(str).tolist():
+            for part in str(v).split("|"):
+                p = part.strip()
+                if p:
+                    raw.append(p)
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in raw:
+            if item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+        return " | ".join(out)
+
     d = (
         d.groupby("date", as_index=False)
-        .agg(helix_records=("helix_records", "sum"), nps_comments=("nps_comments", "sum"))
+        .agg(
+            helix_records=("helix_records", "sum"),
+            nps_comments=("nps_comments", "sum"),
+            nps_comments_moderate=("nps_comments_moderate", "sum"),
+            nps_comments_high=("nps_comments_high", "sum"),
+            nps_comments_critical=("nps_comments_critical", "sum"),
+            incident_ids=("incident_ids", _merge_ids),
+        )
         .sort_values("date")
     )
     d = d[(d["helix_records"] > 0) | (d["nps_comments"] > 0)].copy()
@@ -1165,7 +1422,7 @@ def _zoom_incident_fig(
     period_start: Optional[date] = None,
     period_end: Optional[date] = None,
 ) -> Optional[go.Figure]:
-    del topic_daily, lag_days, focus_name
+    del incident, lag_days, focus_name
 
     rel = related_timeline.copy() if related_timeline is not None else pd.DataFrame()
     if not rel.empty:
@@ -1177,9 +1434,49 @@ def _zoom_incident_fig(
         rel["nps_comments"] = (
             pd.to_numeric(rel["nps_comments"], errors="coerce").fillna(0.0).clip(lower=0.0)
         )
+        rel["nps_comments_moderate"] = (
+            pd.to_numeric(rel.get("nps_comments_moderate"), errors="coerce")
+            .fillna(0.0)
+            .clip(lower=0.0)
+        )
+        rel["nps_comments_high"] = (
+            pd.to_numeric(rel.get("nps_comments_high"), errors="coerce")
+            .fillna(0.0)
+            .clip(lower=0.0)
+        )
+        rel["nps_comments_critical"] = (
+            pd.to_numeric(rel.get("nps_comments_critical"), errors="coerce")
+            .fillna(0.0)
+            .clip(lower=0.0)
+        )
+        rel["incident_ids"] = rel.get("incident_ids", "").astype(str).fillna("")
+
+        def _merge_ids(values: pd.Series) -> str:
+            raw: list[str] = []
+            for v in values.astype(str).tolist():
+                for part in str(v).split("|"):
+                    p = part.strip()
+                    if p:
+                        raw.append(p)
+            seen: set[str] = set()
+            out: list[str] = []
+            for item in raw:
+                if item in seen:
+                    continue
+                seen.add(item)
+                out.append(item)
+            return " | ".join(out)
+
         rel = (
             rel.groupby("date", as_index=False)
-            .agg(helix_records=("helix_records", "sum"), nps_comments=("nps_comments", "sum"))
+            .agg(
+                helix_records=("helix_records", "sum"),
+                nps_comments=("nps_comments", "sum"),
+                nps_comments_moderate=("nps_comments_moderate", "sum"),
+                nps_comments_high=("nps_comments_high", "sum"),
+                nps_comments_critical=("nps_comments_critical", "sum"),
+                incident_ids=("incident_ids", _merge_ids),
+            )
             .sort_values("date")
         )
 
@@ -1199,52 +1496,123 @@ def _zoom_incident_fig(
     z = scope.merge(rel, on="date", how="left")
     z["helix_records"] = pd.to_numeric(z.get("helix_records"), errors="coerce").fillna(0.0)
     z["nps_comments"] = pd.to_numeric(z.get("nps_comments"), errors="coerce").fillna(0.0)
+    z["nps_comments_moderate"] = (
+        pd.to_numeric(z.get("nps_comments_moderate"), errors="coerce").fillna(0.0)
+    )
+    z["nps_comments_high"] = (
+        pd.to_numeric(z.get("nps_comments_high"), errors="coerce").fillna(0.0)
+    )
+    z["nps_comments_critical"] = (
+        pd.to_numeric(z.get("nps_comments_critical"), errors="coerce").fillna(0.0)
+    )
+    z["incident_ids"] = z.get("incident_ids", "").astype(str).fillna("")
+    nps_series = pd.DataFrame(columns=["date", "nps_mean"])
+    if (
+        topic_daily is not None
+        and not topic_daily.empty
+        and {"date", "nps_mean"}.issubset(set(topic_daily.columns))
+    ):
+        nps_series = topic_daily[["date", "nps_mean"]].copy()
+        nps_series["date"] = pd.to_datetime(nps_series["date"], errors="coerce")
+        nps_series["nps_mean"] = pd.to_numeric(nps_series["nps_mean"], errors="coerce")
+        nps_series = nps_series.dropna(subset=["date", "nps_mean"])
+        nps_series = (
+            nps_series.groupby("date", as_index=False)
+            .agg(nps_mean=("nps_mean", "mean"))
+            .sort_values("date")
+        )
 
     fig = go.Figure()
-    comment_labels = [str(int(v)) if float(v) > 0 else "" for v in z["nps_comments"].tolist()]
     fig.add_trace(
         go.Bar(
             x=z["date"],
-            y=z["nps_comments"],
-            name="Comentarios negativos del hotspot",
-            marker=dict(color="#" + BBVA_COLORS["red"]),
-            opacity=0.82,
-            text=comment_labels,
-            textposition="outside",
+            y=z["nps_comments_moderate"],
+            name="Comentarios moderados (NPS 5-6)",
+            marker=dict(color="#FCA5A5"),
+            opacity=0.88,
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=z["date"],
+            y=z["nps_comments_high"],
+            name="Comentarios altos (NPS 3-4)",
+            marker=dict(color="#EF4444"),
+            opacity=0.88,
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=z["date"],
+            y=z["nps_comments_critical"],
+            name="Comentarios críticos (NPS 0-2)",
+            marker=dict(color="#B91C1C"),
+            opacity=0.92,
+        )
+    )
+    totals = z["nps_comments_moderate"] + z["nps_comments_high"] + z["nps_comments_critical"]
+    total_labels = [str(int(v)) if float(v) > 0 else "" for v in totals.tolist()]
+    fig.add_trace(
+        go.Scatter(
+            x=z["date"],
+            y=totals,
+            mode="text",
+            text=total_labels,
+            textposition="top center",
+            showlegend=False,
+            hoverinfo="skip",
+            textfont=dict(size=10, color="#" + BBVA_COLORS["muted"]),
         )
     )
 
     points = z[z["helix_records"] > 0].copy()
+
+    def _point_label(v: object) -> str:
+        items = [p.strip() for p in str(v or "").split("|") if p.strip()]
+        if not items:
+            return ""
+        inc_items = [it for it in items if str(it).upper().startswith("INC")]
+        return str((inc_items[0] if inc_items else items[0])).strip()
+
+    point_labels_raw = points["incident_ids"].map(_point_label).tolist()
+    point_labels: list[str] = []
+    last_labeled_date: Optional[pd.Timestamp] = None
+    for dt, lbl in zip(points["date"].tolist(), point_labels_raw):
+        label = str(lbl or "").strip()
+        if not label:
+            point_labels.append("")
+            continue
+        dt_ts = pd.Timestamp(dt).normalize()
+        if last_labeled_date is not None and int((dt_ts - last_labeled_date).days) < 2:
+            point_labels.append("")
+            continue
+        point_labels.append(label)
+        last_labeled_date = dt_ts
+
     fig.add_trace(
         go.Scatter(
             x=points["date"],
             y=points["helix_records"],
             name="Incidencias Helix del hotspot",
             yaxis="y2",
-            mode="lines+markers",
-            line=dict(color="#" + BBVA_COLORS["blue"], width=2.5, dash="dash"),
+            mode="markers+text",
             marker=dict(size=8),
+            text=point_labels,
+            textposition="top right",
+            textfont=dict(size=9, color="#" + BBVA_COLORS["blue"]),
         )
     )
 
-    if incident.incident_date is not None:
-        fig.add_vline(
-            x=incident.incident_date,
-            line_width=2,
-            line_dash="solid",
-            line_color="#" + BBVA_COLORS["orange"],
-        )
-        ymax = max(1.0, float(z["helix_records"].max()))
-        fig.add_annotation(
-            x=incident.incident_date,
-            y=ymax,
-            yref="y2",
-            text=f"Incidencia {incident.incident_id}",
-            showarrow=True,
-            arrowhead=2,
-            ax=15,
-            ay=-30,
-            font=dict(size=10, color="#" + BBVA_COLORS["muted"]),
+    if not nps_series.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=nps_series["date"],
+                y=nps_series["nps_mean"],
+                name="NPS medio",
+                yaxis="y3",
+                mode="lines",
+                line=dict(color="#" + BBVA_COLORS["green"], width=2.6),
+            )
         )
 
     cp_in_window = []
@@ -1265,6 +1633,7 @@ def _zoom_incident_fig(
         template="plotly_white",
         margin=dict(l=20, r=20, t=20, b=24),
         legend=dict(orientation="h", x=0.01, y=1.08),
+        barmode="stack",
         xaxis_title="Día",
         yaxis=dict(title="Comentarios negativos (volumen diario)", rangemode="tozero"),
         yaxis2=dict(
@@ -1272,6 +1641,15 @@ def _zoom_incident_fig(
             overlaying="y",
             side="right",
             rangemode="tozero",
+            showgrid=False,
+        ),
+        yaxis3=dict(
+            title="NPS medio (0-10)",
+            overlaying="y",
+            side="right",
+            anchor="free",
+            position=0.92,
+            range=[0, 10],
             showgrid=False,
         ),
     )
@@ -1334,6 +1712,7 @@ def generate_business_review_ppt(
     incident_evidence_df: Optional[pd.DataFrame] = None,
     changepoints_by_topic: Optional[pd.DataFrame] = None,
     incident_timeline_df: Optional[pd.DataFrame] = None,
+    hotspot_focus_note: str = "",
 ) -> BusinessPptResult:
     """Build a business deck focused on daily NPS, matched incidents and top-3 zooms."""
     del by_topic_daily, by_topic_weekly, story_md, script_8slides_md, template_name, corporate_fixed, logo_path
@@ -1343,6 +1722,15 @@ def generate_business_review_ppt(
     prs.slide_height = Inches(7.5)
 
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+
+    _add_period_summary_slide(
+        prs,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+        service_origin_n2=service_origin_n2,
+        period_start=period_start,
+        period_end=period_end,
+    )
 
     daily_signals, nps_estimated = _prepare_daily_signals(
         overall_weekly,
@@ -1391,13 +1779,38 @@ def generate_business_review_ppt(
         else []
     )
 
+    top3_fig = _top_hotspots_fig(evidence, incident_timeline_df, top_k=3)
+    _add_chart_slide(
+        prs,
+        title="Top 3 hotspots operativos",
+        subtitle=f"Histórico total del periodo {period_label} · ranking coherente con conteo centralizado",
+        figure=top3_fig,
+        rationale_title="Racional",
+        rationale_lines=[
+            "Top 3 priorizado con la misma fuente de conteos centralizada usada en app, insights y zooms.",
+            "Se usa la misma señaletica de la presentación: hotspot #1 rojo, #2 naranja, #3 amarillo.",
+            "Cada barra muestra dentro del trazo el hotspot y su volumen para evitar dependencia de lectura del eje X.",
+            "Cada barra representa un hotspot operativo Helix validado por señal detractora en NPS.",
+            (
+                f"Top detectado: {', '.join(hotspot_summary['hot_term'].astype(str).head(3).tolist())}."
+                if hotspot_summary is not None and not hotspot_summary.empty
+                else "No se detectó señal suficiente para construir el top de hotspots."
+            ),
+            (
+                _clip(hotspot_focus_note, 170)
+                if str(hotspot_focus_note or "").strip()
+                else "El eje de foco se prioriza por mayor cobertura de ocurrencia sobre descripciones Helix."
+            ),
+        ],
+    )
+
     hfig = _hotspot_stack_fig(daily_signals, evidence, incident_timeline_df)
     hotspot_txt = ", ".join([_clip(t, 18) for t in hotspot_terms]) if hotspot_terms else "n/d"
     _add_chart_slide(
         prs,
         title="Incidencias históricas diarias por hotspot",
         subtitle=(
-            f"Histórico total del periodo {period_label} · focos priorizados: {hotspot_txt}"
+            f"Histórico total del periodo {period_label} · focos operativos Helix priorizados: {hotspot_txt}"
         ),
         figure=hfig,
         rationale_title="Racional",
@@ -1405,6 +1818,13 @@ def generate_business_review_ppt(
             "Cada columna representa las incidencias registradas por día sobre todo el histórico disponible.",
             "La columna está segmentada por foco: rojo (hotspot 1), naranja (hotspot 2), amarillo (hotspot 3) y azul (sin hotspot).",
             "La leyenda horizontal debajo del gráfico identifica claramente qué término de negocio corresponde a cada hotspot.",
+            "Estos hotspots se derivan de términos operativos Helix validados con señal NPS detractora; no son un ranking puro de Palanca/Subpalanca.",
+            (
+                _clip(hotspot_focus_note, 170)
+                if str(hotspot_focus_note or "").strip()
+                else "El eje de foco se prioriza por mayor cobertura de ocurrencia sobre descripciones Helix."
+            ),
+            "Si una incidencia cae en varios hotspots, se asigna al foco de mayor prioridad (1>2>3) para evitar doble conteo diario.",
             "Esto permite ver en qué días domina cada foco caliente y dónde concentrar acciones de dirección.",
         ],
     )
@@ -1424,9 +1844,14 @@ def generate_business_review_ppt(
             hot_term=incident.hot_term,
             incident_timeline_df=incident_timeline_df,
         )
+        zoom_nps = (
+            daily_signals[["date", "nps_mean"]].copy()
+            if {"date", "nps_mean"}.issubset(set(daily_signals.columns))
+            else pd.DataFrame(columns=["date", "nps_mean"])
+        )
         cp_list = cp_map.get(incident.nps_topic, [])
         zfig = _zoom_incident_fig(
-            topic_daily=pd.DataFrame(),
+            topic_daily=zoom_nps,
             related_timeline=related_timeline,
             incident=incident,
             lag_days=lag_days,
@@ -1473,6 +1898,31 @@ def generate_business_review_ppt(
             if summary_row is not None
             else int(incident.hotspot_links)
         )
+        mention_incidents = (
+            int(summary_row.get("mention_incidents", incident.mention_incidents))
+            if summary_row is not None
+            else int(incident.mention_incidents)
+        )
+        mention_comments = (
+            int(summary_row.get("mention_comments", incident.mention_comments))
+            if summary_row is not None
+            else int(incident.mention_comments)
+        )
+        validated_incidents = (
+            int(summary_row.get("hotspot_incidents", incident.hotspot_incidents))
+            if summary_row is not None
+            else int(incident.hotspot_incidents)
+        )
+        validated_comments = (
+            int(summary_row.get("hotspot_comments", incident.hotspot_comments))
+            if summary_row is not None
+            else int(incident.hotspot_comments)
+        )
+        chart_scope_txt = (
+            "Serie diaria validada del gráfico"
+            if int(hotspot_links) > 0
+            else "Serie diaria por mención cruzada (Helix+NPS)"
+        )
 
         metrics = _topic_metrics(incident.nps_topic, rationale_df)
         lag_weeks_txt = (
@@ -1493,10 +1943,17 @@ def generate_business_review_ppt(
             rationale_title="Ficha + lectura",
             rationale_lines=[
                 (
-                    f"Serie diaria del hotspot (misma fuente del gráfico): "
-                    f"{int(chart_helix_total)} incidencias Helix y {int(chart_comments_total)} comentarios negativos."
+                    f"Menciones del hotspot (amplio): "
+                    f"{int(mention_incidents)} incidencias Helix y {int(mention_comments)} comentarios negativos."
                 ),
-                f"Links semánticos detectados en el hotspot: {int(hotspot_links)}.",
+                (
+                    f"Vínculos validados (estricto): {int(validated_incidents)} incidencias, "
+                    f"{int(validated_comments)} comentarios y {int(hotspot_links)} links semánticos."
+                ),
+                (
+                    f"{chart_scope_txt}: {int(chart_helix_total)} incidencias y "
+                    f"{int(chart_comments_total)} comentarios negativos."
+                ),
                 (
                     f"Incidencias ejemplo: {incident.sample_incidents}"
                     if str(incident.sample_incidents or "").strip()
@@ -1514,8 +1971,10 @@ def generate_business_review_ppt(
                 ),
                 f"Descripción: {_clip(incident.incident_summary, 120)}",
                 (
-                    f"Timeline del zoom: barras rojas diarias de comentarios negativos y puntos azules "
-                    f"(línea discontinua) para días con incidencias del hotspot ({int(chart_days)} días con evidencia)."
+                    f"Timeline del zoom: barras rojas apiladas por intensidad "
+                    f"(moderado/alto/crítico), puntos azules (etiqueta INC cuando cabe) "
+                    f"para días con incidencias del hotspot y línea verde de NPS medio diario "
+                    f"({int(chart_days)} días con evidencia)."
                 ),
                 f"Lag estimado: {int(lag_days)} días ({lag_weeks_txt}) · change points detectados: {len(cp_list)}.",
                 (

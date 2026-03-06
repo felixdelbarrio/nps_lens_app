@@ -140,10 +140,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 5
+    assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 5
+    assert len(prs.slides) == 7
 
     texts = []
     for slide in prs.slides:
@@ -152,7 +152,13 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
+    assert any("Resumen del periodo" in t for t in texts)
+    assert any("SERVICE ORIGEN" in t for t in texts)
+    assert any("NIVEL N1" in t for t in texts)
+    assert any("NIVEL N2" in t for t in texts)
+    assert any("MES EN CURSO" in t for t in texts)
     assert any("Evolución histórica diaria de NPS e incidencias" in t for t in texts)
+    assert any("Top 3 hotspots operativos" in t for t in texts)
     assert any("Incidencias históricas diarias por hotspot" in t for t in texts)
     assert any("Zoom de foco caliente 1" in t for t in texts)
     assert any("INC-9001" in t for t in texts)
@@ -222,6 +228,41 @@ def test_month_overlap_highlights_matched_incidents_with_labels() -> None:
     assert fig is not None
     assert fig.data[3]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["orange"]
     assert list(fig.data[3]["text"]) == ["2", "", "1"]
+
+
+def test_top_hotspots_fig_uses_top3_colors_and_inbar_labels() -> None:
+    evidence = pd.DataFrame(
+        {
+            "hot_rank": [1, 1, 2, 2, 3, 3],
+            "hot_term": ["pagos", "pagos", "movimientos", "movimientos", "transferencias", "transferencias"],
+            "mention_incidents": [60, 60, 45, 45, 30, 30],
+            "mention_comments": [114, 114, 98, 98, 85, 85],
+            "hotspot_comments": [114, 114, 98, 98, 85, 85],
+            "hotspot_links": [90, 90, 72, 72, 54, 54],
+        }
+    )
+    timeline = pd.DataFrame(
+        {
+            "incident_id": ["", "", ""],
+            "hot_term": ["pagos", "movimientos", "transferencias"],
+            "date": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-01"]),
+            "helix_records": [60, 45, 30],
+            "nps_comments": [114, 98, 85],
+        }
+    )
+
+    fig = executive_ppt._top_hotspots_fig(evidence, timeline, top_k=3)
+    assert fig is not None
+    assert len(fig.data) == 1
+
+    colors = list(fig.data[0]["marker"]["color"])
+    assert colors == [
+        "#" + executive_ppt.BBVA_COLORS["yellow"],
+        "#" + executive_ppt.BBVA_COLORS["orange"],
+        "#" + executive_ppt.BBVA_COLORS["red"],
+    ]
+    assert fig.layout.xaxis.visible is False
+    assert all(str(t).strip().startswith("#") for t in list(fig.data[0]["text"]))
 
 
 def test_hotspot_matches_by_day_uses_hot_terms_and_overlap_signal() -> None:
@@ -345,6 +386,9 @@ def test_incident_related_timeline_can_aggregate_by_hotspot_term() -> None:
             "date": pd.to_datetime(["2026-01-10", "2026-01-10", "2026-01-11"]),
             "helix_records": [2, 1, 1],
             "nps_comments": [1, 3, 0],
+            "nps_comments_moderate": [1, 1, 0],
+            "nps_comments_high": [0, 2, 0],
+            "nps_comments_critical": [0, 0, 0],
         }
     )
     out = executive_ppt._incident_related_timeline(
@@ -355,14 +399,22 @@ def test_incident_related_timeline_can_aggregate_by_hotspot_term() -> None:
     assert len(out) == 1
     assert out.iloc[0]["helix_records"] == 3
     assert out.iloc[0]["nps_comments"] == 4
+    assert out.iloc[0]["nps_comments_moderate"] == 2
+    assert out.iloc[0]["nps_comments_high"] == 2
+    assert "INC-A1" in out.iloc[0]["incident_ids"]
+    assert "INC-A2" in out.iloc[0]["incident_ids"]
 
 
-def test_zoom_hotspot_fig_uses_daily_red_comments_and_blue_dashed_incident_points() -> None:
+def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> None:
     rel = pd.DataFrame(
         {
             "date": pd.to_datetime(["2026-01-01", "2026-01-20"]),
             "helix_records": [1, 1],
             "nps_comments": [2, 0],
+            "nps_comments_moderate": [1, 0],
+            "nps_comments_high": [1, 0],
+            "nps_comments_critical": [0, 0],
+            "incident_ids": ["INC-1", "INC-2"],
         }
     )
     incident = executive_ppt.ZoomIncident(
@@ -374,8 +426,14 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_and_blue_dashed_incident_point
         similarity=0.9,
         hot_term="transferencias",
     )
+    topic_daily = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-01-01", "2026-01-20"]),
+            "nps_mean": [8.2, 6.1],
+        }
+    )
     fig = executive_ppt._zoom_incident_fig(
-        topic_daily=pd.DataFrame(),
+        topic_daily=topic_daily,
         related_timeline=rel,
         incident=incident,
         lag_days=4,
@@ -384,9 +442,15 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_and_blue_dashed_incident_point
     )
     assert fig is not None
     assert fig.data[0]["type"] == "bar"
-    assert fig.data[0]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["red"]
-    assert fig.data[0]["name"] == "Comentarios negativos del hotspot"
-    assert fig.data[1]["type"] == "scatter"
-    assert fig.data[1]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
-    assert fig.data[1]["line"]["dash"] == "dash"
-    assert fig.data[1]["yaxis"] == "y2"
+    assert fig.data[0]["name"] == "Comentarios moderados (NPS 5-6)"
+    assert fig.data[1]["name"] == "Comentarios altos (NPS 3-4)"
+    assert fig.data[2]["name"] == "Comentarios críticos (NPS 0-2)"
+    assert fig.data[4]["type"] == "scatter"
+    assert fig.data[4]["mode"] == "markers+text"
+    assert fig.data[4]["yaxis"] == "y2"
+    assert any(str(t) == "INC-1" for t in fig.data[4]["text"])
+    assert fig.data[5]["name"] == "NPS medio"
+    assert fig.data[5]["type"] == "scatter"
+    assert fig.data[5]["mode"] == "lines"
+    assert fig.data[5]["yaxis"] == "y3"
+    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["green"]

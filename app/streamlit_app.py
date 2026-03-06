@@ -22,13 +22,21 @@ from dotenv import find_dotenv, load_dotenv
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.hotspot_metrics import (
+    align_hotspot_evidence_to_axis,
     build_hotspot_evidence,
     build_hotspot_timeline,
+    select_best_business_axis_for_hotspots,
     summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
+)
+from nps_lens.analytics.linking_policy import (
+    HOTSPOT_MIN_TERM_OCCURRENCES,
+    LINK_MAX_DAYS_APART,
+    LINK_MIN_SIMILARITY,
+    LINK_TOP_K_PER_INCIDENT,
 )
 from nps_lens.analytics.nps_helix_link import (
     build_incident_display_text,
@@ -499,14 +507,19 @@ def cached_driver_table(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
     return stats_df
 
 
-def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
+def cached_rank_opportunities(
+    df: pd.DataFrame,
+    min_n: int,
+    *,
+    dimensions: Optional[list[str]] = None,
+):
     perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
     cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
 
     fp = _df_fingerprint(
         df, cols=["NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"]
     )
-    dims = [d for d in DEFAULT_OPP_DIMS if d in df.columns]
+    dims = [d for d in (dimensions or list(DEFAULT_OPP_DIMS)) if d in df.columns]
     key = cache.make_key(
         namespace="opps", dataset_sig=fp, params={"min_n": int(min_n), "dims": dims}
     )
@@ -1683,8 +1696,11 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
             st.dataframe(stats_df.head(30), use_container_width=True)
 
     with right:
-        section("Oportunidades priorizadas", "Ranking por impacto estimado x confianza.")
-        opps = cached_rank_opportunities(df, min_n=min_n)
+        section(
+            "Oportunidades priorizadas",
+            "Ranking por impacto estimado x confianza (solo NPS en la dimensión seleccionada).",
+        )
+        opps = cached_rank_opportunities(df, min_n=min_n, dimensions=[dim])
         opp_df = pd.DataFrame([o.__dict__ for o in opps])
 
         if opp_df.empty:
@@ -1715,6 +1731,11 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
                     + "</ul></div>"
                 ),
                 unsafe_allow_html=True,
+            )
+            st.caption(
+                "Nota de coherencia: este ranking usa solo NPS y la dimensión elegida. "
+                "La PPT de incidencias usa hotspots operativos Helix+NPS (detractores, histórico completo), "
+                "por lo que los términos pueden diferir."
             )
 
         with st.expander("Ver ranking completo"):
@@ -2243,26 +2264,12 @@ def page_nps_helix_linking(
     nps_df["Fecha"] = pd.to_datetime(nps_df["Fecha"], errors="coerce")
     dmin = pd.to_datetime(nps_df["Fecha"].min()).date()
     dmax = pd.to_datetime(nps_df["Fecha"].max()).date()
-    colw = st.columns(3)
+    colw = st.columns(2)
     with colw[0]:
         start = st.date_input("Desde", value=dmin, min_value=dmin, max_value=dmax, key="nh_start")
     with colw[1]:
         end = st.date_input("Hasta", value=dmax, min_value=dmin, max_value=dmax, key="nh_end")
-    with colw[2]:
-        # First load of this Streamlit session: force default similarity threshold to 0.16.
-        if "_nh_sim_init_done" not in st.session_state:
-            st.session_state["nh_sim"] = 0.16
-            st.session_state["_nh_sim_init_done"] = True
-        elif "nh_sim" not in st.session_state:
-            st.session_state["nh_sim"] = 0.16
-        min_sim = st.slider(
-            "Umbral similitud (link)",
-            min_value=0.10,
-            max_value=0.60,
-            value=0.16,
-            step=0.01,
-            key="nh_sim",
-        )
+    min_sim = float(LINK_MIN_SIMILARITY)
 
     # Población global (sidebar): rige TODO el contenido de esta pestaña.
     st.caption(f"Población activa: **{nps_group_choice}** (control global en la barra lateral)")
@@ -2350,7 +2357,11 @@ def page_nps_helix_linking(
 
     # 1) Linking + asignación de incidencias a tópico NPS
     assign_df, links_df = link_incidents_to_nps_topics(
-        focus_df, helix_slice, min_similarity=float(min_sim)
+        focus_df,
+        helix_slice,
+        min_similarity=float(min_sim),
+        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+        max_days_apart=int(LINK_MAX_DAYS_APART),
     )
     overall_weekly, by_topic_weekly = weekly_aggregates(
         nps_slice, helix_slice, assign_df, focus_group=focus_group
@@ -2923,7 +2934,10 @@ def page_nps_helix_linking(
                         nps_focus_src,
                         helix_src,
                         system_date=pd.Timestamp.now().date(),
-                        max_hotspots=3,
+                        max_hotspots=10,
+                        min_term_occurrences=int(HOTSPOT_MIN_TERM_OCCURRENCES),
+                        min_validated_similarity=float(LINK_MIN_SIMILARITY),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
                     )
 
                 def _build_incident_timeline_payload(
@@ -2937,8 +2951,45 @@ def page_nps_helix_linking(
                         nps_focus_src,
                         helix_src,
                         incident_evidence_df=incident_evidence_src,
-                        max_hotspots=3,
+                        max_hotspots=10,
+                        min_validated_similarity=float(LINK_MIN_SIMILARITY),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
                     )
+
+                def _align_evidence_to_best_axis(
+                    nps_src: pd.DataFrame,
+                    helix_src: pd.DataFrame,
+                    evidence_src: pd.DataFrame,
+                ) -> tuple[pd.DataFrame, str]:
+                    if evidence_src is None or evidence_src.empty:
+                        return evidence_src, ""
+                    axis_info = select_best_business_axis_for_hotspots(
+                        nps_src,
+                        helix_src,
+                        min_n=200,
+                    )
+                    axis = str(axis_info.get("best_axis", "Palanca"))
+                    red_map = axis_info.get("red_labels", {})
+                    labels = (
+                        list(red_map.get(axis, []))
+                        if isinstance(red_map, dict)
+                        else []
+                    )
+                    aligned = align_hotspot_evidence_to_axis(
+                        evidence_src,
+                        axis=axis,
+                        red_labels=labels,
+                        max_hotspots=10,
+                    )
+                    ratios = axis_info.get("axis_ratios", {})
+                    r_pal = float(ratios.get("Palanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    r_sub = float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    note = (
+                        f"Eje seleccionado para el racional: {axis} "
+                        f"(cobertura Helix en rojos: Palanca {r_pal*100:.1f}% · "
+                        f"Subpalanca {r_sub*100:.1f}%)."
+                    )
+                    return (aligned if aligned is not None and not aligned.empty else evidence_src), note
 
                 # Safe fallback to current view payload if historical payload can't be built.
                 overall_weekly_ppt = overall_daily if not overall_daily.empty else overall_weekly
@@ -2963,11 +3014,17 @@ def page_nps_helix_linking(
                     if "cp_by_topic" in locals() and isinstance(cp_by_topic, pd.DataFrame)
                     else pd.DataFrame(columns=["nps_topic", "changepoints"])
                 )
+                hotspot_focus_note = ""
                 helix_for_hot_terms = helix_hist if not helix_hist.empty else helix_slice
                 incident_evidence_ppt = _build_incident_evidence_payload(
                     links_df,
                     focus_df,
                     helix_for_hot_terms,
+                )
+                incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
+                    nps_slice,
+                    helix_for_hot_terms,
+                    incident_evidence_ppt,
                 )
                 incident_timeline_ppt = _build_incident_timeline_payload(
                     links_df,
@@ -2995,7 +3052,11 @@ def page_nps_helix_linking(
 
                     focus_hist = nps_hist_work[mask_focus_hist].copy()
                     assign_hist, links_hist = link_incidents_to_nps_topics(
-                        focus_hist, helix_hist, min_similarity=float(min_sim)
+                        focus_hist,
+                        helix_hist,
+                        min_similarity=float(min_sim),
+                        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
                     )
                     ow_hist, btw_hist = weekly_aggregates(
                         nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
@@ -3090,6 +3151,11 @@ def page_nps_helix_linking(
                             focus_hist,
                             helix_hist,
                         )
+                        incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
+                            nps_hist_work,
+                            helix_hist,
+                            incident_evidence_ppt,
+                        )
                         incident_timeline_ppt = _build_incident_timeline_payload(
                             links_hist,
                             focus_hist,
@@ -3145,6 +3211,7 @@ def page_nps_helix_linking(
                     incident_evidence_df=incident_evidence_ppt,
                     changepoints_by_topic=changepoints_for_ppt,
                     incident_timeline_df=incident_timeline_ppt,
+                    hotspot_focus_note=hotspot_focus_note,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
@@ -3596,7 +3663,7 @@ def page_nps_helix_linking(
     st.markdown("### Evidence wall: detractores ↔ incidencias (links semánticos)")
     if focus_population.empty or links_df.empty:
         st.info(
-            "No hay links (o no hay detractores) con el umbral actual. Baja el umbral o amplía la ventana."
+            "No hay links validados (o no hay detractores) con la política estricta activa. Amplía la ventana temporal o revisa la calidad de texto."
         )
     else:
         topics = (
@@ -3614,7 +3681,7 @@ def page_nps_helix_linking(
         )
         sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
         if sub_links.empty:
-            st.info("No hay links para este tópico con el umbral actual.")
+            st.info("No hay links validados para este tópico con la política estricta activa.")
         else:
             # Join snippets
             det2 = focus_population.copy()
@@ -3713,7 +3780,7 @@ def page_nps_helix_linking(
         ),
         "notes": [
             "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
-            "Los links se basan en similitud TF-IDF; revisar umbral y ejemplos para validar.",
+            "Los links se validan con política fija: TF-IDF, similitud mínima, cruce semántico estricto y ventana temporal.",
         ],
     }
     pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
@@ -3799,7 +3866,7 @@ def page_nps_helix_linking(
                 f"- sim={rec['similarity']:.3f} · tópico={rec['nps_topic']} · nps_id={rec['nps_id']} ↔ incident_id={rec['incident_id']}"
             )
     else:
-        md_lines.append("- No hay links con el umbral actual.")
+        md_lines.append("- No hay links validados con la política estricta activa.")
     md_lines.append("")
     md_lines.append("## 5) Preguntas sugeridas al LLM")
     md_lines.append(
@@ -3815,7 +3882,10 @@ def page_nps_helix_linking(
     md_lines.append(
         "- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto."
     )
-    md_lines.append("- Linking: TF-IDF + cosine similarity, umbral configurable.")
+    md_lines.append(
+        f"- Linking estricto: TF-IDF + cosine similarity (min={LINK_MIN_SIMILARITY:.2f}), "
+        f"top-k por incidencia={LINK_TOP_K_PER_INCIDENT}, ventana temporal ±{LINK_MAX_DAYS_APART} días."
+    )
 
     md = "\n".join(md_lines)
     wow_prompt = build_wow_prompt(

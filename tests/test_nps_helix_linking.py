@@ -9,6 +9,7 @@ def test_link_incidents_to_nps_topics_sparse_chunked_path() -> None:
     nps = pd.DataFrame(
         {
             "ID": ["n1", "n2", "n3", "n4"],
+            "Fecha": pd.to_datetime(["2026-01-10", "2026-01-11", "2026-01-12", "2026-01-13"]),
             "NPS": [2, 3, 4, 5],
             "Palanca": ["Pagos", "Pagos", "Acceso", "Acceso"],
             "Subpalanca": ["SPEI", "Transferencias", "Login", "Login"],
@@ -23,6 +24,7 @@ def test_link_incidents_to_nps_topics_sparse_chunked_path() -> None:
     helix = pd.DataFrame(
         {
             "Incident Number": ["INC1", "INC2"],
+            "Fecha": pd.to_datetime(["2026-01-12", "2026-01-13"]),
             "summary": ["falla de spei en transferencias", "incidente de login bloqueado"],
             "Product Categorization Tier 1": ["Pagos", "Acceso"],
             "Product Categorization Tier 2": ["SPEI", "Login"],
@@ -70,6 +72,7 @@ def test_link_incidents_to_nps_topics_uses_detailed_description_for_matching() -
     nps = pd.DataFrame(
         {
             "ID": ["n1"],
+            "Fecha": pd.to_datetime(["2026-01-10"]),
             "NPS": [2],
             "Palanca": ["Acceso"],
             "Subpalanca": ["Login"],
@@ -79,6 +82,7 @@ def test_link_incidents_to_nps_topics_uses_detailed_description_for_matching() -
     helix = pd.DataFrame(
         {
             "Incident Number": ["INC-BIO-1"],
+            "Fecha": pd.to_datetime(["2026-01-12"]),
             "summary": ["Incidencia general de canal"],
             "Detailed Description": ["Error en biometria facial durante login de empresas"],
             "Product Categorization Tier 1": [""],
