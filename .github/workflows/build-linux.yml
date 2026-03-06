@@ -20,6 +20,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[build]"
 
+      - name: Prepare icons
+        run: |
+          python scripts/prepare_icons.py --input assets/logo.png --out-dir build/icons
+
       - name: Build (PyInstaller)
         run: |
           out=build/pyinstaller/linux
@@ -27,10 +31,15 @@ jobs:
           pyinstaller --clean --noconfirm \
             --name nps-lens \
             --onefile \
+            --icon build/icons/app.png \
+            --add-data="$PWD/app:app" \
+            --add-data="$PWD/assets:assets" \
+            --add-data="$PWD/.streamlit:.streamlit" \
+            --collect-submodules webview \
             --distpath "$out/dist" \
             --workpath "$out/work" \
             --specpath "$out/spec" \
-            -m nps_lens.cli
+            src/nps_lens/desktop.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

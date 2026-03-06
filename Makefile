@@ -1,6 +1,17 @@
 .DEFAULT_GOAL := help
 PYTHON ?= python3.9
 VENV ?= .venv
+CLI_SCRIPT ?= src/nps_lens/cli.py
+DESKTOP_SCRIPT ?= src/nps_lens/desktop.py
+APP_PORT ?= 8617
+ICON_SOURCE ?= assets/logo.png
+ICON_DIR ?= build/icons
+ICON_PNG ?= $(ICON_DIR)/app.png
+ICON_ICO ?= $(ICON_DIR)/app.ico
+ICON_ICNS ?= $(ICON_DIR)/app.icns
+MACOS_BUNDLE_ID ?= com.npslens.app
+MACOS_CODESIGN_IDENTITY ?=
+MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
 PIP = $(VENV)/bin/pip
 PY = $(VENV)/bin/python
 RUFF = $(VENV)/bin/ruff
@@ -9,7 +20,7 @@ MYPY = $(VENV)/bin/mypy
 PYTEST = $(VENV)/bin/pytest
 STREAMLIT = $(VENV)/bin/streamlit
 
-.PHONY: ci clean format help lint run setup test typecheck check-python platform build build-linux build-mac
+.PHONY: ci clean format help lint run run-web setup ensure-venv test typecheck check-python platform build build-linux build-mac prepare-icons
 
 check-python: ## Fail fast if not running on Python 3.9.x (corp target)
 	@$(PYTHON) -c "import sys; v=sys.version_info; ok=(v.major==3 and v.minor==9);\
@@ -25,6 +36,9 @@ setup: check-python ## Create virtualenv and install all dependencies (incl. Exc
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
 
+ensure-venv: ## Create env only when missing (faster repeated runs/builds)
+	@test -x "$(PY)" || $(MAKE) setup
+
 format: ## Auto-fix lint + format code
 	$(RUFF) check --fix .
 	$(BLACK) .
@@ -38,14 +52,17 @@ typecheck: ## Run mypy type checking
 test: ## Run pytest
 	$(PYTEST)
 
-run: ## Run Streamlit app
-	$(STREAMLIT) run app/streamlit_app.py
+run: ensure-venv ## Run desktop app container (no browser)
+	NPS_LENS_PORT=$(APP_PORT) $(PY) -m nps_lens.desktop
+
+run-web: ensure-venv ## Run Streamlit in browser (legacy/dev fallback)
+	$(STREAMLIT) run app/streamlit_app.py --server.port $(APP_PORT)
 
 platform: ## Run platform batch (requires CONFIG=path/to/batch.json)
 	@test -n "$(CONFIG)" || (echo "Usage: make platform CONFIG=configs/batch.json" && exit 2)
 	$(VENV)/bin/nps-lens platform-batch $(CONFIG) --out-root artifacts
 
-build: setup ## Build native executable with PyInstaller (macOS/Linux). Windows builds run in GitHub Actions.
+build: ensure-venv ## Build native executable with PyInstaller (macOS/Linux). Windows builds run in GitHub Actions.
 	@uname_s=$$(uname -s); \
 	if [ "$$uname_s" = "Darwin" ]; then \
 		$(MAKE) build-mac; \
@@ -57,31 +74,59 @@ build: setup ## Build native executable with PyInstaller (macOS/Linux). Windows 
 		exit 1; \
 	fi
 
-build-linux: setup
+build-linux: ensure-venv
 	$(PIP) install -e ".[build]"
+	$(MAKE) prepare-icons
 	@out=build/pyinstaller/linux; \
 	mkdir -p $$out/dist $$out/work $$out/spec; \
 	$(VENV)/bin/pyinstaller --clean --noconfirm \
 		--name nps-lens \
 		--onefile \
+		--icon "$(PWD)/$(ICON_PNG)" \
+		--add-data="$(PWD)/app:app" \
+		--add-data="$(PWD)/assets:assets" \
+		--add-data="$(PWD)/.streamlit:.streamlit" \
+		--collect-submodules webview \
 		--distpath $$out/dist \
 		--workpath $$out/work \
 		--specpath $$out/spec \
-		-m nps_lens.cli
+		$(DESKTOP_SCRIPT)
 	@echo "Built: build/pyinstaller/linux/dist/nps-lens"
 
-build-mac: setup
+build-mac: ensure-venv
 	$(PIP) install -e ".[build]"
+	$(MAKE) prepare-icons
 	@out=build/pyinstaller/macos; \
 	mkdir -p $$out/dist $$out/work $$out/spec; \
-	$(VENV)/bin/pyinstaller --clean --noconfirm \
+	set -- \
+		--clean \
+		--noconfirm \
 		--name nps-lens \
 		--onefile \
+		--icon "$(PWD)/$(ICON_ICNS)" \
+		--add-data="$(PWD)/app:app" \
+		--add-data="$(PWD)/assets:assets" \
+		--add-data="$(PWD)/.streamlit:.streamlit" \
+		--collect-submodules webview \
 		--distpath $$out/dist \
 		--workpath $$out/work \
 		--specpath $$out/spec \
-		-m nps_lens.cli
+		--osx-bundle-identifier "$(MACOS_BUNDLE_ID)" \
+		"$(DESKTOP_SCRIPT)"; \
+	if [ -n "$(MACOS_CODESIGN_IDENTITY)" ]; then \
+		set -- "$$@" --codesign-identity "$(MACOS_CODESIGN_IDENTITY)"; \
+		if [ -f "$(MACOS_ENTITLEMENTS)" ]; then \
+			set -- "$$@" --osx-entitlements-file "$(MACOS_ENTITLEMENTS)"; \
+		fi; \
+		echo "macOS signing enabled for identity: $(MACOS_CODESIGN_IDENTITY)"; \
+	else \
+		echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
+	fi; \
+	$(VENV)/bin/pyinstaller "$$@"
 	@echo "Built: build/pyinstaller/macos/dist/nps-lens"
+
+prepare-icons: ensure-venv ## Generate .png/.ico/.icns from assets/logo.png
+	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 
 ci: check-python format lint typecheck test ## Run full CI pipeline locally
 

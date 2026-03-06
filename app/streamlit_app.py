@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import shutil
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -96,10 +97,26 @@ def _plotly():
     return px, go
 
 
-st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_RESULTS_DIR = REPO_ROOT / "data" / "cache" / "results"
+
+
+def _resolve_logo_path() -> Optional[Path]:
+    candidates = [REPO_ROOT / "assets" / "logo.png"]
+    if getattr(sys, "frozen", False):
+        candidates.insert(0, Path(sys._MEIPASS) / "assets" / "logo.png")
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+_logo_path = _resolve_logo_path()
+st.set_page_config(
+    page_title="NPS Lens — Senda MX",
+    page_icon=str(_logo_path) if _logo_path else "📈",
+    layout="wide",
+)
 
 # Session-wide performance tracker (timings)
 if "_perf" not in st.session_state:

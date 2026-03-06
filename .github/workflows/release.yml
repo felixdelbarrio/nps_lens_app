@@ -20,6 +20,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[build]"
+      - name: Prepare icons
+        run: |
+          python scripts/prepare_icons.py --input assets/logo.png --out-dir build/icons
       - name: Build
         run: |
           out=build/pyinstaller/linux
@@ -27,10 +30,15 @@ jobs:
           pyinstaller --clean --noconfirm \
             --name nps-lens \
             --onefile \
+            --icon build/icons/app.png \
+            --add-data="$PWD/app:app" \
+            --add-data="$PWD/assets:assets" \
+            --add-data="$PWD/.streamlit:.streamlit" \
+            --collect-submodules webview \
             --distpath "$out/dist" \
             --workpath "$out/work" \
             --specpath "$out/spec" \
-            -m nps_lens.cli
+            src/nps_lens/desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: bin-linux
@@ -47,17 +55,57 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[build]"
+      - name: Prepare icons
+        run: |
+          python scripts/prepare_icons.py --input assets/logo.png --out-dir build/icons
       - name: Build
+        env:
+          MACOS_BUNDLE_ID: com.npslens.app
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          MACOS_ENTITLEMENTS: packaging/macos/entitlements.plist
         run: |
           out=build/pyinstaller/macos
           mkdir -p "$out/dist" "$out/work" "$out/spec"
-          pyinstaller --clean --noconfirm \
-            --name nps-lens \
-            --onefile \
-            --distpath "$out/dist" \
-            --workpath "$out/work" \
-            --specpath "$out/spec" \
-            -m nps_lens.cli
+          args=(
+            --clean
+            --noconfirm
+            --name nps-lens
+            --onefile
+            --icon build/icons/app.icns
+            --add-data="$PWD/app:app"
+            --add-data="$PWD/assets:assets"
+            --add-data="$PWD/.streamlit:.streamlit"
+            --collect-submodules webview
+            --distpath "$out/dist"
+            --workpath "$out/work"
+            --specpath "$out/spec"
+            --osx-bundle-identifier "$MACOS_BUNDLE_ID"
+            src/nps_lens/desktop.py
+          )
+          if [ -n "$MACOS_CODESIGN_IDENTITY" ]; then
+            args+=(--codesign-identity "$MACOS_CODESIGN_IDENTITY")
+            if [ -f "$MACOS_ENTITLEMENTS" ]; then
+              args+=(--osx-entitlements-file "$MACOS_ENTITLEMENTS")
+            fi
+            echo "macOS signing enabled."
+          else
+            echo "macOS signing disabled."
+          fi
+          pyinstaller "${args[@]}"
+
+      - name: Notarize macOS binary (optional)
+        if: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          zip -j nps-lens-macos.zip build/pyinstaller/macos/dist/nps-lens
+          xcrun notarytool submit nps-lens-macos.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
       - uses: actions/upload-artifact@v4
         with:
           name: bin-macos
@@ -75,6 +123,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[build]"
+      - name: Prepare icons
+        shell: pwsh
+        run: |
+          python scripts/prepare_icons.py --input assets/logo.png --out-dir build/icons
       - name: Build
         shell: pwsh
         run: |
@@ -85,10 +137,15 @@ jobs:
           pyinstaller --clean --noconfirm `
             --name nps-lens `
             --onefile `
+            --icon build/icons/app.ico `
+            --add-data="$PWD/app;app" `
+            --add-data="$PWD/assets;assets" `
+            --add-data="$PWD/.streamlit;.streamlit" `
+            --collect-submodules webview `
             --distpath "$out/dist" `
             --workpath "$out/work" `
             --specpath "$out/spec" `
-            -m nps_lens.cli
+            src/nps_lens/desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: bin-windows

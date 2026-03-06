@@ -5,3 +5,13 @@ backgroundColor = "#F7F8F8"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#070E46"
 font = "sans serif"
+
+[server]
+port = 8617
+address = "127.0.0.1"
+headless = true
+fileWatcherType = "none"
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
