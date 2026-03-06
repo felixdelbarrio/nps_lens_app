@@ -84,6 +84,7 @@ module = [
   "nps_lens.ui.*",
   "nps_lens.analytics.*",
   "nps_lens.ingest.*",
+  "nps_lens.reports.executive_ppt",
   "nps_lens.core.store",
   "nps_lens.platform.*",
   "nps_lens.application.service",
