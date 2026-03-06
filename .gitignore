@@ -14,6 +14,8 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .cache/
 .tox/
@@ -60,6 +62,10 @@ Thumbs.db
 .vscode/
 .idea/
 .python-version
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
 
 # -----------------------------
 # Local datasets / caches (do not commit)
@@ -84,6 +90,9 @@ knowledge/*.jsonl
 reports/*
 !reports/examples/
 !reports/examples/**
+packs/*
+!packs/examples/
+!packs/examples/**
 *.log
 logs/
 tmp/
