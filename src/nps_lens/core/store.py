@@ -31,6 +31,21 @@ def _norm_values(values: Optional[Sequence[str]]) -> Tuple[str, ...]:
     return tuple(sorted({str(v) for v in values if str(v)}))
 
 
+def _clear_dir_tree(path: Path) -> None:
+    """Best-effort recursive delete for cache directories."""
+    if not path.exists():
+        return
+    for p in path.rglob("*"):
+        if p.is_file():
+            with contextlib.suppress(Exception):
+                p.unlink()
+    for p in sorted([p for p in path.rglob("*") if p.is_dir()], reverse=True):
+        with contextlib.suppress(Exception):
+            p.rmdir()
+    with contextlib.suppress(Exception):
+        path.rmdir()
+
+
 @lru_cache(maxsize=16)
 def _load_parquet_subset_table_cached(
     parquet_dir: str,
@@ -583,7 +598,12 @@ class DatasetStore:
         stat = data_path.stat()
 
         # Build/refresh parquet cache (derived). JSONL remains source of truth.
-        partitioning = self._write_parquet_dataset(df_out, parquet_dir)
+        partitioning: list[str] = []
+        try:
+            partitioning = self._write_parquet_dataset(df_out, parquet_dir)
+        except Exception:
+            # Keep import resilient: parquet is only a derived cache.
+            _clear_dir_tree(parquet_dir)
 
         # Build compact index (date x palanca x canal) for fast filtering and consistent KPIs.
         try:
@@ -646,12 +666,7 @@ class DatasetStore:
         """
         # Ensure a clean directory (atomic-ish update)
         if parquet_dir.exists():
-            for p in parquet_dir.rglob("*"):
-                if p.is_file():
-                    p.unlink()
-            for p in sorted([p for p in parquet_dir.rglob("*") if p.is_dir()], reverse=True):
-                with contextlib.suppress(Exception):
-                    p.rmdir()
+            _clear_dir_tree(parquet_dir)
         parquet_dir.mkdir(parents=True, exist_ok=True)
 
         d = df.copy()
@@ -775,7 +790,12 @@ class HelixIncidentStore:
         stat = data_path.stat()
 
         # Build/refresh parquet cache
-        partitioning = self._write_parquet_dataset(df_out, parquet_dir)
+        partitioning: list[str] = []
+        try:
+            partitioning = self._write_parquet_dataset(df_out, parquet_dir)
+        except Exception:
+            # Keep import resilient: parquet is only a derived cache.
+            _clear_dir_tree(parquet_dir)
 
         meta = {
             "schema_version": "1.0",
@@ -929,12 +949,7 @@ class HelixIncidentStore:
     def _write_parquet_dataset(self, df: pd.DataFrame, parquet_dir: Path) -> list[str]:
         # Ensure clean dir
         if parquet_dir.exists():
-            for p in parquet_dir.rglob("*"):
-                if p.is_file():
-                    p.unlink()
-            for p in sorted([p for p in parquet_dir.rglob("*") if p.is_dir()], reverse=True):
-                with contextlib.suppress(Exception):
-                    p.rmdir()
+            _clear_dir_tree(parquet_dir)
         parquet_dir.mkdir(parents=True, exist_ok=True)
 
         d = df.copy()
