@@ -115,6 +115,7 @@ omit = [
   "src/nps_lens/application/*",
   "src/nps_lens/logging.py",
   "src/nps_lens/cli.py",
+  "src/nps_lens/desktop.py",
   "src/nps_lens/platform/batch.py",
   "src/nps_lens/analytics/changepoints.py",
   "src/nps_lens/analytics/causal.py",
