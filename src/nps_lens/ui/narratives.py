@@ -6,6 +6,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
+
 
 @dataclass(frozen=True)
 class ExecSummary:
@@ -155,7 +157,7 @@ def build_executive_story(
     Intentionally non-technical: explains *what is happening* and *what to do next*.
     """
     lines: list[str] = []
-    lines.append("# Informe ejecutivo — NPS Lens")
+    lines.append("# Informe de negocio — NPS Lens")
     lines.append("")
 
     lines.append("## 1) Qué está pasando")
@@ -206,4 +208,220 @@ def build_executive_story(
     lines.append("- Abrir 1-2 hipótesis por oportunidad priorizada y definir cómo se medirán.")
     lines.append("- Generar un **Deep-Dive Pack** y guardar aprendizaje en la **Knowledge Cache**.")
 
+    return "\n".join(lines) + "\n"
+
+
+def _fmt_lag(lag_weeks: float) -> str:
+    if lag_weeks != lag_weeks:
+        return "n/d"
+    return f"{lag_weeks:.1f}w"
+
+
+def build_incident_ppt_story(
+    summary: IncidentRationaleSummary,
+    rationale_df: pd.DataFrame,
+    *,
+    focus_name: str = "detractores",
+    top_k: int = 5,
+) -> str:
+    """Narrative ready for PowerPoint committee sessions."""
+    lines: list[str] = []
+    lines.append("# Racional de negocio — Incidencias vs NPS térmico")
+    lines.append("")
+    lines.append("## 1) Qué está pasando")
+    lines.append(
+        f"- Se analizaron **{summary.topics_analyzed} tópicos** con evidencia multi-fuente (NPS + Helix)."
+    )
+    lines.append(
+        f"- El modelo estima **{summary.nps_points_at_risk:.2f} pts NPS en riesgo** por incidencias."
+    )
+    lines.append(
+        f"- Potencial de recuperación estimado: **{summary.nps_points_recoverable:.2f} pts NPS**."
+    )
+    lines.append(
+        f"- Concentración de incidencias en top-3 tópicos: **{summary.top3_incident_share*100:.1f}%**."
+    )
+    if summary.median_lag_weeks == summary.median_lag_weeks:
+        lines.append(
+            f"- Tiempo de reacción estimado (mediana de lag): **{summary.median_lag_weeks:.1f} semanas**."
+        )
+
+    lines.append("")
+    lines.append("## 2) Dónde atacar primero")
+    top = rationale_df.head(int(top_k)) if rationale_df is not None else pd.DataFrame()
+    if top.empty:
+        lines.append("- No hay señal suficiente para priorizar con el umbral actual.")
+    else:
+        for _, r in top.iterrows():
+            topic = str(r.get("nps_topic", ""))
+            risk = float(r.get("nps_points_at_risk", 0.0))
+            rec = float(r.get("nps_points_recoverable", 0.0))
+            prio = float(r.get("priority", 0.0))
+            lane = str(r.get("action_lane", ""))
+            owner = str(r.get("owner_role", ""))
+            eta = int(r.get("eta_weeks", 0))
+            lag = _fmt_lag(float(r.get("best_lag_weeks", np.nan)))
+            lines.append(
+                (
+                    f"- **{topic}** | riesgo={risk:.2f} pts | recuperable={rec:.2f} pts | "
+                    f"prioridad={prio:.2f} | lane={lane} | owner={owner} | ETA={eta}w | lag={lag}"
+                )
+            )
+
+    lines.append("")
+    lines.append("## 3) Plan operativo 30-60-90")
+    lines.append("- 30 días: activar quick wins y cerrar brechas de instrumentación.")
+    lines.append("- 60 días: desplegar fixes estructurales en tópicos P1 con mayor NPS en riesgo.")
+    lines.append("- 90 días: consolidar aprendizaje (confirmado/rechazado) y recalibrar prioridades.")
+
+    lines.append("")
+    lines.append("## 4) KPI de seguimiento semanal")
+    lines.append(f"- % {focus_name}")
+    lines.append("- Incidencias por tópico priorizado")
+    lines.append("- NPS en riesgo (pts) y NPS recuperable (pts)")
+    lines.append("- Cumplimiento de ETA por owner/lane")
+    return "\n".join(lines) + "\n"
+
+
+def build_wow_prompt(
+    *,
+    objective: str,
+    business_story_md: str,
+    top_topics_df: pd.DataFrame,
+    deep_dive_pack_json: str,
+) -> str:
+    """Prompt template for copy/paste workflows with ChatGPT (no API required)."""
+    topic_lines: list[str] = []
+    for _, r in top_topics_df.head(8).iterrows():
+        topic_lines.append(
+            (
+                f"- {str(r.get('nps_topic',''))} | risk={float(r.get('nps_points_at_risk',0.0)):.2f} "
+                f"| recoverable={float(r.get('nps_points_recoverable',0.0)):.2f} "
+                f"| priority={float(r.get('priority',0.0)):.2f} "
+                f"| lane={str(r.get('action_lane',''))}"
+            )
+        )
+    topics_block = "\n".join(topic_lines) if topic_lines else "- Sin topicos priorizados."
+
+    return (
+        "Actua como Principal Consultant de banca empresas para comite de negocio.\n"
+        "Objetivo de negocio:\n"
+        f"{objective}\n\n"
+        "Entregable obligatorio (en ESPANOL y en formato Markdown):\n"
+        "1) Mensaje principal (max 8 lineas).\n"
+        "2) Mapa de causa-efecto incidencia -> NPS (tabla con confidence y riesgos).\n"
+        "3) Plan semanal de ejecucion (owner, ETA, KPI leading/lagging, criterio de exito).\n"
+        "4) 3 experimentos de mejora continua (diseno, muestra, metrica, regla go/no-go).\n"
+        "5) Guion de 6 slides para PowerPoint (titulo + bullets por slide).\n\n"
+        "Reglas:\n"
+        "- No inventes datos. Usa solo la evidencia entregada.\n"
+        "- Si falta evidencia, dilo explicitamente y propone como medirla.\n"
+        "- Prioriza impacto economico y velocidad de recuperacion del NPS.\n\n"
+        "Narrativa base de negocio:\n"
+        f"{business_story_md}\n\n"
+        "Topicos priorizados:\n"
+        f"{topics_block}\n\n"
+        "Deep-Dive Pack JSON:\n"
+        f"{deep_dive_pack_json}\n"
+    )
+
+
+def build_ppt_8slide_script(
+    summary: IncidentRationaleSummary,
+    rationale_df: pd.DataFrame,
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+    focus_name: str,
+    period_label: str,
+    top_k: int = 5,
+) -> str:
+    """Generate a business-first 8-slide script for periodic committee sessions."""
+    top = rationale_df.head(int(top_k)).copy() if rationale_df is not None else pd.DataFrame()
+    topics = top.get("nps_topic", pd.Series(dtype=str)).astype(str).tolist()
+    top_topics = ", ".join(topics[:3]) if topics else "Sin tópicos priorizados"
+
+    lines: list[str] = []
+    lines.append("# Guion de negocio — 8 slides (NPS térmico vs incidencias)")
+    lines.append("")
+    lines.append("## Slide 1 — Mensaje principal")
+    lines.append(
+        f"- Contexto: **{service_origin} · {service_origin_n1}** | Periodo: **{period_label}**."
+    )
+    lines.append(
+        f"- Se estiman **{summary.nps_points_at_risk:.2f} pts NPS en riesgo** asociados a incidencias."
+    )
+    lines.append(
+        f"- Potencial recuperable estimado: **{summary.nps_points_recoverable:.2f} pts NPS**."
+    )
+    lines.append(
+        f"- Concentración top-3 incidencias: **{summary.top3_incident_share*100:.1f}%**."
+    )
+    lines.append("- Decisión sugerida: activar plan semanal en tópicos P1.")
+    lines.append("")
+
+    lines.append("## Slide 2 — Qué está pasando en la señal")
+    lines.append(
+        f"- Evolución semanal de **% {focus_name} vs incidencias** (usar gráfico de timeline causal)."
+    )
+    lines.append("- Señalar semanas con ruptura y eventos operativos/release.")
+    lines.append("- Mensaje clave: cuándo la incidencia precede el deterioro NPS.")
+    lines.append("")
+
+    lines.append("## Slide 3 — Dónde duele (causas priorizadas)")
+    lines.append(f"- Tópicos con mayor criticidad: **{top_topics}**.")
+    if top.empty:
+        lines.append("- No hay evidencia suficiente para priorización robusta.")
+    else:
+        for _, r in top.iterrows():
+            lines.append(
+                (
+                    f"- {str(r.get('nps_topic',''))}: prioridad={float(r.get('priority',0.0)):.2f}, "
+                    f"confianza={float(r.get('confidence',0.0)):.2f}, "
+                    f"Δ%{focus_name}={float(r.get('delta_focus_rate_pp',0.0)):.2f} pp."
+                )
+            )
+    lines.append("")
+
+    lines.append("## Slide 4 — Cuánto impacta al NPS")
+    lines.append("- Mostrar barra comparativa **NPS en riesgo vs NPS recuperable** por tópico.")
+    if not top.empty:
+        risk_top = float(pd.to_numeric(top["nps_points_at_risk"], errors="coerce").fillna(0).sum())
+        rec_top = float(
+            pd.to_numeric(top["nps_points_recoverable"], errors="coerce").fillna(0).sum()
+        )
+        lines.append(f"- Top temas analizados: riesgo={risk_top:.2f} pts | recuperable={rec_top:.2f} pts.")
+    lines.append("- Mensaje clave: impacto económico esperado de corregir tópicos P1.")
+    lines.append("")
+
+    lines.append("## Slide 5 — Qué atacamos primero")
+    lines.append("- Usar matriz de prioridad (confianza x NPS en riesgo x volumen incidencias).")
+    if top.empty:
+        lines.append("- Definir backlog inicial de hipótesis con instrumentación mínima.")
+    else:
+        for _, r in top.head(3).iterrows():
+            lines.append(
+                (
+                    f"- P1 {str(r.get('nps_topic',''))}: lane={str(r.get('action_lane',''))}, "
+                    f"owner={str(r.get('owner_role',''))}, ETA={int(r.get('eta_weeks',0) or 0)} semanas."
+                )
+            )
+    lines.append("")
+
+    lines.append("## Slide 6 — Plan 30-60-90")
+    lines.append("- 30 días: quick wins operativos + corrección de fricción evidente.")
+    lines.append("- 60 días: fixes estructurales y reducción de recurrencia de incidencias.")
+    lines.append("- 90 días: escalado de prácticas efectivas + recalibración de prioridades.")
+    lines.append("")
+
+    lines.append("## Slide 7 — Gobierno y métricas")
+    lines.append(f"- KPI leading: incidencias por tópico P1, SLA de resolución, % {focus_name}.")
+    lines.append("- KPI lagging: NPS térmico, NPS en riesgo (pts), NPS recuperable realizado (pts).")
+    lines.append("- Cadencia: comité semanal con owners de producto, tecnología y operaciones.")
+    lines.append("")
+
+    lines.append("## Slide 8 — Decisiones requeridas al comité")
+    lines.append("- Aprobación de backlog P1 y asignación explícita de owners.")
+    lines.append("- Priorización de capacidad (tecnología/operaciones) para plan 30-60-90.")
+    lines.append("- Acuerdo de criterios de éxito y fecha de revisión de negocio.")
     return "\n".join(lines) + "\n"

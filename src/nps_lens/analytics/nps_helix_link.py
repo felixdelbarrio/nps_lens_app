@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import ruptures as rpt
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 def estimate_best_lag_by_topic(
@@ -335,6 +334,62 @@ def build_nps_topic(df: pd.DataFrame) -> pd.Series:
     return topic.replace({"nan > nan": ""}).fillna("")
 
 
+def _ordered_cols_ci(df: pd.DataFrame, candidates: list[str]) -> list[str]:
+    lower_map = {str(c).strip().lower(): str(c) for c in df.columns}
+    out: list[str] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        hit = lower_map.get(str(cand).strip().lower())
+        if not hit:
+            continue
+        key = hit.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(hit)
+    return out
+
+
+def _txt_series(df: pd.DataFrame, col: str) -> pd.Series:
+    if not col or col not in df.columns:
+        return pd.Series([""] * len(df), index=df.index)
+    s = df[col].astype(str).fillna("").str.strip()
+    return s.replace({"nan": "", "NaN": "", "None": "", "NaT": ""})
+
+
+def build_incident_display_text(df: pd.DataFrame) -> pd.Series:
+    """Best descriptive text for a Helix incident (prefer detailed narrative)."""
+
+    preferred = _ordered_cols_ci(
+        df,
+        [
+            "Detailed Description",
+            "Detailed Decription",  # common export typo
+            "bbva_detaileddescription",
+            "description",
+            "Descripción",
+            "Short Description",
+            "bbva_shortdescription",
+            "summary",
+        ],
+    )
+    if not preferred:
+        return pd.Series([""] * len(df), index=df.index)
+
+    stacked = pd.concat([_txt_series(df, col) for col in preferred], axis=1)
+    arr = stacked.to_numpy(dtype=object)
+    if arr.size == 0:
+        return pd.Series([""] * len(df), index=df.index)
+    non_empty = arr != ""
+    first_idx = non_empty.argmax(axis=1)
+    has_any = non_empty.any(axis=1)
+    vals = np.full(len(stacked), "", dtype=object)
+    rows = np.arange(len(stacked))
+    vals[has_any] = arr[rows[has_any], first_idx[has_any]]
+    display = pd.Series(vals, index=df.index)
+    return display.astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+
+
 def build_incident_topic(df: pd.DataFrame) -> pd.Series:
     t1 = df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index)).astype(
         str
@@ -360,13 +415,8 @@ def build_incident_topic(df: pd.DataFrame) -> pd.Series:
         .fillna("")
         .str.strip()
     )
-    summ = (
-        df.get("summary", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
-    )
-    base = base.where(base.str.len() > 0, svc.where(svc.str.len() > 0, summ))
+    desc = build_incident_display_text(df)
+    base = base.where(base.str.len() > 0, svc.where(svc.str.len() > 0, desc))
     return base.fillna("")
 
 
@@ -378,11 +428,20 @@ def build_nps_text(df: pd.DataFrame) -> pd.Series:
 
 
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
-    parts = []
-    for col in ["summary", "Short Description", "Detailed Decription", "Resolution"]:
-        if col in df.columns:
-            parts.append(df[col].astype(str).fillna(""))
-    if not parts:
+    parts = [build_incident_display_text(df)]
+    aux_cols = _ordered_cols_ci(
+        df,
+        [
+            "Resolution",
+            "Resolución",
+            "resolution",
+            "summary",
+            "Short Description",
+            "bbva_shortdescription",
+        ],
+    )
+    parts.extend([_txt_series(df, col) for col in aux_cols])
+    if not parts or len(parts[0]) == 0:
         return pd.Series([""] * len(df), index=df.index)
     s = parts[0]
     for p in parts[1:]:
@@ -403,12 +462,36 @@ def _safe_id(series: pd.Series) -> pd.Series:
     return series.astype(str).fillna("").replace({"nan": ""})
 
 
+def _sparse_row_topk(row, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return top-k indices/values from a sparse row (descending by value)."""
+    if row is None or row.nnz == 0:
+        return np.array([], dtype=int), np.array([], dtype=float)
+    idx = row.indices
+    vals = row.data
+    if len(vals) <= int(k):
+        order = np.argsort(-vals)
+        return idx[order], vals[order]
+    pick = np.argpartition(vals, -int(k))[-int(k) :]
+    order = pick[np.argsort(-vals[pick])]
+    return idx[order], vals[order]
+
+
+def _sample_positions(total: int, target: int) -> np.ndarray:
+    if total <= target:
+        return np.arange(total, dtype=int)
+    # Deterministic down-sampling spread across the full index range.
+    pos = np.linspace(0, total - 1, num=target, dtype=int)
+    return np.unique(pos)
+
+
 def link_incidents_to_nps_topics(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
     min_similarity: float = 0.22,
     max_features: int = 50000,
     top_k_per_incident: int = 3,
+    max_nps_rows_for_evidence: int = 12000,
+    evidence_chunk_size: int = 128,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return:
     - assignments per incident to best NPS topic (and similarity)
@@ -439,70 +522,111 @@ def link_incidents_to_nps_topics(
 
     nps_text = build_nps_text(nps).fillna("")
     helix_text = build_incident_text(helix).fillna("")
+    corpus = nps_text.tolist() + helix_text.tolist()
+    if not any(str(t).strip() for t in corpus):
+        return (
+            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
+            pd.DataFrame(
+                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+            ),
+        )
 
-    # Build topic centroids using concatenated detractor text per topic.
+    # Build topic docs from concatenated detractor text.
     topic_docs = (
         nps.assign(_txt=nps_text)
         .groupby("nps_topic", dropna=False)["_txt"]
         .apply(lambda s: " ".join([t for t in s.tolist() if t]))
     )
     topics = topic_docs.index.tolist()
-    topic_corpus = topic_docs.values.tolist()
+    if not topics:
+        return (
+            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
+            pd.DataFrame(
+                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+            ),
+        )
 
-    # Vectorize topics + incidents in same space.
+    # Vectorize once for NPS comments + incidents. Dynamic min_df keeps small extracts valid.
+    min_df = 1 if len(corpus) < 250 else 2
     vec = TfidfVectorizer(
         lowercase=True,
         max_features=max_features,
         ngram_range=(1, 2),
-        min_df=2,
+        min_df=min_df,
         stop_words=None,
     )
-    X = vec.fit_transform(topic_corpus + helix_text.tolist())
-    X_topics = X[: len(topics)]
-    X_inc = X[len(topics) :]
+    try:
+        X = vec.fit_transform(corpus)
+    except ValueError:
+        # Empty vocabulary after cleaning
+        return (
+            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
+            pd.DataFrame(
+                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+            ),
+        )
 
-    sim_topic = cosine_similarity(X_inc, X_topics)
-    best_idx = sim_topic.argmax(axis=1)
-    best_sim = sim_topic.max(axis=1)
+    X_nps = X[: len(nps)]
+    X_inc = X[len(nps) :]
+    X_topics = vec.transform(topic_docs.values.tolist())
 
-    assigned_topic = [topics[i] for i in best_idx]
-    assign_df = pd.DataFrame(
-        {
-            "incident_id": helix["incident_id"].values,
-            "nps_topic": assigned_topic,
-            "similarity": best_sim,
-            "incident_topic": helix["incident_topic"].values,
-        }
-    )
+    # Assignment incident -> topic with sparse similarity (no dense NxM matrix).
+    sim_topic = X_inc @ X_topics.T
+    assign_rows: list[dict[str, object]] = []
+    for i in range(sim_topic.shape[0]):
+        idx, vals = _sparse_row_topk(sim_topic.getrow(i), 1)
+        if len(idx) == 0:
+            continue
+        topic_idx = int(idx[0])
+        sim = float(vals[0])
+        assign_rows.append(
+            {
+                "incident_id": str(helix.iloc[i]["incident_id"]),
+                "nps_topic": str(topics[topic_idx]),
+                "similarity": sim,
+                "incident_topic": str(helix.iloc[i]["incident_topic"]),
+            }
+        )
+    assign_df = pd.DataFrame(assign_rows)
+    if assign_df.empty:
+        assign_df = pd.DataFrame(
+            columns=["incident_id", "nps_topic", "similarity", "incident_topic"]
+        )
     assign_df = assign_df[assign_df["similarity"] >= float(min_similarity)].reset_index(drop=True)
 
-    # Evidence links: incident -> top detractors by similarity (comment-level)
-    vec2 = TfidfVectorizer(lowercase=True, max_features=max_features, ngram_range=(1, 2), min_df=2)
-    X2 = vec2.fit_transform(nps_text.tolist() + helix_text.tolist())
-    X2_nps = X2[: len(nps)]
-    X2_inc = X2[len(nps) :]
-    sim_comment = cosine_similarity(X2_inc, X2_nps)
+    # Evidence links: incident -> top detractor comments with sparse/chunked similarity.
+    # Optional deterministic down-sampling keeps worst-case memory/CPU bounded.
+    nps_pos = _sample_positions(int(len(nps)), int(max_nps_rows_for_evidence))
+    X_nps_ev = X_nps[nps_pos]
+    nps_ev = nps.iloc[nps_pos].copy()
 
     links: List[EvidenceLink] = []
-    for i in range(sim_comment.shape[0]):
-        inc_id = helix.loc[helix.index[i], "incident_id"]
-        inc_topic = helix.loc[helix.index[i], "incident_topic"]
-        # Top-K matches
-        row = sim_comment[i]
-        top_idx = np.argsort(-row)[: int(top_k_per_incident)]
-        for j in top_idx:
-            s = float(row[j])
-            if s < float(min_similarity):
+    chunk = max(1, int(evidence_chunk_size))
+    for start in range(0, X_inc.shape[0], chunk):
+        end = min(start + chunk, X_inc.shape[0])
+        sim_block = X_inc[start:end] @ X_nps_ev.T
+        for bi in range(sim_block.shape[0]):
+            row = sim_block.getrow(bi)
+            idx, vals = _sparse_row_topk(row, int(top_k_per_incident))
+            if len(idx) == 0:
                 continue
-            links.append(
-                EvidenceLink(
-                    nps_id=str(nps.loc[nps.index[j], "nps_id"]),
-                    incident_id=str(inc_id),
-                    similarity=s,
-                    nps_topic=str(nps.loc[nps.index[j], "nps_topic"]),
-                    incident_topic=str(inc_topic),
+            inc_row = start + bi
+            inc_id = str(helix.iloc[inc_row]["incident_id"])
+            inc_topic = str(helix.iloc[inc_row]["incident_topic"])
+            for j, sim in zip(idx.tolist(), vals.tolist()):
+                s = float(sim)
+                if s < float(min_similarity):
+                    continue
+                nps_row = nps_ev.iloc[int(j)]
+                links.append(
+                    EvidenceLink(
+                        nps_id=str(nps_row["nps_id"]),
+                        incident_id=inc_id,
+                        similarity=s,
+                        nps_topic=str(nps_row["nps_topic"]),
+                        incident_topic=inc_topic,
+                    )
                 )
-            )
 
     links_df = pd.DataFrame([e.__dict__ for e in links])
     if not links_df.empty:
