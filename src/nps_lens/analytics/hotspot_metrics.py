@@ -754,7 +754,7 @@ def build_hotspot_daily_breakdown(
             if not hot.empty:
                 hot = (
                     hot.groupby(["date", "hot_rank"], as_index=False)
-                    .agg(cnt=("incident_id", "nunique"))
+                    .agg(cnt=("helix_records", "sum"))
                 )
                 pivot = (
                     hot.pivot(index="date", columns="hot_rank", values="cnt")

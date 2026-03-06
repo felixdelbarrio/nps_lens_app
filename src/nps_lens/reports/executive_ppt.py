@@ -24,10 +24,8 @@ from pptx.util import Inches, Pt
 
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
-    summarize_hotspot_counts,
-)
-from nps_lens.analytics.hotspot_metrics import (
     build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
+    summarize_hotspot_counts,
 )
 
 BBVA_COLORS = {

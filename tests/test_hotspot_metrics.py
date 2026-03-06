@@ -88,7 +88,7 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
     daily = pd.DataFrame(
         {
             "date": pd.to_datetime(["2026-02-02", "2026-02-05"]),
-            "incidents": [1, 2],
+            "incidents": [1, 3],
         }
     )
     evidence = pd.DataFrame(
@@ -105,7 +105,7 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
             "incident_id": ["INC1", "INC2", "INC3", "", ""],
             "hot_term": ["", "", "", "transferencias", "token"],
             "date": pd.to_datetime(["2026-02-02", "2026-02-05", "2026-02-05", "2026-02-05", "2026-02-05"]),
-            "helix_records": [1, 1, 1, 1, 1],
+            "helix_records": [1, 2, 1, 1, 1],
             "nps_comments": [0, 1, 1, 1, 1],
         }
     )
@@ -127,7 +127,7 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
     assert float(day2["hotspot_2"]) == 0.0
     assert float(day2["no_hotspot"]) == 0.0
 
-    assert float(day5["hotspot_1"]) == 1.0
+    assert float(day5["hotspot_1"]) == 2.0
     assert float(day5["hotspot_2"]) == 1.0
     assert float(day5["no_hotspot"]) == 0.0
 
