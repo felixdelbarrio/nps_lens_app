@@ -70,12 +70,14 @@ Thumbs.db
 # -----------------------------
 # Local datasets / caches (do not commit)
 # -----------------------------
-data/
+data/*
 *.csv
 *.xlsx
 *.xlsm
 *.parquet
 *.jsonl
+!data/examples/
+!data/examples/**
 
 # -----------------------------
 # Knowledge cache (incremental learning)
