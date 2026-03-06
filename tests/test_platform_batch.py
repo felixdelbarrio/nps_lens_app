@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pandas as pd
 
@@ -53,8 +53,14 @@ def test_run_platform_batch_exports_artifacts(tmp_path: Path, monkeypatch: Any) 
         return _Res(df=df.copy(), issues=[])
 
     monkeypatch.setattr("nps_lens.platform.batch.read_nps_thermal_excel", _fake_read_excel)
-    monkeypatch.setattr("nps_lens.platform.batch.read_incidents_csv", lambda *a, **k: _Res(df=pd.DataFrame(), issues=[]))
-    monkeypatch.setattr("nps_lens.platform.batch.read_reviews_csv", lambda *a, **k: _Res(df=pd.DataFrame(), issues=[]))
+    monkeypatch.setattr(
+        "nps_lens.platform.batch.read_incidents_csv",
+        lambda *a, **k: _Res(df=pd.DataFrame(), issues=[]),
+    )
+    monkeypatch.setattr(
+        "nps_lens.platform.batch.read_reviews_csv",
+        lambda *a, **k: _Res(df=pd.DataFrame(), issues=[]),
+    )
 
     # rank_opportunities is used inside; return one stable opportunity
     @dataclass
@@ -62,7 +68,10 @@ def test_run_platform_batch_exports_artifacts(tmp_path: Path, monkeypatch: Any) 
         dimension: str
         value: str
 
-    monkeypatch.setattr("nps_lens.analytics.opportunities.rank_opportunities", lambda *a, **k: [_Opp("Palanca", "A")])
+    monkeypatch.setattr(
+        "nps_lens.analytics.opportunities.rank_opportunities",
+        lambda *a, **k: [_Opp("Palanca", "A")],
+    )
 
     # causal best-effort: return a simple object with required fields
     @dataclass
@@ -96,12 +105,14 @@ def test_run_platform_batch_exports_artifacts(tmp_path: Path, monkeypatch: Any) 
             self.perf = _Perf()
 
         def driver_stats(self, *a: Any, **k: Any) -> pd.DataFrame:
-            return pd.DataFrame([{ "dimension": "Palanca", "value": "A", "n": 2 }])
+            return pd.DataFrame([{"dimension": "Palanca", "value": "A", "n": 2}])
 
         def routes(self, *a: Any, **k: Any) -> Any:
             return {"routes": []}
 
-    spec = BatchRunSpec(excel_path=Path("x.xlsx"), service_origin="BBVA México", service_origin_n1="Senda")
+    spec = BatchRunSpec(
+        excel_path=Path("x.xlsx"), service_origin="BBVA México", service_origin_n1="Senda"
+    )
     out = run_platform_batch(specs=[spec], store=_Store(), app=_App(), out_root=tmp_path)
 
     assert "runs" in out

@@ -1,0 +1,120 @@
+"""Plotly theming utilities.
+
+Single source of truth for Plotly styling (dark/light) driven by DesignTokens.
+This ensures that exported images keep the same look (template attached to figure),
+not just in-browser CSS.
+
+Design goals:
+- Lazy Plotly imports for fast Streamlit cold-start.
+- Best-effort application: theming must never crash rendering.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+from nps_lens.design.tokens import DesignTokens, primary_accent
+from nps_lens.ui.theme import Theme
+
+
+@dataclass(frozen=True)
+class PlotlyTheme:
+    accent: str
+    detractor: str
+    passive: str
+    promoter: str
+    text: str
+    grid: str
+    paper_bg: str
+    plot_bg: str
+
+
+def build_plotly_theme(theme: Theme) -> PlotlyTheme:
+    toks = DesignTokens.default()
+    pal = toks.colors_dark if theme.mode == "dark" else toks.colors_light
+    detr = pal["color.primary.bg.alert"]
+    pas = pal["color.primary.bg.warning"]
+    pro = pal["color.primary.bg.success"]
+
+    return PlotlyTheme(
+        accent=primary_accent(toks, theme.mode),
+        detractor=detr,
+        passive=pas,
+        promoter=pro,
+        text=theme.text,
+        grid=theme.border,
+        # Solid hex backgrounds so exports are consistent.
+        paper_bg=theme.bg,
+        plot_bg=theme.bg,
+    )
+
+
+def build_plotly_template(theme: Theme) -> Dict[str, Any]:
+    """Return a Plotly template dict derived from tokens."""
+
+    pt = build_plotly_theme(theme)
+    return {
+        "layout": {
+            "paper_bgcolor": pt.paper_bg,
+            "plot_bgcolor": pt.plot_bg,
+            "font": {
+                "color": pt.text,
+                "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
+            },
+            "colorway": [pt.accent, pt.detractor, pt.passive, pt.promoter],
+            "legend": {"bgcolor": "rgba(0,0,0,0)", "bordercolor": pt.grid},
+            "hoverlabel": {"bgcolor": pt.paper_bg, "font": {"color": pt.text}},
+        }
+    }
+
+
+def apply_plotly_theme(fig: Any, theme: Theme, *, template_name: str = "nps_lens") -> Any:
+    """Attach the token-driven template to a Plotly figure (best-effort)."""
+
+    # Lazy import to keep cold-start fast in Streamlit.
+    import plotly.io as pio  # type: ignore
+
+    tpl = build_plotly_template(theme)
+    pt = build_plotly_theme(theme)
+
+    try:
+        # Register named template so other modules can reference it.
+        pio.templates[template_name] = tpl  # type: ignore[index]
+
+        fig.update_layout(template=tpl)  # type: ignore[attr-defined]
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor=pt.grid,
+            zerolinecolor=pt.grid,
+            showline=True,
+            linecolor=pt.grid,
+        )  # type: ignore[attr-defined]
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor=pt.grid,
+            zerolinecolor=pt.grid,
+            showline=True,
+            linecolor=pt.grid,
+        )  # type: ignore[attr-defined]
+    except Exception:
+        return fig
+    return fig
+
+
+def themed_plotly_chart(
+    st_mod: Any,
+    fig: Any,
+    theme: Theme,
+    *,
+    use_container_width: bool = True,
+    config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> None:
+    """Render a Plotly figure in Streamlit with token-driven theming applied.
+
+    Pass `st` as `st_mod` so this module stays UI-framework-agnostic.
+    """
+
+    fig2 = apply_plotly_theme(fig, theme)
+    st_mod.plotly_chart(fig2, use_container_width=use_container_width, config=config, **kwargs)

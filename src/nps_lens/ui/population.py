@@ -12,7 +12,6 @@ import calendar
 from datetime import date
 from typing import Dict, Optional, Tuple
 
-
 # Global option used across selectors.
 POP_ALL = "Todos"
 
@@ -50,7 +49,9 @@ def month_format_es(value: str) -> str:
     return label
 
 
-def population_date_window(pop_year: str, pop_month: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def population_date_window(
+    pop_year: str, pop_month: str
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Compute the global population date window.
 
     Returns a triple: (date_start, date_end, month_filter)

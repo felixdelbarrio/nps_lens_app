@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import json
 import contextlib
+import json
 from dataclasses import dataclass
+from functools import lru_cache
 from hashlib import sha1
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
-from functools import lru_cache
 
 import pandas as pd
-
 
 # ---------------------------
 # In-process dataset cache
@@ -17,7 +16,6 @@ import pandas as pd
 # Streamlit reruns re-execute the script but keep the Python process. An in-process LRU cache
 # prevents reading the exact same (projection + filter) subset multiple times across charts.
 # Cache keys include a signature derived from the JSONL metadata to ensure correctness.
-
 
 
 def _norm_date(d: Optional[pd.Timestamp]) -> Optional[str]:
@@ -95,6 +93,7 @@ def _load_parquet_subset_cached(
     )
     return table.to_pandas()
 
+
 def _subset_key(
     base: str,
     columns: Tuple[str, ...],
@@ -166,6 +165,7 @@ def _load_jsonl_subset_cached(
     )
     return table.to_pandas()
 
+
 @dataclass(frozen=True)
 class DatasetContext:
     service_origin: str
@@ -205,11 +205,15 @@ class DatasetContext:
     def from_key(key: str) -> "DatasetContext":
         parts = key.split("__")
         if len(parts) == 2:
-            return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2="")
+            return DatasetContext(
+                service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2=""
+            )
         if len(parts) >= 3:
             # N2 itself may contain "__" in theory, but our normalizer does not emit it.
             n2 = "__".join(parts[2:])
-            return DatasetContext(service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2=n2)
+            return DatasetContext(
+                service_origin=parts[0], service_origin_n1=parts[1], service_origin_n2=n2
+            )
         raise ValueError(f"Invalid context key: {key}")
 
 
@@ -337,7 +341,9 @@ class DatasetStore:
                     ts = pd.to_datetime(max_s, errors="coerce")
                     if not pd.isna(ts):
                         years.add(str(int(ts.year)))
-                        months_by_year.setdefault(str(int(ts.year)), set()).add(str(int(ts.month)).zfill(2))
+                        months_by_year.setdefault(str(int(ts.year)), set()).add(
+                            str(int(ts.month)).zfill(2)
+                        )
             except Exception:
                 pass
 
@@ -351,7 +357,6 @@ class DatasetStore:
         ctxs = self.list_contexts()
         return ctxs[0] if ctxs else None
 
-    
     def load_table(
         self,
         stored: StoredDataset,
@@ -369,7 +374,6 @@ class DatasetStore:
           - RecordBatch scanning (lower peak memory)
           - in-process LRU caching keyed by projection+filters+dataset signature
         """
-        import pyarrow as pa  # type: ignore
 
         data_path, meta_path, parquet_dir, index_path, hot_dir = self._paths_for(stored.context)
         stat = data_path.stat()
@@ -404,6 +408,7 @@ class DatasetStore:
         if hot_path.exists():
             try:
                 import pyarrow.parquet as pq  # type: ignore
+
                 return pq.read_table(hot_path)
             except Exception:
                 pass
@@ -421,6 +426,7 @@ class DatasetStore:
                 # Persist hot subset on disk (best-effort) to speed future sessions
                 try:
                     import pyarrow.parquet as pq  # type: ignore
+
                     pq.write_table(table, hot_path)
                 except Exception:
                     pass
@@ -439,6 +445,7 @@ class DatasetStore:
         )
         try:
             import pyarrow.parquet as pq  # type: ignore
+
             pq.write_table(table, hot_path)
         except Exception:
             pass
@@ -476,13 +483,19 @@ class DatasetStore:
             and meta_size == int(stat.st_size)
         )
 
-        
         cols_t = tuple(columns) if columns else tuple()
         dsig = f"{int(stat.st_mtime_ns)}|{int(stat.st_size)}"
 
         # Hot subset persistence: if the same projection+filter is requested often,
         # reuse a small parquet subset stored on disk (cross-session speedup).
-        subset_hash = _subset_key(str(parquet_dir), cols_t, _norm_date(date_start), _norm_date(date_end), _norm_values(lever_values), dsig)
+        subset_hash = _subset_key(
+            str(parquet_dir),
+            cols_t,
+            _norm_date(date_start),
+            _norm_date(date_end),
+            _norm_values(lever_values),
+            dsig,
+        )
         hot_path = hot_dir / f"subset__{stored.context.key()}__{subset_hash}.parquet"
         if hot_path.exists():
             with contextlib.suppress(Exception):
@@ -538,7 +551,9 @@ class DatasetStore:
                 idx_df = self._build_compact_index(df)
                 idx_df.to_parquet(index_path, index=False)
                 meta["index"] = {"path": str(index_path), "rows": int(len(idx_df))}
-                meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                meta_path.write_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             except Exception:
                 pass
         except Exception:
@@ -579,7 +594,9 @@ class DatasetStore:
 
         # Dataset identity (stable across sessions) for deterministic caching and traceability.
         # NOTE: we avoid hashing full contents for speed; mtime+size is enough for our source-of-truth JSONL.
-        dataset_id = sha1(f"{ctx.key()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}".encode("utf-8")).hexdigest()[:16]
+        dataset_id = sha1(
+            f"{ctx.key()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}".encode("utf-8")
+        ).hexdigest()[:16]
 
         # Best-effort date range (for debugging / reproducibility)
         date_min = None
@@ -688,15 +705,12 @@ class DatasetStore:
         d["_is_det"] = d["_score"] <= 6
 
         g = d.dropna(subset=["Fecha_day"]).groupby(["Fecha_day", "Palanca", "Canal"], dropna=False)
-        out = (
-            g.agg(
-                n=("_score", "count"),
-                nps_avg=("_score", "mean"),
-                promoter_rate=("_is_prom", "mean"),
-                detractor_rate=("_is_det", "mean"),
-            )
-            .reset_index()
-        )
+        out = g.agg(
+            n=("_score", "count"),
+            nps_avg=("_score", "mean"),
+            promoter_rate=("_is_prom", "mean"),
+            detractor_rate=("_is_det", "mean"),
+        ).reset_index()
         out["nps_classic_pp"] = (out["promoter_rate"] - out["detractor_rate"]) * 100.0
         return out
 
@@ -765,7 +779,10 @@ class HelixIncidentStore:
 
         meta = {
             "schema_version": "1.0",
-            "context": {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1},
+            "context": {
+                "service_origin": ctx.service_origin,
+                "service_origin_n1": ctx.service_origin_n1,
+            },
             "rows": int(len(df_out)),
             "cols": int(len(df_out.columns)),
             "source": source,
@@ -828,9 +845,13 @@ class HelixIncidentStore:
                     return pd.to_datetime(n, errors="coerce")
                 med = float(n.dropna().median())
                 if med >= 1e12:
-                    return pd.to_datetime(n, unit="ms", utc=True, errors="coerce").dt.tz_localize(None)
+                    return pd.to_datetime(n, unit="ms", utc=True, errors="coerce").dt.tz_localize(
+                        None
+                    )
                 if med >= 1e9:
-                    return pd.to_datetime(n, unit="s", utc=True, errors="coerce").dt.tz_localize(None)
+                    return pd.to_datetime(n, unit="s", utc=True, errors="coerce").dt.tz_localize(
+                        None
+                    )
                 return pd.to_datetime(n, errors="coerce")
 
             # If numeric, treat as epoch first (avoid pandas default ns parsing)
@@ -871,8 +892,17 @@ class HelixIncidentStore:
                 continue
 
         # Fallback: if Fecha is missing or poorly parsed, attempt to recover from common timestamp columns.
-        if ("Fecha" not in df.columns) or ("Fecha" in df.columns and float(df["Fecha"].notna().mean()) < 0.4):
-            for c in ["Submit Date", "SubmitDate", "Submitted Date", "Last Modified Date", "bbva_startdatetime", "bbva_closeddate"]:
+        if ("Fecha" not in df.columns) or (
+            "Fecha" in df.columns and float(df["Fecha"].notna().mean()) < 0.4
+        ):
+            for c in [
+                "Submit Date",
+                "SubmitDate",
+                "Submitted Date",
+                "Last Modified Date",
+                "bbva_startdatetime",
+                "bbva_closeddate",
+            ]:
                 if c in df.columns:
                     dt = _recover_epoch_ms(df[c])
                     if float(dt.notna().mean()) >= 0.4:
@@ -885,7 +915,12 @@ class HelixIncidentStore:
             if date_end is not None:
                 end_ts = pd.to_datetime(date_end)
                 # If a pure date (00:00:00), interpret as inclusive end-of-day
-                if end_ts.hour == 0 and end_ts.minute == 0 and end_ts.second == 0 and end_ts.microsecond == 0:
+                if (
+                    end_ts.hour == 0
+                    and end_ts.minute == 0
+                    and end_ts.second == 0
+                    and end_ts.microsecond == 0
+                ):
                     end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
                 df = df[df["Fecha"] <= end_ts]
 

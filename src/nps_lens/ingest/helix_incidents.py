@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from hashlib import sha1
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
-
 
 # Canonical context columns used by the app.
 # We require N1 (channel) to be present. Company/N2 are optional because some
@@ -111,7 +110,9 @@ def _parse_helix_datetime(series: pd.Series) -> pd.Series:
         def _convert(mask: pd.Series, unit: str) -> None:
             if not bool(mask.any()):
                 return
-            out.loc[mask] = pd.to_datetime(n.loc[mask], unit=unit, utc=True, errors="coerce").dt.tz_localize(None)
+            out.loc[mask] = pd.to_datetime(
+                n.loc[mask], unit=unit, utc=True, errors="coerce"
+            ).dt.tz_localize(None)
 
         _convert(mask_ns, "ns")
         _convert(mask_us, "us")
@@ -155,7 +156,9 @@ def _looks_like_datetime_col(col: str) -> bool:
     )
 
 
-def _auto_parse_epoch_datetime_columns(d: pd.DataFrame, issues: List[ValidationIssue]) -> pd.DataFrame:
+def _auto_parse_epoch_datetime_columns(
+    d: pd.DataFrame, issues: List[ValidationIssue]
+) -> pd.DataFrame:
     """Convert epoch-encoded datetime columns to pandas datetime.
 
     Many Helix exports include multiple timestamp fields stored as Unix epoch
@@ -217,6 +220,7 @@ def read_helix_incidents_excel(
     if sheet_name is None:
         try:
             import openpyxl  # type: ignore
+
             wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
             sheetnames = list(wb.sheetnames)
         except Exception:
@@ -258,7 +262,9 @@ def read_helix_incidents_excel(
     issues.extend(require_columns(df, HELIX_REQUIRED))
 
     if any(i.level == "ERROR" for i in issues):
-        return IngestResult(df=df, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1))
+        return IngestResult(
+            df=df, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1)
+        )
 
     # Ensure optional canonical context columns exist.
     if "BBVA_SourceServiceCompany" not in df.columns:
@@ -279,7 +285,9 @@ def read_helix_incidents_excel(
     d = df.copy()
     d["BBVA_SourceServiceCompany"] = d["BBVA_SourceServiceCompany"].astype(str)
     d["BBVA_SourceServiceN1"] = d["BBVA_SourceServiceN1"].astype(str)
-    d["BBVA_SourceServiceN2"] = d["BBVA_SourceServiceN2"].apply(lambda v: ", ".join(_split_csvish(v)))
+    d["BBVA_SourceServiceN2"] = d["BBVA_SourceServiceN2"].apply(
+        lambda v: ", ".join(_split_csvish(v))
+    )
 
     # Context filters
     # Company filter is best-effort: if the column was missing we filled it with the selected origin.
@@ -340,7 +348,9 @@ def read_helix_incidents_excel(
                 ),
             )
         )
-        return IngestResult(df=d, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1))
+        return IngestResult(
+            df=d, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1)
+        )
 
     # Attach selected context columns for downstream joins
     d["service_origin"] = str(service_origin)
@@ -353,7 +363,11 @@ def read_helix_incidents_excel(
         d["Fecha"] = _parse_helix_datetime(d[fecha_col])
         bad = int(d["Fecha"].isna().sum())
         if bad:
-            issues.append(ValidationIssue(level="WARN", message=f"{bad} filas con Fecha inválida (columna '{fecha_col}')"))
+            issues.append(
+                ValidationIssue(
+                    level="WARN", message=f"{bad} filas con Fecha inválida (columna '{fecha_col}')"
+                )
+            )
     else:
         d["Fecha"] = pd.NaT
         issues.append(
@@ -366,4 +380,6 @@ def read_helix_incidents_excel(
     # Convert other date-like columns (many come as epoch ms) for easier inspection and consistent slicing
     d = _auto_parse_epoch_datetime_columns(d, issues)
 
-    return IngestResult(df=d, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1))
+    return IngestResult(
+        df=d, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1)
+    )

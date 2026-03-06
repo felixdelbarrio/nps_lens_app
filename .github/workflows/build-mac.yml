@@ -20,17 +20,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[build]"
 
+      - name: Prepare icons
+        run: |
+          python scripts/prepare_icons.py --input assets/logo.png --out-dir build/icons
+
       - name: Build (PyInstaller)
+        env:
+          MACOS_BUNDLE_ID: com.npslens.app
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          MACOS_ENTITLEMENTS: packaging/macos/entitlements.plist
         run: |
           out=build/pyinstaller/macos
           mkdir -p "$out/dist" "$out/work" "$out/spec"
-          pyinstaller --clean --noconfirm \
-            --name nps-lens \
-            --onefile \
-            --distpath "$out/dist" \
-            --workpath "$out/work" \
-            --specpath "$out/spec" \
-            -m nps_lens.cli
+          args=(
+            --clean
+            --noconfirm
+            --name nps-lens
+            --onefile
+            --icon build/icons/app.icns
+            --add-data="$PWD/app:app"
+            --add-data="$PWD/assets:assets"
+            --add-data="$PWD/.streamlit:.streamlit"
+            --collect-submodules webview
+            --distpath "$out/dist"
+            --workpath "$out/work"
+            --specpath "$out/spec"
+            --osx-bundle-identifier "$MACOS_BUNDLE_ID"
+            src/nps_lens/desktop.py
+          )
+          if [ -n "$MACOS_CODESIGN_IDENTITY" ]; then
+            args+=(--codesign-identity "$MACOS_CODESIGN_IDENTITY")
+            if [ -f "$MACOS_ENTITLEMENTS" ]; then
+              args+=(--osx-entitlements-file "$MACOS_ENTITLEMENTS")
+            fi
+            echo "macOS signing enabled."
+          else
+            echo "macOS signing disabled."
+          fi
+          pyinstaller "${args[@]}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

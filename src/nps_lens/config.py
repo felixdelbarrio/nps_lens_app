@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
@@ -87,7 +87,11 @@ class Settings:
                 key = k.strip()
                 if not key:
                     continue
-                vals = [p.strip() for p in rest.split("|") if p.strip()] if "|" in rest else _split_csv(rest)
+                vals = (
+                    [p.strip() for p in rest.split("|") if p.strip()]
+                    if "|" in rest
+                    else _split_csv(rest)
+                )
                 out2[key] = vals
             return out2
 

@@ -1,51 +1,45 @@
 from __future__ import annotations
 
-import contextlib
-import json
 import base64
+import contextlib
 import hashlib
+import json
+import shutil
+import sys
 from dataclasses import asdict
 from pathlib import Path
-import shutil
 from typing import Any, Optional
 
-import pandas as pd
 import numpy as np
-
-from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL, month_format_es, population_date_window
-
-
-
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.changepoints import detect_nps_changepoints
-from nps_lens.analytics.drivers import driver_table
-from nps_lens.analytics.journey import build_routes
-from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.analytics.nps_helix_link import (
-    causal_rank_by_topic,
-    link_incidents_to_nps_topics,
-    tokenset,
-    weekly_aggregates,
-    daily_aggregates,
     can_use_daily_resample,
+    causal_rank_by_topic,
+    daily_aggregates,
     detect_detractor_changepoints_with_bootstrap,
     estimate_best_lag_by_topic,
     estimate_best_lag_days_by_topic,
     incidents_lead_changepoints_flag,
-
+    link_incidents_to_nps_topics,
+    weekly_aggregates,
 )
-from nps_lens.config import Settings
-from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
-from nps_lens.core.disk_cache import DiskCache
-from nps_lens.core.perf import PerfTracker
+from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.application.service import AppService
+from nps_lens.config import Settings
+from nps_lens.core.disk_cache import DiskCache
+from nps_lens.core.knowledge_cache import load_entries as kc_load_entries
+from nps_lens.core.knowledge_cache import score_adjustments as kc_score_adjustments
+from nps_lens.core.perf import PerfTracker
+from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
 from nps_lens.design.tokens import (
     DesignTokens,
     cp_level_color,
@@ -53,17 +47,16 @@ from nps_lens.design.tokens import (
     plotly_continuous_scale,
     plotly_risk_scale,
 )
-from nps_lens.core.knowledge_cache import add_entry as kc_add_entry, load_entries as kc_load_entries, score_adjustments as kc_score_adjustments
-from nps_lens.llm.insight_response import validate_insight_response
-from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+from nps_lens.llm.insight_response import validate_insight_response
 from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
 from nps_lens.ui.charts import (
-    chart_daily_mix_business,
-    chart_daily_kpis,
-    chart_daily_volume,
-    chart_daily_score_semaforo,
     chart_cohort_heatmap,
+    chart_daily_kpis,
+    chart_daily_mix_business,
+    chart_daily_score_semaforo,
+    chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
     chart_nps_trend,
@@ -77,7 +70,10 @@ from nps_lens.ui.narratives import (
     explain_opportunities,
     explain_topics,
 )
+from nps_lens.ui.plotly_theme import apply_plotly_theme
+from nps_lens.ui.population import POP_ALL, month_format_es, population_date_window
 from nps_lens.ui.theme import Theme, apply_theme, get_theme
+
 
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
@@ -92,8 +88,8 @@ def _plotly():
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
-            'ignore',
-            message=r'.*np\.bool8.*deprecated.*',
+            "ignore",
+            message=r".*np\.bool8.*deprecated.*",
             category=DeprecationWarning,
         )
         import plotly.express as px  # type: ignore
@@ -101,10 +97,26 @@ def _plotly():
     return px, go
 
 
-st.set_page_config(page_title="NPS Lens — Senda MX", layout="wide")
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_RESULTS_DIR = REPO_ROOT / "data" / "cache" / "results"
+
+
+def _resolve_logo_path() -> Optional[Path]:
+    candidates = [REPO_ROOT / "assets" / "logo.png"]
+    if getattr(sys, "frozen", False):
+        candidates.insert(0, Path(sys._MEIPASS) / "assets" / "logo.png")
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
+_logo_path = _resolve_logo_path()
+st.set_page_config(
+    page_title="NPS Lens — Senda MX",
+    page_icon=str(_logo_path) if _logo_path else "📈",
+    layout="wide",
+)
 
 # Session-wide performance tracker (timings)
 if "_perf" not in st.session_state:
@@ -189,7 +201,6 @@ LLM_BUSINESS_QUESTIONS = [
 ]
 
 
-
 DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento")
 
 
@@ -212,7 +223,9 @@ def load_context_df(
     the columns it needs (min CPU/RAM).
     """
     store = DatasetStore(store_dir)
-    stored = store.get(DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1))
+    stored = store.get(
+        DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+    )
     if stored is None:
         return pd.DataFrame()
 
@@ -263,6 +276,7 @@ def load_context_df(
 
     return df
 
+
 VIEW_COLUMNS = {
     "resumen": (
         "Fecha",
@@ -276,8 +290,27 @@ VIEW_COLUMNS = {
         "Comment",
         "ID",
     ),
-    "drivers": ("Fecha", "NPS", "NPS Group", "Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento"),
-    "texto": ("Fecha", "NPS", "NPS Group", "Comment", "Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento"),
+    "drivers": (
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "UsuarioDecisión",
+        "Segmento",
+    ),
+    "texto": (
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Comment",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "UsuarioDecisión",
+        "Segmento",
+    ),
     "journey": ("Fecha", "NPS", "NPS Group", "Comment", "Canal", "Palanca", "Subpalanca"),
     "alertas": ("Fecha", "NPS", "NPS Group", "Canal", "Palanca", "Subpalanca"),
     "llm": (
@@ -294,8 +327,6 @@ VIEW_COLUMNS = {
     ),
     "datos": (),  # empty tuple => load full dataset for inspection
 }
-
-
 
 
 def filter_nps_by_group(df: pd.DataFrame, group_mode: str) -> pd.DataFrame:
@@ -332,6 +363,7 @@ def filter_nps_by_group(df: pd.DataFrame, group_mode: str) -> pd.DataFrame:
 
     return df
 
+
 # Column sets per chart (granular manifest). Each chart requests only what it needs.
 CHART_COLUMNS = {
     "trend_weekly": ("Fecha", "NPS"),
@@ -339,12 +371,32 @@ CHART_COLUMNS = {
     "daily_volume": ("Fecha", "NPS"),
     "daily_kpis": ("Fecha", "NPS"),
     "daily_semaforo": ("Fecha", "NPS"),
-    "daily_llm": ("Fecha", "NPS", "NPS Group", "Comment", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "daily_llm": (
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Comment",
+        "Palanca",
+        "Subpalanca",
+        "Canal",
+        "UsuarioDecisión",
+        "Segmento",
+    ),
     "drivers_bar": ("NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
-    "drivers_delta": ("Fecha", "NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
+    "drivers_delta": (
+        "Fecha",
+        "NPS",
+        "Palanca",
+        "Subpalanca",
+        "Canal",
+        "UsuarioDecisión",
+        "Segmento",
+    ),
     "cohort_heatmap": ("NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
     "topics": ("Comment",),
 }
+
+
 def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     """Reduce memory footprint and speed up groupbys (categoricals + downcast)."""
     out = df.copy()
@@ -365,19 +417,24 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-
-
-def load_llm_insights_for_context(settings: Settings, service_origin: str, service_origin_n1: str) -> list[dict[str, Any]]:
+def load_llm_insights_for_context(
+    settings: Settings, service_origin: str, service_origin_n1: str
+) -> list[dict[str, Any]]:
     """Load persisted LLM insights for the selected context."""
     from nps_lens.llm.knowledge_cache import KnowledgeCache
 
-    kc = KnowledgeCache.for_context(settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1)
+    kc = KnowledgeCache.for_context(
+        settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
     data = kc.load()
     entries = data.get("entries", [])
     # entries are dicts; keep as-is
     return list(entries)
 
-def _df_fingerprint(df: pd.DataFrame, *, cols: Optional[list[str]] = None, sample_rows: int = 1500) -> str:
+
+def _df_fingerprint(
+    df: pd.DataFrame, *, cols: Optional[list[str]] = None, sample_rows: int = 1500
+) -> str:
     """Cheap-ish fingerprint for deterministic caching.
 
     We avoid hashing full DataFrames (slow). Instead we combine:
@@ -433,9 +490,13 @@ def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
     perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
     cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
 
-    fp = _df_fingerprint(df, cols=["NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"])
+    fp = _df_fingerprint(
+        df, cols=["NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"]
+    )
     dims = [d for d in DEFAULT_OPP_DIMS if d in df.columns]
-    key = cache.make_key(namespace="opps", dataset_sig=fp, params={"min_n": int(min_n), "dims": dims})
+    key = cache.make_key(
+        namespace="opps", dataset_sig=fp, params={"min_n": int(min_n), "dims": dims}
+    )
     hit = cache.get(key)
     if hit is not None:
         return hit
@@ -481,11 +542,7 @@ def cached_detect_changepoints(df: pd.DataFrame):
 def _copy_to_clipboard(payload: str, *, toast: str = "Copiado") -> None:
     """Copy text to clipboard via a tiny JS snippet (Streamlit has no native clipboard API)."""
     # Use JSON encoding to safely escape quotes/newlines.
-    js = (
-        "<script>"
-        f"navigator.clipboard.writeText({json.dumps(payload)});"
-        "</script>"
-    )
+    js = "<script>" f"navigator.clipboard.writeText({json.dumps(payload)});" "</script>"
     components.html(js, height=0)
     # `st.toast` exists on newer Streamlit; fallback to success if not.
     if hasattr(st, "toast"):
@@ -571,6 +628,7 @@ def _repair_json_text(text: str) -> str:
 
     # Remove markdown fences
     import re
+
     s = re.sub(r"```(?:json)?\s*", "", s, flags=re.IGNORECASE)
     s = s.replace("```", "")
 
@@ -588,7 +646,6 @@ def _repair_json_text(text: str) -> str:
     }
     for k, v in rep.items():
         s = s.replace(k, v)
-
 
     def _escape_unescaped_quotes_in_strings(payload: str) -> str:
         """Escape inner quotes inside JSON strings.
@@ -671,7 +728,9 @@ def _repair_json_text(text: str) -> str:
     return s.strip()
 
 
-def _parse_json_with_repair(text: str) -> tuple[Optional[dict[str, Any]], Optional[str], Optional[str]]:
+def _parse_json_with_repair(
+    text: str,
+) -> tuple[Optional[dict[str, Any]], Optional[str], Optional[str]]:
     """Parse JSON from pasted text. Repairs automatically when possible.
 
     Returns: (obj, repaired_json_text, error_message)
@@ -858,6 +917,7 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
     agg["classic_nps"] = (agg["pro"] - agg["det"]) * 100.0
     return agg[["day", "n", "det_pct", "pas_pct", "pro_pct", "classic_nps"]].copy()
 
+
 def render_sidebar(  # noqa: PLR0915
     settings: Settings,
 ) -> tuple[Optional[Path], int, str, str, str, str, str, str, Path, str, Optional[str], bool]:
@@ -875,7 +935,9 @@ def render_sidebar(  # noqa: PLR0915
     # options from stored datasets to avoid silent drift. Advanced users can
     # add/remove values by editing the .env.
 
-    service_origin_options = list(settings.service_origin_values) or [settings.default_service_origin]
+    service_origin_options = list(settings.service_origin_values) or [
+        settings.default_service_origin
+    ]
     # Keep current/default selectable even if .env was edited incorrectly.
     for v in [settings.default_service_origin]:
         if v and v not in service_origin_options:
@@ -962,7 +1024,9 @@ def render_sidebar(  # noqa: PLR0915
         pop_year_default = POP_ALL
         pop_month_default = POP_ALL
 
-        ctx_base = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+        ctx_base = DatasetContext(
+            service_origin=service_origin, service_origin_n1=service_origin_n1
+        )
         meta_pop = store.read_meta(ctx_base)
         dataset_id = str(meta_pop.get("dataset_id") or "")
         years_available, months_by_year = store.available_year_month(ctx_base.key())
@@ -1028,19 +1092,23 @@ def render_sidebar(  # noqa: PLR0915
         nps_group_choice = st.selectbox(
             "Grupo",
             options=NPS_GROUP_OPTIONS,
-            index=NPS_GROUP_OPTIONS.index(st.session_state.get("_nps_group_choice", "Detractores"))
-            if st.session_state.get("_nps_group_choice") in NPS_GROUP_OPTIONS
-            else 1,
+            index=(
+                NPS_GROUP_OPTIONS.index(st.session_state.get("_nps_group_choice", "Detractores"))
+                if st.session_state.get("_nps_group_choice") in NPS_GROUP_OPTIONS
+                else 1
+            ),
             help="Selecciona la población sobre la que se calculan TODOS los análisis e insights (Drivers, Texto, Journey, Alertas, Insights LLM, NPS↔Helix, Datos).",
         )
         st.session_state["_nps_group_choice"] = nps_group_choice
 
         st.divider()
         st.header("NPS")
-        st.caption("Sube el Excel de NPS térmico para el contexto seleccionado (service_origin + service_origin_n1).")
+        st.caption(
+            "Sube el Excel de NPS térmico para el contexto seleccionado (service_origin + service_origin_n1)."
+        )
 
         up = st.file_uploader("Subir Excel NPS térmico (.xlsx)", type=["xlsx", "xlsm", "xls"])
-        sheet_name = (st.text_input("Hoja (opcional)", value="") or None)
+        sheet_name = st.text_input("Hoja (opcional)", value="") or None
 
         ctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
         stored = store.get(ctx)
@@ -1094,7 +1162,7 @@ def render_sidebar(  # noqa: PLR0915
             type=["xlsx", "xlsm", "xls"],
             key="helix_uploader",
         )
-        helix_sheet = (st.text_input("Hoja Helix (opcional)", value="", key="helix_sheet") or None)
+        helix_sheet = st.text_input("Hoja Helix (opcional)", value="", key="helix_sheet") or None
 
         helix_store = HelixIncidentStore(settings.data_dir / "helix")
         hctx = DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
@@ -1105,7 +1173,9 @@ def render_sidebar(  # noqa: PLR0915
                 f"Helix activo: {hmeta.get('rows', '?'):,} filas · actualizado {hmeta.get('updated_at_utc', '?')}"
             )
         else:
-            st.info("No hay incidencias Helix persistidas para este contexto. Sube el Excel para ingestar.")
+            st.info(
+                "No hay incidencias Helix persistidas para este contexto. Sube el Excel para ingestar."
+            )
 
         if st.button("Importar / actualizar Helix", type="secondary", use_container_width=True):
             if helix_up is None:
@@ -1168,8 +1238,6 @@ def render_sidebar(  # noqa: PLR0915
                 "min_n": int(min_n),
             }
 
-
-
         st.divider()
         st.header("⚡ Performance")
         perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
@@ -1198,7 +1266,9 @@ def render_sidebar(  # noqa: PLR0915
                         pass
                     st.rerun()
 
-    stored2 = store.get(DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1))
+    stored2 = store.get(
+        DatasetContext(service_origin=service_origin, service_origin_n1=service_origin_n1)
+    )
     data_path = stored2.path if stored2 is not None else None
     data_ready = stored2 is not None
 
@@ -1217,7 +1287,15 @@ def render_sidebar(  # noqa: PLR0915
         data_ready,
     )
 
-def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_origin: str, service_origin_n1: str, service_origin_n2: str) -> None:
+
+def page_executive(
+    df: pd.DataFrame,
+    theme: Theme,
+    store_dir: Path,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+) -> None:
     section(
         "Resumen ejecutivo",
         "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
@@ -1249,7 +1327,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig is None:
                 st.info("No hay suficientes datos para construir una tendencia.")
             else:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
         with tab_dm:
             days = st.slider(
@@ -1272,7 +1350,6 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                 unsafe_allow_html=True,
             )
 
-            
             # Load only the requested window with predicate pushdown (partitioned parquet).
             end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
             end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
@@ -1295,16 +1372,18 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig_mix is None:
                 st.info("No hay suficientes datos para construir la vista diaria.")
             else:
-                st.plotly_chart(fig_mix, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 fig_vol = chart_daily_volume(df_win, theme, days=int(days))
                 if fig_vol is not None:
-                    st.plotly_chart(fig_vol, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                st.caption("Lectura ejecutiva diaria: NPS clásico (promotores - detractores) y % detractores.")
+                st.caption(
+                    "Lectura ejecutiva diaria: NPS clásico (promotores - detractores) y % detractores."
+                )
                 fig_k = chart_daily_kpis(df_win, theme, days=int(days))
                 if fig_k is not None:
-                    st.plotly_chart(fig_k, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
 
                 with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
                     st.caption(
@@ -1326,8 +1405,12 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                     if metrics.empty:
                         st.info("No hay suficientes datos diarios para construir el asistente.")
                     else:
-                        worst = metrics.sort_values(["det_pct", "n"], ascending=[False, False]).head(3)
-                        best = metrics.sort_values(["classic_nps", "n"], ascending=[False, False]).head(3)
+                        worst = metrics.sort_values(
+                            ["det_pct", "n"], ascending=[False, False]
+                        ).head(3)
+                        best = metrics.sort_values(
+                            ["classic_nps", "n"], ascending=[False, False]
+                        ).head(3)
                         picks = []
                         for _, r in worst.iterrows():
                             picks.append(
@@ -1360,9 +1443,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                             # Verbative samples
                             verb = []
                             if "Comment" in slice_df.columns:
-                                verb = (
-                                    slice_df["Comment"].dropna().astype(str).head(12).tolist()
-                                )
+                                verb = slice_df["Comment"].dropna().astype(str).head(12).tolist()
 
                             # Top levers that day (if available)
                             tops = []
@@ -1423,7 +1504,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
                 "</div>",
                 unsafe_allow_html=True,
             )
-            
+
             # Same windowed load for the semáforo detail.
             if end_day is not None:
                 df_sema = load_context_df(
@@ -1443,8 +1524,7 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
             if fig2 is None:
                 st.info("No hay suficientes datos para construir la escalera.")
             else:
-                st.plotly_chart(fig2, use_container_width=True)
-
+                st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
 
     with col_b:
         det = s.top_detractor_driver
@@ -1498,11 +1578,9 @@ def page_executive(df: pd.DataFrame, theme: Theme, store_dir: Path, service_orig
         mime="text/markdown",
     )
 
-
-
-
     section("✨ Insights LLM integrados")
     _render_llm_insights(theme)
+
 
 def page_comparisons(df: pd.DataFrame, theme: Theme) -> None:
     st.subheader("Comparativas (periodo actual vs periodo base)")
@@ -1557,7 +1635,7 @@ def page_comparisons(df: pd.DataFrame, theme: Theme) -> None:
         return
     fig = chart_driver_delta(delta, theme)
     if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
     with st.expander("Ver tabla de deltas"):
         st.dataframe(delta.head(30), use_container_width=True)
 
@@ -1584,7 +1662,7 @@ def page_cohorts(df: pd.DataFrame, theme: Theme) -> None:
             "(revisa columnas y N mínimo)."
         )
         return
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     st.markdown(
         "<div class='nps-card'>"
@@ -1612,7 +1690,7 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
             stats_df = stats_df.sort_values("gap_vs_overall", ascending=True)
             fig = chart_driver_bar(stats_df, theme)
             if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
         with st.expander("Ver tabla detallada"):
             st.dataframe(stats_df.head(30), use_container_width=True)
@@ -1630,12 +1708,14 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
                 from nps_lens.ui.charts import chart_opportunities_bar
 
                 cfig = chart_opportunities_bar(
-                    opp_df.assign(label=lambda d: d.apply(lambda r: f"{r['dimension']}={r['value']}", axis=1)),
+                    opp_df.assign(
+                        label=lambda d: d.apply(lambda r: f"{r['dimension']}={r['value']}", axis=1)
+                    ),
                     theme,
                     top_k=10,
                 )
                 if cfig is not None:
-                    st.plotly_chart(cfig, use_container_width=True)
+                    st.plotly_chart(apply_plotly_theme(cfig, theme), use_container_width=True)
             except Exception:
                 # Never block the page on chart errors
                 pass
@@ -1670,7 +1750,7 @@ def page_text(df: pd.DataFrame, theme: Theme) -> None:
         if fig is None:
             st.info("No hay texto suficiente para extraer temas.")
         else:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     with c2:
         section("Explicación en lenguaje natural", "Resumen de lo que significan los temas.")
@@ -1712,7 +1792,7 @@ def page_journey(df: pd.DataFrame) -> None:
     st.markdown(
         "<div class='nps-card'><b>Cómo leerlo:</b> una ruta con score alto suele "
         "ser una combinación "
-        "repetida y con mayor tasa de detractores. Úsala para abrir tickets/hipótesis." 
+        "repetida y con mayor tasa de detractores. Úsala para abrir tickets/hipótesis."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1723,20 +1803,23 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
     st.markdown(
         "<div class='nps-card nps-muted'>"
         "Detecta puntos donde el NPS cambia de nivel para una palanca seleccionada. "
-        "Útil para vincular con releases, incidencias o campañas en esa ventana." 
+        "Útil para vincular con releases, incidencias o campañas en esa ventana."
         "</div>",
         unsafe_allow_html=True,
     )
 
+    import pandas as pd
+
     from nps_lens.analytics.changepoints import detect_nps_changepoints_with_bootstrap
     from nps_lens.analytics.drivers import compute_nps_from_scores
     from nps_lens.ui.charts import chart_nps_timeseries_with_changepoints
-    import pandas as pd
 
     levers = sorted(df["Palanca"].astype(str).fillna("(vacío)").unique())[:80]
     lever = st.selectbox("Palanca", levers)
 
-    cp = detect_nps_changepoints_with_bootstrap(df, dim_col="Palanca", value=lever, freq="D", pen=8.0)
+    cp = detect_nps_changepoints_with_bootstrap(
+        df, dim_col="Palanca", value=lever, freq="D", pen=8.0
+    )
     if cp is None:
         st.info("No hay suficientes datos para detectar cambios para esa selección.")
         return
@@ -1757,7 +1840,7 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
     pts = [pd.Timestamp(p) for p in cp.points]
     fig = chart_nps_timeseries_with_changepoints(ts, theme=theme, points=pts, levels=cp.level)
     if fig is not None:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     cp_rows = [
         {"date": str(p), "stability": float(s), "level": str(level)}
@@ -1776,7 +1859,6 @@ def page_changes(df: pd.DataFrame, theme: Theme) -> None:
         st.dataframe(pd.DataFrame(cp_rows), use_container_width=True)
     else:
         st.info("No se detectaron changepoints con los parámetros actuales.")
-
 
 
 def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
@@ -1880,7 +1962,7 @@ def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
         f"- {question}\n\n"
         "REGLA CRITICA\n"
         "- RESPONDE SOLO con UN objeto JSON valido (sin texto antes o despues, sin markdown).\n"
-        "- Usa comillas dobles normales (\"), sin comillas tipograficas.\n"
+        '- Usa comillas dobles normales ("), sin comillas tipograficas.\n'
         "- Sin trailing commas. No uses NaN/Infinity/None: usa null si aplica.\n\n"
         "DEEP-DIVE PACK\n"
         f"{md}"
@@ -2029,7 +2111,9 @@ def _llm_save_to_cache(
 
     service_origin = str(context.get("service_origin") or settings.default_service_origin)
     service_origin_n1 = str(context.get("service_origin_n1") or settings.default_service_origin_n1)
-    kc = KnowledgeCache.for_context(settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1)
+    kc = KnowledgeCache.for_context(
+        settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
     sig = stable_signature(context=context, title=pack.title)
     record = {
         "signature": sig,
@@ -2049,7 +2133,6 @@ def _llm_save_to_cache(
     st.success("Guardado. Se usara para deduplicacion y contexto futuro.")
 
 
-
 def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path) -> None:
     st.subheader("WoW: Deep-Dive Pack para ChatGPT (copy/paste + memoria)")
     st.markdown(
@@ -2064,7 +2147,9 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
     if selected is None or slice_df is None:
         return
 
-    md, out, pack, context = _llm_build_pack(df, settings, selected, slice_df, out_dir=cache_path.parent / "packs")
+    md, out, pack, context = _llm_build_pack(
+        df, settings, selected, slice_df, out_dir=cache_path.parent / "packs"
+    )
     _llm_render_copy_prompt(md, out)
 
     answer, parsed = _llm_render_paste_and_parse("")
@@ -2110,9 +2195,8 @@ def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path)
 
         # Apply the repaired JSON back into the text area and refresh.
         st.rerun()
-# Refresh UI so the integrated insights section updates immediately.
+        # Refresh UI so the integrated insights section updates immediately.
         st.rerun()
-
 
 
 def _normalize_empty_n2(n2: str) -> str:
@@ -2120,7 +2204,6 @@ def _normalize_empty_n2(n2: str) -> str:
     if v in {"-", "—", "–"}:
         return ""
     return v
-
 
 
 NPS_GROUP_OPTIONS = ["Todos", "Detractores", "Neutros", "Promotores"]
@@ -2162,6 +2245,7 @@ def filter_df_by_nps_group(df: pd.DataFrame, group_choice: str) -> pd.DataFrame:
 
     mask = df["NPS Group"].apply(_bucket) == target
     return df.loc[mask].copy()
+
 
 def page_quality(df: pd.DataFrame, helix_df: Optional[pd.DataFrame] = None) -> None:
     st.subheader("Datos & calidad")
@@ -2226,7 +2310,6 @@ def page_quality(df: pd.DataFrame, helix_df: Optional[pd.DataFrame] = None) -> N
             st.dataframe(view_h, use_container_width=True, height=520)
 
 
-
 def page_nps_helix_linking(
     nps_df: pd.DataFrame,
     store_dir: Path,
@@ -2239,6 +2322,9 @@ def page_nps_helix_linking(
 ) -> None:
     st.subheader("🔗 NPS ↔ Helix — causalidad pragmática (multi-fuente)")
 
+    # Use the global app theme for any Plotly figures built directly in this page.
+    theme = get_theme(theme_mode)
+
     # IMPORTANT: context is only used to load the already-ingested population.
     # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
     helix_store = HelixIncidentStore(settings.data_dir / "helix")
@@ -2249,7 +2335,9 @@ def page_nps_helix_linking(
     )
     hstored = helix_store.get(hctx)
     if hstored is None:
-        st.info("No hay incidencias Helix persistidas para este contexto. Súbelas en la barra lateral para activar el análisis.")
+        st.info(
+            "No hay incidencias Helix persistidas para este contexto. Súbelas en la barra lateral para activar el análisis."
+        )
         return
 
     helix_df = helix_store.load_df(hstored)
@@ -2268,7 +2356,14 @@ def page_nps_helix_linking(
     with colw[1]:
         end = st.date_input("Hasta", value=dmax, min_value=dmin, max_value=dmax, key="nh_end")
     with colw[2]:
-        min_sim = st.slider("Umbral similitud (link)", min_value=0.10, max_value=0.60, value=0.22, step=0.02, key="nh_sim")
+        min_sim = st.slider(
+            "Umbral similitud (link)",
+            min_value=0.10,
+            max_value=0.60,
+            value=0.22,
+            step=0.02,
+            key="nh_sim",
+        )
 
     # Población global (sidebar): rige TODO el contenido de esta pestaña.
     st.caption(f"Población activa: **{nps_group_choice}** (control global en la barra lateral)")
@@ -2321,7 +2416,9 @@ def page_nps_helix_linking(
                     dt = pd.to_datetime(num, unit="s", errors="coerce")
         helix_df["Fecha"] = dt
 
-    helix_slice = helix_df[(helix_df["Fecha"].dt.date >= start) & (helix_df["Fecha"].dt.date <= end)].copy()
+    helix_slice = helix_df[
+        (helix_df["Fecha"].dt.date >= start) & (helix_df["Fecha"].dt.date <= end)
+    ].copy()
 
     if nps_slice.empty:
         st.warning("No hay respuestas NPS en el rango seleccionado.")
@@ -2346,7 +2443,9 @@ def page_nps_helix_linking(
 
     focus_df = nps_slice[mask_focus].copy()
     if focus_df.empty:
-        st.info(f"No hay {focus_name} en el rango seleccionado. El linking semántico se activa cuando existan registros de ese grupo.")
+        st.info(
+            f"No hay {focus_name} en el rango seleccionado. El linking semántico se activa cuando existan registros de ese grupo."
+        )
     else:
         st.caption(
             "El análisis usa: (1) contexto determinista, (2) ventana temporal, (3) mapping semántico de incidencias a tópicos NPS, "
@@ -2354,8 +2453,12 @@ def page_nps_helix_linking(
         )
 
     # 1) Linking + asignación de incidencias a tópico NPS
-    assign_df, links_df = link_incidents_to_nps_topics(focus_df, helix_slice, min_similarity=float(min_sim))
-    overall_weekly, by_topic_weekly = weekly_aggregates(nps_slice, helix_slice, assign_df, focus_group=focus_group)
+    assign_df, links_df = link_incidents_to_nps_topics(
+        focus_df, helix_slice, min_similarity=float(min_sim)
+    )
+    overall_weekly, by_topic_weekly = weekly_aggregates(
+        nps_slice, helix_slice, assign_df, focus_group=focus_group
+    )
 
     # Design tokens (Plotly colors)
     dtokens = DesignTokens.default()
@@ -2432,7 +2535,7 @@ def page_nps_helix_linking(
         yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
         legend=dict(orientation="h"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     # 3) Ranking causal por tópico NPS
     st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
@@ -2456,7 +2559,11 @@ def page_nps_helix_linking(
     if not rank.empty:
 
         # Enriquecer ranking con changepoints + lag + learning
-        rank2 = rank.merge(cp_by_topic, on="nps_topic", how="left").merge(lag_by_topic, on="nps_topic", how="left").merge(lead_share, on="nps_topic", how="left")
+        rank2 = (
+            rank.merge(cp_by_topic, on="nps_topic", how="left")
+            .merge(lag_by_topic, on="nps_topic", how="left")
+            .merge(lead_share, on="nps_topic", how="left")
+        )
         if not kc_adj.empty:
             rank2 = rank2.merge(kc_adj, on="nps_topic", how="left")
         else:
@@ -2465,7 +2572,9 @@ def page_nps_helix_linking(
             rank2["rejected"] = 0
         rank2["factor"] = rank2.get("factor", 1.0).fillna(1.0).astype(float)
         rank2["confidence_learned"] = (rank2["score"].astype(float) * rank2["factor"]).clip(0, 1)
-        rank2 = rank2.sort_values(["confidence_learned", "incidents", "responses"], ascending=False).reset_index(drop=True)
+        rank2 = rank2.sort_values(
+            ["confidence_learned", "incidents", "responses"], ascending=False
+        ).reset_index(drop=True)
 
         show = rank2.copy()
 
@@ -2474,7 +2583,9 @@ def page_nps_helix_linking(
         show["confidence_learned"] = show["confidence_learned"].round(3)
         show["factor"] = show["factor"].round(3)
         show["corr"] = show["corr"].round(3)
-        show["incidents_lead_changepoint_share"] = (show["incidents_lead_changepoint_share"] * 100).round(0)
+        show["incidents_lead_changepoint_share"] = (
+            show["incidents_lead_changepoint_share"] * 100
+        ).round(0)
         show["score"] = show["score"].round(3)
         show["max_cp_stability"] = show.get("max_cp_stability", np.nan).astype(float).round(3)
         st.dataframe(
@@ -2535,16 +2646,18 @@ def page_nps_helix_linking(
             color_continuous_scale=risk_scale,
             range_color=[0, 1],
         )
-        fig2.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1]))
-        st.plotly_chart(fig2, use_container_width=True)
+        fig2.update_layout(
+            height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1])
+        )
+        st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
     else:
         st.info("No hay suficiente señal para rankear tópicos (prueba con un rango más amplio).")
 
     # 4) Heatmap Tema x Semana (incidencias asignadas)
     st.markdown("### Heatmap: incidencias asignadas a tópico NPS por semana")
     if not by_topic_weekly.empty:
-        pivot = (
-            by_topic_weekly.pivot_table(index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0)
+        pivot = by_topic_weekly.pivot_table(
+            index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0
         )
         if pivot.shape[0] > 0 and pivot.shape[1] > 0:
             px, go = _plotly()
@@ -2552,23 +2665,42 @@ def page_nps_helix_linking(
                 pivot,
                 aspect="auto",
                 zmin=0,
-                zmax=float(np.nanpercentile(pivot.values.astype(float), 95)) if pivot.values.size else None,
+                zmax=(
+                    float(np.nanpercentile(pivot.values.astype(float), 95))
+                    if pivot.values.size
+                    else None
+                ),
             )
             heat.update_traces(coloraxis="coloraxis")
             # Incidence intensity -> status-aligned scale
             heat.update_layout(coloraxis=dict(colorscale=risk_scale))
-            heat.update_layout(height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(heat, use_container_width=True)
+            heat.update_layout(
+                height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10)
+            )
+            st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
 
-    
     # 4.1) Changepoints + Lag (incidencias preceden X semanas)
     st.markdown("### Changepoints + Lag (incidencias preceden X semanas)")
-    if not by_topic_weekly.empty and 'rank2' in locals() and not rank2.empty:
-        topic_for_lag = st.selectbox("Tópico (para ver lag)", options=rank2["nps_topic"].tolist(), key="lag_topic_sel")
-        g = by_topic_weekly[by_topic_weekly["nps_topic"] == topic_for_lag].sort_values("week").copy()
+    if not by_topic_weekly.empty and "rank2" in locals() and not rank2.empty:
+        topic_for_lag = st.selectbox(
+            "Tópico (para ver lag)", options=rank2["nps_topic"].tolist(), key="lag_topic_sel"
+        )
+        g = (
+            by_topic_weekly[by_topic_weekly["nps_topic"] == topic_for_lag]
+            .sort_values("week")
+            .copy()
+        )
         lag_row = rank2[rank2["nps_topic"] == topic_for_lag].head(1)
-        lagw = int(lag_row["best_lag_weeks"].iloc[0]) if not lag_row.empty and pd.notna(lag_row["best_lag_weeks"].iloc[0]) else 0
-        cps = lag_row["changepoints"].iloc[0] if (not lag_row.empty and "changepoints" in lag_row.columns) else []
+        lagw = (
+            int(lag_row["best_lag_weeks"].iloc[0])
+            if not lag_row.empty and pd.notna(lag_row["best_lag_weeks"].iloc[0])
+            else 0
+        )
+        cps = (
+            lag_row["changepoints"].iloc[0]
+            if (not lag_row.empty and "changepoints" in lag_row.columns)
+            else []
+        )
         if not isinstance(cps, list):
             # may be NaN or string
             cps = [] if pd.isna(cps) else [str(cps)]
@@ -2596,7 +2728,11 @@ def page_nps_helix_linking(
             )
         )
         # changepoint vertical lines
-        cp_level = str(lag_row["max_cp_level"].iloc[0]) if (not lag_row.empty and "max_cp_level" in lag_row.columns) else ""
+        cp_level = (
+            str(lag_row["max_cp_level"].iloc[0])
+            if (not lag_row.empty and "max_cp_level" in lag_row.columns)
+            else ""
+        )
         cp_color = cp_level_color(dtokens, theme_mode, cp_level)
         for cp in cps[:8]:
             try:
@@ -2611,7 +2747,7 @@ def page_nps_helix_linking(
             yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(fig_lag, use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig_lag, theme), use_container_width=True)
         st.caption(
             "Interpretación: el lag se elige maximizando la correlación entre incidencias(t) y detracción(t+lag). "
             "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico. "
@@ -2622,14 +2758,18 @@ def page_nps_helix_linking(
 
     # 4.2) Lag en días (si la densidad de NPS permite daily resample)
     st.markdown("### Lag en días (cuando la densidad de NPS lo permite)")
-    overall_daily, by_topic_daily = daily_aggregates(nps_slice, helix_slice, assign_df, focus_group=focus_group)
+    overall_daily, by_topic_daily = daily_aggregates(
+        nps_slice, helix_slice, assign_df, focus_group=focus_group
+    )
     if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45):
         lag_days = estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
-        if not lag_days.empty and 'rank2' in locals() and not rank2.empty:
+        if not lag_days.empty and "rank2" in locals() and not rank2.empty:
             lag_days = lag_days.merge(rank2[["nps_topic"]], on="nps_topic", how="inner")
             lag_days["corr"] = lag_days["corr"].round(3)
             st.dataframe(
-                lag_days.sort_values(["corr"], ascending=False).head(25).rename(
+                lag_days.sort_values(["corr"], ascending=False)
+                .head(25)
+                .rename(
                     columns={
                         "nps_topic": "Tópico NPS",
                         "best_lag_days": "Lag (días)",
@@ -2649,7 +2789,11 @@ def page_nps_helix_linking(
                 options=lag_days.sort_values(["corr"], ascending=False)["nps_topic"].tolist(),
                 key="lag_day_topic_sel",
             )
-            lagd = int(lag_days.set_index("nps_topic").loc[topic_sel, "best_lag_days"]) if topic_sel in lag_days["nps_topic"].values else 0
+            lagd = (
+                int(lag_days.set_index("nps_topic").loc[topic_sel, "best_lag_days"])
+                if topic_sel in lag_days["nps_topic"].values
+                else 0
+            )
             gd = by_topic_daily[by_topic_daily["nps_topic"] == topic_sel].sort_values("date").copy()
             gd["incidents_shifted"] = gd["incidents"].shift(lagd)
             px, go = _plotly()
@@ -2680,7 +2824,7 @@ def page_nps_helix_linking(
                 yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(figd, use_container_width=True)
+            st.plotly_chart(apply_plotly_theme(figd, theme), use_container_width=True)
             st.caption(
                 "Se activa el lag diario cuando hay suficiente densidad de respuestas por día (cobertura) y puntos válidos. "
                 "El lag se elige maximizando corr(incidencias(t), detracción(t+lag))."
@@ -2691,13 +2835,26 @@ def page_nps_helix_linking(
             "Usa el lag semanal (arriba) o amplía la ventana."
         )
 
-# 5) Evidence wall
+    # 5) Evidence wall
     st.markdown("### Evidence wall: detractores ↔ incidencias (links semánticos)")
     if det.empty or links_df.empty:
-        st.info("No hay links (o no hay detractores) con el umbral actual. Baja el umbral o amplía la ventana.")
+        st.info(
+            "No hay links (o no hay detractores) con el umbral actual. Baja el umbral o amplía la ventana."
+        )
     else:
-        topics = rank["nps_topic"].tolist() if not rank.empty else sorted(det["Palanca"].astype(str).unique().tolist())
-        chosen = st.selectbox("Selecciona tópico NPS", options=rank["nps_topic"].tolist() if not rank.empty else sorted(det["Palanca"].astype(str).unique().tolist()))
+        topics = (
+            rank["nps_topic"].tolist()
+            if not rank.empty
+            else sorted(det["Palanca"].astype(str).unique().tolist())
+        )
+        chosen = st.selectbox(
+            "Selecciona tópico NPS",
+            options=(
+                rank["nps_topic"].tolist()
+                if not rank.empty
+                else sorted(det["Palanca"].astype(str).unique().tolist())
+            ),
+        )
         sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
         if sub_links.empty:
             st.info("No hay links para este tópico con el umbral actual.")
@@ -2706,17 +2863,35 @@ def page_nps_helix_linking(
             det2 = det.copy()
             det2["nps_id"] = det2["ID"].astype(str)
             hel2 = helix_slice.copy()
-            hel2["incident_id"] = hel2.get("Incident Number", hel2.get("ID de la Incidencia", hel2.index)).astype(str)
+            hel2["incident_id"] = hel2.get(
+                "Incident Number", hel2.get("ID de la Incidencia", hel2.index)
+            ).astype(str)
 
             det_snip = det2.set_index("nps_id")["Comment"].astype(str).fillna("")
-            inc_snip = (hel2.set_index("incident_id")["summary"].astype(str).fillna("") if "summary" in hel2.columns else pd.Series(dtype=str))
+            inc_snip = (
+                hel2.set_index("incident_id")["summary"].astype(str).fillna("")
+                if "summary" in hel2.columns
+                else pd.Series(dtype=str)
+            )
 
-            sub_links["Comentario detractor"] = sub_links["nps_id"].map(det_snip).fillna("").str.slice(0, 220)
-            sub_links["Incidencia (summary)"] = sub_links["incident_id"].map(inc_snip).fillna("").str.slice(0, 220)
+            sub_links["Comentario detractor"] = (
+                sub_links["nps_id"].map(det_snip).fillna("").str.slice(0, 220)
+            )
+            sub_links["Incidencia (summary)"] = (
+                sub_links["incident_id"].map(inc_snip).fillna("").str.slice(0, 220)
+            )
             sub_links["similarity"] = sub_links["similarity"].round(3)
 
             st.dataframe(
-                sub_links[["similarity", "Comentario detractor", "Incidencia (summary)", "incident_id", "nps_id"]],
+                sub_links[
+                    [
+                        "similarity",
+                        "Comentario detractor",
+                        "Incidencia (summary)",
+                        "incident_id",
+                        "nps_id",
+                    ]
+                ],
                 use_container_width=True,
                 height=420,
             )
@@ -2734,11 +2909,23 @@ def page_nps_helix_linking(
             "min_similarity": float(min_sim),
         },
         "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
-        "metrics_overall_daily": overall_daily.to_dict(orient="records") if "overall_daily" in locals() and not overall_daily.empty else [],
+        "metrics_overall_daily": (
+            overall_daily.to_dict(orient="records")
+            if "overall_daily" in locals() and not overall_daily.empty
+            else []
+        ),
         "ranked_hypotheses": rank.head(20).to_dict(orient="records") if "rank" in locals() else [],
-        "changepoints_by_topic": cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else [],
-        "best_lag_by_topic": lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else [],
-        "best_lag_days_by_topic": lag_days.to_dict(orient="records") if "lag_days" in locals() and not lag_days.empty else [],
+        "changepoints_by_topic": (
+            cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else []
+        ),
+        "best_lag_by_topic": (
+            lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else []
+        ),
+        "best_lag_days_by_topic": (
+            lag_days.to_dict(orient="records")
+            if "lag_days" in locals() and not lag_days.empty
+            else []
+        ),
         "knowledge_cache_context_entries": (
             kc_entries[
                 (kc_entries["service_origin"] == str(service_origin))
@@ -2748,8 +2935,9 @@ def page_nps_helix_linking(
             if "kc_entries" in locals() and not kc_entries.empty
             else []
         ),
-
-        "evidence_links_sample": links_df.head(200).to_dict(orient="records") if not links_df.empty else [],
+        "evidence_links_sample": (
+            links_df.head(200).to_dict(orient="records") if not links_df.empty else []
+        ),
         "notes": [
             "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
             "Los links se basan en similitud TF-IDF; revisar umbral y ejemplos para validar.",
@@ -2776,7 +2964,9 @@ def page_nps_helix_linking(
     md_lines.append("## 2) Evidencia cuantitativa (semanal)")
     md_lines.append(f"**Global:** % {focus_name} vs incidencias")
     md_lines.append("")
-    md_lines.append(f"| Semana | Respuestas | {focus_name.capitalize()} | % {focus_name} | Incidencias |")
+    md_lines.append(
+        f"| Semana | Respuestas | {focus_name.capitalize()} | % {focus_name} | Incidencias |"
+    )
     md_lines.append("|---|---:|---:|---:|---:|")
     for rec in overall_weekly.sort_values("week").to_dict(orient="records"):
         md_lines.append(
@@ -2803,20 +2993,28 @@ def page_nps_helix_linking(
         md_lines.append("- No hay links con el umbral actual.")
     md_lines.append("")
     md_lines.append("## 4) Preguntas sugeridas al LLM")
-    md_lines.append("- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?")
+    md_lines.append(
+        "- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?"
+    )
     md_lines.append("- ¿Qué subtemas emergen en los verbatims y en las incidencias? ¿Coinciden?")
-    md_lines.append("- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?")
+    md_lines.append(
+        "- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?"
+    )
     md_lines.append("")
     md_lines.append("## 5) Trazabilidad técnica")
     md_lines.append("- Fuente NPS: dataset persistido para el contexto seleccionado.")
-    md_lines.append("- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto.")
+    md_lines.append(
+        "- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto."
+    )
     md_lines.append("- Linking: TF-IDF + cosine similarity, umbral configurable.")
 
     md = "\n".join(md_lines)
 
     c1, c2 = st.columns(2)
     with c1:
-        st.download_button("Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md")
+        st.download_button(
+            "Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md"
+        )
     with c2:
         pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
         st.download_button(
@@ -2842,17 +3040,15 @@ def main() -> None:
         try:
             shutil.copyfile(str(env_example_path), str(env_path))
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to bootstrap .env from .env.example: {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to bootstrap .env from .env.example: {exc}") from exc
 
     # IMPORTANT: Streamlit may execute with different working directories depending on how it's launched.
     # We therefore resolve the .env path robustly (cwd + parent directories) and then load it.
     dotenv_path = find_dotenv(usecwd=True)
     if not dotenv_path:
         candidates = [
-            env_path,                 # repo root
-            here.parents[0] / ".env", # app/
+            env_path,  # repo root
+            here.parents[0] / ".env",  # app/
         ]
         for cand in candidates:
             if cand.exists():
@@ -2886,7 +3082,9 @@ def main() -> None:
     ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{pop_year}__{pop_month}__{nps_group_choice}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
-        st.session_state["llm_insights"] = load_llm_insights_for_context(settings, service_origin=service_origin, service_origin_n1=service_origin_n1)
+        st.session_state["llm_insights"] = load_llm_insights_for_context(
+            settings, service_origin=service_origin, service_origin_n1=service_origin_n1
+        )
 
     st.markdown(
         """
@@ -2911,7 +3109,6 @@ def main() -> None:
     )
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-
     if not data_ready:
         st.info(
             "No hay dataset cargado para este **contexto** (geografía + canal). "
@@ -2924,7 +3121,6 @@ def main() -> None:
     # Global population time window (Año/Mes) applied everywhere.
     pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
-
     st.divider()
 
     with st.expander("📘 Qué estás viendo", expanded=False):
@@ -2932,7 +3128,6 @@ def main() -> None:
             "Este dashboard está pensado para una lectura **ejecutiva** del NPS térmico. "
             "Empieza en **Resumen**, luego ve a **Drivers** para priorizar y usa **Insights LLM** "
             "para convertir hallazgos en narrativa y acciones.\n\n"
-
             "**Tip:** en cada sección verás una breve explicación de *qué significa* "
             "y *qué decisión habilita*."
         )
@@ -2971,7 +3166,9 @@ def main() -> None:
         )
         s1, s2, s3, s4 = st.tabs(["Resumen", "Comparativas", "Cohortes", "NPS ↔ Helix"])
         with s1:
-            page_executive(df, theme, store_dir, service_origin, service_origin_n1, service_origin_n2)
+            page_executive(
+                df, theme, store_dir, service_origin, service_origin_n1, service_origin_n2
+            )
         with s2:
             page_comparisons(df, theme)
         with s3:
@@ -3080,8 +3277,6 @@ def main() -> None:
         hstored = helix_store.get(hctx)
         helix_df = helix_store.load_df(hstored) if hstored is not None else None
         page_quality(df, helix_df=helix_df)
-
-
 
 
 if __name__ == "__main__":

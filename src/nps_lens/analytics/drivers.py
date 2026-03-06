@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -16,6 +15,7 @@ class DriverStat:
     detractor_rate: float
     promoter_rate: float
     gap_vs_overall: float
+
 
 def compute_nps_from_scores(scores: pd.Series) -> float:
     s = pd.to_numeric(scores, errors="coerce").dropna()

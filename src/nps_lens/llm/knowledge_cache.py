@@ -22,7 +22,9 @@ class CacheHit:
 class KnowledgeCache:
 
     @classmethod
-    def for_context(cls, base_dir: Path, service_origin: str, service_origin_n1: str) -> "KnowledgeCache":
+    def for_context(
+        cls, base_dir: Path, service_origin: str, service_origin_n1: str
+    ) -> "KnowledgeCache":
         base_dir.mkdir(parents=True, exist_ok=True)
         fname = f"insights__{service_origin}__{service_origin_n1}.json"
         return cls(base_dir / fname)
@@ -59,7 +61,9 @@ class KnowledgeCache:
         data["entries"] = entries
         payload = json.dumps(data, ensure_ascii=False, indent=2)
         # Atomic write to avoid corruption if the process is interrupted.
-        with NamedTemporaryFile("w", delete=False, encoding="utf-8", dir=str(self.path.parent)) as tmp:
+        with NamedTemporaryFile(
+            "w", delete=False, encoding="utf-8", dir=str(self.path.parent)
+        ) as tmp:
             tmp.write(payload)
             tmp_path = Path(tmp.name)
         tmp_path.replace(self.path)

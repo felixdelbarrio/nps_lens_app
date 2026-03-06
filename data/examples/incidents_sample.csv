@@ -1,3 +1,0 @@
-opened_at,closed_at,incident_id,category,severity,system,description,channel,geo,segment
-2026-01-15T10:22:00,2026-01-15T13:05:00,INC-1001,Login/Acceso,S2,Senda API,"Intermitencia al iniciar sesión, error 500",Senda,MX,Empresas
-2026-01-22T09:12:00,2026-01-22T12:30:00,INC-1002,Transferencias,S1,Core Payments,Transferencias SPEI rechazadas por timeout,Senda,MX,Empresas

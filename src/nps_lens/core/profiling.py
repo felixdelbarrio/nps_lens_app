@@ -39,6 +39,7 @@ def load_profile_summary(path: Path, *, top_n: int = 15) -> ProfileSummary:
                 "self_s": float(tt),
             }
         )
+
     def _cum_key(r: Dict[str, object]) -> float:
         return float(cast(float, r["cum_s"]))
 
@@ -71,7 +72,9 @@ def profile_if_enabled(out_dir: Path, *, tag: str = "run") -> Iterator[List[Prof
         yield summaries
     finally:
         pr.disable()
-        with tempfile.NamedTemporaryFile(dir=str(out_dir), delete=False, suffix=f"_{tag}.prof") as tf:
+        with tempfile.NamedTemporaryFile(
+            dir=str(out_dir), delete=False, suffix=f"_{tag}.prof"
+        ) as tf:
             tmp_path = Path(tf.name)
         pr.dump_stats(str(tmp_path))
         import contextlib

@@ -1,13 +1,17 @@
-name: type check
+name: typecheck
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "**" ]
+    tags-ignore: [ "v*" ]
   pull_request:
+    branches: [ "**" ]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 jobs:
   typecheck:
+    name: typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

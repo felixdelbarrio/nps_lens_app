@@ -6,7 +6,6 @@ import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 
-
 INCIDENTS_REQUIRED = [
     "opened_at",
     "closed_at",
