@@ -4,7 +4,9 @@ import base64
 import contextlib
 import hashlib
 import json
+import os
 import shutil
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -19,8 +21,25 @@ from dotenv import find_dotenv, load_dotenv
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
-from nps_lens.analytics.changepoints import detect_nps_changepoints
+from nps_lens.analytics.hotspot_metrics import (
+    align_hotspot_evidence_to_axis,
+    build_hotspot_evidence,
+    build_hotspot_timeline,
+    select_best_business_axis_for_hotspots,
+    summarize_hotspot_counts,
+)
+from nps_lens.analytics.incident_rationale import (
+    build_incident_nps_rationale,
+    summarize_incident_nps_rationale,
+)
+from nps_lens.analytics.linking_policy import (
+    HOTSPOT_MIN_TERM_OCCURRENCES,
+    LINK_MAX_DAYS_APART,
+    LINK_MIN_SIMILARITY,
+    LINK_TOP_K_PER_INCIDENT,
+)
 from nps_lens.analytics.nps_helix_link import (
+    build_incident_display_text,
     can_use_daily_resample,
     causal_rank_by_topic,
     daily_aggregates,
@@ -44,7 +63,6 @@ from nps_lens.design.tokens import (
     DesignTokens,
     cp_level_color,
     palette,
-    plotly_continuous_scale,
     plotly_risk_scale,
 )
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -59,12 +77,17 @@ from nps_lens.ui.charts import (
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
+    chart_incident_priority_matrix,
+    chart_incident_risk_recovery,
     chart_nps_trend,
     chart_topic_bars,
 )
 from nps_lens.ui.components import card, kpi, pills, section
 from nps_lens.ui.narratives import (
     build_executive_story,
+    build_incident_ppt_story,
+    build_ppt_8slide_script,
+    build_wow_prompt,
     compare_periods,
     executive_summary,
     explain_opportunities,
@@ -194,10 +217,10 @@ TAGS (OBLIGATORIO, SIN INVENTAR):
 Devuelve SOLO un JSON con el esquema indicado y sin ningún texto adicional."""
 
 LLM_BUSINESS_QUESTIONS = [
-    "Devuelve SOLO el JSON del esquema (sin texto adicional). Enfocate en causas raiz y acciones priorizadas.",
-    "Identifica 3 hipotesis causales no obvias (con checks) y propone fixes/experimentos rapidos con owners y ETA.",
-    "Que palancas atacaria un director esta semana? Prioriza 3 acciones, que medir y riesgos por falta de evidencia.",
-    "Agrupa los verbatims en temas, explica el impacto en negocio y sugiere instrumentacion para confirmarlo.",
+    "Devuelve SOLO el JSON del esquema (sin texto adicional). Prioriza causas raiz con impacto demostrable en NPS y plan de accion.",
+    "Construye una narrativa de comite: 3 hipotesis causales no obvias, checks concretos, quick wins y riesgos por evidencia insuficiente.",
+    "Disena un playbook semanal: top 3 palancas, owner por rol, ETA y KPI leading/lagging para recuperar NPS termico.",
+    "Genera guion de 8 slides: mensaje principal, señal temporal, causas, impacto, prioridades, plan 30-60-90, gobierno KPI y decisiones de comité.",
 ]
 
 
@@ -311,8 +334,6 @@ VIEW_COLUMNS = {
         "UsuarioDecisión",
         "Segmento",
     ),
-    "journey": ("Fecha", "NPS", "NPS Group", "Comment", "Canal", "Palanca", "Subpalanca"),
-    "alertas": ("Fecha", "NPS", "NPS Group", "Canal", "Palanca", "Subpalanca"),
     "llm": (
         "Fecha",
         "NPS",
@@ -486,14 +507,19 @@ def cached_driver_table(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
     return stats_df
 
 
-def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
+def cached_rank_opportunities(
+    df: pd.DataFrame,
+    min_n: int,
+    *,
+    dimensions: Optional[list[str]] = None,
+):
     perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
     cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
 
     fp = _df_fingerprint(
         df, cols=["NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"]
     )
-    dims = [d for d in DEFAULT_OPP_DIMS if d in df.columns]
+    dims = [d for d in (dimensions or list(DEFAULT_OPP_DIMS)) if d in df.columns]
     key = cache.make_key(
         namespace="opps", dataset_sig=fp, params={"min_n": int(min_n), "dims": dims}
     )
@@ -504,38 +530,6 @@ def cached_rank_opportunities(df: pd.DataFrame, min_n: int):
     with perf.track("opportunities"):
         out = rank_opportunities(df, dimensions=dims, min_n=min_n)
     cache.set(key, out, meta={"namespace": "opps"})
-    return out
-
-
-def cached_extract_topics(texts, n_clusters: int = 8):
-    svc: AppService = st.session_state.get("_app_service")  # type: ignore
-
-    try:
-        s = pd.Series(texts).astype(str).fillna("")
-    except Exception:
-        s = pd.Series([], dtype=str)
-
-    return svc.topics(s, n_clusters=int(n_clusters))
-
-
-def cached_build_routes(df: pd.DataFrame):
-    svc: AppService = st.session_state.get("_app_service")  # type: ignore
-    return svc.routes(df)
-
-
-def cached_detect_changepoints(df: pd.DataFrame):
-    perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
-    cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
-
-    fp = _df_fingerprint(df, cols=["Fecha", "NPS", "Palanca"], sample_rows=2500)
-    key = cache.make_key(namespace="changepoints", dataset_sig=fp, params={})
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-
-    with perf.track("changepoints"):
-        out = detect_nps_changepoints(df)
-    cache.set(key, out, meta={"namespace": "changepoints"})
     return out
 
 
@@ -1089,13 +1083,21 @@ def render_sidebar(  # noqa: PLR0915
         )
         st.session_state["_pop_month"] = pop_month
 
+        # First load of this Streamlit session: force default group to "Todos"
+        # even if a stale value exists from a previous browser/state snapshot.
+        if "_nps_group_init_done" not in st.session_state:
+            st.session_state["_nps_group_choice"] = POP_ALL
+            st.session_state["_nps_group_init_done"] = True
+        elif st.session_state.get("_nps_group_choice") not in NPS_GROUP_OPTIONS:
+            st.session_state["_nps_group_choice"] = POP_ALL
+
         nps_group_choice = st.selectbox(
             "Grupo",
             options=NPS_GROUP_OPTIONS,
             index=(
-                NPS_GROUP_OPTIONS.index(st.session_state.get("_nps_group_choice", "Detractores"))
+                NPS_GROUP_OPTIONS.index(st.session_state.get("_nps_group_choice", POP_ALL))
                 if st.session_state.get("_nps_group_choice") in NPS_GROUP_OPTIONS
-                else 1
+                else 0
             ),
             help="Selecciona la población sobre la que se calculan TODOS los análisis e insights (Drivers, Texto, Journey, Alertas, Insights LLM, NPS↔Helix, Datos).",
         )
@@ -1280,7 +1282,7 @@ def render_sidebar(  # noqa: PLR0915
         service_origin_n2,
         pop_year,
         pop_month,
-        st.session_state.get("_nps_group_choice", "Detractores"),
+        st.session_state.get("_nps_group_choice", POP_ALL),
         settings.knowledge_dir,
         theme_mode,
         sheet_name,
@@ -1297,7 +1299,7 @@ def page_executive(
     service_origin_n2: str,
 ) -> None:
     section(
-        "Resumen ejecutivo",
+        "Resumen del periodo",
         "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
     )
 
@@ -1360,7 +1362,7 @@ def page_executive(
                     service_origin,
                     service_origin_n1,
                     service_origin_n2,
-                    st.session_state.get("_nps_group_choice", "Detractores"),
+                    st.session_state.get("_nps_group_choice", POP_ALL),
                     CHART_COLUMNS["daily_mix"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -1379,7 +1381,7 @@ def page_executive(
                     st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
                 st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
                 st.caption(
-                    "Lectura ejecutiva diaria: NPS clásico (promotores - detractores) y % detractores."
+                    "Lectura diaria: NPS clásico (promotores - detractores) y % detractores."
                 )
                 fig_k = chart_daily_kpis(df_win, theme, days=int(days))
                 if fig_k is not None:
@@ -1396,7 +1398,7 @@ def page_executive(
                         service_origin,
                         service_origin_n1,
                         service_origin_n2,
-                        st.session_state.get("_nps_group_choice", "Detractores"),
+                        st.session_state.get("_nps_group_choice", POP_ALL),
                         CHART_COLUMNS["daily_llm"],
                         date_start=str(start_day.date()) if end_day is not None else None,
                         date_end=str(end_day.date()) if end_day is not None else None,
@@ -1453,7 +1455,7 @@ def page_executive(
 
                             prompt = (
                                 "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
-                                "1) Resumen ejecutivo (max 10 líneas)\n"
+                                "1) Resumen del periodo (max 10 líneas)\n"
                                 "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
                                 f"Contexto:\n- service_origin: {service_origin}\n- service_origin_n1: {service_origin_n1}\n- service_origin_n2: {service_origin_n2 or '-'}\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
                                 "Hechos del día (métricas):\n"
@@ -1512,7 +1514,7 @@ def page_executive(
                     service_origin,
                     service_origin_n1,
                     service_origin_n2,
-                    st.session_state.get("_nps_group_choice", "Detractores"),
+                    st.session_state.get("_nps_group_choice", POP_ALL),
                     CHART_COLUMNS["daily_semaforo"],
                     date_start=str(start_day.date()),
                     date_end=str(end_day.date()),
@@ -1543,7 +1545,7 @@ def page_executive(
         )
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    section("Informe ejecutivo", "Copy/paste listo para comité / daily.")
+    section("Informe de negocio", "Copy/paste listo para comité / daily.")
 
     # Default time windows for a simple business comparison
     w_cur, w_base = default_windows(df, days=14)
@@ -1570,11 +1572,11 @@ def page_executive(
         top_opportunities=opp_bullets,
         top_topics=topic_bullets,
     )
-    st.text_area("Informe ejecutivo", report_md, height=260)
+    st.text_area("Informe de negocio", report_md, height=260)
     st.download_button(
         "Descargar informe .md",
         data=report_md.encode("utf-8"),
-        file_name="informe_ejecutivo_nps_lens.md",
+        file_name="informe_negocio_nps_lens.md",
         mime="text/markdown",
     )
 
@@ -1636,7 +1638,7 @@ def page_comparisons(df: pd.DataFrame, theme: Theme) -> None:
     fig = chart_driver_delta(delta, theme)
     if fig is not None:
         st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
-    with st.expander("Ver tabla de deltas"):
+    with st.expander("Ver tabla de deltas", expanded=False):
         st.dataframe(delta.head(30), use_container_width=True)
 
 
@@ -1696,8 +1698,11 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
             st.dataframe(stats_df.head(30), use_container_width=True)
 
     with right:
-        section("Oportunidades priorizadas", "Ranking por impacto estimado x confianza.")
-        opps = cached_rank_opportunities(df, min_n=min_n)
+        section(
+            "Oportunidades priorizadas",
+            "Ranking por impacto estimado x confianza (solo NPS en la dimensión seleccionada).",
+        )
+        opps = cached_rank_opportunities(df, min_n=min_n, dimensions=[dim])
         opp_df = pd.DataFrame([o.__dict__ for o in opps])
 
         if opp_df.empty:
@@ -1728,6 +1733,11 @@ def page_drivers(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
                     + "</ul></div>"
                 ),
                 unsafe_allow_html=True,
+            )
+            st.caption(
+                "Nota de coherencia: este ranking usa solo NPS y la dimensión elegida. "
+                "La PPT de incidencias usa hotspots operativos Helix+NPS (detractores, histórico completo), "
+                "por lo que los términos pueden diferir."
             )
 
         with st.expander("Ver ranking completo"):
@@ -1766,99 +1776,6 @@ def page_text(df: pd.DataFrame, theme: Theme) -> None:
 
     with st.expander("Ver clusters (incluye ejemplos)"):
         st.dataframe(topics_df, use_container_width=True)
-
-
-def page_journey(df: pd.DataFrame) -> None:
-    st.subheader("Journey & causas raíz (MVP)")
-    st.markdown(
-        "<div class='nps-card nps-muted'>"
-        "Esta vista construye rutas tipo <b>palanca → subpalanca → tema</b> y las ordena por "
-        "<b>frecuencia</b> y <b>asociación con detractores</b>. "
-        "Es una aproximación best-effort: sirve para priorizar investigaciones, "
-        "no como prueba definitiva."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    routes = cached_build_routes(df)
-    routes_df = pd.DataFrame([r.__dict__ for r in routes])
-    if routes_df.empty:
-        st.info("No se pudieron construir rutas con los datos actuales.")
-        return
-
-    section("Top rutas por score", "Rutas tipo palanca -> subpalanca -> tema.")
-    st.dataframe(routes_df.head(25), use_container_width=True)
-
-    st.markdown(
-        "<div class='nps-card'><b>Cómo leerlo:</b> una ruta con score alto suele "
-        "ser una combinación "
-        "repetida y con mayor tasa de detractores. Úsala para abrir tickets/hipótesis."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-
-def page_changes(df: pd.DataFrame, theme: Theme) -> None:
-    st.subheader("Alertas: cambios relevantes en el tiempo")
-    st.markdown(
-        "<div class='nps-card nps-muted'>"
-        "Detecta puntos donde el NPS cambia de nivel para una palanca seleccionada. "
-        "Útil para vincular con releases, incidencias o campañas en esa ventana."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    import pandas as pd
-
-    from nps_lens.analytics.changepoints import detect_nps_changepoints_with_bootstrap
-    from nps_lens.analytics.drivers import compute_nps_from_scores
-    from nps_lens.ui.charts import chart_nps_timeseries_with_changepoints
-
-    levers = sorted(df["Palanca"].astype(str).fillna("(vacío)").unique())[:80]
-    lever = st.selectbox("Palanca", levers)
-
-    cp = detect_nps_changepoints_with_bootstrap(
-        df, dim_col="Palanca", value=lever, freq="D", pen=8.0
-    )
-    if cp is None:
-        st.info("No hay suficientes datos para detectar cambios para esa selección.")
-        return
-
-    # Build time series for plotting
-    tmp = df.copy()
-    tmp["Fecha"] = pd.to_datetime(tmp.get("Fecha"), errors="coerce")
-    tmp = tmp.dropna(subset=["Fecha"])
-    tmp = tmp.loc[tmp["Palanca"] == lever]
-    ts = (
-        tmp.set_index("Fecha")
-        .resample("D")["NPS"]
-        .apply(compute_nps_from_scores)
-        .dropna()
-        .astype(float)
-    )
-
-    pts = [pd.Timestamp(p) for p in cp.points]
-    fig = chart_nps_timeseries_with_changepoints(ts, theme=theme, points=pts, levels=cp.level)
-    if fig is not None:
-        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
-
-    cp_rows = [
-        {"date": str(p), "stability": float(s), "level": str(level)}
-        for p, s, level in zip(cp.points, cp.stability, cp.level)
-    ]
-
-    st.markdown(
-        "<div class='nps-card'>"
-        f"<div><b>Palanca:</b> {cp.value}</div>"
-        f"<div><b>Método:</b> {cp.method}</div>"
-        f"<div class='nps-muted' style='margin-top:6px'>{cp.note}</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    if cp_rows:
-        st.dataframe(pd.DataFrame(cp_rows), use_container_width=True)
-    else:
-        st.info("No se detectaron changepoints con los parámetros actuales.")
 
 
 def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
@@ -2350,20 +2267,12 @@ def page_nps_helix_linking(
     nps_df["Fecha"] = pd.to_datetime(nps_df["Fecha"], errors="coerce")
     dmin = pd.to_datetime(nps_df["Fecha"].min()).date()
     dmax = pd.to_datetime(nps_df["Fecha"].max()).date()
-    colw = st.columns(3)
+    colw = st.columns(2)
     with colw[0]:
         start = st.date_input("Desde", value=dmin, min_value=dmin, max_value=dmax, key="nh_start")
     with colw[1]:
         end = st.date_input("Hasta", value=dmax, min_value=dmin, max_value=dmax, key="nh_end")
-    with colw[2]:
-        min_sim = st.slider(
-            "Umbral similitud (link)",
-            min_value=0.10,
-            max_value=0.60,
-            value=0.22,
-            step=0.02,
-            key="nh_sim",
-        )
+    min_sim = float(LINK_MIN_SIMILARITY)
 
     # Población global (sidebar): rige TODO el contenido de esta pestaña.
     st.caption(f"Población activa: **{nps_group_choice}** (control global en la barra lateral)")
@@ -2379,11 +2288,8 @@ def page_nps_helix_linking(
 
     nps_slice = nps_df[(nps_df["Fecha"].dt.date >= start) & (nps_df["Fecha"].dt.date <= end)].copy()
 
-    # Global population filter (sidebar). This governs *all* analysis inside this page.
-    # We keep the legacy variable name `det` used downstream (evidence wall/linking) to
-    # avoid a large refactor; it now represents the selected group population.
-    focus_df = filter_nps_by_group(nps_slice, nps_group_choice)
-    det = focus_df
+    # Global population filter (sidebar). This governs all analysis inside this page.
+    focus_population = filter_nps_by_group(nps_slice, nps_group_choice)
     helix_df = helix_df.copy()
     # Canonical date col for helix store is 'Fecha' (set in ingestion); if missing, fallback to bbva_closeddate/startdatetime.
     if "Fecha" not in helix_df.columns:
@@ -2454,9 +2360,16 @@ def page_nps_helix_linking(
 
     # 1) Linking + asignación de incidencias a tópico NPS
     assign_df, links_df = link_incidents_to_nps_topics(
-        focus_df, helix_slice, min_similarity=float(min_sim)
+        focus_df,
+        helix_slice,
+        min_similarity=float(min_sim),
+        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+        max_days_apart=int(LINK_MAX_DAYS_APART),
     )
     overall_weekly, by_topic_weekly = weekly_aggregates(
+        nps_slice, helix_slice, assign_df, focus_group=focus_group
+    )
+    overall_daily, by_topic_daily = daily_aggregates(
         nps_slice, helix_slice, assign_df, focus_group=focus_group
     )
 
@@ -2464,81 +2377,191 @@ def page_nps_helix_linking(
     dtokens = DesignTokens.default()
     pal = palette(dtokens, theme_mode)
     # Continuous scales aligned to design tokens
-    cont_scale = plotly_continuous_scale(dtokens, theme_mode)
     risk_scale = plotly_risk_scale(dtokens, theme_mode)
+    view_mode = st.radio(
+        "Navegación de la sesión",
+        options=[
+            "1) Situación del periodo",
+            "2) Priorización y palancas",
+            "3) Narrativa y presentación",
+            "4) Evidencia y paquete GPT",
+        ],
+        horizontal=True,
+        key="nh_view_mode",
+    )
+    show_overview = view_mode.startswith("1)")
+    show_priorities = view_mode.startswith("2)")
+    show_ppt = view_mode.startswith("3)")
+    show_evidence = view_mode.startswith("4)")
+    lag_days = pd.DataFrame()
 
     # 2) Timeline causal (global)
-    st.markdown("### Timeline causal (global)")
-    px, go = _plotly()
-    fig = go.Figure()
-    if show_all_groups:
-        # Show the 3 group rates on the same plot (comparison mode)
-        empty_assign = pd.DataFrame(columns=["incident_id", "nps_topic"])
-        ow_det, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="detractor")
-        ow_pas, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="passive")
-        ow_pro, _ = weekly_aggregates(nps_slice, helix_slice, empty_assign, focus_group="promoter")
+    if show_overview:
+        st.markdown("### Situación del periodo")
+        trend_grain = st.radio(
+            "Granularidad de tendencia",
+            options=["Diaria", "Semanal"],
+            index=0,
+            horizontal=True,
+            key="nh_timeline_grain",
+            help="Vista diaria por defecto para capturar tendencias y puntos de inflexión con más detalle.",
+        )
+        use_daily_trend = trend_grain == "Diaria"
+        trend_df = overall_daily if use_daily_trend and not overall_daily.empty else overall_weekly
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            kpi(
+                "Respuestas analizadas",
+                f"{int(pd.to_numeric(trend_df.get('responses', 0), errors='coerce').fillna(0).sum()):,}",
+            )
+        with k2:
+            kpi(
+                "Incidencias del periodo",
+                f"{int(pd.to_numeric(trend_df.get('incidents', 0), errors='coerce').fillna(0).sum()):,}",
+            )
+        with k3:
+            avg_focus = float(
+                pd.to_numeric(trend_df.get("focus_rate", 0.0), errors="coerce").fillna(0.0).mean()
+            )
+            kpi(f"% {focus_name} medio", f"{avg_focus * 100.0:.2f}%")
+
+        st.markdown(f"### Timeline causal ({trend_grain.lower()})")
+        px, go = _plotly()
+        fig = go.Figure()
+        if show_all_groups:
+            # Show the 3 group rates on the same plot (comparison mode).
+            empty_assign = pd.DataFrame(columns=["incident_id", "nps_topic"])
+            if use_daily_trend and not overall_daily.empty:
+                ow_det, _ = daily_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="detractor"
+                )
+                ow_pas, _ = daily_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="passive"
+                )
+                ow_pro, _ = daily_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="promoter"
+                )
+                x_col = "date"
+            else:
+                ow_det, _ = weekly_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="detractor"
+                )
+                ow_pas, _ = weekly_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="passive"
+                )
+                ow_pro, _ = weekly_aggregates(
+                    nps_slice, helix_slice, empty_assign, focus_group="promoter"
+                )
+                x_col = "week"
+            fig.add_trace(
+                go.Scatter(
+                    x=ow_det[x_col],
+                    y=ow_det["focus_rate"],
+                    name="% detractores",
+                    mode="lines+markers",
+                    line=dict(color=pal["color.primary.bg.alert"], width=2),
+                    marker=dict(color=pal["color.primary.bg.alert"], size=6),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=ow_pas[x_col],
+                    y=ow_pas["focus_rate"],
+                    name="% pasivos",
+                    mode="lines+markers",
+                    line=dict(color=pal["color.primary.bg.warning"], width=2),
+                    marker=dict(color=pal["color.primary.bg.warning"], size=6),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=ow_pro[x_col],
+                    y=ow_pro["focus_rate"],
+                    name="% promotores",
+                    mode="lines+markers",
+                    line=dict(color=pal["color.primary.bg.success"], width=2),
+                    marker=dict(color=pal["color.primary.bg.success"], size=6),
+                )
+            )
+            bar_x = (
+                trend_df["date"]
+                if use_daily_trend and "date" in trend_df.columns
+                else trend_df["week"]
+            )
+        else:
+            if use_daily_trend and "date" in trend_df.columns:
+                dline = trend_df.sort_values("date").copy()
+                dline["focus_rate_smooth"] = (
+                    pd.to_numeric(dline["focus_rate"], errors="coerce")
+                    .fillna(0.0)
+                    .rolling(7, min_periods=1)
+                    .mean()
+                )
+                line_mode = "lines" if len(dline) > 90 else "lines+markers"
+                fig.add_trace(
+                    go.Scatter(
+                        x=dline["date"],
+                        y=dline["focus_rate"],
+                        name=f"% {focus_name} (diario)",
+                        mode=line_mode,
+                        line=dict(color=pal["color.primary.accent.value-07.default"], width=1.5),
+                        marker=dict(color=pal["color.primary.accent.value-07.default"], size=5),
+                        opacity=0.45,
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=dline["date"],
+                        y=dline["focus_rate_smooth"],
+                        name=f"% {focus_name} (media 7d)",
+                        mode="lines",
+                        line=dict(color=pal["color.primary.accent.value-07.default"], width=3),
+                    )
+                )
+                bar_x = dline["date"]
+            else:
+                bar_x = trend_df["week"]
+                line_mode = "lines+markers"
+                fig.add_trace(
+                    go.Scatter(
+                        x=trend_df["week"],
+                        y=trend_df["focus_rate"],
+                        name=f"% {focus_name}",
+                        mode=line_mode,
+                        line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
+                        marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
+                    )
+                )
         fig.add_trace(
-            go.Scatter(
-                x=ow_det["week"],
-                y=ow_det["focus_rate"],
-                name="% detractores",
-                mode="lines+markers",
-                line=dict(color=pal["color.primary.bg.alert"], width=2),
-                marker=dict(color=pal["color.primary.bg.alert"], size=6),
+            go.Bar(
+                x=bar_x,
+                y=trend_df["incidents"],
+                name="# incidencias",
+                yaxis="y2",
+                opacity=0.75,
+                marker=dict(color=pal["color.primary.accent.value-01.default"]),
             )
         )
-        fig.add_trace(
-            go.Scatter(
-                x=ow_pas["week"],
-                y=ow_pas["focus_rate"],
-                name="% pasivos",
-                mode="lines+markers",
-                line=dict(color=pal["color.primary.bg.warning"], width=2),
-                marker=dict(color=pal["color.primary.bg.warning"], size=6),
+        fig.update_layout(
+            height=380,
+            margin=dict(l=10, r=10, t=10, b=10),
+            yaxis=dict(
+                title=("Tasa por grupo" if show_all_groups else f"% {focus_name}"),
+                tickformat=".0%",
+            ),
+            yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        if use_daily_trend and "date" in trend_df.columns:
+            st.caption(
+                "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=ow_pro["week"],
-                y=ow_pro["focus_rate"],
-                name="% promotores",
-                mode="lines+markers",
-                line=dict(color=pal["color.primary.bg.success"], width=2),
-                marker=dict(color=pal["color.primary.bg.success"], size=6),
-            )
-        )
-    else:
-        fig.add_trace(
-            go.Scatter(
-                x=overall_weekly["week"],
-                y=overall_weekly["focus_rate"],
-                name=f"% {focus_name}",
-                mode="lines+markers",
-                line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
-                marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
-            )
-        )
-    fig.add_trace(
-        go.Bar(
-            x=overall_weekly["week"],
-            y=overall_weekly["incidents"],
-            name="# incidencias",
-            yaxis="y2",
-            opacity=0.75,
-            marker=dict(color=pal["color.primary.accent.value-01.default"]),
-        )
-    )
-    fig.update_layout(
-        height=380,
-        margin=dict(l=10, r=10, t=10, b=10),
-        yaxis=dict(title="% detractores", tickformat=".0%"),
-        yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
-        legend=dict(orientation="h"),
-    )
-    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
     # 3) Ranking causal por tópico NPS
-    st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
+    if show_priorities:
+        st.markdown("### Ranking de hipótesis causal (tópicos NPS)")
     rank = causal_rank_by_topic(by_topic_weekly)
     # 3.1) Changepoints en detracción por tópico + lag (incidencias preceden X semanas)
     # Changepoints con estabilidad (bootstrap) para etiquetar alto/medio/bajo
@@ -2588,100 +2611,912 @@ def page_nps_helix_linking(
         ).round(0)
         show["score"] = show["score"].round(3)
         show["max_cp_stability"] = show.get("max_cp_stability", np.nan).astype(float).round(3)
-        st.dataframe(
-            show[
-                [
-                    "nps_topic",
-                    "confidence_learned",
-                    "score",
-                    "factor",
-                    "confirmed",
-                    "rejected",
-                    "best_lag_weeks",
-                    "corr",
-                    "incidents_lead_changepoint_share",
-                    "max_cp_level",
-                    "max_cp_stability",
-                    "changepoints",
-                    "incidents",
-                    "responses",
-                    "focus_rate",
-                    "delta_focus_rate",
-                    "weeks",
-                ]
-            ].rename(
-                columns={
-                    "nps_topic": "Tópico NPS",
-                    "confidence_learned": "Confidence (learned)",
-                    "score": "Confidence (raw)",
-                    "factor": "Learning factor",
-                    "confirmed": "✓ Confirmed",
-                    "rejected": "✗ Rejected",
-                    "best_lag_weeks": "Lag (semanas)",
-                    "corr": "Corr@Lag",
-                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
-                    "max_cp_level": "CP Significance",
-                    "max_cp_stability": "CP Stability",
-                    "changepoints": "Changepoints",
-                    "incidents": "Incidencias (asignadas)",
-                    "responses": "Respuestas",
-                    "focus_rate": f"% {focus_name.capitalize()}",
-                    "delta_focus_rate": f"Δ % {focus_name.capitalize()} (high-inc vs low-inc)",
-                    "weeks": "Semanas",
-                }
-            ),
-            use_container_width=True,
-            height=320,
-        )
-        # Bar chart top 15
-        topn = show.head(15).copy()
-        # Confidence is a priority/risk proxy -> use status-aligned scale (neutral→warning→alert)
-        px, go = _plotly()
-        fig2 = px.bar(
-            topn[::-1],
-            x="confidence_learned",
-            y="nps_topic",
-            orientation="h",
-            color="confidence_learned",
-            color_continuous_scale=risk_scale,
-            range_color=[0, 1],
-        )
-        fig2.update_layout(
-            height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis=dict(range=[0, 1])
-        )
-        st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
-    else:
+        if show_priorities:
+            st.dataframe(
+                show[
+                    [
+                        "nps_topic",
+                        "confidence_learned",
+                        "score",
+                        "factor",
+                        "confirmed",
+                        "rejected",
+                        "best_lag_weeks",
+                        "corr",
+                        "incidents_lead_changepoint_share",
+                        "max_cp_level",
+                        "max_cp_stability",
+                        "changepoints",
+                        "incidents",
+                        "responses",
+                        "focus_rate",
+                        "delta_focus_rate",
+                        "weeks",
+                    ]
+                ].rename(
+                    columns={
+                        "nps_topic": "Tópico NPS",
+                        "confidence_learned": "Confidence (learned)",
+                        "score": "Confidence (raw)",
+                        "factor": "Learning factor",
+                        "confirmed": "✓ Confirmed",
+                        "rejected": "✗ Rejected",
+                        "best_lag_weeks": "Lag (semanas)",
+                        "corr": "Corr@Lag",
+                        "incidents_lead_changepoint_share": "Incidencias→CP (share)",
+                        "max_cp_level": "CP Significance",
+                        "max_cp_stability": "CP Stability",
+                        "changepoints": "Changepoints",
+                        "incidents": "Incidencias (asignadas)",
+                        "responses": "Respuestas",
+                        "focus_rate": f"% {focus_name.capitalize()}",
+                        "delta_focus_rate": f"Δ % {focus_name.capitalize()} (high-inc vs low-inc)",
+                        "weeks": "Semanas",
+                    }
+                ),
+                use_container_width=True,
+                height=320,
+            )
+            # Bar chart top 15
+            topn = show.head(15).copy()
+            px, go = _plotly()
+            topn["rank"] = np.arange(1, len(topn) + 1)
+            topn["topic_label"] = topn.apply(
+                lambda r: (
+                    f"TOP {int(r['rank'])} · {r['nps_topic']}"
+                    if int(r["rank"]) <= 3
+                    else str(r["nps_topic"])
+                ),
+                axis=1,
+            )
+            topn["topic_label"] = topn["topic_label"].astype(str).str.slice(0, 72)
+            topn_plot = topn[::-1].copy()
+            colors = []
+            for rk in topn_plot["rank"].tolist():
+                if int(rk) == 1:
+                    colors.append(pal["color.primary.bg.alert"])
+                elif int(rk) == 2:
+                    colors.append(pal["color.primary.bg.warning"])
+                elif int(rk) == 3:
+                    colors.append(pal["color.primary.bg.success"])
+                else:
+                    colors.append(
+                        pal.get(
+                            "color.neutral.bg.01",
+                            pal.get("color.primary.bg.bar", "#CAD1D8"),
+                        )
+                    )
+            fig2 = go.Figure()
+            fig2.add_trace(
+                go.Bar(
+                    x=topn_plot["confidence_learned"],
+                    y=topn_plot["topic_label"],
+                    orientation="h",
+                    marker=dict(color=colors),
+                    text=[f"{float(v):.2f}" for v in topn_plot["confidence_learned"].tolist()],
+                    textposition="outside",
+                    hovertemplate=("Tópico=%{y}<br>confidence learned=%{x:.2f}<extra></extra>"),
+                )
+            )
+            fig2.update_layout(
+                height=440,
+                margin=dict(l=10, r=10, t=10, b=10),
+                xaxis=dict(range=[0, 1], title="confidence learned"),
+                yaxis=dict(title="Tópicos trending"),
+            )
+            st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
+    elif show_priorities:
         st.info("No hay suficiente señal para rankear tópicos (prueba con un rango más amplio).")
 
-    # 4) Heatmap Tema x Semana (incidencias asignadas)
-    st.markdown("### Heatmap: incidencias asignadas a tópico NPS por semana")
-    if not by_topic_weekly.empty:
-        pivot = by_topic_weekly.pivot_table(
-            index="nps_topic", columns="week", values="incidents", aggfunc="sum", fill_value=0
+    # 3.3) Racional de negocio: incidencias -> riesgo NPS -> recuperación + plan
+    rank_for_rationale = rank2 if "rank2" in locals() and not rank2.empty else rank
+    rationale_df = build_incident_nps_rationale(
+        by_topic_weekly,
+        focus_group=focus_group,
+        rank_df=rank_for_rationale,
+        min_topic_responses=80,
+        recovery_factor=0.65,
+    )
+    rationale_summary = summarize_incident_nps_rationale(rationale_df)
+    ppt_story_md = (
+        build_incident_ppt_story(
+            rationale_summary,
+            rationale_df,
+            focus_name=focus_name,
+            top_k=6,
         )
+        if not rationale_df.empty
+        else ""
+    )
+    period_label = f"{start} -> {end}"
+    ppt_8slides_md = build_ppt_8slide_script(
+        rationale_summary,
+        rationale_df,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+        focus_name=focus_name,
+        period_label=period_label,
+        top_k=6,
+    )
+
+    if show_priorities or show_ppt:
+        st.markdown("### Racional de negocio: NPS en riesgo y palancas de recuperación")
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            kpi(
+                "NPS en riesgo",
+                f"{rationale_summary.nps_points_at_risk:.2f} pts",
+                hint="Estimación de pérdida asociada a incidencias",
+            )
+        with k2:
+            kpi(
+                "NPS recuperable",
+                f"{rationale_summary.nps_points_recoverable:.2f} pts",
+                hint="Potencial recuperable con plan priorizado",
+            )
+        with k3:
+            kpi(
+                "Concentración top-3",
+                f"{rationale_summary.top3_incident_share*100:.1f}%",
+                hint="Incidencias concentradas en 3 tópicos",
+            )
+        with k4:
+            lag_lbl = (
+                f"{rationale_summary.median_lag_weeks:.1f} semanas"
+                if rationale_summary.median_lag_weeks == rationale_summary.median_lag_weeks
+                else "n/d"
+            )
+            kpi(
+                "Tiempo de reacción",
+                lag_lbl,
+                hint="Mediana del lag incidencia -> cambio de NPS",
+            )
+
+        if rationale_df.empty:
+            st.info(
+                "No hay señal suficiente para construir el racional de negocio (prueba ampliando ventana o bajando umbral)."
+            )
+        elif show_priorities:
+            cmat, crisk = st.columns(2)
+            with cmat:
+                fig_pm = chart_incident_priority_matrix(rationale_df, theme=theme, top_k=8)
+                if fig_pm is not None:
+                    st.plotly_chart(fig_pm, use_container_width=True)
+            with crisk:
+                fig_rr = chart_incident_risk_recovery(rationale_df, theme=theme, top_k=8)
+                if fig_rr is not None:
+                    st.plotly_chart(fig_rr, use_container_width=True)
+
+            show_cols = [
+                "nps_topic",
+                "priority",
+                "confidence",
+                "nps_points_at_risk",
+                "nps_points_recoverable",
+                "delta_focus_rate_pp",
+                "incident_rate_per_100_responses",
+                "incidents",
+                "responses",
+                "action_lane",
+                "owner_role",
+                "eta_weeks",
+            ]
+            show_df = rationale_df[show_cols].copy()
+            show_df["priority"] = show_df["priority"].astype(float).round(3)
+            show_df["confidence"] = show_df["confidence"].astype(float).round(3)
+            show_df["nps_points_at_risk"] = show_df["nps_points_at_risk"].astype(float).round(2)
+            show_df["nps_points_recoverable"] = (
+                show_df["nps_points_recoverable"].astype(float).round(2)
+            )
+            show_df["delta_focus_rate_pp"] = show_df["delta_focus_rate_pp"].astype(float).round(2)
+            show_df["incident_rate_per_100_responses"] = (
+                show_df["incident_rate_per_100_responses"].astype(float).round(2)
+            )
+            st.dataframe(
+                show_df.rename(
+                    columns={
+                        "nps_topic": "Tópico NPS",
+                        "priority": "Prioridad",
+                        "confidence": "Confianza",
+                        "nps_points_at_risk": "NPS en riesgo (pts)",
+                        "nps_points_recoverable": "NPS recuperable (pts)",
+                        "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
+                        "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
+                        "incidents": "Incidencias",
+                        "responses": "Respuestas",
+                        "action_lane": "Lane de acción",
+                        "owner_role": "Owner (rol)",
+                        "eta_weeks": "ETA (semanas)",
+                    }
+                ),
+                use_container_width=True,
+                height=360,
+            )
+
+    if show_ppt:
+        with st.expander("Narrativa lista para PPT (copy/paste)", expanded=False):
+            _clipboard_copy_widget(ppt_story_md, label="Copiar narrativa PPT")
+            st.text_area(
+                "Narrativa de negocio",
+                value=ppt_story_md,
+                height=280,
+            )
+
+        with st.expander("Guion estándar de 8 slides (copy/paste)", expanded=False):
+            _clipboard_copy_widget(ppt_8slides_md, label="Copiar guion 8 slides")
+            st.text_area(
+                "Script de presentación",
+                value=ppt_8slides_md,
+                height=360,
+            )
+            st.download_button(
+                "Descargar guion 8 slides (.md)",
+                data=ppt_8slides_md.encode("utf-8"),
+                file_name="guion_8_slides_nps_helix.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+        st.divider()
+        section(
+            "Presentación automática",
+            "Genera y descarga la presentación en formato corporativo fijo con un clic.",
+        )
+    if show_ppt:
+        ppt_sig = (
+            f"{service_origin}|{service_origin_n1}|{service_origin_n2}|{start}|{end}|"
+            f"{focus_name}|{len(overall_daily)}|{len(rationale_df)}"
+        )
+        template_mode = st.selectbox(
+            "Formato de presentación",
+            options=["Plantilla corporativa fija v1"],
+            index=0,
+            key="nh_ppt_template_mode",
+            help="Formato bloqueado para mantener consistencia entre periodos.",
+        )
+        b1, b2 = st.columns(2)
+        with b1:
+            make_ppt = st.button(
+                "Generar y guardar en Descargas (.pptx)",
+                type="primary",
+                use_container_width=True,
+                key="nh_generate_pptx",
+            )
+        with b2:
+            make_ppt_open = st.button(
+                "Generar + abrir en Descargas",
+                use_container_width=True,
+                key="nh_generate_open_pptx",
+            )
+        if make_ppt or make_ppt_open:
+            try:
+                from nps_lens.reports import generate_business_review_ppt
+
+                # PPT dataset is intentionally decoupled from the on-screen filtered slice.
+                # For presentation narratives, use full historical context (SO + N1 + optional N2).
+                nps_hist = load_context_df(
+                    store_dir,
+                    service_origin,
+                    service_origin_n1,
+                    service_origin_n2,
+                    nps_group_choice,
+                    VIEW_COLUMNS["llm"],
+                    date_start=None,
+                    date_end=None,
+                    month_filter=None,
+                )
+                nps_hist["Fecha"] = pd.to_datetime(nps_hist.get("Fecha"), errors="coerce")
+                nps_hist = nps_hist.dropna(subset=["Fecha"]).copy()
+                helix_hist = helix_df.copy()
+                helix_hist["Fecha"] = pd.to_datetime(helix_hist.get("Fecha"), errors="coerce")
+                helix_hist = helix_hist.dropna(subset=["Fecha"]).copy()
+
+                def _attach_daily_nps_mean(
+                    base_df: pd.DataFrame, nps_df: pd.DataFrame
+                ) -> pd.DataFrame:
+                    """Attach daily mean NPS to a date-based aggregate dataframe."""
+                    if base_df is None or base_df.empty:
+                        return pd.DataFrame()
+                    out = base_df.copy()
+                    if "date" not in out.columns:
+                        return out
+                    src = nps_df.copy()
+                    src["Fecha"] = pd.to_datetime(src.get("Fecha"), errors="coerce")
+                    src["NPS"] = pd.to_numeric(src.get("NPS"), errors="coerce")
+                    src = src.dropna(subset=["Fecha"])
+                    if src.empty:
+                        return out
+                    daily_nps = (
+                        src.assign(date=lambda d: d["Fecha"].dt.normalize())
+                        .groupby("date", as_index=False)
+                        .agg(nps_mean=("NPS", "mean"))
+                    )
+                    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+                    out = out.merge(daily_nps, on="date", how="left")
+                    return out
+
+                def _build_incident_evidence_payload(
+                    links_src: pd.DataFrame,
+                    nps_focus_src: pd.DataFrame,
+                    helix_src: pd.DataFrame,
+                ) -> pd.DataFrame:
+                    return build_hotspot_evidence(
+                        links_src,
+                        nps_focus_src,
+                        helix_src,
+                        system_date=pd.Timestamp.now().date(),
+                        max_hotspots=10,
+                        min_term_occurrences=int(HOTSPOT_MIN_TERM_OCCURRENCES),
+                        min_validated_similarity=float(LINK_MIN_SIMILARITY),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
+                    )
+
+                def _build_incident_timeline_payload(
+                    links_src: pd.DataFrame,
+                    nps_focus_src: pd.DataFrame,
+                    helix_src: pd.DataFrame,
+                    incident_evidence_src: Optional[pd.DataFrame] = None,
+                ) -> pd.DataFrame:
+                    return build_hotspot_timeline(
+                        links_src,
+                        nps_focus_src,
+                        helix_src,
+                        incident_evidence_df=incident_evidence_src,
+                        max_hotspots=10,
+                        min_validated_similarity=float(LINK_MIN_SIMILARITY),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
+                    )
+
+                def _align_evidence_to_best_axis(
+                    nps_src: pd.DataFrame,
+                    helix_src: pd.DataFrame,
+                    evidence_src: pd.DataFrame,
+                ) -> tuple[pd.DataFrame, str]:
+                    if evidence_src is None or evidence_src.empty:
+                        return evidence_src, ""
+                    axis_info = select_best_business_axis_for_hotspots(
+                        nps_src,
+                        helix_src,
+                        min_n=200,
+                    )
+                    axis = str(axis_info.get("best_axis", "Palanca"))
+                    red_map = axis_info.get("red_labels", {})
+                    labels = list(red_map.get(axis, [])) if isinstance(red_map, dict) else []
+                    aligned = align_hotspot_evidence_to_axis(
+                        evidence_src,
+                        axis=axis,
+                        red_labels=labels,
+                        max_hotspots=10,
+                    )
+                    ratios = axis_info.get("axis_ratios", {})
+                    r_pal = float(ratios.get("Palanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    r_sub = (
+                        float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
+                    )
+                    note = (
+                        f"Eje seleccionado para el racional: {axis} "
+                        f"(cobertura Helix en rojos: Palanca {r_pal*100:.1f}% · "
+                        f"Subpalanca {r_sub*100:.1f}%)."
+                    )
+                    return (
+                        aligned if aligned is not None and not aligned.empty else evidence_src
+                    ), note
+
+                # Safe fallback to current view payload if historical payload can't be built.
+                overall_weekly_ppt = overall_daily if not overall_daily.empty else overall_weekly
+                overall_weekly_ppt = _attach_daily_nps_mean(overall_weekly_ppt, nps_slice)
+                by_topic_daily_ppt = by_topic_daily
+                by_topic_weekly_ppt = by_topic_weekly
+                ranking_df_ppt = (
+                    rank2 if "rank2" in locals() and not rank2.empty else rank_for_rationale
+                )
+                rationale_df_ppt = rationale_df
+                rationale_summary_ppt = rationale_summary
+                ppt_story_md_ppt = ppt_story_md
+                ppt_8slides_md_ppt = ppt_8slides_md
+                ppt_start = start
+                ppt_end = end
+                lag_days_for_ppt = lag_days.copy()
+                lag_weeks_for_ppt = (
+                    rank2[["nps_topic", "best_lag_weeks"]].copy()
+                    if "rank2" in locals() and not rank2.empty and "best_lag_weeks" in rank2.columns
+                    else pd.DataFrame(columns=["nps_topic", "best_lag_weeks"])
+                )
+                changepoints_for_ppt = (
+                    cp_by_topic.copy()
+                    if "cp_by_topic" in locals() and isinstance(cp_by_topic, pd.DataFrame)
+                    else pd.DataFrame(columns=["nps_topic", "changepoints"])
+                )
+                hotspot_focus_note = ""
+                helix_for_hot_terms = helix_hist if not helix_hist.empty else helix_slice
+                incident_evidence_ppt = _build_incident_evidence_payload(
+                    links_df,
+                    focus_df,
+                    helix_for_hot_terms,
+                )
+                incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
+                    nps_slice,
+                    helix_for_hot_terms,
+                    incident_evidence_ppt,
+                )
+                incident_timeline_ppt = _build_incident_timeline_payload(
+                    links_df,
+                    focus_df,
+                    helix_for_hot_terms,
+                    incident_evidence_ppt,
+                )
+
+                if not nps_hist.empty and not helix_hist.empty:
+                    ppt_start = pd.to_datetime(nps_hist["Fecha"].min(), errors="coerce").date()
+                    ppt_end = pd.to_datetime(nps_hist["Fecha"].max(), errors="coerce").date()
+
+                    nps_hist_work = nps_hist.copy()
+                    nps_hist_work["NPS Group"] = nps_hist_work.get("NPS Group", "").astype(str)
+                    score_hist = pd.to_numeric(nps_hist_work.get("NPS", np.nan), errors="coerce")
+                    grp_hist = nps_hist_work["NPS Group"].str.upper()
+                    if focus_group == "promoter":
+                        mask_focus_hist = (grp_hist == "PROMOTER") | (score_hist >= 9)
+                    elif focus_group == "passive":
+                        mask_focus_hist = (grp_hist == "PASSIVE") | (
+                            (score_hist >= 7) & (score_hist <= 8)
+                        )
+                    else:
+                        mask_focus_hist = (grp_hist == "DETRACTOR") | (score_hist <= 6)
+
+                    focus_hist = nps_hist_work[mask_focus_hist].copy()
+                    assign_hist, links_hist = link_incidents_to_nps_topics(
+                        focus_hist,
+                        helix_hist,
+                        min_similarity=float(min_sim),
+                        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+                        max_days_apart=int(LINK_MAX_DAYS_APART),
+                    )
+                    ow_hist, btw_hist = weekly_aggregates(
+                        nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
+                    )
+                    od_hist, btd_hist = daily_aggregates(
+                        nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
+                    )
+                    od_hist = _attach_daily_nps_mean(od_hist, nps_hist_work)
+
+                    rank_hist = causal_rank_by_topic(btw_hist)
+                    cp_hist = detect_detractor_changepoints_with_bootstrap(
+                        btw_hist,
+                        pen=6.0,
+                        n_boot=200,
+                        block_size=2,
+                        tol_periods=1,
+                    )
+                    lag_hist = estimate_best_lag_by_topic(btw_hist, max_lag_weeks=6)
+                    lead_hist = incidents_lead_changepoints_flag(btw_hist, cp_hist, window_weeks=4)
+                    rank2_hist = (
+                        rank_hist.merge(cp_hist, on="nps_topic", how="left")
+                        .merge(lag_hist, on="nps_topic", how="left")
+                        .merge(lead_hist, on="nps_topic", how="left")
+                    )
+                    if not kc_adj.empty:
+                        rank2_hist = rank2_hist.merge(kc_adj, on="nps_topic", how="left")
+                    else:
+                        rank2_hist["factor"] = 1.0
+                    rank2_hist["factor"] = rank2_hist.get("factor", 1.0).fillna(1.0).astype(float)
+                    score_hist = pd.to_numeric(
+                        rank2_hist.get("score", pd.Series(0.0, index=rank2_hist.index)),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    rank2_hist["confidence_learned"] = (
+                        score_hist.astype(float) * rank2_hist["factor"]
+                    ).clip(0, 1)
+                    rank2_hist = rank2_hist.sort_values(
+                        ["confidence_learned", "incidents", "responses"], ascending=False
+                    ).reset_index(drop=True)
+
+                    rationale_hist = build_incident_nps_rationale(
+                        btw_hist,
+                        focus_group=focus_group,
+                        rank_df=rank2_hist if not rank2_hist.empty else rank_hist,
+                        min_topic_responses=80,
+                        recovery_factor=0.65,
+                    )
+                    if not rationale_hist.empty:
+                        rationale_summary_hist = summarize_incident_nps_rationale(rationale_hist)
+                        period_label_hist = f"{ppt_start} -> {ppt_end}"
+                        ppt_story_md_hist = build_incident_ppt_story(
+                            rationale_summary_hist,
+                            rationale_hist,
+                            focus_name=focus_name,
+                            top_k=6,
+                        )
+                        ppt_8slides_md_hist = build_ppt_8slide_script(
+                            rationale_summary_hist,
+                            rationale_hist,
+                            service_origin=service_origin,
+                            service_origin_n1=service_origin_n1,
+                            focus_name=focus_name,
+                            period_label=period_label_hist,
+                            top_k=6,
+                        )
+                        lag_days_hist = (
+                            estimate_best_lag_days_by_topic(
+                                btd_hist,
+                                max_lag_days=21,
+                                min_points=30,
+                            )
+                            if can_use_daily_resample(
+                                od_hist, min_days_with_responses=20, min_coverage=0.45
+                            )
+                            else pd.DataFrame()
+                        )
+                        overall_weekly_ppt = od_hist if not od_hist.empty else ow_hist
+                        by_topic_daily_ppt = btd_hist
+                        by_topic_weekly_ppt = btw_hist
+                        ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
+                        rationale_df_ppt = rationale_hist
+                        rationale_summary_ppt = rationale_summary_hist
+                        ppt_story_md_ppt = ppt_story_md_hist
+                        ppt_8slides_md_ppt = ppt_8slides_md_hist
+                        lag_days_for_ppt = lag_days_hist
+                        lag_weeks_for_ppt = lag_hist
+                        changepoints_for_ppt = cp_hist
+                        incident_evidence_ppt = _build_incident_evidence_payload(
+                            links_hist,
+                            focus_hist,
+                            helix_hist,
+                        )
+                        incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
+                            nps_hist_work,
+                            helix_hist,
+                            incident_evidence_ppt,
+                        )
+                        incident_timeline_ppt = _build_incident_timeline_payload(
+                            links_hist,
+                            focus_hist,
+                            helix_hist,
+                            incident_evidence_ppt,
+                        )
+                        st.caption(
+                            f"La PPT usa histórico completo del contexto: {ppt_start} -> {ppt_end}."
+                        )
+
+                hotspot_summary_ppt = summarize_hotspot_counts(
+                    incident_evidence_ppt,
+                    incident_timeline_ppt,
+                    max_hotspots=3,
+                )
+                st.session_state["_nh_hotspot_summary_ppt"] = hotspot_summary_ppt.to_dict(
+                    orient="records"
+                )
+                if not hotspot_summary_ppt.empty:
+                    severe = hotspot_summary_ppt[
+                        (hotspot_summary_ppt["hotspot_incidents"] > 0)
+                        & (hotspot_summary_ppt["chart_helix_records"] <= 0)
+                    ]
+                    if not severe.empty:
+                        st.warning(
+                            "Se detectó desalineación de conteos en un hotspot. "
+                            "Se forzó cálculo centralizado para mantener coherencia de fuente."
+                        )
+
+                ppt_out = generate_business_review_ppt(
+                    service_origin=service_origin,
+                    service_origin_n1=service_origin_n1,
+                    service_origin_n2=service_origin_n2,
+                    period_start=ppt_start,
+                    period_end=ppt_end,
+                    focus_name=focus_name,
+                    overall_weekly=overall_weekly_ppt,
+                    rationale_df=rationale_df_ppt,
+                    nps_points_at_risk=float(rationale_summary_ppt.nps_points_at_risk),
+                    nps_points_recoverable=float(rationale_summary_ppt.nps_points_recoverable),
+                    top3_incident_share=float(rationale_summary_ppt.top3_incident_share),
+                    median_lag_weeks=float(rationale_summary_ppt.median_lag_weeks),
+                    story_md=ppt_story_md_ppt,
+                    script_8slides_md=ppt_8slides_md_ppt,
+                    ranking_df=ranking_df_ppt,
+                    by_topic_daily=by_topic_daily_ppt,
+                    lag_days_by_topic=lag_days_for_ppt,
+                    by_topic_weekly=by_topic_weekly_ppt,
+                    lag_weeks_by_topic=lag_weeks_for_ppt,
+                    template_name=str(template_mode),
+                    corporate_fixed=True,
+                    logo_path=_logo_path,
+                    incident_evidence_df=incident_evidence_ppt,
+                    changepoints_by_topic=changepoints_for_ppt,
+                    incident_timeline_df=incident_timeline_ppt,
+                    hotspot_focus_note=hotspot_focus_note,
+                )
+                export_dir = settings.data_dir / "exports" / "ppt"
+                export_dir.mkdir(parents=True, exist_ok=True)
+                saved_path = export_dir / str(ppt_out.file_name)
+                saved_path.write_bytes(ppt_out.content)
+                downloads_path = None
+                downloads_error = ""
+                try:
+                    downloads_dir = Path.home() / "Downloads"
+                    downloads_dir.mkdir(parents=True, exist_ok=True)
+                    downloads_path = downloads_dir / str(ppt_out.file_name)
+                    downloads_path.write_bytes(ppt_out.content)
+                except Exception as exc:
+                    downloads_path = None
+                    downloads_error = str(exc)
+
+                st.session_state["_nh_ppt_export"] = {
+                    "sig": ppt_sig,
+                    "file_name": ppt_out.file_name,
+                    "content": ppt_out.content,
+                    "slides": int(ppt_out.slide_count),
+                    "saved_path": str(saved_path),
+                    "downloads_path": (str(downloads_path) if downloads_path is not None else ""),
+                    "downloads_error": downloads_error,
+                }
+                st.success(
+                    f"Presentación generada correctamente ({int(ppt_out.slide_count)} diapositivas)."
+                )
+                saved_folder = saved_path.parent.resolve()
+                st.markdown(f"Copia local guardada en: [{saved_path}]({saved_folder.as_uri()})")
+                if downloads_path is not None:
+                    st.caption(f"Copia en Descargas: {downloads_path}")
+                elif downloads_error:
+                    st.warning(
+                        "No se pudo guardar en Descargas. "
+                        f"Detalle: {downloads_error}. Se mantiene la copia local de exportaciones."
+                    )
+                if make_ppt_open:
+                    dl_path = downloads_path
+                    if dl_path is None:
+                        raise RuntimeError("No se pudo crear la copia en Descargas.")
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", str(dl_path)])
+                    elif os.name == "nt" and hasattr(os, "startfile"):
+                        os.startfile(str(dl_path))  # type: ignore[attr-defined]
+                    else:
+                        subprocess.Popen(["xdg-open", str(dl_path)])
+                    st.info(f"Archivo abierto desde Descargas: {dl_path}")
+            except Exception as exc:
+                st.error(
+                    "No se pudo generar la presentación en este entorno. "
+                    "Ejecuta `make setup` y `make verify-runtime` para validar dependencias."
+                )
+                with st.expander("Detalle técnico", expanded=False):
+                    st.code(str(exc))
+
+        cached_ppt = st.session_state.get("_nh_ppt_export")
+        if isinstance(cached_ppt, dict) and str(cached_ppt.get("sig", "")) == ppt_sig:
+            saved_path_raw = str(cached_ppt.get("saved_path", "")).strip()
+            downloads_path_raw = str(cached_ppt.get("downloads_path", "")).strip()
+            if st.button(
+                "Abrir archivo local (.pptx)",
+                use_container_width=True,
+                key="nh_open_local_pptx",
+            ):
+                if not saved_path_raw:
+                    st.error("No se encontró la ruta local de la presentación.")
+                else:
+                    target = Path(saved_path_raw)
+                    if not target.exists():
+                        st.error(f"El archivo no existe en disco: {target}")
+                    else:
+                        try:
+                            if sys.platform == "darwin":
+                                subprocess.Popen(["open", str(target)])
+                            elif os.name == "nt" and hasattr(os, "startfile"):
+                                os.startfile(str(target))  # type: ignore[attr-defined]
+                            else:
+                                subprocess.Popen(["xdg-open", str(target)])
+                            st.success(f"Archivo abierto: {target.name}")
+                        except Exception as exc:
+                            st.error("No se pudo abrir el archivo automáticamente.")
+                            st.caption(f"Error: {exc}")
+            if saved_path_raw:
+                with contextlib.suppress(Exception):
+                    saved_folder = Path(saved_path_raw).expanduser().resolve().parent
+                    st.markdown(
+                        f"Copia local guardada en: [{saved_path_raw}]({saved_folder.as_uri()})"
+                    )
+            else:
+                st.caption("Ruta local: no disponible")
+            if downloads_path_raw:
+                st.caption(f"Ruta en Descargas: {downloads_path_raw}")
+            elif str(cached_ppt.get("downloads_error", "")).strip():
+                st.caption(
+                    "No se creó copia en Descargas. "
+                    f"Detalle: {str(cached_ppt.get('downloads_error', '')).strip()}"
+                )
+
+            local_folder = (
+                Path(saved_path_raw).expanduser().resolve().parent if saved_path_raw else None
+            )
+            downloads_folder = (
+                Path(downloads_path_raw).expanduser().resolve().parent
+                if downloads_path_raw
+                else None
+            )
+            f1, f2 = st.columns(2)
+            with f1:
+                if local_folder is not None:
+                    with contextlib.suppress(Exception):
+                        st.markdown(
+                            f"[Abrir carpeta de exportación local]({local_folder.as_uri()})"
+                        )
+                    if st.button(
+                        "Abrir carpeta local",
+                        use_container_width=True,
+                        key="nh_open_local_folder",
+                    ):
+                        try:
+                            if sys.platform == "darwin":
+                                subprocess.Popen(["open", str(local_folder)])
+                            elif os.name == "nt" and hasattr(os, "startfile"):
+                                os.startfile(str(local_folder))  # type: ignore[attr-defined]
+                            else:
+                                subprocess.Popen(["xdg-open", str(local_folder)])
+                        except Exception as exc:
+                            st.error("No se pudo abrir la carpeta local.")
+                            st.caption(f"Error: {exc}")
+            with f2:
+                if downloads_folder is not None:
+                    with contextlib.suppress(Exception):
+                        st.markdown(f"[Abrir carpeta Descargas]({downloads_folder.as_uri()})")
+                    if st.button(
+                        "Abrir carpeta Descargas",
+                        use_container_width=True,
+                        key="nh_open_downloads_folder",
+                    ):
+                        try:
+                            if sys.platform == "darwin":
+                                subprocess.Popen(["open", str(downloads_folder)])
+                            elif os.name == "nt" and hasattr(os, "startfile"):
+                                os.startfile(str(downloads_folder))  # type: ignore[attr-defined]
+                            else:
+                                subprocess.Popen(["xdg-open", str(downloads_folder)])
+                        except Exception as exc:
+                            st.error("No se pudo abrir la carpeta Descargas.")
+                            st.caption(f"Error: {exc}")
+            if st.button(
+                "Guardar copia en Descargas y abrir",
+                use_container_width=True,
+                key="nh_save_downloads_pptx",
+            ):
+                try:
+                    file_name = str(
+                        cached_ppt.get("file_name", "presentacion_nps_incidencias.pptx")
+                    )
+                    payload = bytes(cached_ppt.get("content", b""))
+                    downloads_dir = Path.home() / "Downloads"
+                    downloads_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = downloads_dir / file_name
+                    out_path.write_bytes(payload)
+                    if sys.platform == "darwin":
+                        subprocess.Popen(["open", str(out_path)])
+                    elif os.name == "nt" and hasattr(os, "startfile"):
+                        os.startfile(str(out_path))  # type: ignore[attr-defined]
+                    else:
+                        subprocess.Popen(["xdg-open", str(out_path)])
+                    st.success(f"Archivo guardado y abierto: {out_path}")
+                except Exception as exc:
+                    st.error("No se pudo guardar la copia en Descargas.")
+                    st.caption(f"Error: {exc}")
+
+    # 4) Heatmap Tema x Día (incidencias asignadas)
+    if show_priorities:
+        st.markdown("### Heatmap: incidencias por bloque y tópico NPS (día)")
+    if show_priorities and not by_topic_daily.empty:
+        hdf = by_topic_daily.copy()
+        hdf["block"] = hdf["nps_topic"].astype(str).str.split(">").str[0].str.strip()
+        hdf["topic_short"] = (
+            hdf["nps_topic"].astype(str).str.split(">", n=1).str[-1].str.strip().str.slice(0, 42)
+        )
+        hdf["topic_short"] = hdf["topic_short"].where(
+            hdf["topic_short"].str.len() <= 42, hdf["topic_short"] + "…"
+        )
+        topic_rank = (
+            hdf.groupby(["block", "nps_topic", "topic_short"], as_index=False)["incidents"]
+            .sum()
+            .sort_values(["incidents"], ascending=False)
+            .head(24)
+        )
+        topic_rank = topic_rank.sort_values(["block", "incidents"], ascending=[True, False]).copy()
+        topic_order = topic_rank["nps_topic"].tolist()
+        label_map = {
+            str(r["nps_topic"]): f"{str(r['block'])} | {str(r['topic_short'])}"
+            for _, r in topic_rank.iterrows()
+        }
+
+        pivot = hdf[hdf["nps_topic"].isin(topic_order)].pivot_table(
+            index="nps_topic",
+            columns="date",
+            values="incidents",
+            aggfunc="sum",
+            fill_value=0,
+        )
+        pivot = pivot.reindex(topic_order)
         if pivot.shape[0] > 0 and pivot.shape[1] > 0:
             px, go = _plotly()
-            heat = px.imshow(
-                pivot,
-                aspect="auto",
-                zmin=0,
-                zmax=(
-                    float(np.nanpercentile(pivot.values.astype(float), 95))
-                    if pivot.values.size
-                    else None
-                ),
+            y_positions = list(range(pivot.shape[0]))
+            tick_labels = [label_map.get(str(t), str(t)) for t in pivot.index.tolist()]
+            zmax = (
+                float(np.nanpercentile(pivot.values.astype(float), 95))
+                if pivot.values.size
+                else 1.0
             )
-            heat.update_traces(coloraxis="coloraxis")
-            # Incidence intensity -> status-aligned scale
-            heat.update_layout(coloraxis=dict(colorscale=risk_scale))
+            hover_topics = np.tile(
+                np.array(tick_labels, dtype=object).reshape(-1, 1), (1, pivot.shape[1])
+            )
+            heat = go.Figure(
+                data=[
+                    go.Heatmap(
+                        x=pivot.columns.tolist(),
+                        y=y_positions,
+                        z=pivot.values.astype(float),
+                        customdata=hover_topics,
+                        zmin=0,
+                        zmax=zmax if zmax > 0 else 1.0,
+                        colorscale=risk_scale,
+                        colorbar=dict(title="Incidencias"),
+                        hovertemplate=(
+                            "Fecha=%{x}<br>Tópico=%{customdata}<br>Incidencias=%{z:.0f}<extra></extra>"
+                        ),
+                    )
+                ]
+            )
+            block_ranges = []
+            cursor = 0
+            for block, g in topic_rank.groupby("block", sort=False):
+                n = len(g)
+                start = cursor
+                end = cursor + n - 1
+                block_ranges.append((str(block), start, end))
+                cursor += n
+            for idx, (_, start, end) in enumerate(block_ranges):
+                if idx % 2 == 0:
+                    heat.add_hrect(
+                        y0=start - 0.5,
+                        y1=end + 0.5,
+                        fillcolor=pal.get("color.neutral.bg.01", "#F4F7FB"),
+                        opacity=0.16,
+                        line_width=0,
+                    )
+                if start > 0:
+                    heat.add_hline(
+                        y=start - 0.5,
+                        line_width=1,
+                        line_dash="dot",
+                        line_color=pal.get("color.neutral.border.01", "#D6DFEA"),
+                    )
+                y_center = (start + end) / 2
+                heat.add_annotation(
+                    x=-0.18,
+                    y=y_center,
+                    xref="paper",
+                    yref="y",
+                    text=f"<b>{block_ranges[idx][0]}</b>",
+                    showarrow=False,
+                    xanchor="right",
+                    font=dict(size=11, color=pal.get("color.primary.text.01", "#0A1F44")),
+                )
             heat.update_layout(
-                height=min(650, 160 + 18 * pivot.shape[0]), margin=dict(l=10, r=10, t=10, b=10)
+                height=min(860, 220 + 24 * pivot.shape[0]),
+                margin=dict(l=260, r=20, t=10, b=10),
+                yaxis=dict(
+                    tickmode="array",
+                    tickvals=y_positions,
+                    ticktext=tick_labels,
+                    automargin=True,
+                ),
+                xaxis=dict(title="Fecha"),
             )
             st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
+            st.caption(
+                "Cada fila muestra: bloque | tópico. Las franjas y separadores agrupan visualmente por bloque para ubicar cada incidencia con rapidez."
+            )
+        else:
+            st.info(
+                "No hay datos suficientes para construir el heatmap en el periodo seleccionado."
+            )
 
     # 4.1) Changepoints + Lag (incidencias preceden X semanas)
-    st.markdown("### Changepoints + Lag (incidencias preceden X semanas)")
-    if not by_topic_weekly.empty and "rank2" in locals() and not rank2.empty:
+    if show_priorities:
+        st.markdown("### Changepoints + Lag (incidencias preceden X semanas)")
+    if show_priorities and not by_topic_weekly.empty and "rank2" in locals() and not rank2.empty:
         topic_for_lag = st.selectbox(
             "Tópico (para ver lag)", options=rank2["nps_topic"].tolist(), key="lag_topic_sel"
         )
@@ -2753,17 +3588,17 @@ def page_nps_helix_linking(
             "Las líneas punteadas son changepoints detectados en la serie de detracción por tópico. "
             "La significancia (High/Medium/Low) se estima por estabilidad con bootstrap (replicabilidad del punto de cambio)."
         )
-    else:
+    elif show_priorities:
         st.info("No hay datos suficientes para estimar changepoints/lag por tópico.")
 
     # 4.2) Lag en días (si la densidad de NPS permite daily resample)
-    st.markdown("### Lag en días (cuando la densidad de NPS lo permite)")
-    overall_daily, by_topic_daily = daily_aggregates(
-        nps_slice, helix_slice, assign_df, focus_group=focus_group
-    )
-    if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45):
+    if show_priorities:
+        st.markdown("### Lag en días (cuando la densidad de NPS lo permite)")
+    if (show_priorities or show_evidence) and can_use_daily_resample(
+        overall_daily, min_days_with_responses=20, min_coverage=0.45
+    ):
         lag_days = estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
-        if not lag_days.empty and "rank2" in locals() and not rank2.empty:
+        if show_priorities and not lag_days.empty and "rank2" in locals() and not rank2.empty:
             lag_days = lag_days.merge(rank2[["nps_topic"]], on="nps_topic", how="inner")
             lag_days["corr"] = lag_days["corr"].round(3)
             st.dataframe(
@@ -2780,10 +3615,10 @@ def page_nps_helix_linking(
                 use_container_width=True,
                 height=320,
             )
-        else:
+        elif show_priorities:
             st.info("No hay tópicos suficientes para estimar lag diario.")
 
-        if not lag_days.empty:
+        if show_priorities and not lag_days.empty:
             topic_sel = st.selectbox(
                 "Tópico para visualizar lag diario",
                 options=lag_days.sort_values(["corr"], ascending=False)["nps_topic"].tolist(),
@@ -2829,38 +3664,41 @@ def page_nps_helix_linking(
                 "Se activa el lag diario cuando hay suficiente densidad de respuestas por día (cobertura) y puntos válidos. "
                 "El lag se elige maximizando corr(incidencias(t), detracción(t+lag))."
             )
-    else:
+    elif show_priorities:
         st.info(
             "El análisis diario no se activa: la densidad de NPS por día es insuficiente (pocos días con respuestas o baja cobertura). "
             "Usa el lag semanal (arriba) o amplía la ventana."
         )
 
+    if not show_evidence:
+        return
+
     # 5) Evidence wall
     st.markdown("### Evidence wall: detractores ↔ incidencias (links semánticos)")
-    if det.empty or links_df.empty:
+    if focus_population.empty or links_df.empty:
         st.info(
-            "No hay links (o no hay detractores) con el umbral actual. Baja el umbral o amplía la ventana."
+            "No hay links validados (o no hay detractores) con la política estricta activa. Amplía la ventana temporal o revisa la calidad de texto."
         )
     else:
         topics = (
             rank["nps_topic"].tolist()
             if not rank.empty
-            else sorted(det["Palanca"].astype(str).unique().tolist())
+            else sorted(focus_population["Palanca"].astype(str).unique().tolist())
         )
         chosen = st.selectbox(
             "Selecciona tópico NPS",
             options=(
                 rank["nps_topic"].tolist()
                 if not rank.empty
-                else sorted(det["Palanca"].astype(str).unique().tolist())
+                else sorted(focus_population["Palanca"].astype(str).unique().tolist())
             ),
         )
         sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
         if sub_links.empty:
-            st.info("No hay links para este tópico con el umbral actual.")
+            st.info("No hay links validados para este tópico con la política estricta activa.")
         else:
             # Join snippets
-            det2 = det.copy()
+            det2 = focus_population.copy()
             det2["nps_id"] = det2["ID"].astype(str)
             hel2 = helix_slice.copy()
             hel2["incident_id"] = hel2.get(
@@ -2868,16 +3706,13 @@ def page_nps_helix_linking(
             ).astype(str)
 
             det_snip = det2.set_index("nps_id")["Comment"].astype(str).fillna("")
-            inc_snip = (
-                hel2.set_index("incident_id")["summary"].astype(str).fillna("")
-                if "summary" in hel2.columns
-                else pd.Series(dtype=str)
-            )
+            hel2["incident_summary"] = build_incident_display_text(hel2)
+            inc_snip = hel2.set_index("incident_id")["incident_summary"].astype(str).fillna("")
 
             sub_links["Comentario detractor"] = (
                 sub_links["nps_id"].map(det_snip).fillna("").str.slice(0, 220)
             )
-            sub_links["Incidencia (summary)"] = (
+            sub_links["Incidencia (descripción)"] = (
                 sub_links["incident_id"].map(inc_snip).fillna("").str.slice(0, 220)
             )
             sub_links["similarity"] = sub_links["similarity"].round(3)
@@ -2887,7 +3722,7 @@ def page_nps_helix_linking(
                     [
                         "similarity",
                         "Comentario detractor",
-                        "Incidencia (summary)",
+                        "Incidencia (descripción)",
                         "incident_id",
                         "nps_id",
                     ]
@@ -2935,14 +3770,34 @@ def page_nps_helix_linking(
             if "kc_entries" in locals() and not kc_entries.empty
             else []
         ),
+        "business_rationale": {
+            "summary": {
+                "topics_analyzed": int(rationale_summary.topics_analyzed),
+                "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
+                "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
+                "top3_incident_share": float(rationale_summary.top3_incident_share),
+                "confidence_mean": float(rationale_summary.confidence_mean),
+                "median_lag_weeks": (
+                    None
+                    if rationale_summary.median_lag_weeks != rationale_summary.median_lag_weeks
+                    else float(rationale_summary.median_lag_weeks)
+                ),
+            },
+            "priority_topics": (
+                rationale_df.head(25).to_dict(orient="records") if not rationale_df.empty else []
+            ),
+            "ppt_story_md": ppt_story_md,
+            "ppt_8slides_md": ppt_8slides_md,
+        },
         "evidence_links_sample": (
             links_df.head(200).to_dict(orient="records") if not links_df.empty else []
         ),
         "notes": [
             "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
-            "Los links se basan en similitud TF-IDF; revisar umbral y ejemplos para validar.",
+            "Los links se validan con política fija: TF-IDF, similitud mínima, cruce semántico estricto y ventana temporal.",
         ],
     }
+    pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
 
     md_lines = []
     md_lines.append(f"# Deep-Dive Pack — NPS ↔ Helix ({service_origin} · {service_origin_n1})")
@@ -2950,7 +3805,7 @@ def page_nps_helix_linking(
         md_lines.append(f"**Service origin N2:** {service_origin_n2}")
     md_lines.append(f"**Ventana:** {start} → {end}")
     md_lines.append("")
-    md_lines.append("## 1) Resumen ejecutivo")
+    md_lines.append("## 1) Resumen del periodo")
     if not rank.empty:
         top = rank.head(3)
         for _, r in top.iterrows():
@@ -2983,16 +3838,49 @@ def page_nps_helix_linking(
                 f"| {rec.get('nps_topic','')} | {int(rec.get('best_lag_days',0) or 0)} | {float(rec.get('corr',0) or 0):.3f} | {int(rec.get('points',0) or 0)} |"
             )
         md_lines.append("")
-    md_lines.append("## 3) Evidencia cualitativa (links)")
+    md_lines.append("## 3) Racional de negocio (riesgo -> recuperacion)")
+    md_lines.append(f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**")
+    md_lines.append(
+        f"- NPS recuperable estimado: **{rationale_summary.nps_points_recoverable:.2f} pts**"
+    )
+    md_lines.append(
+        f"- Concentración de incidencias en top-3: **{rationale_summary.top3_incident_share*100:.1f}%**"
+    )
+    if not rationale_df.empty:
+        md_lines.append("")
+        md_lines.append(
+            "| Tópico | Prioridad | Confianza | NPS en riesgo | NPS recuperable | Lane | Owner | ETA (w) |"
+        )
+        md_lines.append("|---|---:|---:|---:|---:|---|---|---:|")
+        for rec in rationale_df.head(8).to_dict(orient="records"):
+            md_lines.append(
+                f"| {rec.get('nps_topic','')} | {float(rec.get('priority',0.0)):.3f} | {float(rec.get('confidence',0.0)):.3f} | "
+                f"{float(rec.get('nps_points_at_risk',0.0)):.2f} | {float(rec.get('nps_points_recoverable',0.0)):.2f} | "
+                f"{rec.get('action_lane','')} | {rec.get('owner_role','')} | {int(rec.get('eta_weeks',0) or 0)} |"
+            )
+    if ppt_story_md:
+        md_lines.append("")
+        md_lines.append("### Narrativa sugerida para comité")
+        md_lines.append("```markdown")
+        md_lines.append(ppt_story_md.strip())
+        md_lines.append("```")
+    if ppt_8slides_md:
+        md_lines.append("")
+        md_lines.append("### Guion estándar de 8 slides")
+        md_lines.append("```markdown")
+        md_lines.append(ppt_8slides_md.strip())
+        md_lines.append("```")
+    md_lines.append("")
+    md_lines.append("## 4) Evidencia cualitativa (links)")
     if not links_df.empty:
         for rec in links_df.head(20).to_dict(orient="records"):
             md_lines.append(
                 f"- sim={rec['similarity']:.3f} · tópico={rec['nps_topic']} · nps_id={rec['nps_id']} ↔ incident_id={rec['incident_id']}"
             )
     else:
-        md_lines.append("- No hay links con el umbral actual.")
+        md_lines.append("- No hay links validados con la política estricta activa.")
     md_lines.append("")
-    md_lines.append("## 4) Preguntas sugeridas al LLM")
+    md_lines.append("## 5) Preguntas sugeridas al LLM")
     md_lines.append(
         "- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?"
     )
@@ -3001,14 +3889,26 @@ def page_nps_helix_linking(
         "- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?"
     )
     md_lines.append("")
-    md_lines.append("## 5) Trazabilidad técnica")
+    md_lines.append("## 6) Trazabilidad técnica")
     md_lines.append("- Fuente NPS: dataset persistido para el contexto seleccionado.")
     md_lines.append(
         "- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto."
     )
-    md_lines.append("- Linking: TF-IDF + cosine similarity, umbral configurable.")
+    md_lines.append(
+        f"- Linking estricto: TF-IDF + cosine similarity (min={LINK_MIN_SIMILARITY:.2f}), "
+        f"top-k por incidencia={LINK_TOP_K_PER_INCIDENT}, ventana temporal ±{LINK_MAX_DAYS_APART} días."
+    )
 
     md = "\n".join(md_lines)
+    wow_prompt = build_wow_prompt(
+        objective=(
+            "Demostrar semanalmente como la resolucion de incidencias impacta el NPS termico "
+            "y priorizar palancas de mejora continua con ownership claro."
+        ),
+        business_story_md=ppt_story_md or "Narrativa no disponible para esta ventana.",
+        top_topics_df=rationale_df.head(10) if not rationale_df.empty else pd.DataFrame(),
+        deep_dive_pack_json=pack_json,
+    )
 
     c1, c2 = st.columns(2)
     with c1:
@@ -3016,11 +3916,18 @@ def page_nps_helix_linking(
             "Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md"
         )
     with c2:
-        pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
         st.download_button(
             "Descargar Pack (JSON)",
             data=pack_json.encode("utf-8"),
             file_name="deep_dive_pack.json",
+        )
+
+    with st.expander("Prompt WoW para GPT (copy/paste manual)", expanded=False):
+        _clipboard_copy_widget(wow_prompt, label="Copiar prompt WoW")
+        st.text_area(
+            "Prompt recomendado",
+            value=wow_prompt,
+            height=320,
         )
 
 
@@ -3091,7 +3998,7 @@ def main() -> None:
 <div class="nps-card nps-card--flat">
   <div style="font-size:28px; font-weight:900;">NPS Lens</div>
   <div class="nps-muted" style="margin-top:4px;">
-    Lectura ejecutiva y accionable del NPS térmico (Senda · México)
+    Lectura de negocio y accionable del NPS térmico (Senda · México)
   </div>
 </div>
 """,
@@ -3125,27 +4032,19 @@ def main() -> None:
 
     with st.expander("📘 Qué estás viendo", expanded=False):
         st.markdown(
-            "Este dashboard está pensado para una lectura **ejecutiva** del NPS térmico. "
+            "Este dashboard está pensado para una lectura de **negocio** del NPS térmico. "
             "Empieza en **Resumen**, luego ve a **Drivers** para priorizar y usa **Insights LLM** "
             "para convertir hallazgos en narrativa y acciones.\n\n"
             "**Tip:** en cada sección verás una breve explicación de *qué significa* "
             "y *qué decisión habilita*."
         )
 
-    t_resumen, t_drivers, t_texto, t_journey, t_alertas, t_llm, t_datos = st.tabs(
-        [
-            "🏠 Resumen",
-            "🎯 Drivers",
-            "📝 Texto",
-            "🧭 Journey",
-            "🚨 Alertas",
-            "✨ Insights LLM",
-            "🧾 Datos",
-        ]
+    t_situacion, t_prioridades, t_llm, t_datos = st.tabs(
+        ["📊 Situación", "🎯 Prioridades", "✨ Insights GPT", "🧾 Datos"]
     )
 
-    with t_resumen:
-        df = load_context_df(
+    with t_situacion:
+        df_resumen = load_context_df(
             store_dir,
             service_origin,
             service_origin_n1,
@@ -3158,25 +4057,25 @@ def main() -> None:
         )
         st.markdown(
             "<div class='nps-card nps-card--flat'>"
-            "<b>Cómo leer esta pestaña</b><br/>"
-            "<span class='nps-muted'>Empieza por el resumen, luego compara ventanas de tiempo "
-            "y revisa cohortes si necesitas aislar el problema por segmento/canal.</span>"
+            "<b>Flujo recomendado</b><br/>"
+            "<span class='nps-muted'>Primero revisa la situación del periodo y después baja al vínculo "
+            "incidencias ↔ NPS para definir prioridades y generar la presentación.</span>"
             "</div>",
             unsafe_allow_html=True,
         )
-        s1, s2, s3, s4 = st.tabs(["Resumen", "Comparativas", "Cohortes", "NPS ↔ Helix"])
+        s1, s2 = st.tabs(["Panorama del periodo", "Incidencias ↔ NPS"])
         with s1:
             page_executive(
-                df, theme, store_dir, service_origin, service_origin_n1, service_origin_n2
+                df_resumen,
+                theme,
+                store_dir,
+                service_origin,
+                service_origin_n1,
+                service_origin_n2,
             )
         with s2:
-            page_comparisons(df, theme)
-        with s3:
-            page_cohorts(df, theme)
-        with s4:
-            # Multi-fuente: NPS ↔ Helix. Usa el mismo df NPS ya filtrado por contexto.
             page_nps_helix_linking(
-                nps_df=df,
+                nps_df=df_resumen,
                 store_dir=store_dir,
                 service_origin=service_origin,
                 service_origin_n1=service_origin_n1,
@@ -3186,8 +4085,8 @@ def main() -> None:
                 theme_mode=theme_mode,
             )
 
-    with t_drivers:
-        df = load_context_df(
+    with t_prioridades:
+        df_prior = load_context_df(
             store_dir,
             service_origin,
             service_origin_n1,
@@ -3198,52 +4097,32 @@ def main() -> None:
             date_end=pop_date_end,
             month_filter=pop_month_filter,
         )
-        page_drivers(df, theme, min_n=min_n)
-
-    with t_texto:
-        df = load_context_df(
-            store_dir,
-            service_origin,
-            service_origin_n1,
-            service_origin_n2,
-            nps_group_choice,
-            VIEW_COLUMNS["texto"],
-            date_start=pop_date_start,
-            date_end=pop_date_end,
-            month_filter=pop_month_filter,
-        )
-        page_text(df, theme)
-
-    with t_journey:
-        df = load_context_df(
-            store_dir,
-            service_origin,
-            service_origin_n1,
-            service_origin_n2,
-            nps_group_choice,
-            VIEW_COLUMNS["journey"],
-            date_start=pop_date_start,
-            date_end=pop_date_end,
-            month_filter=pop_month_filter,
-        )
-        page_journey(df)
-
-    with t_alertas:
-        df = load_context_df(
-            store_dir,
-            service_origin,
-            service_origin_n1,
-            service_origin_n2,
-            nps_group_choice,
-            VIEW_COLUMNS["alertas"],
-            date_start=pop_date_start,
-            date_end=pop_date_end,
-            month_filter=pop_month_filter,
-        )
-        page_changes(df, theme)
+        p1, p2, p3 = st.tabs(["Drivers", "Temas de clientes", "Segmentos"])
+        with p1:
+            page_drivers(df_prior, theme, min_n=min_n)
+        with p2:
+            df_texto = load_context_df(
+                store_dir,
+                service_origin,
+                service_origin_n1,
+                service_origin_n2,
+                nps_group_choice,
+                VIEW_COLUMNS["texto"],
+                date_start=pop_date_start,
+                date_end=pop_date_end,
+                month_filter=pop_month_filter,
+            )
+            page_text(df_texto, theme)
+        with p3:
+            page_cohorts(df_prior, theme)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            section(
+                "Comparativa de periodos", "Evolución frente al periodo base para validar avance."
+            )
+            page_comparisons(df_prior, theme)
 
     with t_llm:
-        df = load_context_df(
+        df_llm = load_context_df(
             store_dir,
             service_origin,
             service_origin_n1,
@@ -3254,10 +4133,10 @@ def main() -> None:
             date_end=pop_date_end,
             month_filter=pop_month_filter,
         )
-        page_llm(df, settings=settings, min_n=min_n, cache_path=cache_path)
+        page_llm(df_llm, settings=settings, min_n=min_n, cache_path=cache_path)
 
     with t_datos:
-        df = load_context_df(
+        df_datos = load_context_df(
             store_dir,
             service_origin,
             service_origin_n1,
@@ -3276,7 +4155,7 @@ def main() -> None:
         )
         hstored = helix_store.get(hctx)
         helix_df = helix_store.load_df(hstored) if hstored is not None else None
-        page_quality(df, helix_df=helix_df)
+        page_quality(df_datos, helix_df=helix_df)
 
 
 if __name__ == "__main__":

@@ -30,10 +30,6 @@ class PerfTracker:
             dt = time.perf_counter() - t0
             self.events.append(PerfEvent(name=name, seconds=float(dt)))
 
-    # Backward-compatible alias (older code used `timer`).
-    def timer(self, name: str) -> contextlib.AbstractContextManager[None]:
-        return self.track(name)
-
     def summary(self) -> List[Dict[str, object]]:
         # last N only to keep UI light
         out: List[Dict[str, object]] = []

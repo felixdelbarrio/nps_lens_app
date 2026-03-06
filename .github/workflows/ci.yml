@@ -26,6 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Runtime smoke-check (PPT/export)
+        run: |
+          python scripts/verify_runtime.py
+
       - name: Ruff (lint)
         run: |
           ruff check .

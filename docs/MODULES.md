@@ -15,6 +15,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
   - `design/` — tokens/escala de colores (design system)
   - `ingest/` — ingesta + normalización + validación
   - `llm/` — contratos/validación y generación de packs
+  - `reports/` — generación de presentaciones PPT para comité
   - `models/` — modelos canónicos (Pydantic)
   - `platform/` — ejecución batch + artefactos versionados
   - `quality/` — utilidades de calidad/perf (dev)
@@ -65,6 +66,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `drivers.py`: ranking de palancas/subpalancas por impacto/volumen
 - `text_mining.py`: tópicos / keywords (MVP)
 - `nps_helix_link.py`: linking y agregados NPS↔Helix (diario/semanal)
+- `incident_rationale.py`: racional ejecutivo (NPS en riesgo, recuperable, prioridad y plan de acción)
 - `causal.py`: score causal best‑effort con logit / heurísticas
 - `changepoints.py`: detección de cambios (ruptures opcional)
 
@@ -72,6 +74,9 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `insight_response.py`: schema + validador del JSON de respuesta del LLM
 - `knowledge_cache.py`: persistencia y recuperación de aprendizajes
 - `pack.py`: generación y export de packs (Markdown + JSON)
+
+### `nps_lens.reports.*`
+- `executive_ppt.py`: composición de PPT de negocio (scope, KPI, gráficos y plan de acción)
 
 ### `nps_lens.platform.*`
 - `batch.py`: ejecución headless según config JSON
@@ -102,4 +107,3 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - **Cambiar UI (diseño)** → `design/tokens.py` + `ui/theme.py`
 - **Cambiar ranking causal** → `analytics/causal.py` + `analytics/nps_helix_link.py`
 - **Cambiar plataforma batch** → `platform/batch.py` + `platform/artifacts.py`
-

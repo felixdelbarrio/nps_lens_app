@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from nps_lens.design.tokens import DesignTokens, palette, primary_accent
@@ -665,6 +666,188 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     fig.update_traces(marker_color=colors)
     fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
+    return apply_plotly_template(fig, theme)
+
+
+def chart_incident_priority_matrix(
+    rationale_df: pd.DataFrame,
+    theme: Theme,
+    *,
+    top_k: int = 12,
+):
+    """Readable priority ranking (bar + confidence marker) for incident-driven topics."""
+    if rationale_df.empty:
+        return None
+    required = {"nps_topic", "confidence", "nps_points_at_risk", "incidents", "priority"}
+    if not required.issubset(set(rationale_df.columns)):
+        return None
+
+    d = (
+        rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False)
+        .head(top_k)
+        .copy()
+    )
+    if d.empty:
+        return None
+
+    d["short_topic"] = d["nps_topic"].astype(str).str.slice(0, 42)
+    d["short_topic"] = d["short_topic"].where(
+        d["nps_topic"].astype(str).str.len() <= 42,
+        d["short_topic"] + "…",
+    )
+    d["confidence"] = pd.to_numeric(d["confidence"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
+    d["priority"] = pd.to_numeric(d["priority"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    d["incidents"] = pd.to_numeric(d["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    d = d.reset_index(drop=True)
+    d["rank"] = np.arange(1, len(d) + 1)
+    d["topic_label"] = d.apply(
+        lambda r: (
+            f"TOP {int(r['rank'])} · {r['short_topic']}"
+            if int(r["rank"]) <= 3
+            else str(r["short_topic"])
+        ),
+        axis=1,
+    )
+    d = d.iloc[::-1].copy()
+
+    th = chart_theme(theme)
+    detr_c, warn_c, pro_c = _status_colors(theme)
+    bar_colors = []
+    for rk in d["rank"].tolist():
+        if int(rk) == 1:
+            bar_colors.append(detr_c)
+        elif int(rk) == 2:
+            bar_colors.append(warn_c)
+        elif int(rk) == 3:
+            bar_colors.append(pro_c)
+        else:
+            bar_colors.append(th.grid)
+
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=d["priority"],
+            y=d["topic_label"],
+            orientation="h",
+            marker=dict(color=bar_colors),
+            name="Prioridad",
+            text=[f"{v:.2f}" for v in d["priority"].tolist()],
+            textposition="outside",
+            customdata=np.column_stack([d["confidence"], d["nps_points_at_risk"], d["incidents"]]),
+            hovertemplate=(
+                "Tópico=%{y}<br>Prioridad=%{x:.2f}<br>"
+                "Confianza=%{customdata[0]:.2f}<br>"
+                "NPS en riesgo=%{customdata[1]:.2f}<br>"
+                "Incidencias=%{customdata[2]:.0f}<extra></extra>"
+            ),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=d["confidence"],
+            y=d["topic_label"],
+            mode="markers",
+            name="Confianza",
+            marker=dict(color=th.accent, size=11, symbol="diamond"),
+            hovertemplate="Tópico=%{y}<br>Confianza=%{x:.2f}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Indice 0-1 (barra=prioridad, rombo=confianza)",
+        yaxis_title="",
+        barmode="overlay",
+        legend=dict(orientation="h", y=1.08, x=0),
+    )
+    fig.update_xaxes(range=[0, 1], dtick=0.1, gridcolor=th.grid)
+    fig.update_yaxes(automargin=True)
+    _layout_common(fig, th, height=max(430, 240 + 38 * min(int(top_k), len(d))))
+    return apply_plotly_template(fig, theme)
+
+
+def chart_incident_risk_recovery(
+    rationale_df: pd.DataFrame,
+    theme: Theme,
+    *,
+    top_k: int = 8,
+):
+    """Risk vs recoverable comparison using dumbbell chart (readable for committees)."""
+    if rationale_df.empty:
+        return None
+    required = {"nps_topic", "nps_points_at_risk", "nps_points_recoverable"}
+    if not required.issubset(set(rationale_df.columns)):
+        return None
+
+    d = rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False).copy()
+    if d.empty:
+        return None
+
+    d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
+    d["nps_points_recoverable"] = pd.to_numeric(
+        d["nps_points_recoverable"], errors="coerce"
+    ).fillna(0.0)
+    d["signal"] = d[["nps_points_at_risk", "nps_points_recoverable"]].max(axis=1)
+    d = d[d["signal"] > 0.0005].copy()
+    if d.empty:
+        return None
+    d = d.head(top_k).copy()
+
+    d["topic"] = d["nps_topic"].astype(str).str.slice(0, 42)
+    d["topic"] = d["topic"].where(d["nps_topic"].astype(str).str.len() <= 42, d["topic"] + "…")
+    d["gap"] = d["nps_points_at_risk"] - d["nps_points_recoverable"]
+    d = d.sort_values(["nps_points_at_risk", "gap"], ascending=[True, True]).copy()
+
+    detr_c, _, pro_c = _status_colors(theme)
+
+    th = chart_theme(theme)
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for _, row in d.iterrows():
+        fig.add_shape(
+            type="line",
+            x0=float(row["nps_points_recoverable"]),
+            y0=str(row["topic"]),
+            x1=float(row["nps_points_at_risk"]),
+            y1=str(row["topic"]),
+            line=dict(color=th.grid, width=3),
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=d["nps_points_at_risk"],
+            y=d["topic"],
+            mode="markers+text",
+            name="NPS en riesgo",
+            marker=dict(color=detr_c, size=11),
+            text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
+            textposition="middle right",
+            hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=d["nps_points_recoverable"],
+            y=d["topic"],
+            mode="markers+text",
+            name="NPS recuperable",
+            marker=dict(color=pro_c, size=11, symbol="diamond"),
+            text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
+            textposition="middle left",
+            hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Puntos NPS",
+        yaxis_title="",
+        legend_title_text="Metricas",
+        legend=dict(orientation="h", y=1.08, x=0),
+    )
+    fig.update_yaxes(automargin=True)
+    xmax = float(max(d["nps_points_at_risk"].max(), d["nps_points_recoverable"].max()))
+    fig.update_xaxes(range=[0.0, xmax * 1.22 if xmax > 0 else 1.0])
+    _layout_common(fig, th, height=max(420, 240 + 42 * min(int(top_k), len(d))))
     return apply_plotly_template(fig, theme)
 
 

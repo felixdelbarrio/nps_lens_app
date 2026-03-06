@@ -5,6 +5,7 @@ import importlib
 import inspect
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -97,9 +98,109 @@ def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
         proc.kill()
 
 
+def _is_port_open(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.25)
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+
+
+def _list_listen_pids(port: int) -> list[int]:
+    """Best-effort listing of LISTEN pids for a TCP port."""
+    if os.name == "nt":
+        return []
+    try:
+        cp = subprocess.run(
+            ["lsof", "-tiTCP:%d" % int(port), "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return []
+    out = str(cp.stdout or "").strip()
+    if not out:
+        return []
+    pids: list[int] = []
+    for line in out.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            pids.append(int(s))
+        except Exception:
+            continue
+    return pids
+
+
+def _pid_command(pid: int) -> str:
+    if os.name == "nt":
+        return ""
+    try:
+        cp = subprocess.run(
+            ["ps", "-p", str(int(pid)), "-o", "command="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return ""
+    return str(cp.stdout or "").strip()
+
+
+def _pid_is_nps_lens_instance(pid: int) -> bool:
+    cmd = _pid_command(pid).lower()
+    if not cmd:
+        return False
+    app_markers = [
+        "nps_lens.desktop",
+        "app/streamlit_app.py",
+        "--internal-server",
+        "nps_lens_app",
+    ]
+    return any(m in cmd for m in app_markers)
+
+
+def _kill_pid(pid: int, *, timeout_seconds: float = 3.0) -> None:
+    if pid <= 0:
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except Exception:
+        return
+    deadline = time.time() + float(timeout_seconds)
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        except Exception:
+            return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        return
+
+
+def _reclaim_port_from_previous_instance(port: int) -> None:
+    """Kill previous NPS Lens listeners on the selected port."""
+    if not _is_port_open(port):
+        return
+
+    pids = [p for p in _list_listen_pids(port) if p != os.getpid()]
+    for pid in pids:
+        if _pid_is_nps_lens_instance(pid):
+            _kill_pid(pid)
+
+    if _is_port_open(port):
+        raise RuntimeError(
+            f"Port {port} is already in use by another process. "
+            "Close that process or change NPS_LENS_PORT."
+        )
+
+
 def _run_desktop(port: int) -> None:
     import webview
 
+    _reclaim_port_from_previous_instance(port)
     proc = subprocess.Popen(_server_cmd(port))
     try:
         _wait_for_server(port)
