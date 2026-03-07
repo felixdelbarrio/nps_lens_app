@@ -299,7 +299,9 @@ def build_incident_ppt_story(
     lines.append("")
     lines.append("## 2) Cadena de impacto")
     if not cards:
-        lines.append("- No hay señal suficiente para construir una cadena causal robusta con el umbral actual.")
+        lines.append(
+            "- No hay señal suficiente para construir una cadena causal robusta con el umbral actual."
+        )
     else:
         for card in cards:
             title = str(_card_value(card, "nps_topic", _card_value(card, "title", "")))
@@ -309,7 +311,9 @@ def build_incident_ppt_story(
             incident_total = _evidence_total(card, "linked_incidents", "incident_examples", 5)
             comment_total = _evidence_total(card, "linked_comments", "comment_examples", 2)
             probability = float(
-                _card_value(card, "detractor_probability", _card_value(card, "focus_probability", np.nan))
+                _card_value(
+                    card, "detractor_probability", _card_value(card, "focus_probability", np.nan)
+                )
             )
             delta_nps = float(_card_value(card, "nps_delta_expected", np.nan))
             impact = float(_card_value(card, "total_nps_impact", 0.0))
@@ -334,7 +338,11 @@ def build_incident_ppt_story(
     lines.append("## 3) Evidencia estadística")
     if cards:
         for card in cards:
-            title = str(card.get("nps_topic", card.get("title", ""))) if isinstance(card, dict) else str(card.title)
+            title = (
+                str(card.get("nps_topic", card.get("title", "")))
+                if isinstance(card, dict)
+                else str(card.title)
+            )
             causal_score = (
                 float(card.get("causal_score", 0.0))
                 if isinstance(card, dict)
@@ -362,7 +370,9 @@ def build_incident_ppt_story(
 
     lines.append("")
     lines.append("## 4) Plan operativo 30-60-90")
-    lines.append("- 30 días: activar quick wins en touchpoints críticos y cerrar brechas de instrumentación.")
+    lines.append(
+        "- 30 días: activar quick wins en touchpoints críticos y cerrar brechas de instrumentación."
+    )
     lines.append("- 60 días: desplegar fixes estructurales en tópicos P1 con mayor NPS en riesgo.")
     lines.append(
         "- 90 días: consolidar aprendizaje (confirmado/rechazado), medir recuperación y recalibrar prioridades."
@@ -474,7 +484,9 @@ def build_ppt_8slide_script(
         )
     else:
         lines.append("## Slide 3 — Impact Chain")
-        lines.append("- Narrativa obligatoria: incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS.")
+        lines.append(
+            "- Narrativa obligatoria: incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS."
+        )
     if not cards:
         lines.append("- No hay evidencia suficiente para construir la cadena con rigor.")
     else:
@@ -482,7 +494,9 @@ def build_ppt_8slide_script(
             title = str(_card_value(card, "nps_topic", _card_value(card, "title", "")))
             touchpoint = str(_card_value(card, "touchpoint", ""))
             probability = float(
-                _card_value(card, "detractor_probability", _card_value(card, "focus_probability", np.nan))
+                _card_value(
+                    card, "detractor_probability", _card_value(card, "focus_probability", np.nan)
+                )
             )
             delta_nps = float(_card_value(card, "nps_delta_expected", np.nan))
             impact = float(_card_value(card, "total_nps_impact", 0.0))

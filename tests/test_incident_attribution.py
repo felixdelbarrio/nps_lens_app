@@ -54,7 +54,14 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     )
     helix = pd.DataFrame(
         {
-            "Incident Number": ["INC00001", "INC00003", "INC00025", "INC00040", "INC00041", "INC00099"],
+            "Incident Number": [
+                "INC00001",
+                "INC00003",
+                "INC00025",
+                "INC00040",
+                "INC00041",
+                "INC00099",
+            ],
             "Fecha": pd.to_datetime(
                 ["2026-02-01", "2026-02-01", "2026-02-01", "2026-02-02", "2026-02-02", "2026-02-02"]
             ),
@@ -66,9 +73,23 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 "Falla de sesión al entrar en portal empresas",
                 "Incidencia genérica sin detalle",
             ],
-            "Product Categorization Tier 1": ["Acceso", "Acceso", "Acceso", "Acceso", "Acceso", "General"],
+            "Product Categorization Tier 1": [
+                "Acceso",
+                "Acceso",
+                "Acceso",
+                "Acceso",
+                "Acceso",
+                "General",
+            ],
             "Product Categorization Tier 2": ["Login", "Login", "Login", "Login", "Login", ""],
-            "Product Categorization Tier 3": ["Autenticación", "Autenticación", "Autenticación", "Autenticación", "Autenticación", ""],
+            "Product Categorization Tier 3": [
+                "Autenticación",
+                "Autenticación",
+                "Autenticación",
+                "Autenticación",
+                "Autenticación",
+                "",
+            ],
         }
     )
     rationale_df = pd.DataFrame(

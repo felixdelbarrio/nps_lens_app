@@ -449,13 +449,16 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     out = chain_df.copy().reset_index(drop=True)
+
     def _safe_int_label(value: object) -> int:
         try:
             return int(float(value))
         except Exception:
             return 0
 
-    topic = out.get("nps_topic", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    topic = (
+        out.get("nps_topic", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    )
     touchpoint = (
         out.get("touchpoint", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
     )
@@ -500,11 +503,9 @@ def _sync_chain_selection_state(
         st.session_state[selected_key] = keys[: min(int(default_limit), len(keys))]
         st.session_state[view_idx_key] = 0
 
-    selected = [
-        str(k)
-        for k in st.session_state.get(selected_key, [])
-        if str(k) in keys
-    ][: int(default_limit)]
+    selected = [str(k) for k in st.session_state.get(selected_key, []) if str(k) in keys][
+        : int(default_limit)
+    ]
     if not selected:
         selected = keys[: min(int(default_limit), len(keys))]
         st.session_state[selected_key] = selected
@@ -523,7 +524,9 @@ def _select_chain_rows(chain_df: pd.DataFrame, selected_keys: list[str]) -> pd.D
     if not selected_keys:
         return chain_df.head(0).copy()
 
-    selected = chain_df[chain_df["chain_key"].astype(str).isin([str(k) for k in selected_keys])].copy()
+    selected = chain_df[
+        chain_df["chain_key"].astype(str).isin([str(k) for k in selected_keys])
+    ].copy()
     if selected.empty:
         return selected
 
@@ -3080,7 +3083,9 @@ def page_nps_helix_linking(
             )
             st.markdown("#### Selección para comité")
             label_map = {
-                str(rec.get("chain_key", "")): str(rec.get("selection_label", rec.get("nps_topic", "")))
+                str(rec.get("chain_key", "")): str(
+                    rec.get("selection_label", rec.get("nps_topic", ""))
+                )
                 for rec in impact_cards
             }
             selected_chain_keys = st.multiselect(
@@ -3105,9 +3110,7 @@ def page_nps_helix_linking(
             )
 
             chosen_labels = [
-                label_map.get(str(k), str(k))
-                for k in selected_chain_keys
-                if str(k) in label_map
+                label_map.get(str(k), str(k)) for k in selected_chain_keys if str(k) in label_map
             ]
             if chosen_labels:
                 pills([f"PPT {idx + 1}: {lbl}" for idx, lbl in enumerate(chosen_labels)])
@@ -3139,7 +3142,9 @@ def page_nps_helix_linking(
                 ):
                     current_idx = (current_idx + 1) % total_cards
                     st.session_state["nh_chain_candidates_view_idx"] = current_idx
-            current_idx = int(st.session_state.get("nh_chain_candidates_view_idx", current_idx) or 0)
+            current_idx = int(
+                st.session_state.get("nh_chain_candidates_view_idx", current_idx) or 0
+            )
             current_idx = max(0, min(current_idx, total_cards - 1))
             current_card = impact_cards[current_idx]
             with nav_meta:
@@ -3148,10 +3153,10 @@ def page_nps_helix_linking(
                     if str(current_card.get("chain_key", "")) in set(map(str, selected_chain_keys))
                     else "No seleccionada para PPT"
                 )
-                st.markdown(
-                    f"**Cadena {current_idx + 1} de {total_cards}** · {selected_note}"
+                st.markdown(f"**Cadena {current_idx + 1} de {total_cards}** · {selected_note}")
+                st.caption(
+                    str(current_card.get("selection_label", current_card.get("nps_topic", "")))
                 )
-                st.caption(str(current_card.get("selection_label", current_card.get("nps_topic", ""))))
             impact_chain([current_card])
         elif not rationale_df.empty:
             st.info(
@@ -3186,7 +3191,11 @@ def page_nps_helix_linking(
             ]
             for col in show_cols:
                 if col not in active_df.columns:
-                    active_df[col] = np.nan if col not in {"action_lane", "owner_role", "nps_topic", "touchpoint"} else ""
+                    active_df[col] = (
+                        np.nan
+                        if col not in {"action_lane", "owner_role", "nps_topic", "touchpoint"}
+                        else ""
+                    )
             if "focus_probability_with_incident" in active_df.columns:
                 active_df["focus_probability_with_incident"] = active_df[
                     "focus_probability_with_incident"
@@ -3198,7 +3207,9 @@ def page_nps_helix_linking(
                 )
 
             active_df["priority"] = pd.to_numeric(active_df["priority"], errors="coerce").round(3)
-            active_df["confidence"] = pd.to_numeric(active_df["confidence"], errors="coerce").round(3)
+            active_df["confidence"] = pd.to_numeric(active_df["confidence"], errors="coerce").round(
+                3
+            )
             active_df["nps_points_at_risk"] = pd.to_numeric(
                 active_df["nps_points_at_risk"], errors="coerce"
             ).round(2)
@@ -3228,9 +3239,30 @@ def page_nps_helix_linking(
             active_df["eta_weeks"] = pd.to_numeric(active_df["eta_weeks"], errors="coerce").round(1)
 
             active_metrics = [
-                ("Prioridad", f"{float(active_df.iloc[0]['priority']):.2f}" if pd.notna(active_df.iloc[0]["priority"]) else "n/d"),
-                ("NPS en riesgo", f"{float(active_df.iloc[0]['nps_points_at_risk']):.2f} pts" if pd.notna(active_df.iloc[0]["nps_points_at_risk"]) else "n/d"),
-                ("NPS recuperable", f"{float(active_df.iloc[0]['nps_points_recoverable']):.2f} pts" if pd.notna(active_df.iloc[0]["nps_points_recoverable"]) else "n/d"),
+                (
+                    "Prioridad",
+                    (
+                        f"{float(active_df.iloc[0]['priority']):.2f}"
+                        if pd.notna(active_df.iloc[0]["priority"])
+                        else "n/d"
+                    ),
+                ),
+                (
+                    "NPS en riesgo",
+                    (
+                        f"{float(active_df.iloc[0]['nps_points_at_risk']):.2f} pts"
+                        if pd.notna(active_df.iloc[0]["nps_points_at_risk"])
+                        else "n/d"
+                    ),
+                ),
+                (
+                    "NPS recuperable",
+                    (
+                        f"{float(active_df.iloc[0]['nps_points_recoverable']):.2f} pts"
+                        if pd.notna(active_df.iloc[0]["nps_points_recoverable"])
+                        else "n/d"
+                    ),
+                ),
                 ("Owner", str(active_df.iloc[0]["owner_role"] or "n/d")),
             ]
             executive_banner(
@@ -3320,7 +3352,10 @@ def page_nps_helix_linking(
                 metrics=[
                     ("Cadenas seleccionadas", "0"),
                     ("Links validados", str(linked_pairs_total)),
-                    ("Modo causal", mode_label_map.get(str(touchpoint_source), str(touchpoint_source))),
+                    (
+                        "Modo causal",
+                        mode_label_map.get(str(touchpoint_source), str(touchpoint_source)),
+                    ),
                 ],
             )
 
@@ -4319,7 +4354,9 @@ def page_nps_helix_linking(
                 rationale_df.head(25).to_dict(orient="records") if not rationale_df.empty else []
             ),
             "attribution_chains": (
-                chain_df.to_dict(orient="records") if "chain_df" in locals() and not chain_df.empty else []
+                chain_df.to_dict(orient="records")
+                if "chain_df" in locals() and not chain_df.empty
+                else []
             ),
             "ppt_story_md": ppt_story_md,
             "ppt_8slides_md": ppt_8slides_md,
@@ -4384,9 +4421,7 @@ def page_nps_helix_linking(
     md_lines.append(
         f"- Probabilidad máxima del foco con incidencia: **{rationale_summary.peak_focus_probability*100:.0f}%**"
     )
-    md_lines.append(
-        f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**"
-    )
+    md_lines.append(f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**")
     md_lines.append(
         f"- Concentración de incidencias en top-3: **{rationale_summary.top3_incident_share*100:.1f}%**"
     )

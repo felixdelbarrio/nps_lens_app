@@ -246,14 +246,10 @@ def impact_chain(items: list[object]) -> None:
         incidents_html = ""
         comments_html = ""
         if incident_examples:
-            incidents_html = "".join(
-                [f"<li>{escape(str(v))}</li>" for v in incident_examples]
-            )
+            incidents_html = "".join([f"<li>{escape(str(v))}</li>" for v in incident_examples])
             incidents_html = f"<div class='nps-impact-evidence'><div class='nps-impact-label'>{helix_header}</div><ul>{incidents_html}</ul></div>"
         if comment_examples:
-            comments_html = "".join(
-                [f"<li>{escape(str(v))}</li>" for v in comment_examples]
-            )
+            comments_html = "".join([f"<li>{escape(str(v))}</li>" for v in comment_examples])
             comments_html = f"<div class='nps-impact-evidence'><div class='nps-impact-label'>{voc_header}</div><ul>{comments_html}</ul></div>"
         cards.append(
             f"""

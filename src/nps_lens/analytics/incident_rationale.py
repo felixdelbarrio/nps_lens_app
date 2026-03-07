@@ -232,7 +232,9 @@ def build_incident_nps_rationale(
         nps_high = _safe_num(topic_nps.loc[high_mask].mean(), default=np.nan)
         if np.isfinite(nps_base) and np.isfinite(nps_high):
             nps_delta_expected = float(nps_high - nps_base)
-            total_nps_impact = float(abs(nps_delta_expected) * (high_responses / max(total_responses, 1.0)))
+            total_nps_impact = float(
+                abs(nps_delta_expected) * (high_responses / max(total_responses, 1.0))
+            )
         else:
             nps_delta_expected = float("nan")
             total_nps_impact = float(nps_risk)
@@ -292,7 +294,9 @@ def build_incident_nps_rationale(
                 "focus_rate_high_inc": float(focus_high),
                 "delta_focus_rate_pp": float(delta_focus * 100.0),
                 "focus_probability_with_incident": float(focus_high),
-                "detractor_uplift_pp": float(delta_focus * 100.0) if fg == "detractor" else float("nan"),
+                "detractor_uplift_pp": (
+                    float(delta_focus * 100.0) if fg == "detractor" else float("nan")
+                ),
                 "baseline_nps": nps_base if np.isfinite(nps_base) else np.nan,
                 "incident_nps": nps_high if np.isfinite(nps_high) else np.nan,
                 "nps_delta_expected": nps_delta_expected,
@@ -386,7 +390,9 @@ def summarize_incident_nps_rationale(
     conf = pd.to_numeric(df.get("confidence"), errors="coerce").fillna(0.0)
     risk = pd.to_numeric(df.get("nps_points_at_risk"), errors="coerce").fillna(0.0)
     rec = pd.to_numeric(df.get("nps_points_recoverable"), errors="coerce").fillna(0.0)
-    focus_prob = pd.to_numeric(df.get("focus_probability_with_incident"), errors="coerce").fillna(0.0)
+    focus_prob = pd.to_numeric(df.get("focus_probability_with_incident"), errors="coerce").fillna(
+        0.0
+    )
     total_impact = pd.to_numeric(df.get("total_nps_impact"), errors="coerce").fillna(0.0)
     delta_nps = pd.to_numeric(df.get("nps_delta_expected"), errors="coerce")
     weights = pd.to_numeric(df.get("responses"), errors="coerce").fillna(0.0)

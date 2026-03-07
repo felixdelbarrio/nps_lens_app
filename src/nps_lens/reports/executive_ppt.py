@@ -430,10 +430,22 @@ def _add_impact_chain_slide(
     )
     steps = [
         ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
-        ("2. Touchpoint", "Se identifica el momento del journey afectado, no solo el sistema técnico."),
-        ("3. Palanca / subpalanca", "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app."),
-        ("4. Comentario VoC", "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas."),
-        ("5. NPS", f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total."),
+        (
+            "2. Touchpoint",
+            "Se identifica el momento del journey afectado, no solo el sistema técnico.",
+        ),
+        (
+            "3. Palanca / subpalanca",
+            "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app.",
+        ),
+        (
+            "4. Comentario VoC",
+            "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
+        ),
+        (
+            "5. NPS",
+            f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+        ),
     ]
     left = 0.80
     top = 1.70
@@ -490,7 +502,9 @@ def _add_executive_journey_summary_slide(
 ) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
-    focus_label = "detracción" if str(focus_name).strip().lower() == "detractores" else str(focus_name)
+    focus_label = (
+        "detracción" if str(focus_name).strip().lower() == "detractores" else str(focus_name)
+    )
     _add_header(
         slide,
         title=f"NPS Lens — Journeys que explican la {focus_label}",
@@ -558,7 +572,8 @@ def _add_executive_journey_summary_slide(
             (
                 item
                 for item in cards
-                if str(item.get("nps_topic", "") if isinstance(item, dict) else "") == str(journey["title"])
+                if str(item.get("nps_topic", "") if isinstance(item, dict) else "")
+                == str(journey["title"])
             ),
             None,
         )
@@ -866,7 +881,9 @@ def _add_chain_evidence_slide(
     vr.font.bold = True
     vr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
     if not voc_lines:
-        voc_lines = ["No hay suficiente evidencia VoC enlazada para construir otro relato defendible."]
+        voc_lines = [
+            "No hay suficiente evidencia VoC enlazada para construir otro relato defendible."
+        ]
     for line in voc_lines:
         p = vtf.add_paragraph()
         p.text = f"• {_clip(line, 170)}"
@@ -2219,7 +2236,9 @@ def _topic_metrics(topic: str, rationale_df: pd.DataFrame) -> dict[str, float]:
         "recoverable": _safe_float(r.get("nps_points_recoverable", 0.0), default=0.0),
         "priority": _safe_float(r.get("priority", 0.0), default=0.0),
         "confidence": _safe_float(r.get("confidence", 0.0), default=0.0),
-        "focus_probability": _safe_float(r.get("focus_probability_with_incident", np.nan), default=np.nan),
+        "focus_probability": _safe_float(
+            r.get("focus_probability_with_incident", np.nan), default=np.nan
+        ),
         "nps_delta_expected": _safe_float(r.get("nps_delta_expected", np.nan), default=np.nan),
         "total_nps_impact": _safe_float(r.get("total_nps_impact", 0.0), default=0.0),
         "causal_score": _safe_float(r.get("causal_score", 0.0), default=0.0),
@@ -2312,7 +2331,9 @@ def generate_business_review_ppt(
 
     _add_impact_chain_slide(
         prs,
-        cards=(attribution_df.head(3).to_dict(orient="records") if attribution_df is not None else []),
+        cards=(
+            attribution_df.head(3).to_dict(orient="records") if attribution_df is not None else []
+        ),
         focus_name=focus_name,
         period_label=period_label,
         presentation_mode=touchpoint_source,
@@ -2436,10 +2457,10 @@ def generate_business_review_ppt(
             lag_days = _lag_days_for_topic(
                 incident.nps_topic,
                 lag_days_by_topic=lag_days_by_topic,
-            lag_weeks_by_topic=lag_weeks_by_topic,
-            rationale_df=rationale_df,
-            ranking_df=ranking_df,
-        )
+                lag_weeks_by_topic=lag_weeks_by_topic,
+                rationale_df=rationale_df,
+                ranking_df=ranking_df,
+            )
         related_timeline = _incident_related_timeline(
             incident_id=incident.incident_id,
             hot_term=incident.hot_term,
