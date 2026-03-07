@@ -15,10 +15,14 @@ class IncidentRationaleSummary:
     top3_incident_share: float
     confidence_mean: float
     median_lag_weeks: float
+    peak_focus_probability: float
+    expected_nps_delta: float
+    total_nps_impact: float
 
 
 RATIONALE_COLUMNS = [
     "nps_topic",
+    "touchpoint",
     "weeks",
     "responses",
     "incidents",
@@ -26,7 +30,20 @@ RATIONALE_COLUMNS = [
     "focus_rate_base",
     "focus_rate_high_inc",
     "delta_focus_rate_pp",
+    "focus_probability_with_incident",
+    "detractor_uplift_pp",
+    "baseline_nps",
+    "incident_nps",
+    "nps_delta_expected",
+    "total_nps_impact",
     "attributable_focus_cases",
+    "topic_concentration_share",
+    "temporal_score",
+    "uplift_score",
+    "consistency_score",
+    "plausibility_score",
+    "volume_score",
+    "causal_score",
     "nps_points_at_risk",
     "nps_points_recoverable",
     "confidence",
@@ -98,6 +115,13 @@ def _action_plan(priority: float, lag_weeks: float, stability: float) -> tuple[s
     if p >= 0.48 and lag <= 2.0:
         return "Quick win operativo", "Canal + Operaciones", 2
     return "Instrumentacion + validacion", "VoC + Analitica", 3
+
+
+def _touchpoint_from_topic(topic: object) -> str:
+    parts = [p.strip() for p in str(topic or "").split(">") if p.strip()]
+    if not parts:
+        return "Journey sin etiquetar"
+    return parts[0]
 
 
 def _rank_lookup(rank_df: Optional[pd.DataFrame]) -> dict[str, dict[str, float]]:
@@ -200,6 +224,19 @@ def build_incident_nps_rationale(
         response_share = float(responses / total_responses)
         nps_risk = float(risk_delta * 100.0 * response_share)
 
+        topic_nps = pd.to_numeric(
+            g.get("nps_mean", pd.Series([np.nan] * len(g), index=g.index)),
+            errors="coerce",
+        )
+        nps_base = _safe_num(topic_nps.loc[low_mask].mean(), default=np.nan)
+        nps_high = _safe_num(topic_nps.loc[high_mask].mean(), default=np.nan)
+        if np.isfinite(nps_base) and np.isfinite(nps_high):
+            nps_delta_expected = float(nps_high - nps_base)
+            total_nps_impact = float(abs(nps_delta_expected) * (high_responses / max(total_responses, 1.0)))
+        else:
+            nps_delta_expected = float("nan")
+            total_nps_impact = float(nps_risk)
+
         r = rank_map.get(str(topic), {})
         rank_score = _clip01(r.get("score", 0.0))
         corr = abs(_safe_num(r.get("corr", 0.0), default=0.0))
@@ -210,10 +247,26 @@ def build_incident_nps_rationale(
             # Some UI paths show this metric in percentage points.
             lead_share = _clip01(lead_share / 100.0)
 
+        lag_signal = 0.55
+        if np.isfinite(lag_weeks):
+            lag_signal = 1.0 - _clip01(float(lag_weeks) / 6.0)
+
         support_signal = _clip01(np.log1p(responses) / 8.0)
         incident_signal = _clip01(np.log1p(incidents_total) / 6.0)
         effect_signal = _clip01(risk_delta / 0.12)
         temporal_signal = _clip01(corr)
+        temporal_score = _clip01(0.60 * temporal_signal + 0.40 * lead_share)
+        uplift_score = _clip01(risk_delta / 0.20)
+        consistency_score = _clip01(0.55 * cp_stability + 0.45 * lag_signal)
+        plausibility_score = _clip01(0.70 * rank_score + 0.30 * effect_signal)
+        volume_score = _clip01(0.55 * support_signal + 0.45 * incident_signal)
+        causal_score = _clip01(
+            0.30 * temporal_score
+            + 0.25 * uplift_score
+            + 0.20 * consistency_score
+            + 0.15 * plausibility_score
+            + 0.10 * volume_score
+        )
         confidence = (
             0.22 * support_signal
             + 0.12 * incident_signal
@@ -223,16 +276,14 @@ def build_incident_nps_rationale(
             + 0.07 * lead_share
             + 0.05 * rank_score
         )
-        confidence = _clip01(confidence)
+        confidence = _clip01(0.55 * confidence + 0.45 * causal_score)
 
-        lag_signal = 0.55
-        if np.isfinite(lag_weeks):
-            lag_signal = 1.0 - _clip01(float(lag_weeks) / 6.0)
         recoverable = float(nps_risk * float(recovery_factor) * confidence)
 
         rows.append(
             {
                 "nps_topic": str(topic),
+                "touchpoint": _touchpoint_from_topic(topic),
                 "weeks": int(weeks),
                 "responses": int(responses),
                 "incidents": int(round(incidents_total)),
@@ -240,7 +291,20 @@ def build_incident_nps_rationale(
                 "focus_rate_base": float(focus_base),
                 "focus_rate_high_inc": float(focus_high),
                 "delta_focus_rate_pp": float(delta_focus * 100.0),
+                "focus_probability_with_incident": float(focus_high),
+                "detractor_uplift_pp": float(delta_focus * 100.0) if fg == "detractor" else float("nan"),
+                "baseline_nps": nps_base if np.isfinite(nps_base) else np.nan,
+                "incident_nps": nps_high if np.isfinite(nps_high) else np.nan,
+                "nps_delta_expected": nps_delta_expected,
+                "total_nps_impact": total_nps_impact,
                 "attributable_focus_cases": attributable_cases,
+                "topic_concentration_share": 0.0,
+                "temporal_score": temporal_score,
+                "uplift_score": uplift_score,
+                "consistency_score": consistency_score,
+                "plausibility_score": plausibility_score,
+                "volume_score": volume_score,
+                "causal_score": causal_score,
                 "nps_points_at_risk": nps_risk,
                 "nps_points_recoverable": recoverable,
                 "confidence": confidence,
@@ -256,10 +320,21 @@ def build_incident_nps_rationale(
         return _empty_rationale_df()
 
     out = pd.DataFrame(rows)
+    attributable_total = float(
+        pd.to_numeric(out.get("attributable_focus_cases"), errors="coerce").fillna(0.0).sum()
+    )
+    if attributable_total > 0.0:
+        out["topic_concentration_share"] = (
+            pd.to_numeric(out.get("attributable_focus_cases"), errors="coerce").fillna(0.0)
+            / attributable_total
+        ).clip(0.0, 1.0)
+    else:
+        out["topic_concentration_share"] = 0.0
     out["impact_norm"] = _norm_by_max(out["nps_points_at_risk"])
     out["priority"] = (
-        0.60 * out["impact_norm"]
+        0.45 * out["impact_norm"]
         + 0.30 * out["confidence"].astype(float)
+        + 0.15 * out["causal_score"].astype(float)
         + 0.10 * out["_lag_signal"].astype(float)
     ).clip(0.0, 1.0)
     out.loc[out["nps_points_at_risk"] <= 0.0, "priority"] = 0.0
@@ -294,6 +369,9 @@ def summarize_incident_nps_rationale(
             top3_incident_share=0.0,
             confidence_mean=0.0,
             median_lag_weeks=float("nan"),
+            peak_focus_probability=0.0,
+            expected_nps_delta=0.0,
+            total_nps_impact=0.0,
         )
 
     df = rationale_df.copy()
@@ -308,6 +386,21 @@ def summarize_incident_nps_rationale(
     conf = pd.to_numeric(df.get("confidence"), errors="coerce").fillna(0.0)
     risk = pd.to_numeric(df.get("nps_points_at_risk"), errors="coerce").fillna(0.0)
     rec = pd.to_numeric(df.get("nps_points_recoverable"), errors="coerce").fillna(0.0)
+    focus_prob = pd.to_numeric(df.get("focus_probability_with_incident"), errors="coerce").fillna(0.0)
+    total_impact = pd.to_numeric(df.get("total_nps_impact"), errors="coerce").fillna(0.0)
+    delta_nps = pd.to_numeric(df.get("nps_delta_expected"), errors="coerce")
+    weights = pd.to_numeric(df.get("responses"), errors="coerce").fillna(0.0)
+    valid_delta = delta_nps.notna()
+    if bool(valid_delta.any()):
+        valid_weights = weights.loc[valid_delta]
+        if float(valid_weights.sum()) > 0.0:
+            expected_nps_delta = float(
+                np.average(delta_nps.loc[valid_delta].astype(float), weights=valid_weights.astype(float))
+            )
+        else:
+            expected_nps_delta = float(delta_nps.loc[valid_delta].astype(float).mean())
+    else:
+        expected_nps_delta = 0.0
 
     return IncidentRationaleSummary(
         topics_analyzed=int(len(df)),
@@ -316,4 +409,7 @@ def summarize_incident_nps_rationale(
         top3_incident_share=float(max(0.0, min(1.0, top3_share))),
         confidence_mean=float(conf.mean()),
         median_lag_weeks=lag_med,
+        peak_focus_probability=float(focus_prob.max()) if not focus_prob.empty else 0.0,
+        expected_nps_delta=expected_nps_delta,
+        total_nps_impact=float(total_impact.sum()) if not total_impact.empty else float(risk.sum()),
     )

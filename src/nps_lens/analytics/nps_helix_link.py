@@ -718,9 +718,14 @@ def weekly_aggregates(
     else:
         nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
 
+    count_col = "ID" if "ID" in nps.columns else date_col_nps
     overall_nps = (
         nps.groupby("week")
-        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .agg(
+            responses=(count_col, "count"),
+            focus_count=("is_focus", "sum"),
+            nps_mean=("NPS", "mean"),
+        )
         .reset_index()
     )
     overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
@@ -736,7 +741,11 @@ def weekly_aggregates(
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
         nps.groupby(["week", "nps_topic"])
-        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .agg(
+            responses=(count_col, "count"),
+            focus_count=("is_focus", "sum"),
+            nps_mean=("NPS", "mean"),
+        )
         .reset_index()
     )
     by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace(
@@ -803,9 +812,14 @@ def daily_aggregates(
     else:
         nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
 
+    count_col = "ID" if "ID" in nps.columns else date_col_nps
     overall_nps = (
         nps.groupby("date")
-        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .agg(
+            responses=(count_col, "count"),
+            focus_count=("is_focus", "sum"),
+            nps_mean=("NPS", "mean"),
+        )
         .reset_index()
     )
     overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
@@ -819,7 +833,11 @@ def daily_aggregates(
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
         nps.groupby(["date", "nps_topic"])
-        .agg(responses=("ID", "count"), focus_count=("is_focus", "sum"))
+        .agg(
+            responses=(count_col, "count"),
+            focus_count=("is_focus", "sum"),
+            nps_mean=("NPS", "mean"),
+        )
         .reset_index()
     )
     by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace(

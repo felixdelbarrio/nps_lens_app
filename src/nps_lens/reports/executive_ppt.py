@@ -22,6 +22,10 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
+from nps_lens.analytics.incident_attribution import (
+    EXECUTIVE_JOURNEY_CATALOG,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
     summarize_hotspot_counts,
@@ -29,22 +33,8 @@ from nps_lens.analytics.hotspot_metrics import (
 from nps_lens.analytics.hotspot_metrics import (
     build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
 )
-
-BBVA_COLORS = {
-    "bg_dark": "061B4E",
-    "bg_light": "F4F7FB",
-    "line": "D6DFEA",
-    "ink": "0A1F44",
-    "muted": "42526E",
-    "white": "FFFFFF",
-    "blue": "004481",
-    "sky": "2DCCCD",
-    "green": "16A34A",
-    "amber": "D97706",
-    "yellow": "FACC15",
-    "orange": "FB923C",
-    "red": "DC2626",
-}
+from nps_lens.design.tokens import DesignTokens, executive_report_palette
+BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
 
 BBVA_FONT_HEAD = "BentonSansBBVA Bold"
 BBVA_FONT_BODY = "BentonSansBBVA Book"
@@ -99,6 +89,21 @@ def _safe_int(v: object, default: int = 0) -> int:
     except Exception:
         return int(default)
     return int(i)
+
+
+def _fmt_pct_or_nd(v: object) -> str:
+    f = _safe_float(v, default=float("nan"))
+    return "n/d" if not np.isfinite(f) else f"{f*100:.0f}%"
+
+
+def _fmt_signed_or_nd(v: object, decimals: int = 1) -> str:
+    f = _safe_float(v, default=float("nan"))
+    return "n/d" if not np.isfinite(f) else f"{f:+.{int(decimals)}f}"
+
+
+def _fmt_num_or_nd(v: object, decimals: int = 2) -> str:
+    f = _safe_float(v, default=float("nan"))
+    return "n/d" if not np.isfinite(f) else f"{f:.{int(decimals)}f}"
 
 
 def _clip(txt: object, max_len: int) -> str:
@@ -396,6 +401,513 @@ def _add_period_summary_slide(
         r3.font.name = BBVA_FONT_BODY
         r3.font.size = Pt(12)
         r3.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+
+def _add_impact_chain_slide(
+    prs: Presentation,
+    *,
+    cards: list[object],
+    focus_name: str,
+    period_label: str,
+    presentation_mode: str = "",
+) -> None:
+    if str(presentation_mode or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+        _add_executive_journey_summary_slide(
+            prs,
+            cards=cards,
+            focus_name=focus_name,
+            period_label=period_label,
+        )
+        return
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title="Marco causal",
+        subtitle=f"Cómo se atribuye el impacto: incidencia -> touchpoint -> VoC -> NPS · periodo {period_label}",
+    )
+    steps = [
+        ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
+        ("2. Touchpoint", "Se identifica el momento del journey afectado, no solo el sistema técnico."),
+        ("3. Palanca / subpalanca", "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app."),
+        ("4. Comentario VoC", "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas."),
+        ("5. NPS", f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total."),
+    ]
+    left = 0.80
+    top = 1.70
+    width = 11.7
+    gap = 0.15
+    box_h = 0.78
+    for idx, (title, body) in enumerate(steps):
+        box = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+            Inches(left),
+            Inches(top + idx * (box_h + gap)),
+            Inches(width),
+            Inches(box_h),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+        box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+        tf = box.text_frame
+        tf.clear()
+        p1 = tf.paragraphs[0]
+        r1 = p1.add_run()
+        r1.text = title
+        r1.font.name = BBVA_FONT_MEDIUM
+        r1.font.bold = True
+        r1.font.size = Pt(14)
+        r1.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+        p2 = tf.add_paragraph()
+        r2 = p2.add_run()
+        r2.text = body
+        r2.font.name = BBVA_FONT_BODY
+        r2.font.size = Pt(11.5)
+        r2.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    note = slide.shapes.add_textbox(Inches(0.90), Inches(6.45), Inches(11.4), Inches(0.55))
+    ntf = note.text_frame
+    ntf.clear()
+    np = ntf.paragraphs[0]
+    nr = np.add_run()
+    nr.text = (
+        "Solo se presentan temas con link explícito entre Helix y VoC. "
+        "Se excluyen etiquetas genéricas sin comentario defendible, como 'Sin comentarios'."
+    )
+    nr.font.name = BBVA_FONT_BODY
+    nr.font.size = Pt(11.5)
+    nr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+
+def _add_executive_journey_summary_slide(
+    prs: Presentation,
+    *,
+    cards: list[object],
+    focus_name: str,
+    period_label: str,
+) -> None:
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    focus_label = "detracción" if str(focus_name).strip().lower() == "detractores" else str(focus_name)
+    _add_header(
+        slide,
+        title=f"NPS Lens — Journeys que explican la {focus_label}",
+        subtitle=f"Resumen ejecutivo 1 página · periodo {period_label}",
+    )
+
+    objective = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.72),
+        Inches(1.42),
+        Inches(12.0),
+        Inches(1.08),
+    )
+    objective.fill.solid()
+    objective.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    objective.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    otf = objective.text_frame
+    otf.clear()
+    op = otf.paragraphs[0]
+    or1 = op.add_run()
+    or1.text = "Objetivo"
+    or1.font.name = BBVA_FONT_HEAD
+    or1.font.bold = True
+    or1.font.size = Pt(16)
+    or1.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    op2 = otf.add_paragraph()
+    or2 = op2.add_run()
+    or2.text = (
+        "Identificar rutas de degradación de experiencia que conectan señales operativas "
+        "(incidencias) con la voz del cliente (NPS) para priorizar causas raíz accionables."
+    )
+    or2.font.name = BBVA_FONT_BODY
+    or2.font.size = Pt(11.5)
+    or2.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    table_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.72),
+        Inches(2.72),
+        Inches(12.0),
+        Inches(2.42),
+    )
+    table_box.fill.solid()
+    table_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    table_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+
+    catalog_rows = list(EXECUTIVE_JOURNEY_CATALOG)
+    row_y = 2.92
+    cols = [0.92, 3.15, 6.45, 10.15]
+    headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en NPS"]
+    for idx, header in enumerate(headers):
+        tb = slide.shapes.add_textbox(Inches(cols[idx]), Inches(row_y), Inches(2.2), Inches(0.26))
+        ttf = tb.text_frame
+        ttf.clear()
+        p = ttf.paragraphs[0]
+        r = p.add_run()
+        r.text = header
+        r.font.name = BBVA_FONT_MEDIUM
+        r.font.bold = True
+        r.font.size = Pt(11.5)
+        r.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+
+    for row_idx, journey in enumerate(catalog_rows[:3], start=1):
+        card = next(
+            (
+                item
+                for item in cards
+                if str(item.get("nps_topic", "") if isinstance(item, dict) else "") == str(journey["title"])
+            ),
+            None,
+        )
+        current_y = row_y + 0.32 + (row_idx - 1) * 0.58
+        values = [
+            f"{row_idx}. {journey['title']}",
+            str(journey["what_occurs"]),
+            str(journey["expected_evidence"]),
+            str(journey["impact_label"]),
+        ]
+        if isinstance(card, dict):
+            impact_override = str(card.get("journey_impact_label", "")).strip()
+            if impact_override:
+                values[3] = impact_override
+        widths = [2.0, 3.05, 3.45, 1.55]
+        for idx, (value, width) in enumerate(zip(values, widths)):
+            tb = slide.shapes.add_textbox(
+                Inches(cols[idx]),
+                Inches(current_y),
+                Inches(width),
+                Inches(0.42),
+            )
+            ttf = tb.text_frame
+            ttf.clear()
+            p = ttf.paragraphs[0]
+            r = p.add_run()
+            r.text = _clip(value, 84)
+            r.font.name = BBVA_FONT_BODY
+            r.font.size = Pt(10.8)
+            r.font.color.rgb = _rgb(BBVA_COLORS["ink"] if idx == 0 else BBVA_COLORS["muted"])
+
+    left_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.72),
+        Inches(5.42),
+        Inches(5.85),
+        Inches(1.25),
+    )
+    left_box.fill.solid()
+    left_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    left_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    ltf = left_box.text_frame
+    ltf.clear()
+    lp = ltf.paragraphs[0]
+    lr = lp.add_run()
+    lr.text = "Valor diferencial de NPS Lens"
+    lr.font.name = BBVA_FONT_HEAD
+    lr.font.bold = True
+    lr.font.size = Pt(16)
+    lr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    for line in [
+        "Temas mencionados por clientes -> Journeys de caída de experiencia",
+        "Comentarios aislados -> Conexión con incidencias operativas",
+        "Insights descriptivos -> Hipótesis causales accionables",
+    ]:
+        p = ltf.add_paragraph()
+        p.text = f"• {_clip(line, 85)}"
+        p.font.name = BBVA_FONT_BODY
+        p.font.size = Pt(10.8)
+        p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    right_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(6.85),
+        Inches(5.42),
+        Inches(5.87),
+        Inches(1.25),
+    )
+    right_box.fill.solid()
+    right_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    right_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    rtf = right_box.text_frame
+    rtf.clear()
+    rp = rtf.paragraphs[0]
+    rr = rp.add_run()
+    rr.text = "Resultado esperado"
+    rr.font.name = BBVA_FONT_HEAD
+    rr.font.bold = True
+    rr.font.size = Pt(16)
+    rr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    for line in [
+        "Dónde se rompe la experiencia",
+        "Qué incidencias lo provocan",
+        f"Cuántos {focus_name} genera",
+        "Qué acciones priorizar",
+    ]:
+        p = rtf.add_paragraph()
+        p.text = f"• {line}"
+        p.font.name = BBVA_FONT_BODY
+        p.font.size = Pt(10.8)
+        p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+
+def _chain_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if value is None:
+        return []
+    txt = str(value).strip()
+    return [txt] if txt else []
+
+
+def _chain_header(label: str, shown: int, total: int) -> str:
+    if shown < total:
+        return f"{label} ({shown} de {total})"
+    return f"{label} ({shown})"
+
+
+def _chain_priority_summary(chain_row: pd.Series, *, focus_name: str) -> list[str]:
+    owner = str(chain_row.get("owner_role", "") or "").strip()
+    lane = str(chain_row.get("action_lane", "") or "").strip()
+    eta_weeks = _safe_float(chain_row.get("eta_weeks", np.nan), default=np.nan)
+    responses = _safe_float(chain_row.get("responses", np.nan), default=np.nan)
+    incidents = _safe_float(chain_row.get("incidents", np.nan), default=np.nan)
+    incident_rate = _safe_float(
+        chain_row.get("incident_rate_per_100_responses", np.nan),
+        default=np.nan,
+    )
+    delta_focus = _safe_float(chain_row.get("delta_focus_rate_pp", np.nan), default=np.nan)
+    risk = _safe_float(chain_row.get("nps_points_at_risk", np.nan), default=np.nan)
+    recoverable = _safe_float(chain_row.get("nps_points_recoverable", np.nan), default=np.nan)
+    priority = _safe_float(chain_row.get("priority", np.nan), default=np.nan)
+    confidence = _safe_float(chain_row.get("confidence", np.nan), default=np.nan)
+    parts_top = [
+        f"Prioridad {_fmt_num_or_nd(priority)}",
+        f"Confianza {_fmt_num_or_nd(confidence)}",
+        f"NPS en riesgo {_fmt_num_or_nd(risk)} pts",
+        f"NPS recuperable {_fmt_num_or_nd(recoverable)} pts",
+    ]
+    parts_bottom = [
+        f"Delta % {focus_name} {_fmt_signed_or_nd(delta_focus)} pp",
+        f"Incidencias/100 resp. {_fmt_num_or_nd(incident_rate)}",
+        f"Incidencias {_fmt_num_or_nd(incidents, decimals=0)}",
+        f"Respuestas {_fmt_num_or_nd(responses, decimals=0)}",
+    ]
+    if lane:
+        parts_bottom.append(f"Lane {lane}")
+    if owner:
+        parts_bottom.append(f"Owner {owner}")
+    if np.isfinite(eta_weeks):
+        parts_bottom.append(f"ETA {eta_weeks:.1f} semanas")
+    return [
+        " · ".join(parts_top),
+        " · ".join(parts_bottom),
+    ]
+
+
+def _add_chain_evidence_slide(
+    prs: Presentation,
+    *,
+    chain_row: pd.Series,
+    idx: int,
+    focus_name: str,
+    period_label: str,
+) -> None:
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+
+    topic = _clip(chain_row.get("nps_topic", "Tema sin etiqueta"), 72)
+    touchpoint = _clip(chain_row.get("touchpoint", "Touchpoint sin etiqueta"), 42)
+    palanca = _clip(chain_row.get("palanca", "n/d"), 30)
+    subpalanca = _clip(chain_row.get("subpalanca", "n/d"), 36)
+    presentation_mode = str(chain_row.get("presentation_mode", "") or "").strip()
+    linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
+    linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
+    helix_lines = _chain_list(chain_row.get("incident_examples"))[:5]
+    voc_lines = _chain_list(chain_row.get("comment_examples"))[:2]
+    shown_incidents = len(helix_lines)
+    shown_comments = len(voc_lines)
+    header_title = (
+        f"Journey {idx}: {topic}"
+        if presentation_mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+        else f"Tema prioritario {idx}: {touchpoint}"
+    )
+    _add_header(
+        slide,
+        title=header_title,
+        subtitle=f"{topic} · periodo {period_label}",
+    )
+
+    flow_y = 1.55
+    step_w = 2.32
+    step_gap = 0.18
+    step_titles = [
+        f"({shown_incidents}) Incidencias",
+        touchpoint,
+        f"{palanca} / {subpalanca}",
+        f"({shown_comments}) Comentarios VoC",
+        "NPS",
+    ]
+    step_colors = ["sky", "blue", "green", "orange", "red"]
+    for s_idx, (label, color_key) in enumerate(zip(step_titles, step_colors)):
+        x = 0.70 + s_idx * (step_w + step_gap)
+        box = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+            Inches(x),
+            Inches(flow_y),
+            Inches(step_w),
+            Inches(0.72),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+        box.line.color.rgb = _rgb(BBVA_COLORS[color_key])
+        tf = box.text_frame
+        tf.clear()
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = label
+        r.font.name = BBVA_FONT_MEDIUM
+        r.font.size = Pt(12)
+        r.font.bold = True
+        r.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+        if s_idx < len(step_titles) - 1:
+            arr = slide.shapes.add_textbox(
+                Inches(x + step_w),
+                Inches(flow_y + 0.18),
+                Inches(step_gap),
+                Inches(0.30),
+            )
+            atf = arr.text_frame
+            atf.clear()
+            ap = atf.paragraphs[0]
+            ap.alignment = PP_ALIGN.CENTER
+            ar = ap.add_run()
+            ar.text = "→"
+            ar.font.name = BBVA_FONT_HEAD
+            ar.font.size = Pt(16)
+            ar.font.bold = True
+            ar.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    metric_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.70),
+        Inches(2.45),
+        Inches(12.0),
+        Inches(0.88),
+    )
+    metric_box.fill.solid()
+    metric_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    metric_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    mtf = metric_box.text_frame
+    mtf.clear()
+    metrics = [
+        f"Prob. {focus_name}: {_fmt_pct_or_nd(chain_row.get('detractor_probability', np.nan))}",
+        f"Delta NPS: {_fmt_signed_or_nd(chain_row.get('nps_delta_expected', np.nan))}",
+        f"Impacto total: {_fmt_num_or_nd(chain_row.get('total_nps_impact', 0.0))} pts",
+        f"Links validados: {int(_safe_int(chain_row.get('linked_pairs', 0), default=0))}",
+        f"Confianza: {_fmt_num_or_nd(chain_row.get('confidence', 0.0))}",
+    ]
+    for m_idx, metric in enumerate(metrics):
+        p = mtf.paragraphs[0] if m_idx == 0 else mtf.add_paragraph()
+        p.level = 0
+        r = p.add_run()
+        r.text = metric
+        r.font.name = BBVA_FONT_BODY
+        r.font.size = Pt(11)
+        r.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    helix_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.70),
+        Inches(3.55),
+        Inches(5.85),
+        Inches(2.45),
+    )
+    helix_box.fill.solid()
+    helix_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    helix_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    htf = helix_box.text_frame
+    htf.clear()
+    hp = htf.paragraphs[0]
+    hr = hp.add_run()
+    hr.text = _chain_header("Evidencia Helix", shown_incidents, linked_incidents)
+    hr.font.name = BBVA_FONT_HEAD
+    hr.font.size = Pt(18)
+    hr.font.bold = True
+    hr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    if not helix_lines:
+        helix_lines = ["No hay suficiente evidencia Helix validada para elevar otro caso."]
+    for line in helix_lines:
+        p = htf.add_paragraph()
+        p.text = f"• {_clip(line, 170)}"
+        p.font.name = BBVA_FONT_BODY
+        p.font.size = Pt(11.5)
+        p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    voc_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(6.82),
+        Inches(3.55),
+        Inches(5.88),
+        Inches(2.45),
+    )
+    voc_box.fill.solid()
+    voc_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    voc_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    vtf = voc_box.text_frame
+    vtf.clear()
+    vp = vtf.paragraphs[0]
+    vr = vp.add_run()
+    vr.text = _chain_header("Evidencia Voz del Cliente", shown_comments, linked_comments)
+    vr.font.name = BBVA_FONT_HEAD
+    vr.font.size = Pt(18)
+    vr.font.bold = True
+    vr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    if not voc_lines:
+        voc_lines = ["No hay suficiente evidencia VoC enlazada para construir otro relato defendible."]
+    for line in voc_lines:
+        p = vtf.add_paragraph()
+        p.text = f"• {_clip(line, 170)}"
+        p.font.name = BBVA_FONT_BODY
+        p.font.size = Pt(11.5)
+        p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    footer_box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.70),
+        Inches(6.18),
+        Inches(12.0),
+        Inches(0.84),
+    )
+    footer_box.fill.solid()
+    footer_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    footer_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+    ftf = footer_box.text_frame
+    ftf.clear()
+    fp = ftf.paragraphs[0]
+    fr = fp.add_run()
+    fr.text = "Priorización del tema"
+    fr.font.name = BBVA_FONT_HEAD
+    fr.font.size = Pt(13)
+    fr.font.bold = True
+    fr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    for line in _chain_priority_summary(chain_row, focus_name=focus_name):
+        p = ftf.add_paragraph()
+        p.text = _clip(line, 175)
+        p.font.name = BBVA_FONT_BODY
+        p.font.size = Pt(10.6)
+        p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    concl = slide.shapes.add_textbox(Inches(0.78), Inches(7.04), Inches(11.8), Inches(0.22))
+    ctf = concl.text_frame
+    ctf.clear()
+    cp = ctf.paragraphs[0]
+    cr = cp.add_run()
+    cr.text = _clip(chain_row.get("chain_story", ""), 170)
+    cr.font.name = BBVA_FONT_BODY
+    cr.font.size = Pt(9.8)
+    cr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
 def _pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str:
@@ -1706,6 +2218,10 @@ def _topic_metrics(topic: str, rationale_df: pd.DataFrame) -> dict[str, float]:
         "recoverable": _safe_float(r.get("nps_points_recoverable", 0.0), default=0.0),
         "priority": _safe_float(r.get("priority", 0.0), default=0.0),
         "confidence": _safe_float(r.get("confidence", 0.0), default=0.0),
+        "focus_probability": _safe_float(r.get("focus_probability_with_incident", np.nan), default=np.nan),
+        "nps_delta_expected": _safe_float(r.get("nps_delta_expected", np.nan), default=np.nan),
+        "total_nps_impact": _safe_float(r.get("total_nps_impact", 0.0), default=0.0),
+        "causal_score": _safe_float(r.get("causal_score", 0.0), default=0.0),
         "lag_weeks": _safe_float(r.get("best_lag_weeks", np.nan), default=np.nan),
     }
 
@@ -1726,6 +2242,7 @@ def generate_business_review_ppt(
     median_lag_weeks: float,
     story_md: str,
     script_8slides_md: str,
+    attribution_df: Optional[pd.DataFrame] = None,
     ranking_df: Optional[pd.DataFrame] = None,
     by_topic_daily: Optional[pd.DataFrame] = None,
     lag_days_by_topic: Optional[pd.DataFrame] = None,
@@ -1738,6 +2255,7 @@ def generate_business_review_ppt(
     changepoints_by_topic: Optional[pd.DataFrame] = None,
     incident_timeline_df: Optional[pd.DataFrame] = None,
     hotspot_focus_note: str = "",
+    touchpoint_source: str = "",
 ) -> BusinessPptResult:
     """Build a business deck focused on daily NPS, matched incidents and top-3 zooms."""
     del (
@@ -1789,6 +2307,14 @@ def generate_business_review_ppt(
                 else "El NPS medio diario se calcula sobre respuestas reales del periodo."
             ),
         ],
+    )
+
+    _add_impact_chain_slide(
+        prs,
+        cards=(attribution_df.head(3).to_dict(orient="records") if attribution_df is not None else []),
+        focus_name=focus_name,
+        period_label=period_label,
+        presentation_mode=touchpoint_source,
     )
 
     top_topics = _top_topics_for_zoom(rationale_df, ranking_df, max_topics=3)
@@ -1863,11 +2389,52 @@ def generate_business_review_ppt(
     )
 
     cp_map = _changepoints_map(changepoints_by_topic)
+    chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
 
-    for idx, incident in enumerate(zoom_incidents, start=1):
-        lag_days = _lag_days_for_topic(
-            incident.nps_topic,
-            lag_days_by_topic=lag_days_by_topic,
+    if chains is not None and not chains.empty:
+        chain_rows = [row.copy() for _, row in chains.head(3).iterrows()]
+        while len(chain_rows) < 3:
+            chain_rows.append(
+                pd.Series(
+                    {
+                        "nps_topic": "Sin evidencia defendible",
+                        "touchpoint": "n/d",
+                        "palanca": "n/d",
+                        "subpalanca": "n/d",
+                        "detractor_probability": np.nan,
+                        "nps_delta_expected": np.nan,
+                        "total_nps_impact": 0.0,
+                        "linked_pairs": 0,
+                        "confidence": 0.0,
+                        "priority": 0.0,
+                        "nps_points_at_risk": 0.0,
+                        "nps_points_recoverable": 0.0,
+                        "delta_focus_rate_pp": np.nan,
+                        "incident_rate_per_100_responses": np.nan,
+                        "incidents": 0.0,
+                        "responses": np.nan,
+                        "action_lane": "",
+                        "owner_role": "",
+                        "eta_weeks": np.nan,
+                        "incident_examples": [],
+                        "comment_examples": [],
+                        "chain_story": "No se encontraron suficientes links explícitos Helix ↔ VoC para defender otro tema en comité.",
+                    }
+                )
+            )
+        for idx, chain_row in enumerate(chain_rows, start=1):
+            _add_chain_evidence_slide(
+                prs,
+                chain_row=chain_row,
+                idx=idx,
+                focus_name=focus_name,
+                period_label=period_label,
+            )
+    else:
+        for idx, incident in enumerate(zoom_incidents, start=1):
+            lag_days = _lag_days_for_topic(
+                incident.nps_topic,
+                lag_days_by_topic=lag_days_by_topic,
             lag_weeks_by_topic=lag_weeks_by_topic,
             rationale_df=rationale_df,
             ranking_df=ranking_df,
@@ -2013,8 +2580,8 @@ def generate_business_review_ppt(
                 ),
                 f"Lag estimado: {int(lag_days)} días ({lag_weeks_txt}) · change points detectados: {len(cp_list)}.",
                 (
-                    f"Impacto estimado en negocio: riesgo {metrics.get('risk', 0.0):.2f} pts NPS, "
-                    f"recuperable {metrics.get('recoverable', 0.0):.2f} pts, prioridad {metrics.get('priority', 0.0):.2f}."
+                    f"Impacto estimado en negocio: prob. foco {_fmt_pct_or_nd(metrics.get('focus_probability', np.nan))}, "
+                    f"delta NPS {_fmt_signed_or_nd(metrics.get('nps_delta_expected', np.nan))}, impacto total {_fmt_num_or_nd(metrics.get('total_nps_impact', 0.0))} pts, prioridad {_fmt_num_or_nd(metrics.get('priority', 0.0))}."
                 ),
                 (
                     f"Lenguaje de negocio: al corregir esta incidencia se reduce la fricción "

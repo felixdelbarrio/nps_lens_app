@@ -145,3 +145,24 @@ def cp_level_color(tokens: DesignTokens, mode: str, level: str) -> str:
     if lv == "medium":
         return p["color.primary.bg.warning"]
     return p["color.primary.bg.bar"]
+
+
+def executive_report_palette(tokens: DesignTokens, mode: str = "light") -> dict[str, str]:
+    """Presentation palette derived from the centralized token set."""
+
+    p = palette(tokens, mode)
+    return {
+        "bg_dark": "061B4E",
+        "bg_light": "F4F7FB",
+        "line": p["color.primary.bg.bar"].lstrip("#").upper(),
+        "ink": p["color.primary.text.primary"].lstrip("#").upper(),
+        "muted": "42526E",
+        "white": "FFFFFF",
+        "blue": p["color.primary.bg.action.default"].lstrip("#").upper(),
+        "sky": p["color.primary.accent.value-01.default"].lstrip("#").upper(),
+        "green": p["color.primary.bg.success"].lstrip("#").upper(),
+        "amber": "D97706",
+        "yellow": p["color.primary.bg.warning"].lstrip("#").upper(),
+        "orange": "FB923C",
+        "red": p["color.primary.bg.alert"].lstrip("#").upper(),
+    }
