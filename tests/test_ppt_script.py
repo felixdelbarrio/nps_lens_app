@@ -14,13 +14,21 @@ def test_build_ppt_8slide_script_contains_all_slides() -> None:
         top3_incident_share=0.72,
         confidence_mean=0.64,
         median_lag_weeks=1.5,
+        peak_focus_probability=0.46,
+        expected_nps_delta=-3.8,
+        total_nps_impact=2.2,
     )
     rationale_df = pd.DataFrame(
         [
             {
                 "nps_topic": "Pagos > SPEI",
+                "touchpoint": "Pagos",
                 "priority": 0.81,
                 "confidence": 0.74,
+                "focus_probability_with_incident": 0.46,
+                "nps_delta_expected": -3.8,
+                "total_nps_impact": 1.2,
+                "causal_score": 0.79,
                 "delta_focus_rate_pp": 6.2,
                 "nps_points_at_risk": 0.9,
                 "nps_points_recoverable": 0.6,
@@ -40,5 +48,6 @@ def test_build_ppt_8slide_script_contains_all_slides() -> None:
     )
     assert "Slide 1" in out
     assert "Slide 8" in out
-    assert "NPS en riesgo" in out
-    assert "Decisiones requeridas al comité" in out
+    assert "Impact Chain" in out
+    assert "impacto total en NPS" in out
+    assert "Gobierno y métricas" in out

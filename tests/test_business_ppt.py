@@ -6,6 +6,7 @@ from io import BytesIO
 import pandas as pd
 from pptx import Presentation
 
+from nps_lens.analytics.incident_attribution import TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 
@@ -38,24 +39,39 @@ def _sample_payload() -> dict:
         [
             {
                 "nps_topic": "Pagos > SPEI",
+                "touchpoint": "Pagos",
                 "priority": 0.91,
                 "confidence": 0.80,
+                "focus_probability_with_incident": 0.47,
+                "nps_delta_expected": -4.8,
+                "total_nps_impact": 1.9,
+                "causal_score": 0.84,
                 "nps_points_at_risk": 1.9,
                 "nps_points_recoverable": 1.2,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Acceso > Login",
+                "touchpoint": "Acceso",
                 "priority": 0.79,
                 "confidence": 0.71,
+                "focus_probability_with_incident": 0.39,
+                "nps_delta_expected": -3.6,
+                "total_nps_impact": 1.1,
+                "causal_score": 0.77,
                 "nps_points_at_risk": 1.1,
                 "nps_points_recoverable": 0.7,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Tarjetas > Bloqueo",
+                "touchpoint": "Tarjetas",
                 "priority": 0.68,
                 "confidence": 0.64,
+                "focus_probability_with_incident": 0.31,
+                "nps_delta_expected": -2.8,
+                "total_nps_impact": 0.9,
+                "causal_score": 0.66,
                 "nps_points_at_risk": 0.9,
                 "nps_points_recoverable": 0.5,
                 "best_lag_weeks": 2.0,
@@ -100,6 +116,49 @@ def _sample_payload() -> dict:
         }
     )
 
+    attribution = pd.DataFrame(
+        [
+            {
+                "nps_topic": "Acceso > Login",
+                "touchpoint": "Login",
+                "palanca": "Acceso",
+                "subpalanca": "Login",
+                "linked_incidents": 5,
+                "linked_comments": 2,
+                "linked_pairs": 5,
+                "avg_similarity": 0.89,
+                "avg_nps": 1.5,
+                "detractor_probability": 0.47,
+                "nps_delta_expected": -4.8,
+                "total_nps_impact": 1.7,
+                "nps_points_at_risk": 1.7,
+                "nps_points_recoverable": 1.1,
+                "priority": 0.91,
+                "confidence": 0.82,
+                "causal_score": 0.86,
+                "delta_focus_rate_pp": 29.0,
+                "incident_rate_per_100_responses": 8.5,
+                "incidents": 5,
+                "responses": 120,
+                "action_lane": "Fix estructural",
+                "owner_role": "Producto + Tecnologia",
+                "eta_weeks": 6.0,
+                "incident_examples": [
+                    "INC00001: problema en el login",
+                    "INC00003: no puedo acceder",
+                    "INC00025: nada mas entras se desloguea",
+                    "INC00040: error al autenticar usuario en acceso web",
+                    "INC00041: falla de sesion al entrar en portal empresas",
+                ],
+                "comment_examples": [
+                    "NPS 1: No hay quien entre a la aplicación",
+                    "NPS 2: La web expulsa al usuario al entrar",
+                ],
+                "chain_story": "5 incidencias Helix degradan el touchpoint Login y se reflejan en 2 comentarios VoC con NPS muy bajo.",
+            }
+        ]
+    )
+
     return {
         "overall_daily": overall_daily,
         "by_topic_daily": by_topic_daily,
@@ -107,6 +166,7 @@ def _sample_payload() -> dict:
         "lag_days": lag_days,
         "incident_evidence": incident_evidence,
         "changepoints": changepoints,
+        "attribution": attribution,
     }
 
 
@@ -128,6 +188,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         median_lag_weeks=1.2,
         story_md="",
         script_8slides_md="",
+        attribution_df=payload["attribution"],
         ranking_df=payload["rationale"],
         by_topic_daily=payload["by_topic_daily"],
         lag_days_by_topic=payload["lag_days"],
@@ -140,10 +201,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 7
+    assert out.slide_count == 8
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 7
+    assert len(prs.slides) == 8
 
     texts = []
     for slide in prs.slides:
@@ -158,10 +219,17 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("NIVEL N2" in t for t in texts)
     assert any("MES EN CURSO" in t for t in texts)
     assert any("Evolución histórica diaria de NPS e incidencias" in t for t in texts)
+    assert any("Marco causal" in t for t in texts)
     assert any("Top 3 hotspots operativos" in t for t in texts)
     assert any("Incidencias históricas diarias por hotspot" in t for t in texts)
-    assert any("Zoom de foco caliente 1" in t for t in texts)
-    assert any("INC-9001" in t for t in texts)
+    assert any("Tema prioritario 1: Login" in t for t in texts)
+    assert any("Evidencia Helix" in t for t in texts)
+    assert any("INC00001: problema en el login" in t for t in texts)
+    assert any("INC00041: falla de sesion al entrar en portal empresas" in t for t in texts)
+    assert any("No hay quien entre a la aplicación" in t for t in texts)
+    assert any("La web expulsa al usuario al entrar" in t for t in texts)
+    assert any("Priorización del tema" in t for t in texts)
+    assert any("Fix estructural" in t for t in texts)
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -181,6 +249,7 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         median_lag_weeks=1.2,
         story_md="",
         script_8slides_md="",
+        attribution_df=payload["attribution"],
         by_topic_daily=payload["by_topic_daily"],
         logo_path=None,
     )
@@ -188,6 +257,59 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
     assert "/" not in out.file_name
     assert ":" not in out.file_name
     assert "?" not in out.file_name
+
+
+def test_generate_business_review_ppt_can_render_executive_journey_slide() -> None:
+    payload = _sample_payload()
+    attribution = payload["attribution"].copy()
+    attribution.loc[:, "nps_topic"] = [
+        "Acceso bloqueado",
+    ]
+    attribution.loc[:, "touchpoint"] = ["Login / autenticación"]
+    attribution.loc[:, "palanca"] = ["Acceso"]
+    attribution.loc[:, "subpalanca"] = ["Bloqueo / OTP"]
+    attribution.loc[:, "journey_expected_evidence"] = [
+        "Comentarios sobre login + incidencias de autenticación"
+    ]
+    attribution.loc[:, "journey_impact_label"] = ["Muy alto"]
+    attribution.loc[:, "presentation_mode"] = [TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS]
+
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="Empresas Mobile",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        overall_weekly=payload["overall_daily"],
+        rationale_df=payload["rationale"],
+        nps_points_at_risk=3.9,
+        nps_points_recoverable=2.4,
+        top3_incident_share=0.74,
+        median_lag_weeks=1.2,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=attribution,
+        ranking_df=payload["rationale"],
+        by_topic_daily=payload["by_topic_daily"],
+        lag_days_by_topic=payload["lag_days"],
+        logo_path=None,
+        incident_evidence_df=payload["incident_evidence"],
+        changepoints_by_topic=payload["changepoints"],
+        touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert any("Journeys que explican la detracción" in t for t in texts)
+    assert any("Valor diferencial de NPS Lens" in t for t in texts)
+    assert any("Acceso bloqueado" in t for t in texts)
 
 
 def test_history_fig_daily_uses_requested_colors() -> None:

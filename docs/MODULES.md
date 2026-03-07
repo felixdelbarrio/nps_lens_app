@@ -66,7 +66,8 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `drivers.py`: ranking de palancas/subpalancas por impacto/volumen
 - `text_mining.py`: tópicos / keywords (MVP)
 - `nps_helix_link.py`: linking y agregados NPS↔Helix (diario/semanal)
-- `incident_rationale.py`: racional ejecutivo (NPS en riesgo, recuperable, prioridad y plan de acción)
+- `incident_rationale.py`: modelo central de atribución incidencia -> journey -> VoC -> NPS (probabilidad de foco, delta NPS esperado, impacto total, prioridad y plan de acción)
+- `incident_attribution.py`: cadenas causales presentables basadas en links explícitos Helix ↔ VoC con evidencias reutilizables en app, pack y PPT
 - `causal.py`: score causal best‑effort con logit / heurísticas
 - `changepoints.py`: detección de cambios (ruptures opcional)
 
@@ -76,7 +77,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `pack.py`: generación y export de packs (Markdown + JSON)
 
 ### `nps_lens.reports.*`
-- `executive_ppt.py`: composición de PPT de negocio (scope, KPI, gráficos y plan de acción)
+- `executive_ppt.py`: composición de PPT de negocio (scope, KPI, gráficos, Impact Chain y plan de acción) usando la misma fuente de verdad analítica que la UI
 
 ### `nps_lens.platform.*`
 - `batch.py`: ejecución headless según config JSON
@@ -86,7 +87,8 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `theme.py`: tema tokenizado (light/dark) + CSS quirúrgico
 - `population.py`: Año/Mes/Grupo como control global (y window temporal)
 - `charts.py`: charts y tablas (Plotly/Streamlit)
-- `narratives.py`: textos ejecutivos (explicaciones)
+- `narratives.py`: textos ejecutivos y narrativa causal reusable para UI/PPT
+- `components.py`: componentes visuales reutilizables, incluido el bloque `Impact Chain`
 - `business.py`: utilidades de slicing y ventanas
 
 ---

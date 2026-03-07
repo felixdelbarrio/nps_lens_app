@@ -28,6 +28,12 @@ from nps_lens.analytics.hotspot_metrics import (
     select_best_business_axis_for_hotspots,
     summarize_hotspot_counts,
 )
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_DOMAIN,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    TOUCHPOINT_SOURCE_HELIX_N2,
+    build_incident_attribution_chains,
+)
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
@@ -82,7 +88,7 @@ from nps_lens.ui.charts import (
     chart_nps_trend,
     chart_topic_bars,
 )
-from nps_lens.ui.components import card, kpi, pills, section
+from nps_lens.ui.components import card, executive_banner, impact_chain, kpi, pills, section
 from nps_lens.ui.narratives import (
     build_executive_story,
     build_incident_ppt_story,
@@ -435,6 +441,141 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     for c in out.select_dtypes(include=["float64", "float32"]).columns:
         out[c] = pd.to_numeric(out[c], downcast="float")
 
+    return out
+
+
+def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
+    if chain_df is None or chain_df.empty:
+        return pd.DataFrame()
+
+    out = chain_df.copy().reset_index(drop=True)
+
+    def _safe_int_label(value: object) -> int:
+        try:
+            return int(float(value))
+        except Exception:
+            return 0
+
+    topic = (
+        out.get("nps_topic", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    )
+    touchpoint = (
+        out.get("touchpoint", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    )
+    out["chain_key"] = [
+        hashlib.sha1(f"{tp}|{tpnt}".encode("utf-8")).hexdigest()[:12]
+        for tp, tpnt in zip(topic.tolist(), touchpoint.tolist())
+    ]
+    out["selection_label"] = [
+        (
+            f"{touchpoint_val or 'Touchpoint sin etiquetar'} | {topic_val or 'Tema sin etiqueta'} | "
+            f"{_safe_int_label(inc)} INC | {_safe_int_label(com)} VoC"
+        )
+        for topic_val, touchpoint_val, inc, com in zip(
+            topic.tolist(),
+            touchpoint.tolist(),
+            out.get("linked_incidents", pd.Series([0] * len(out), index=out.index)).tolist(),
+            out.get("linked_comments", pd.Series([0] * len(out), index=out.index)).tolist(),
+        )
+    ]
+    return out
+
+
+def _sync_chain_selection_state(
+    chain_df: pd.DataFrame,
+    *,
+    key_prefix: str,
+    default_limit: int = 3,
+) -> list[str]:
+    if chain_df is None or chain_df.empty:
+        st.session_state[f"{key_prefix}_sig"] = "empty"
+        st.session_state[f"{key_prefix}_selected"] = []
+        st.session_state[f"{key_prefix}_view_idx"] = 0
+        return []
+
+    keys = chain_df["chain_key"].astype(str).tolist()
+    sig = hashlib.sha1("|".join(keys).encode("utf-8")).hexdigest()
+    sig_key = f"{key_prefix}_sig"
+    selected_key = f"{key_prefix}_selected"
+    view_idx_key = f"{key_prefix}_view_idx"
+    if st.session_state.get(sig_key) != sig:
+        st.session_state[sig_key] = sig
+        st.session_state[selected_key] = keys[: min(int(default_limit), len(keys))]
+        st.session_state[view_idx_key] = 0
+
+    selected = [str(k) for k in st.session_state.get(selected_key, []) if str(k) in keys][
+        : int(default_limit)
+    ]
+    if not selected:
+        selected = keys[: min(int(default_limit), len(keys))]
+        st.session_state[selected_key] = selected
+    else:
+        st.session_state[selected_key] = selected
+
+    current_idx = int(st.session_state.get(view_idx_key, 0) or 0)
+    if current_idx < 0 or current_idx >= len(keys):
+        st.session_state[view_idx_key] = 0
+    return selected
+
+
+def _select_chain_rows(chain_df: pd.DataFrame, selected_keys: list[str]) -> pd.DataFrame:
+    if chain_df is None or chain_df.empty:
+        return pd.DataFrame()
+    if not selected_keys:
+        return chain_df.head(0).copy()
+
+    selected = chain_df[
+        chain_df["chain_key"].astype(str).isin([str(k) for k in selected_keys])
+    ].copy()
+    if selected.empty:
+        return selected
+
+    selected["__order"] = pd.Categorical(
+        selected["chain_key"].astype(str),
+        categories=[str(k) for k in selected_keys],
+        ordered=True,
+    )
+    selected = selected.sort_values("__order").drop(columns="__order").reset_index(drop=True)
+    return selected
+
+
+def _cap_chain_evidence_rows(
+    chain_df: pd.DataFrame,
+    *,
+    max_incident_examples: int = 5,
+    max_comment_examples: int = 2,
+) -> pd.DataFrame:
+    if chain_df is None or chain_df.empty:
+        return pd.DataFrame()
+
+    out = chain_df.copy()
+
+    def _normalize_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            values = value
+        elif value in (None, ""):
+            values = []
+        else:
+            values = [value]
+        return [str(v).strip() for v in values if str(v).strip()]
+
+    def _cap(values: list[str], limit: int) -> list[str]:
+        try:
+            max_items = int(limit)
+        except Exception:
+            return values
+        if max_items <= 0:
+            return values
+        return values[:max_items]
+
+    out["incident_examples"] = [
+        _cap(_normalize_list(v), max_incident_examples)
+        for v in out.get("incident_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
+    ]
+    out["comment_examples"] = [
+        _cap(_normalize_list(v), max_comment_examples)
+        for v in out.get("comment_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
+    ]
     return out
 
 
@@ -914,7 +1055,21 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
 
 def render_sidebar(  # noqa: PLR0915
     settings: Settings,
-) -> tuple[Optional[Path], int, str, str, str, str, str, str, Path, str, Optional[str], bool]:
+) -> tuple[
+    Optional[Path],
+    int,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    Path,
+    str,
+    Optional[str],
+    bool,
+    str,
+]:
     """Single-source sidebar: Context -> dataset -> controls.
 
     Context dimensions:
@@ -1221,6 +1376,24 @@ def render_sidebar(  # noqa: PLR0915
             ["light", "dark"],
             index=0 if defaults["theme_mode"] == "light" else 1,
         )
+        touchpoint_mode_labels = {
+            TOUCHPOINT_SOURCE_DOMAIN: "Touchpoint como ahora",
+            TOUCHPOINT_SOURCE_HELIX_N2: "Touchpoint como N2 asignado en Helix",
+            TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+        }
+        current_touchpoint_mode = str(
+            st.session_state.get("_touchpoint_source", TOUCHPOINT_SOURCE_DOMAIN)
+        )
+        if current_touchpoint_mode not in touchpoint_mode_labels:
+            current_touchpoint_mode = TOUCHPOINT_SOURCE_DOMAIN
+        touchpoint_source = st.radio(
+            "Modo de lectura causal",
+            options=list(touchpoint_mode_labels.keys()),
+            index=list(touchpoint_mode_labels.keys()).index(current_touchpoint_mode),
+            format_func=lambda key: touchpoint_mode_labels.get(str(key), str(key)),
+            help="Elige si el racional se construye con el touchpoint actual, con el N2 final asignado en Helix o con una lectura ejecutiva de journeys.",
+        )
+        st.session_state["_touchpoint_source"] = touchpoint_source
 
         st.divider()
         st.header("Controles")
@@ -1287,6 +1460,7 @@ def render_sidebar(  # noqa: PLR0915
         theme_mode,
         sheet_name,
         data_ready,
+        st.session_state.get("_touchpoint_source", TOUCHPOINT_SOURCE_DOMAIN),
     )
 
 
@@ -2236,11 +2410,18 @@ def page_nps_helix_linking(
     nps_group_choice: str,
     settings: Settings,
     theme_mode: str,
+    touchpoint_source: str,
 ) -> None:
     st.subheader("🔗 NPS ↔ Helix — causalidad pragmática (multi-fuente)")
 
     # Use the global app theme for any Plotly figures built directly in this page.
     theme = get_theme(theme_mode)
+    touchpoint_source_label = {
+        TOUCHPOINT_SOURCE_DOMAIN: "Lógica actual de dominio",
+        TOUCHPOINT_SOURCE_HELIX_N2: "N2 final asignado en Helix",
+        TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+    }.get(touchpoint_source, "Lógica actual de dominio")
+    st.caption(f"Modo causal activo: {touchpoint_source_label}.")
 
     # IMPORTANT: context is only used to load the already-ingested population.
     # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
@@ -2718,10 +2899,76 @@ def page_nps_helix_linking(
         recovery_factor=0.65,
     )
     rationale_summary = summarize_incident_nps_rationale(rationale_df)
+    chain_candidates_df = build_incident_attribution_chains(
+        links_df,
+        focus_df,
+        helix_slice,
+        rationale_df=rationale_df,
+        top_k=0,
+        max_incident_examples=0,
+        max_comment_examples=0,
+        min_links_per_topic=1,
+        touchpoint_source=touchpoint_source,
+    )
+    chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
+    selected_chain_keys = _sync_chain_selection_state(
+        chain_candidates_df,
+        key_prefix="nh_chain_candidates",
+        default_limit=3,
+    )
+    chain_df = _cap_chain_evidence_rows(
+        _select_chain_rows(chain_candidates_df, selected_chain_keys),
+        max_incident_examples=5,
+        max_comment_examples=2,
+    )
+    linked_topics_total = (
+        int(
+            links_df.get("nps_topic", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
+        )
+        if links_df is not None and not links_df.empty
+        else 0
+    )
+    assigned_incidents_total = (
+        int(
+            assign_df.get("incident_id", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
+        )
+        if assign_df is not None and not assign_df.empty
+        else 0
+    )
+    linked_pairs_total = (
+        int(len(links_df[["incident_id", "nps_id"]].drop_duplicates()))
+        if links_df is not None
+        and not links_df.empty
+        and {"incident_id", "nps_id"}.issubset(set(links_df.columns))
+        else 0
+    )
+    linked_comments_total = (
+        int(
+            links_df.get("nps_id", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
+        )
+        if links_df is not None and not links_df.empty
+        else 0
+    )
     ppt_story_md = (
         build_incident_ppt_story(
             rationale_summary,
             rationale_df,
+            attribution_df=chain_df,
             focus_name=focus_name,
             top_k=6,
         )
@@ -2732,6 +2979,8 @@ def page_nps_helix_linking(
     ppt_8slides_md = build_ppt_8slide_script(
         rationale_summary,
         rationale_df,
+        attribution_df=chain_df,
+        touchpoint_source=touchpoint_source,
         service_origin=service_origin,
         service_origin_n1=service_origin_n1,
         focus_name=focus_name,
@@ -2740,7 +2989,20 @@ def page_nps_helix_linking(
     )
 
     if show_priorities or show_ppt:
-        st.markdown("### Racional de negocio: NPS en riesgo y palancas de recuperación")
+        mode_label_map = {
+            TOUCHPOINT_SOURCE_DOMAIN: "Touchpoint operativo actual",
+            TOUCHPOINT_SOURCE_HELIX_N2: "Touchpoint N2 asignado en Helix",
+            TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+        }
+        mode_summary_map = {
+            TOUCHPOINT_SOURCE_DOMAIN: "La lectura une incidencia operativa, touchpoint afectado, palanca NPS y voz del cliente con el vocabulario actual del dominio.",
+            TOUCHPOINT_SOURCE_HELIX_N2: "La lectura causal se apoya en el touchpoint final asignado en Helix para evitar vacíos o etiquetas débiles del dominio.",
+            TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "La lectura causal se reorganiza en journeys de comité para explicar dónde se rompe la experiencia y por qué cae el NPS.",
+        }
+        section(
+            "Mapa causal priorizado",
+            "Dónde se rompe la experiencia, qué evidencia lo sostiene y qué entrará en comité.",
+        )
         k1, k2, k3, k4 = st.columns(4)
         with k1:
             kpi(
@@ -2772,27 +3034,153 @@ def page_nps_helix_linking(
                 hint="Mediana del lag incidencia -> cambio de NPS",
             )
 
+        impact_cards = []
+        current_card: Optional[dict[str, Any]] = None
+        if not chain_candidates_df.empty:
+            chain_view_all = chain_candidates_df.copy().reset_index(drop=True)
+            chain_view_all["rank"] = np.arange(1, len(chain_view_all) + 1)
+            chain_view_all["title"] = chain_view_all["nps_topic"].astype(str)
+            chain_view_all["statement"] = chain_view_all["chain_story"].astype(str)
+            impact_cards = chain_view_all.to_dict(orient="records")
+        executive_banner(
+            kicker="Narrativa causal",
+            title=(
+                f"{len(chain_candidates_df)} cadenas defendibles para {focus_name}"
+                if not chain_candidates_df.empty
+                else "Sin cadenas defendibles en esta ventana"
+            ),
+            summary=(
+                f"{mode_summary_map.get(str(touchpoint_source), 'Lectura causal activa.')} "
+                f"La política Helix↔VoC está fijada en similitud ≥ {LINK_MIN_SIMILARITY:.2f}, "
+                f"top-{LINK_TOP_K_PER_INCIDENT} por incidencia y ventana de ±{LINK_MAX_DAYS_APART} días."
+            ),
+            metrics=[
+                ("Modo causal", mode_label_map.get(str(touchpoint_source), str(touchpoint_source))),
+                ("Incidencias con match", str(assigned_incidents_total)),
+                ("Comentarios enlazados", str(linked_comments_total)),
+                ("Links validados", str(linked_pairs_total)),
+            ],
+        )
+        if impact_cards:
+            pills(
+                [
+                    "Solo cadena completa defendible",
+                    f"{linked_topics_total} tópicos linkados",
+                    f"{len(chain_candidates_df)} cadenas causales",
+                ]
+            )
+            card(
+                "Diagnóstico de cobertura",
+                (
+                    "<div style='line-height:1.55;'>"
+                    f"<strong>{assigned_incidents_total}</strong> incidencias con match semántico, "
+                    f"<strong>{linked_comments_total}</strong> comentarios enlazados, "
+                    f"<strong>{linked_pairs_total}</strong> links validados y "
+                    f"<strong>{len(chain_candidates_df)}</strong> cadenas defendibles en el modo activo."
+                    "</div>"
+                ),
+                flat=True,
+            )
+            st.markdown("#### Selección para comité")
+            label_map = {
+                str(rec.get("chain_key", "")): str(
+                    rec.get("selection_label", rec.get("nps_topic", ""))
+                )
+                for rec in impact_cards
+            }
+            selected_chain_keys = st.multiselect(
+                "Temas que entrarán en la PPT",
+                options=list(label_map.keys()),
+                default=selected_chain_keys,
+                format_func=lambda key: label_map.get(str(key), str(key)),
+                max_selections=3,
+                key="nh_chain_candidates_selected",
+                help="Selecciona hasta 3 cadenas causales defendibles. Estas serán las que alimenten la narrativa y la PPT.",
+            )
+            if not selected_chain_keys:
+                selected_chain_keys = _sync_chain_selection_state(
+                    chain_candidates_df,
+                    key_prefix="nh_chain_candidates",
+                    default_limit=3,
+                )
+            chain_df = _cap_chain_evidence_rows(
+                _select_chain_rows(chain_candidates_df, selected_chain_keys),
+                max_incident_examples=5,
+                max_comment_examples=2,
+            )
+
+            chosen_labels = [
+                label_map.get(str(k), str(k)) for k in selected_chain_keys if str(k) in label_map
+            ]
+            if chosen_labels:
+                pills([f"PPT {idx + 1}: {lbl}" for idx, lbl in enumerate(chosen_labels)])
+            if len(chosen_labels) < 3:
+                st.info(
+                    "La presentación mostrará las cadenas seleccionadas. Si eliges menos de 3, las restantes quedarán vacías."
+                )
+
+            st.markdown("#### Cadena activa")
+            nav_prev, nav_meta, nav_next = st.columns([1, 3, 1])
+            current_idx = int(st.session_state.get("nh_chain_candidates_view_idx", 0) or 0)
+            total_cards = len(impact_cards)
+            current_idx = max(0, min(current_idx, total_cards - 1))
+            with nav_prev:
+                if st.button(
+                    "Anterior",
+                    use_container_width=True,
+                    key="nh_chain_candidates_prev",
+                    disabled=total_cards <= 1,
+                ):
+                    current_idx = (current_idx - 1) % total_cards
+                    st.session_state["nh_chain_candidates_view_idx"] = current_idx
+            with nav_next:
+                if st.button(
+                    "Ver siguiente",
+                    use_container_width=True,
+                    key="nh_chain_candidates_next",
+                    disabled=total_cards <= 1,
+                ):
+                    current_idx = (current_idx + 1) % total_cards
+                    st.session_state["nh_chain_candidates_view_idx"] = current_idx
+            current_idx = int(
+                st.session_state.get("nh_chain_candidates_view_idx", current_idx) or 0
+            )
+            current_idx = max(0, min(current_idx, total_cards - 1))
+            current_card = impact_cards[current_idx]
+            with nav_meta:
+                selected_note = (
+                    "Seleccionada para PPT"
+                    if str(current_card.get("chain_key", "")) in set(map(str, selected_chain_keys))
+                    else "No seleccionada para PPT"
+                )
+                st.markdown(f"**Cadena {current_idx + 1} de {total_cards}** · {selected_note}")
+                st.caption(
+                    str(current_card.get("selection_label", current_card.get("nps_topic", "")))
+                )
+            impact_chain([current_card])
+        elif not rationale_df.empty:
+            st.info(
+                "Hay impacto estadístico, pero no se encontraron cadenas defendibles con link explícito entre Helix y VoC para mostrar en comité."
+            )
+
         if rationale_df.empty:
             st.info(
                 "No hay señal suficiente para construir el racional de negocio (prueba ampliando ventana o bajando umbral)."
             )
-        elif show_priorities:
-            cmat, crisk = st.columns(2)
-            with cmat:
-                fig_pm = chart_incident_priority_matrix(rationale_df, theme=theme, top_k=8)
-                if fig_pm is not None:
-                    st.plotly_chart(fig_pm, use_container_width=True)
-            with crisk:
-                fig_rr = chart_incident_risk_recovery(rationale_df, theme=theme, top_k=8)
-                if fig_rr is not None:
-                    st.plotly_chart(fig_rr, use_container_width=True)
-
+        elif show_priorities and current_card is not None:
+            st.markdown("#### Priorización del tema activo")
+            active_df = pd.DataFrame([current_card]).copy()
             show_cols = [
                 "nps_topic",
                 "priority",
                 "confidence",
                 "nps_points_at_risk",
                 "nps_points_recoverable",
+                "focus_probability_with_incident",
+                "nps_delta_expected",
+                "total_nps_impact",
+                "causal_score",
+                "touchpoint",
                 "delta_focus_rate_pp",
                 "incident_rate_per_100_responses",
                 "incidents",
@@ -2801,53 +3189,203 @@ def page_nps_helix_linking(
                 "owner_role",
                 "eta_weeks",
             ]
-            show_df = rationale_df[show_cols].copy()
-            show_df["priority"] = show_df["priority"].astype(float).round(3)
-            show_df["confidence"] = show_df["confidence"].astype(float).round(3)
-            show_df["nps_points_at_risk"] = show_df["nps_points_at_risk"].astype(float).round(2)
-            show_df["nps_points_recoverable"] = (
-                show_df["nps_points_recoverable"].astype(float).round(2)
+            for col in show_cols:
+                if col not in active_df.columns:
+                    active_df[col] = (
+                        np.nan
+                        if col not in {"action_lane", "owner_role", "nps_topic", "touchpoint"}
+                        else ""
+                    )
+            if "focus_probability_with_incident" in active_df.columns:
+                active_df["focus_probability_with_incident"] = active_df[
+                    "focus_probability_with_incident"
+                ].where(
+                    pd.to_numeric(
+                        active_df["focus_probability_with_incident"], errors="coerce"
+                    ).notna(),
+                    active_df.get("detractor_probability", np.nan),
+                )
+
+            active_df["priority"] = pd.to_numeric(active_df["priority"], errors="coerce").round(3)
+            active_df["confidence"] = pd.to_numeric(active_df["confidence"], errors="coerce").round(
+                3
             )
-            show_df["delta_focus_rate_pp"] = show_df["delta_focus_rate_pp"].astype(float).round(2)
-            show_df["incident_rate_per_100_responses"] = (
-                show_df["incident_rate_per_100_responses"].astype(float).round(2)
-            )
-            st.dataframe(
-                show_df.rename(
-                    columns={
-                        "nps_topic": "Tópico NPS",
-                        "priority": "Prioridad",
-                        "confidence": "Confianza",
-                        "nps_points_at_risk": "NPS en riesgo (pts)",
-                        "nps_points_recoverable": "NPS recuperable (pts)",
-                        "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
-                        "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
-                        "incidents": "Incidencias",
-                        "responses": "Respuestas",
-                        "action_lane": "Lane de acción",
-                        "owner_role": "Owner (rol)",
-                        "eta_weeks": "ETA (semanas)",
-                    }
+            active_df["nps_points_at_risk"] = pd.to_numeric(
+                active_df["nps_points_at_risk"], errors="coerce"
+            ).round(2)
+            active_df["nps_points_recoverable"] = pd.to_numeric(
+                active_df["nps_points_recoverable"], errors="coerce"
+            ).round(2)
+            active_df["focus_probability_with_incident"] = pd.to_numeric(
+                active_df["focus_probability_with_incident"], errors="coerce"
+            ).round(3)
+            active_df["nps_delta_expected"] = pd.to_numeric(
+                active_df["nps_delta_expected"], errors="coerce"
+            ).round(2)
+            active_df["total_nps_impact"] = pd.to_numeric(
+                active_df["total_nps_impact"], errors="coerce"
+            ).round(2)
+            active_df["causal_score"] = pd.to_numeric(
+                active_df["causal_score"], errors="coerce"
+            ).round(3)
+            active_df["delta_focus_rate_pp"] = pd.to_numeric(
+                active_df["delta_focus_rate_pp"], errors="coerce"
+            ).round(2)
+            active_df["incident_rate_per_100_responses"] = pd.to_numeric(
+                active_df["incident_rate_per_100_responses"], errors="coerce"
+            ).round(2)
+            active_df["incidents"] = pd.to_numeric(active_df["incidents"], errors="coerce").round(0)
+            active_df["responses"] = pd.to_numeric(active_df["responses"], errors="coerce").round(0)
+            active_df["eta_weeks"] = pd.to_numeric(active_df["eta_weeks"], errors="coerce").round(1)
+
+            active_metrics = [
+                (
+                    "Prioridad",
+                    (
+                        f"{float(active_df.iloc[0]['priority']):.2f}"
+                        if pd.notna(active_df.iloc[0]["priority"])
+                        else "n/d"
+                    ),
                 ),
-                use_container_width=True,
-                height=360,
+                (
+                    "NPS en riesgo",
+                    (
+                        f"{float(active_df.iloc[0]['nps_points_at_risk']):.2f} pts"
+                        if pd.notna(active_df.iloc[0]["nps_points_at_risk"])
+                        else "n/d"
+                    ),
+                ),
+                (
+                    "NPS recuperable",
+                    (
+                        f"{float(active_df.iloc[0]['nps_points_recoverable']):.2f} pts"
+                        if pd.notna(active_df.iloc[0]["nps_points_recoverable"])
+                        else "n/d"
+                    ),
+                ),
+                ("Owner", str(active_df.iloc[0]["owner_role"] or "n/d")),
+            ]
+            executive_banner(
+                kicker="Ficha operativa individual",
+                title=str(active_df.iloc[0]["nps_topic"] or "Tema activo"),
+                summary=(
+                    "Todo el detalle inferior queda aislado al tema que estás viendo arriba. "
+                    "No se mezclan otros tópicos en la lectura operativa."
+                ),
+                metrics=active_metrics,
             )
 
+            tab_matrix, tab_detail = st.tabs(["Matriz visual", "Ficha cuantitativa"])
+            with tab_matrix:
+                cmat, crisk = st.columns(2)
+                with cmat:
+                    fig_pm = chart_incident_priority_matrix(active_df, theme=theme, top_k=1)
+                    if fig_pm is not None:
+                        st.plotly_chart(fig_pm, use_container_width=True)
+                with crisk:
+                    fig_rr = chart_incident_risk_recovery(active_df, theme=theme, top_k=1)
+                    if fig_rr is not None:
+                        st.plotly_chart(fig_rr, use_container_width=True)
+
+            with tab_detail:
+                st.dataframe(
+                    active_df[show_cols].rename(
+                        columns={
+                            "nps_topic": "Tópico NPS",
+                            "touchpoint": "Touchpoint",
+                            "priority": "Prioridad",
+                            "confidence": "Confianza",
+                            "nps_points_at_risk": "NPS en riesgo (pts)",
+                            "nps_points_recoverable": "NPS recuperable (pts)",
+                            "focus_probability_with_incident": f"Prob. {focus_name} con incidencia",
+                            "nps_delta_expected": "Delta NPS esperado",
+                            "total_nps_impact": "Impacto total NPS (pts)",
+                            "causal_score": "Causal score",
+                            "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
+                            "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
+                            "incidents": "Incidencias",
+                            "responses": "Respuestas",
+                            "action_lane": "Lane de acción",
+                            "owner_role": "Owner (rol)",
+                            "eta_weeks": "ETA (semanas)",
+                        }
+                    ),
+                    use_container_width=True,
+                    height=230,
+                )
+
     if show_ppt:
-        with st.expander("Narrativa lista para PPT (copy/paste)", expanded=False):
+        section(
+            "Narrativa y presentación",
+            "Salida lista para comité con las cadenas que has seleccionado en la priorización.",
+        )
+        if not chain_df.empty:
+            executive_banner(
+                kicker="Salida de comité",
+                title=f"{len(chain_df)} cadenas seleccionadas para la presentación",
+                summary=(
+                    "La narrativa ejecutiva, el guion y la PPT se construyen solo con las cadenas que has marcado. "
+                    "Aquí ya no hay fallback genérico: o hay evidencia defendible o no entra en comité."
+                ),
+                metrics=[
+                    ("Cadenas seleccionadas", str(len(chain_df))),
+                    ("NPS en riesgo", f"{rationale_summary.nps_points_at_risk:.2f} pts"),
+                    ("NPS recuperable", f"{rationale_summary.nps_points_recoverable:.2f} pts"),
+                    ("Impacto total", f"{rationale_summary.total_nps_impact:.2f} pts"),
+                ],
+            )
+            pills(
+                [
+                    f"PPT {idx + 1}: {str(row.get('selection_label', row.get('nps_topic', '')))}"
+                    for idx, row in enumerate(chain_df.to_dict(orient="records"))
+                ]
+            )
+            impact_chain(chain_df.to_dict(orient="records"))
+        else:
+            executive_banner(
+                kicker="Salida de comité",
+                title="Narrativa sin evidencia causal seleccionada",
+                summary=(
+                    "Para construir una narrativa de comité potente necesitas seleccionar cadenas defendibles en "
+                    "Priorización y palancas. Si no hay selección, la salida se mantiene descriptiva."
+                ),
+                metrics=[
+                    ("Cadenas seleccionadas", "0"),
+                    ("Links validados", str(linked_pairs_total)),
+                    (
+                        "Modo causal",
+                        mode_label_map.get(str(touchpoint_source), str(touchpoint_source)),
+                    ),
+                ],
+            )
+
+        tab_message, tab_story, tab_script = st.tabs(
+            ["Mensaje ejecutivo", "Narrativa comité", "Guion 8 slides"]
+        )
+        with tab_message:
+            card(
+                "Mensaje principal",
+                (
+                    "<div style='line-height:1.65;'>"
+                    f"El periodo analizado concentra <strong>{rationale_summary.nps_points_at_risk:.2f} puntos</strong> "
+                    f"de NPS en riesgo y un potencial recuperable de <strong>{rationale_summary.nps_points_recoverable:.2f} puntos</strong>. "
+                    f"Las cadenas seleccionadas representan la mejor combinación de impacto, evidencia y accionabilidad para comité."
+                    "</div>"
+                ),
+            )
+        with tab_story:
             _clipboard_copy_widget(ppt_story_md, label="Copiar narrativa PPT")
             st.text_area(
                 "Narrativa de negocio",
                 value=ppt_story_md,
-                height=280,
+                height=320,
             )
-
-        with st.expander("Guion estándar de 8 slides (copy/paste)", expanded=False):
+        with tab_script:
             _clipboard_copy_widget(ppt_8slides_md, label="Copiar guion 8 slides")
             st.text_area(
                 "Script de presentación",
                 value=ppt_8slides_md,
-                height=360,
+                height=380,
             )
             st.download_button(
                 "Descargar guion 8 slides (.md)",
@@ -2865,7 +3403,7 @@ def page_nps_helix_linking(
     if show_ppt:
         ppt_sig = (
             f"{service_origin}|{service_origin_n1}|{service_origin_n2}|{start}|{end}|"
-            f"{focus_name}|{len(overall_daily)}|{len(rationale_df)}"
+            f"{focus_name}|{len(overall_daily)}|{len(rationale_df)}|{'/'.join(selected_chain_keys)}"
         )
         template_mode = st.selectbox(
             "Formato de presentación",
@@ -3012,6 +3550,7 @@ def page_nps_helix_linking(
                 )
                 rationale_df_ppt = rationale_df
                 rationale_summary_ppt = rationale_summary
+                chain_df_ppt = chain_df
                 ppt_story_md_ppt = ppt_story_md
                 ppt_8slides_md_ppt = ppt_8slides_md
                 ppt_start = start
@@ -3120,15 +3659,37 @@ def page_nps_helix_linking(
                     if not rationale_hist.empty:
                         rationale_summary_hist = summarize_incident_nps_rationale(rationale_hist)
                         period_label_hist = f"{ppt_start} -> {ppt_end}"
+                        chain_hist_all = build_incident_attribution_chains(
+                            links_hist,
+                            focus_hist,
+                            helix_hist,
+                            rationale_df=rationale_hist,
+                            top_k=0,
+                            max_incident_examples=5,
+                            max_comment_examples=2,
+                            min_links_per_topic=1,
+                            touchpoint_source=touchpoint_source,
+                        )
+                        chain_hist_all = _annotate_chain_candidates(chain_hist_all)
+                        chain_hist = _select_chain_rows(chain_hist_all, selected_chain_keys)
+                        if chain_hist.empty and not chain_hist_all.empty:
+                            chain_hist = chain_hist_all.head(min(3, len(chain_hist_all))).copy()
+                            st.warning(
+                                "Alguno de los temas seleccionados no estaba disponible en el histórico completo. "
+                                "La PPT ha usado las primeras cadenas defendibles disponibles en ese histórico."
+                            )
                         ppt_story_md_hist = build_incident_ppt_story(
                             rationale_summary_hist,
                             rationale_hist,
+                            attribution_df=chain_hist,
                             focus_name=focus_name,
                             top_k=6,
                         )
                         ppt_8slides_md_hist = build_ppt_8slide_script(
                             rationale_summary_hist,
                             rationale_hist,
+                            attribution_df=chain_hist,
+                            touchpoint_source=touchpoint_source,
                             service_origin=service_origin,
                             service_origin_n1=service_origin_n1,
                             focus_name=focus_name,
@@ -3152,6 +3713,7 @@ def page_nps_helix_linking(
                         ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
                         rationale_df_ppt = rationale_hist
                         rationale_summary_ppt = rationale_summary_hist
+                        chain_df_ppt = chain_hist
                         ppt_story_md_ppt = ppt_story_md_hist
                         ppt_8slides_md_ppt = ppt_8slides_md_hist
                         lag_days_for_ppt = lag_days_hist
@@ -3211,6 +3773,7 @@ def page_nps_helix_linking(
                     median_lag_weeks=float(rationale_summary_ppt.median_lag_weeks),
                     story_md=ppt_story_md_ppt,
                     script_8slides_md=ppt_8slides_md_ppt,
+                    attribution_df=chain_df_ppt,
                     ranking_df=ranking_df_ppt,
                     by_topic_daily=by_topic_daily_ppt,
                     lag_days_by_topic=lag_days_for_ppt,
@@ -3223,6 +3786,7 @@ def page_nps_helix_linking(
                     changepoints_by_topic=changepoints_for_ppt,
                     incident_timeline_df=incident_timeline_ppt,
                     hotspot_focus_note=hotspot_focus_note,
+                    touchpoint_source=touchpoint_source,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
@@ -3777,6 +4341,9 @@ def page_nps_helix_linking(
                 "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
                 "top3_incident_share": float(rationale_summary.top3_incident_share),
                 "confidence_mean": float(rationale_summary.confidence_mean),
+                "peak_focus_probability": float(rationale_summary.peak_focus_probability),
+                "expected_nps_delta": float(rationale_summary.expected_nps_delta),
+                "total_nps_impact": float(rationale_summary.total_nps_impact),
                 "median_lag_weeks": (
                     None
                     if rationale_summary.median_lag_weeks != rationale_summary.median_lag_weeks
@@ -3785,6 +4352,11 @@ def page_nps_helix_linking(
             },
             "priority_topics": (
                 rationale_df.head(25).to_dict(orient="records") if not rationale_df.empty else []
+            ),
+            "attribution_chains": (
+                chain_df.to_dict(orient="records")
+                if "chain_df" in locals() and not chain_df.empty
+                else []
             ),
             "ppt_story_md": ppt_story_md,
             "ppt_8slides_md": ppt_8slides_md,
@@ -3844,20 +4416,38 @@ def page_nps_helix_linking(
         f"- NPS recuperable estimado: **{rationale_summary.nps_points_recoverable:.2f} pts**"
     )
     md_lines.append(
+        f"- Impacto total atribuido en NPS: **{rationale_summary.total_nps_impact:.2f} pts**"
+    )
+    md_lines.append(
+        f"- Probabilidad máxima del foco con incidencia: **{rationale_summary.peak_focus_probability*100:.0f}%**"
+    )
+    md_lines.append(f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**")
+    md_lines.append(
         f"- Concentración de incidencias en top-3: **{rationale_summary.top3_incident_share*100:.1f}%**"
     )
     if not rationale_df.empty:
         md_lines.append("")
         md_lines.append(
-            "| Tópico | Prioridad | Confianza | NPS en riesgo | NPS recuperable | Lane | Owner | ETA (w) |"
+            "| Tópico | Touchpoint | Prioridad | Confianza | Prob. foco | Delta NPS | Impacto total | Lane | Owner | ETA (w) |"
         )
-        md_lines.append("|---|---:|---:|---:|---:|---|---|---:|")
+        md_lines.append("|---|---|---:|---:|---:|---:|---:|---|---|---:|")
         for rec in rationale_df.head(8).to_dict(orient="records"):
             md_lines.append(
-                f"| {rec.get('nps_topic','')} | {float(rec.get('priority',0.0)):.3f} | {float(rec.get('confidence',0.0)):.3f} | "
-                f"{float(rec.get('nps_points_at_risk',0.0)):.2f} | {float(rec.get('nps_points_recoverable',0.0)):.2f} | "
+                f"| {rec.get('nps_topic','')} | {rec.get('touchpoint','')} | {float(rec.get('priority',0.0)):.3f} | {float(rec.get('confidence',0.0)):.3f} | "
+                f"{float(rec.get('focus_probability_with_incident',0.0))*100:.1f}% | {float(rec.get('nps_delta_expected',0.0)):+.2f} | {float(rec.get('total_nps_impact',0.0)):.2f} | "
                 f"{rec.get('action_lane','')} | {rec.get('owner_role','')} | {int(rec.get('eta_weeks',0) or 0)} |"
             )
+    if "chain_df" in locals() and not chain_df.empty:
+        md_lines.append("")
+        md_lines.append("### Cadenas causales defendibles")
+        for rec in chain_df.to_dict(orient="records"):
+            md_lines.append(
+                f"- **{rec.get('nps_topic','')}** | Touchpoint: **{rec.get('touchpoint','')}** | Links: **{int(rec.get('linked_pairs',0) or 0)}**"
+            )
+            for inc in list(rec.get("incident_examples", []))[:5]:
+                md_lines.append(f"  - Helix: {inc}")
+            for com in list(rec.get("comment_examples", []))[:2]:
+                md_lines.append(f"  - VoC: {com}")
     if ppt_story_md:
         md_lines.append("")
         md_lines.append("### Narrativa sugerida para comité")
@@ -3981,12 +4571,13 @@ def main() -> None:
         theme_mode,
         sheet_name,
         data_ready,
+        touchpoint_source,
     ) = render_sidebar(settings)
 
     theme = get_theme(theme_mode)
     apply_theme(theme)
 
-    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{pop_year}__{pop_month}__{nps_group_choice}"
+    ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{pop_year}__{pop_month}__{nps_group_choice}__{touchpoint_source}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
         st.session_state["llm_insights"] = load_llm_insights_for_context(
@@ -4083,6 +4674,7 @@ def main() -> None:
                 nps_group_choice=nps_group_choice,
                 settings=settings,
                 theme_mode=theme_mode,
+                touchpoint_source=touchpoint_source,
             )
 
     with t_prioridades:

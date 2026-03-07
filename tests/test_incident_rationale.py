@@ -15,6 +15,8 @@ def test_build_incident_nps_rationale_prioritizes_high_impact_topic() -> None:
             "week": list(weeks) + list(weeks),
             "nps_topic": ["Pagos > SPEI"] * 8 + ["Acceso > Login"] * 8,
             "responses": [120] * 16,
+            "nps_mean": [8.2, 8.1, 8.1, 8.0, 6.1, 5.9, 5.8, 6.0]
+            + [8.4, 8.5, 8.3, 8.4, 8.2, 8.3, 8.4, 8.3],
             # Topic A: clear worsening when incidents rise
             "focus_rate": [0.12, 0.13, 0.12, 0.14, 0.22, 0.24, 0.25, 0.23]
             + [0.11, 0.10, 0.12, 0.11, 0.12, 0.11, 0.10, 0.11],
@@ -44,11 +46,19 @@ def test_build_incident_nps_rationale_prioritizes_high_impact_topic() -> None:
     assert out.iloc[0]["nps_topic"] == "Pagos > SPEI"
     assert float(out.iloc[0]["nps_points_at_risk"]) > float(out.iloc[1]["nps_points_at_risk"])
     assert float(out.iloc[0]["priority"]) >= float(out.iloc[1]["priority"])
+    assert float(out.iloc[0]["focus_probability_with_incident"]) > float(
+        out.iloc[0]["focus_rate_base"]
+    )
+    assert float(out.iloc[0]["nps_delta_expected"]) < 0.0
+    assert float(out.iloc[0]["total_nps_impact"]) > 0.0
+    assert float(out.iloc[0]["causal_score"]) >= float(out.iloc[1]["causal_score"])
 
     summary = summarize_incident_nps_rationale(out)
     assert summary.topics_analyzed == 2
     assert summary.nps_points_at_risk > 0
     assert summary.nps_points_recoverable > 0
+    assert summary.peak_focus_probability > 0
+    assert summary.total_nps_impact > 0
 
 
 def test_build_incident_nps_rationale_handles_empty_input() -> None:
