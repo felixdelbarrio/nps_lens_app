@@ -2540,7 +2540,7 @@ def generate_business_review_ppt(
 
         _add_chart_slide(
             prs,
-            title=f"Zoom de foco caliente {idx}: {_clip(hot_label, 56)}",
+            title=f"Zoom de foco caliente {_idx}: {_clip(hot_label, 56)}",
             subtitle=f"{_clip(incident.nps_topic, 88)} · fecha referencia {incident_date_txt}",
             figure=zfig,
             rationale_title="Ficha + lectura",
