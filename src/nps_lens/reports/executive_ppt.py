@@ -22,10 +22,6 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-from nps_lens.analytics.incident_attribution import (
-    EXECUTIVE_JOURNEY_CATALOG,
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
-)
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
     summarize_hotspot_counts,
@@ -33,7 +29,12 @@ from nps_lens.analytics.hotspot_metrics import (
 from nps_lens.analytics.hotspot_metrics import (
     build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
 )
+from nps_lens.analytics.incident_attribution import (
+    EXECUTIVE_JOURNEY_CATALOG,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
 from nps_lens.design.tokens import DesignTokens, executive_report_palette
+
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
 
 BBVA_FONT_HEAD = "BentonSansBBVA Bold"
@@ -2431,7 +2432,7 @@ def generate_business_review_ppt(
                 period_label=period_label,
             )
     else:
-        for idx, incident in enumerate(zoom_incidents, start=1):
+        for _idx, incident in enumerate(zoom_incidents, start=1):
             lag_days = _lag_days_for_topic(
                 incident.nps_topic,
                 lag_days_by_topic=lag_days_by_topic,

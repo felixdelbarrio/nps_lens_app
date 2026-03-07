@@ -185,9 +185,7 @@ def _is_generic(value: object) -> bool:
     if flattened in _GENERIC_LABELS:
         return True
     parts = [p.strip() for p in norm.split(">") if p.strip()]
-    if parts and all(p in _GENERIC_LABELS for p in parts):
-        return True
-    return False
+    return bool(parts) and all(p in _GENERIC_LABELS for p in parts)
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:

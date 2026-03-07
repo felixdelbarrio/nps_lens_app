@@ -21,18 +21,18 @@ from dotenv import find_dotenv, load_dotenv
 # Lazy import to avoid heavy imports + noisy DeprecationWarnings at app start
 # (Plotly triggers a NumPy alias deprecation warning in some versions.)
 from nps_lens.analytics.causal import best_effort_ate_logit
-from nps_lens.analytics.incident_attribution import (
-    TOUCHPOINT_SOURCE_DOMAIN,
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
-    TOUCHPOINT_SOURCE_HELIX_N2,
-    build_incident_attribution_chains,
-)
 from nps_lens.analytics.hotspot_metrics import (
     align_hotspot_evidence_to_axis,
     build_hotspot_evidence,
     build_hotspot_timeline,
     select_best_business_axis_for_hotspots,
     summarize_hotspot_counts,
+)
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_DOMAIN,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    TOUCHPOINT_SOURCE_HELIX_N2,
+    build_incident_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
@@ -3061,7 +3061,7 @@ def page_nps_helix_linking(
         if impact_cards:
             pills(
                 [
-                    f"Solo cadena completa defendible",
+                    "Solo cadena completa defendible",
                     f"{linked_topics_total} tópicos linkados",
                     f"{len(chain_candidates_df)} cadenas causales",
                 ]

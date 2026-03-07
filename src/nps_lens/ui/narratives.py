@@ -318,7 +318,11 @@ def build_incident_ppt_story(
                 f"- **{title}**: ({len(incident_examples)}) incidencias Helix mostradas sobre **{touchpoint}** -> ({len(comment_examples)}) comentarios VoC -> riesgo de {focus_name}."
             )
             lines.append(
-                f"  Impacto esperado: probabilidad {focus_name} **{_fmt_pct(probability)}** · Δ NPS **{_fmt_delta(delta_nps)}** · impacto total **{impact:.2f} pts** · evidencia validada **{incident_total} incidencias / {comment_total} comentarios**."
+                "  Impacto esperado: "
+                f"probabilidad {focus_name} **{_fmt_pct(probability)}** · "
+                f"Δ NPS **{_fmt_delta(delta_nps)}** · "
+                f"impacto total **{impact:.2f} pts** · "
+                f"evidencia validada **{incident_total} incidencias / {comment_total} comentarios**."
             )
             for incident in incident_examples:
                 lines.append(f"  Helix: {incident}")
@@ -490,11 +494,21 @@ def build_ppt_8slide_script(
                 expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
                 impact_label = str(_card_value(card, "journey_impact_label", "")).strip()
                 lines.append(
-                    f"- {title}: {expected_evidence or 'journey causal defendible'} | impacto esperado {impact_label or 'alto'} | probabilidad {focus_name} {_fmt_pct(probability)} | Δ NPS {_fmt_delta(delta_nps)} | impacto {impact:.2f} pts | evidencia validada {incident_total}/{comment_total}."
+                    f"- {title}: {expected_evidence or 'journey causal defendible'} | "
+                    f"impacto esperado {impact_label or 'alto'} | "
+                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
+                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"impacto {impact:.2f} pts | "
+                    f"evidencia validada {incident_total}/{comment_total}."
                 )
             else:
                 lines.append(
-                    f"- {title}: ({len(incident_examples)}) incidencias mostradas sobre {touchpoint} | ({len(comment_examples)}) VoC | probabilidad {focus_name} {_fmt_pct(probability)} | Δ NPS {_fmt_delta(delta_nps)} | impacto {impact:.2f} pts | evidencia validada {incident_total}/{comment_total}."
+                    f"- {title}: ({len(incident_examples)}) incidencias mostradas sobre {touchpoint} | "
+                    f"({len(comment_examples)}) VoC | "
+                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
+                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"impacto {impact:.2f} pts | "
+                    f"evidencia validada {incident_total}/{comment_total}."
                 )
             for incident in incident_examples:
                 lines.append(f"- Helix: {incident}")

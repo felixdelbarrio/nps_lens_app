@@ -393,12 +393,16 @@ def summarize_incident_nps_rationale(
     valid_delta = delta_nps.notna()
     if bool(valid_delta.any()):
         valid_weights = weights.loc[valid_delta]
-        if float(valid_weights.sum()) > 0.0:
-            expected_nps_delta = float(
-                np.average(delta_nps.loc[valid_delta].astype(float), weights=valid_weights.astype(float))
+        expected_nps_delta = (
+            float(
+                np.average(
+                    delta_nps.loc[valid_delta].astype(float),
+                    weights=valid_weights.astype(float),
+                )
             )
-        else:
-            expected_nps_delta = float(delta_nps.loc[valid_delta].astype(float).mean())
+            if float(valid_weights.sum()) > 0.0
+            else float(delta_nps.loc[valid_delta].astype(float).mean())
+        )
     else:
         expected_nps_delta = 0.0
 
