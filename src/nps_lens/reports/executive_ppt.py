@@ -682,6 +682,27 @@ def _chain_header(label: str, shown: int, total: int) -> str:
     return f"{label} ({shown})"
 
 
+def _chain_incident_records(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        incident_id = str(entry.get("incident_id", "") or "").strip()
+        summary = str(entry.get("summary", "") or "").strip()
+        url = str(entry.get("url", "") or "").strip()
+        if incident_id or summary:
+            out.append(
+                {
+                    "incident_id": incident_id,
+                    "summary": summary,
+                    "url": url,
+                }
+            )
+    return out
+
+
 def _chain_priority_summary(chain_row: pd.Series, *, focus_name: str) -> list[str]:
     owner = str(chain_row.get("owner_role", "") or "").strip()
     lane = str(chain_row.get("action_lane", "") or "").strip()
@@ -739,7 +760,11 @@ def _add_chain_evidence_slide(
     presentation_mode = str(chain_row.get("presentation_mode", "") or "").strip()
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
-    helix_lines = _chain_list(chain_row.get("incident_examples"))[:5]
+    helix_records = _chain_incident_records(chain_row.get("incident_records"))[:5]
+    if helix_records:
+        helix_lines = [str(rec.get("summary", "")).strip() for rec in helix_records if str(rec.get("summary", "")).strip()]
+    else:
+        helix_lines = _chain_list(chain_row.get("incident_examples"))[:5]
     voc_lines = _chain_list(chain_row.get("comment_examples"))[:2]
     shown_incidents = len(helix_lines)
     shown_comments = len(voc_lines)
@@ -854,12 +879,43 @@ def _add_chain_evidence_slide(
     hr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
     if not helix_lines:
         helix_lines = ["No hay suficiente evidencia Helix validada para elevar otro caso."]
-    for line in helix_lines:
+    for idx_line, line in enumerate(helix_lines):
         p = htf.add_paragraph()
-        p.text = f"• {_clip(line, 170)}"
         p.font.name = BBVA_FONT_BODY
         p.font.size = Pt(11.5)
         p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        if idx_line < len(helix_records):
+            rec = helix_records[idx_line]
+            rec_id = str(rec.get("incident_id", "")).strip()
+            rec_summary = _clip(str(rec.get("summary", "")).strip(), 150)
+            rec_url = str(rec.get("url", "")).strip()
+            bullet = p.add_run()
+            bullet.text = "• "
+            bullet.font.name = BBVA_FONT_BODY
+            bullet.font.size = Pt(11.5)
+            bullet.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+            if rec_id:
+                id_run = p.add_run()
+                id_run.text = rec_id
+                id_run.font.name = BBVA_FONT_MEDIUM
+                id_run.font.size = Pt(11.5)
+                id_run.font.bold = True
+                id_run.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+                if rec_url.startswith(("http://", "https://", "file://")):
+                    id_run.hyperlink.address = rec_url
+            if rec_summary:
+                sep_run = p.add_run()
+                sep_run.text = " · " if rec_id else ""
+                sep_run.font.name = BBVA_FONT_BODY
+                sep_run.font.size = Pt(11.5)
+                sep_run.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+                text_run = p.add_run()
+                text_run.text = rec_summary
+                text_run.font.name = BBVA_FONT_BODY
+                text_run.font.size = Pt(11.5)
+                text_run.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        else:
+            p.text = f"• {_clip(line, 170)}"
 
     voc_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,

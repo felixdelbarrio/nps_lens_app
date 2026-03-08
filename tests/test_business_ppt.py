@@ -143,12 +143,31 @@ def _sample_payload() -> dict:
                 "action_lane": "Fix estructural",
                 "owner_role": "Producto + Tecnologia",
                 "eta_weeks": 6.0,
+                "incident_records": [
+                    {"incident_id": "INC00001", "summary": "problema en el login", "url": ""},
+                    {"incident_id": "INC00003", "summary": "no puedo acceder", "url": ""},
+                    {
+                        "incident_id": "INC00025",
+                        "summary": "nada mas entras se desloguea",
+                        "url": "",
+                    },
+                    {
+                        "incident_id": "INC00040",
+                        "summary": "error al autenticar usuario en acceso web",
+                        "url": "",
+                    },
+                    {
+                        "incident_id": "INC00041",
+                        "summary": "falla de sesion al entrar en portal empresas",
+                        "url": "",
+                    },
+                ],
                 "incident_examples": [
-                    "INC00001: problema en el login",
-                    "INC00003: no puedo acceder",
-                    "INC00025: nada mas entras se desloguea",
-                    "INC00040: error al autenticar usuario en acceso web",
-                    "INC00041: falla de sesion al entrar en portal empresas",
+                    "problema en el login",
+                    "no puedo acceder",
+                    "nada mas entras se desloguea",
+                    "error al autenticar usuario en acceso web",
+                    "falla de sesion al entrar en portal empresas",
                 ],
                 "comment_examples": [
                     "NPS 1: No hay quien entre a la aplicación",

@@ -136,6 +136,7 @@ CHAIN_COLUMNS = [
     "priority",
     "confidence",
     "causal_score",
+    "incident_records",
     "incident_examples",
     "comment_examples",
     "chain_story",
@@ -350,6 +351,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
                 "incident_id",
                 "incident_date",
                 "incident_summary",
+                "incident_url",
                 "incident_topic",
                 "helix_touchpoint_n2",
             ]
@@ -361,6 +363,58 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     )
     df["incident_date"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
     df["incident_summary"] = build_incident_display_text(df).astype(str).fillna("").str.strip()
+    url_candidates = [
+        "Incident URL",
+        "Incident Link",
+        "Record URL",
+        "Record Link",
+        "Document URL",
+        "Document Link",
+        "URL",
+        "Link",
+        "Href",
+    ]
+    lower_map = {str(col).strip().lower(): str(col) for col in df.columns}
+    picked_url_col = ""
+    for candidate in url_candidates:
+        hit = lower_map.get(candidate.strip().lower(), "")
+        if hit:
+            picked_url_col = hit
+            break
+    if not picked_url_col:
+        hyperlink_cols = [
+            str(col)
+            for col in df.columns
+            if str(col).strip().lower().endswith("__hyperlink")
+            and pd.Series(df.get(col, pd.Series(dtype=object))).astype(str).str.strip().ne("").any()
+        ]
+        if hyperlink_cols:
+            picked_url_col = hyperlink_cols[0]
+    if not picked_url_col:
+        fallback_cols = [
+            str(col)
+            for col in df.columns
+            if any(token in str(col).strip().lower() for token in ("url", "link", "href"))
+        ]
+        if fallback_cols:
+            picked_url_col = fallback_cols[0]
+    if picked_url_col and picked_url_col in df.columns:
+        incident_url = df.get(picked_url_col, pd.Series([""] * len(df), index=df.index))
+    else:
+        incident_url = pd.Series([""] * len(df), index=df.index)
+    incident_url = (
+        incident_url.astype(str)
+        .fillna("")
+        .str.strip()
+        .where(
+            incident_url.astype(str)
+            .fillna("")
+            .str.strip()
+            .str.match(r"^(https?|file)://", case=False, na=False),
+            "",
+        )
+    )
+    df["incident_url"] = incident_url
     tier1 = (
         df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index))
         .astype(str)
@@ -393,6 +447,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
             "incident_id",
             "incident_date",
             "incident_summary",
+            "incident_url",
             "incident_topic",
             "helix_touchpoint_n2",
         ]
@@ -674,17 +729,22 @@ def build_incident_attribution_chains(
             ["nps_score", "similarity"], ascending=[True, False], na_position="last"
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
-        incident_examples = [
-            f"{str(r.get('incident_id','')).strip()}: {' '.join(str(r.get('incident_summary','') or '').split())}"
+        incident_records = [
+            {
+                "incident_id": str(r.get("incident_id", "")).strip(),
+                "summary": " ".join(str(r.get("incident_summary", "") or "").split()),
+                "url": str(r.get("incident_url", "") or "").strip(),
+            }
             for _, r in inc_ranked.iterrows()
             if str(r.get("incident_id", "")).strip()
         ]
+        incident_examples = [str(rec.get("summary", "")).strip() for rec in incident_records if str(rec.get("summary", "")).strip()]
         comment_examples = [
             f"NPS {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
             for _, r in comment_ranked.iterrows()
             if str(r.get("comment_txt", "")).strip()
         ]
-        if not incident_examples or not comment_examples:
+        if not incident_records or not comment_examples:
             continue
 
         detractor_probability = _safe_float(
@@ -722,7 +782,11 @@ def build_incident_attribution_chains(
         owner_role = _mode_text(grp.get("owner_role", pd.Series(dtype=object)))
         eta_weeks = _safe_float(grp.get("eta_weeks", pd.Series([np.nan])).max(), default=np.nan)
 
-        incident_ids = [s.split(":", 1)[0].strip() for s in incident_examples if ":" in str(s)]
+        incident_ids = [
+            str(rec.get("incident_id", "")).strip()
+            for rec in incident_records
+            if str(rec.get("incident_id", "")).strip()
+        ]
         incident_sample_count = len(incident_examples)
         comment_sample_count = len(comment_examples)
         incident_sample_label = (
@@ -772,6 +836,7 @@ def build_incident_attribution_chains(
                 "priority": _safe_float(grp.get("priority", pd.Series([0.0])).max(), default=0.0),
                 "confidence": confidence,
                 "causal_score": causal_score,
+                "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "chain_story": story,

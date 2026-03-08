@@ -36,6 +36,21 @@ def default_windows(
     return PeriodWindow(cur_start, cur_end), PeriodWindow(base_start, base_end)
 
 
+def context_period_days(df: pd.DataFrame, *, minimum: int = 1) -> int:
+    """Return the full active context span in days.
+
+    The app already scopes data by the selected context/time period, so charts that
+    should follow that context must use this full span rather than an extra UI slider.
+    """
+    if "Fecha" not in df.columns:
+        return int(max(1, minimum))
+    dts = pd.to_datetime(df["Fecha"], errors="coerce").dropna()
+    if dts.empty:
+        return int(max(1, minimum))
+    span = int((dts.max().date() - dts.min().date()).days) + 1
+    return int(max(int(minimum), span))
+
+
 def slice_by_window(df: pd.DataFrame, w: PeriodWindow) -> pd.DataFrame:
     if "Fecha" not in df.columns:
         return df.iloc[0:0].copy()

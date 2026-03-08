@@ -130,9 +130,11 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     assert out.iloc[0]["linked_pairs"] == 5
     assert out.iloc[0]["linked_incidents"] == 5
     assert out.iloc[0]["linked_comments"] == 5
+    assert len(out.iloc[0]["incident_records"]) == 5
     assert len(out.iloc[0]["incident_examples"]) == 5
     assert len(out.iloc[0]["comment_examples"]) == 2
-    assert "INC00001" in out.iloc[0]["incident_examples"][0]
+    assert out.iloc[0]["incident_records"][0]["incident_id"] == "INC00001"
+    assert "problema" in out.iloc[0]["incident_examples"][0].lower()
     assert "No puedo entrar" in out.iloc[0]["comment_examples"][0]
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "2 comentarios VoC" in out.iloc[0]["chain_story"]

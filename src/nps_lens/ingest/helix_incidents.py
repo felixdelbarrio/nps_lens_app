@@ -238,6 +238,35 @@ def read_helix_incidents_excel(
     df = pd.read_excel(path, sheet_name=sn, engine="openpyxl")
     if isinstance(df, dict):
         df = list(df.values())[0]
+    try:
+        import openpyxl  # type: ignore
+
+        wb_links = openpyxl.load_workbook(path, read_only=False, data_only=False)
+        ws = wb_links[sn] if isinstance(sn, str) else wb_links.worksheets[int(sn)]
+        header_row = next(ws.iter_rows(min_row=1, max_row=1))
+        hyperlink_payload: dict[str, list[str]] = {}
+        for col_idx, cell in enumerate(header_row, start=1):
+            header = str(cell.value or "").strip()
+            if not header:
+                continue
+            values: list[str] = []
+            has_hyperlink = False
+            for row_idx in range(2, len(df) + 2):
+                target = ""
+                link = ws.cell(row=row_idx, column=col_idx).hyperlink
+                if link is not None:
+                    target = str(
+                        getattr(link, "target", "") or getattr(link, "location", "") or ""
+                    ).strip()
+                if target:
+                    has_hyperlink = True
+                values.append(target)
+            if has_hyperlink:
+                hyperlink_payload[f"{header}__hyperlink"] = values
+        if hyperlink_payload:
+            df = pd.concat([df, pd.DataFrame(hyperlink_payload, index=df.index)], axis=1)
+    except Exception:
+        pass
 
     # Canonicalize / robust column names (tolerate minor variants)
     df = standardize_columns(
