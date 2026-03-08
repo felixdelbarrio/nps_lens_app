@@ -269,7 +269,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Tema prioritario 1: Login" in t for t in texts)
     assert any("Evidencia Helix" in t for t in texts)
     assert any("INC00001" in t and "problema en el login" in t for t in texts)
-    assert any("INC00041" in t and "falla de sesion al entrar en portal empresas" in t for t in texts)
+    assert any(
+        "INC00041" in t and "falla de sesion al entrar en portal empresas" in t for t in texts
+    )
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert any("Priorización del tema" in t for t in texts)

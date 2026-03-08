@@ -267,7 +267,9 @@ def impact_chain(
             cells = []
             for key, _label in columns:
                 value = str(row.get(key, "") or "").strip()
-                if key == "incident_id" and _is_clickable_url(str(row.get("url", "") or "").strip()):
+                if key == "incident_id" and _is_clickable_url(
+                    str(row.get("url", "") or "").strip()
+                ):
                     href = quote(str(row.get("url", "") or "").strip(), safe=":/?&=%#@+,-._~")
                     cell_html = f"<a href='{href}' target='_blank'>{escape(value)}</a>"
                 else:

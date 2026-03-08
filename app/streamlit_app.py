@@ -688,7 +688,9 @@ def _build_case_export_workbook(case_row: dict[str, Any]) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         summary_df.to_excel(writer, index=False, sheet_name="Resumen")
-        helix_df.drop(columns="__url", errors="ignore").to_excel(writer, index=False, sheet_name="Helix")
+        helix_df.drop(columns="__url", errors="ignore").to_excel(
+            writer, index=False, sheet_name="Helix"
+        )
         voc_df.to_excel(writer, index=False, sheet_name="VozCliente")
 
         for sheet_name, sheet_df in {
@@ -699,7 +701,9 @@ def _build_case_export_workbook(case_row: dict[str, Any]) -> bytes:
             worksheet = writer.sheets[sheet_name]
             for row in worksheet.iter_rows():
                 for cell in row:
-                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    cell.alignment = Alignment(
+                        horizontal="center", vertical="center", wrap_text=True
+                    )
             for cell in worksheet[1]:
                 cell.font = Font(bold=True)
             for idx, column in enumerate(sheet_df.columns, start=1):
@@ -2088,7 +2092,9 @@ def page_prioritized_opportunities(df: pd.DataFrame, theme: Theme, min_n: int) -
         from nps_lens.ui.charts import chart_opportunities_bar
 
         cfig = chart_opportunities_bar(
-            opp_df.assign(label=lambda d: d.apply(lambda r: f"{r['dimension']}={r['value']}", axis=1)),
+            opp_df.assign(
+                label=lambda d: d.apply(lambda r: f"{r['dimension']}={r['value']}", axis=1)
+            ),
             theme,
             top_k=10,
         )
@@ -3180,9 +3186,7 @@ def page_nps_helix_linking(
             chosen = (
                 str(show.iloc[0]["nps_topic"])
                 if "show" in locals() and not show.empty
-                else str(
-                    sorted(focus_population["Palanca"].astype(str).unique().tolist())[0]
-                )
+                else str(sorted(focus_population["Palanca"].astype(str).unique().tolist())[0])
             )
             sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
             if sub_links.empty:
@@ -3250,7 +3254,9 @@ def page_nps_helix_linking(
                 metrics=[
                     (
                         "Modo causal",
-                        TOUCHPOINT_MODE_BANNER_LABELS.get(str(touchpoint_source), str(touchpoint_source)),
+                        TOUCHPOINT_MODE_BANNER_LABELS.get(
+                            str(touchpoint_source), str(touchpoint_source)
+                        ),
                     ),
                     ("Incidencias con match", str(assigned_incidents_total)),
                     ("Comentarios enlazados", str(linked_comments_total)),
@@ -3295,24 +3301,24 @@ def page_nps_helix_linking(
             active_df = pd.DataFrame([current_card]).copy()
             active_topic = str(current_card.get("nps_topic", "") or "").strip()
             show_cols = [
-                    "nps_topic",
-                    "priority",
-                    "confidence",
-                    "nps_points_at_risk",
-                    "nps_points_recoverable",
-                    "focus_probability_with_incident",
-                    "nps_delta_expected",
-                    "total_nps_impact",
-                    "causal_score",
-                    "touchpoint",
-                    "delta_focus_rate_pp",
-                    "incident_rate_per_100_responses",
-                    "incidents",
-                    "responses",
-                    "action_lane",
-                    "owner_role",
-                    "eta_weeks",
-                ]
+                "nps_topic",
+                "priority",
+                "confidence",
+                "nps_points_at_risk",
+                "nps_points_recoverable",
+                "focus_probability_with_incident",
+                "nps_delta_expected",
+                "total_nps_impact",
+                "causal_score",
+                "touchpoint",
+                "delta_focus_rate_pp",
+                "incident_rate_per_100_responses",
+                "incidents",
+                "responses",
+                "action_lane",
+                "owner_role",
+                "eta_weeks",
+            ]
             for col in show_cols:
                 if col not in active_df.columns:
                     active_df[col] = (
@@ -3330,7 +3336,9 @@ def page_nps_helix_linking(
                     active_df.get("detractor_probability", np.nan),
                 )
             active_df["priority"] = pd.to_numeric(active_df["priority"], errors="coerce").round(3)
-            active_df["confidence"] = pd.to_numeric(active_df["confidence"], errors="coerce").round(3)
+            active_df["confidence"] = pd.to_numeric(active_df["confidence"], errors="coerce").round(
+                3
+            )
             active_df["nps_points_at_risk"] = pd.to_numeric(
                 active_df["nps_points_at_risk"], errors="coerce"
             ).round(2)
@@ -3363,200 +3371,187 @@ def page_nps_helix_linking(
                 st.caption(
                     str(current_card.get("selection_label", current_card.get("nps_topic", "")))
                 )
+
             def _render_matrix_tab() -> None:
-                    cmat, crisk = st.columns(2)
-                    with cmat:
-                        fig_pm = chart_incident_priority_matrix(active_df, theme=theme, top_k=1)
-                        if fig_pm is not None:
-                            st.plotly_chart(fig_pm, use_container_width=True)
-                    with crisk:
-                        fig_rr = chart_incident_risk_recovery(active_df, theme=theme, top_k=1)
-                        if fig_rr is not None:
-                            st.plotly_chart(fig_rr, use_container_width=True)
+                cmat, crisk = st.columns(2)
+                with cmat:
+                    fig_pm = chart_incident_priority_matrix(active_df, theme=theme, top_k=1)
+                    if fig_pm is not None:
+                        st.plotly_chart(fig_pm, use_container_width=True)
+                with crisk:
+                    fig_rr = chart_incident_risk_recovery(active_df, theme=theme, top_k=1)
+                    if fig_rr is not None:
+                        st.plotly_chart(fig_rr, use_container_width=True)
 
             def _render_detail_tab() -> None:
-                    st.dataframe(
-                        active_df[show_cols].rename(
-                            columns={
-                                "nps_topic": "Tópico NPS",
-                                "touchpoint": "Ahora",
-                                "priority": "Prioridad",
-                                "confidence": "Confianza",
-                                "nps_points_at_risk": "NPS en riesgo (pts)",
-                                "nps_points_recoverable": "NPS recuperable (pts)",
-                                "focus_probability_with_incident": f"Prob. {focus_name} con incidencia",
-                                "nps_delta_expected": "Delta NPS esperado",
-                                "total_nps_impact": "Impacto total NPS (pts)",
-                                "causal_score": "Causal score",
-                                "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
-                                "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
-                                "incidents": "Incidencias",
-                                "responses": "Respuestas",
-                                "action_lane": "Lane de acción",
-                                "owner_role": "Owner (rol)",
-                                "eta_weeks": "ETA (semanas)",
-                            }
-                        ),
-                        use_container_width=True,
-                        height=230,
-                    )
+                st.dataframe(
+                    active_df[show_cols].rename(
+                        columns={
+                            "nps_topic": "Tópico NPS",
+                            "touchpoint": "Ahora",
+                            "priority": "Prioridad",
+                            "confidence": "Confianza",
+                            "nps_points_at_risk": "NPS en riesgo (pts)",
+                            "nps_points_recoverable": "NPS recuperable (pts)",
+                            "focus_probability_with_incident": f"Prob. {focus_name} con incidencia",
+                            "nps_delta_expected": "Delta NPS esperado",
+                            "total_nps_impact": "Impacto total NPS (pts)",
+                            "causal_score": "Causal score",
+                            "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
+                            "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
+                            "incidents": "Incidencias",
+                            "responses": "Respuestas",
+                            "action_lane": "Lane de acción",
+                            "owner_role": "Owner (rol)",
+                            "eta_weeks": "ETA (semanas)",
+                        }
+                    ),
+                    use_container_width=True,
+                    height=230,
+                )
 
             def _render_heat_tab() -> None:
-                    g_heat = by_topic_daily[by_topic_daily["nps_topic"] == active_topic].copy()
-                    if g_heat.empty:
-                        st.info("No hay datos suficientes para el heat map del caso activo.")
-                    else:
-                        g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
-                        px, go = _plotly()
-                        heat = go.Figure(
-                            data=[
-                                go.Heatmap(
-                                    x=g_heat["date"].dt.date.tolist(),
-                                    y=["Incidencias"],
-                                    z=[g_heat["incidents"].astype(float).tolist()],
-                                    zmin=0,
-                                    colorscale=risk_scale,
-                                    colorbar=dict(title="Incidencias"),
-                                    hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
-                                )
-                            ]
-                        )
-                        heat.update_layout(
-                            height=260,
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            yaxis=dict(showticklabels=True),
-                        )
-                        st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
+                g_heat = by_topic_daily[by_topic_daily["nps_topic"] == active_topic].copy()
+                if g_heat.empty:
+                    st.info("No hay datos suficientes para el heat map del caso activo.")
+                else:
+                    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
+                    px, go = _plotly()
+                    heat = go.Figure(
+                        data=[
+                            go.Heatmap(
+                                x=g_heat["date"].dt.date.tolist(),
+                                y=["Incidencias"],
+                                z=[g_heat["incidents"].astype(float).tolist()],
+                                zmin=0,
+                                colorscale=risk_scale,
+                                colorbar=dict(title="Incidencias"),
+                                hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
+                            )
+                        ]
+                    )
+                    heat.update_layout(
+                        height=260,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        yaxis=dict(showticklabels=True),
+                    )
+                    st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
 
             def _render_cp_tab() -> None:
-                    g = (
-                        by_topic_weekly[by_topic_weekly["nps_topic"] == active_topic]
-                        .sort_values("week")
-                        .copy()
+                g = (
+                    by_topic_weekly[by_topic_weekly["nps_topic"] == active_topic]
+                    .sort_values("week")
+                    .copy()
+                )
+                lag_row = (
+                    rank2[rank2["nps_topic"] == active_topic].head(1)
+                    if "rank2" in locals() and not rank2.empty
+                    else pd.DataFrame()
+                )
+                if g.empty or lag_row.empty:
+                    st.info("No hay datos suficientes para changepoints y lag del caso activo.")
+                else:
+                    lagw = (
+                        int(lag_row["best_lag_weeks"].iloc[0])
+                        if pd.notna(lag_row["best_lag_weeks"].iloc[0])
+                        else 0
                     )
-                    lag_row = (
-                        rank2[rank2["nps_topic"] == active_topic].head(1)
-                        if "rank2" in locals() and not rank2.empty
-                        else pd.DataFrame()
+                    cps = (
+                        lag_row["changepoints"].iloc[0] if "changepoints" in lag_row.columns else []
                     )
-                    if g.empty or lag_row.empty:
-                        st.info("No hay datos suficientes para changepoints y lag del caso activo.")
-                    else:
-                        lagw = (
-                            int(lag_row["best_lag_weeks"].iloc[0])
-                            if pd.notna(lag_row["best_lag_weeks"].iloc[0])
-                            else 0
+                    if not isinstance(cps, list):
+                        cps = [] if pd.isna(cps) else [str(cps)]
+                    g["incidents_shifted"] = g["incidents"].shift(lagw)
+                    px, go = _plotly()
+                    fig_lag = go.Figure()
+                    fig_lag.add_trace(
+                        go.Scatter(
+                            x=g["week"],
+                            y=g["focus_rate"],
+                            name=f"% {focus_name}",
+                            mode="lines+markers",
+                            line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
+                            marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
                         )
-                        cps = (
-                            lag_row["changepoints"].iloc[0]
-                            if "changepoints" in lag_row.columns
-                            else []
+                    )
+                    fig_lag.add_trace(
+                        go.Bar(
+                            x=g["week"],
+                            y=g["incidents_shifted"],
+                            name=f"# incidencias (shift {lagw}w)",
+                            yaxis="y2",
+                            opacity=0.70,
+                            marker=dict(color=pal["color.primary.accent.value-01.default"]),
                         )
-                        if not isinstance(cps, list):
-                            cps = [] if pd.isna(cps) else [str(cps)]
-                        g["incidents_shifted"] = g["incidents"].shift(lagw)
-                        px, go = _plotly()
-                        fig_lag = go.Figure()
-                        fig_lag.add_trace(
-                            go.Scatter(
-                                x=g["week"],
-                                y=g["focus_rate"],
-                                name=f"% {focus_name}",
-                                mode="lines+markers",
-                                line=dict(
-                                    color=pal["color.primary.accent.value-07.default"], width=2
-                                ),
-                                marker=dict(
-                                    color=pal["color.primary.accent.value-07.default"], size=6
-                                ),
+                    )
+                    cp_level = (
+                        str(lag_row["max_cp_level"].iloc[0])
+                        if "max_cp_level" in lag_row.columns
+                        else ""
+                    )
+                    cp_color = cp_level_color(dtokens, theme_mode, cp_level)
+                    for cp in cps[:8]:
+                        with contextlib.suppress(Exception):
+                            fig_lag.add_vline(
+                                x=pd.to_datetime(cp),
+                                line_width=2,
+                                line_dash="dot",
+                                line_color=cp_color,
                             )
-                        )
-                        fig_lag.add_trace(
-                            go.Bar(
-                                x=g["week"],
-                                y=g["incidents_shifted"],
-                                name=f"# incidencias (shift {lagw}w)",
-                                yaxis="y2",
-                                opacity=0.70,
-                                marker=dict(color=pal["color.primary.accent.value-01.default"]),
-                            )
-                        )
-                        cp_level = (
-                            str(lag_row["max_cp_level"].iloc[0])
-                            if "max_cp_level" in lag_row.columns
-                            else ""
-                        )
-                        cp_color = cp_level_color(dtokens, theme_mode, cp_level)
-                        for cp in cps[:8]:
-                            with contextlib.suppress(Exception):
-                                fig_lag.add_vline(
-                                    x=pd.to_datetime(cp),
-                                    line_width=2,
-                                    line_dash="dot",
-                                    line_color=cp_color,
-                                )
-                        fig_lag.update_layout(
-                            height=380,
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-                            yaxis2=dict(
-                                title="Incidencias (shifted)", overlaying="y", side="right"
-                            ),
-                            legend=dict(orientation="h"),
-                        )
-                        st.plotly_chart(
-                            apply_plotly_theme(fig_lag, theme), use_container_width=True
-                        )
+                    fig_lag.update_layout(
+                        height=380,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
+                        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
+                        legend=dict(orientation="h"),
+                    )
+                    st.plotly_chart(apply_plotly_theme(fig_lag, theme), use_container_width=True)
 
             def _render_lag_tab() -> None:
-                    active_lag_days = (
-                        lag_days[lag_days["nps_topic"] == active_topic].copy()
-                        if "lag_days" in locals() and not lag_days.empty
-                        else pd.DataFrame()
+                active_lag_days = (
+                    lag_days[lag_days["nps_topic"] == active_topic].copy()
+                    if "lag_days" in locals() and not lag_days.empty
+                    else pd.DataFrame()
+                )
+                if active_lag_days.empty:
+                    st.info("No hay lag diario disponible para el caso activo.")
+                else:
+                    lagd = int(active_lag_days.iloc[0]["best_lag_days"])
+                    gd = (
+                        by_topic_daily[by_topic_daily["nps_topic"] == active_topic]
+                        .sort_values("date")
+                        .copy()
                     )
-                    if active_lag_days.empty:
-                        st.info("No hay lag diario disponible para el caso activo.")
-                    else:
-                        lagd = int(active_lag_days.iloc[0]["best_lag_days"])
-                        gd = (
-                            by_topic_daily[by_topic_daily["nps_topic"] == active_topic]
-                            .sort_values("date")
-                            .copy()
+                    gd["incidents_shifted"] = gd["incidents"].shift(lagd)
+                    px, go = _plotly()
+                    figd = go.Figure()
+                    figd.add_trace(
+                        go.Scatter(
+                            x=gd["date"],
+                            y=gd["focus_rate"],
+                            name=f"% {focus_name}",
+                            mode="lines",
+                            line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
                         )
-                        gd["incidents_shifted"] = gd["incidents"].shift(lagd)
-                        px, go = _plotly()
-                        figd = go.Figure()
-                        figd.add_trace(
-                            go.Scatter(
-                                x=gd["date"],
-                                y=gd["focus_rate"],
-                                name=f"% {focus_name}",
-                                mode="lines",
-                                line=dict(
-                                    color=pal["color.primary.accent.value-07.default"], width=2
-                                ),
-                            )
+                    )
+                    figd.add_trace(
+                        go.Bar(
+                            x=gd["date"],
+                            y=gd["incidents_shifted"],
+                            name=f"# incidencias (shift {lagd}d)",
+                            yaxis="y2",
+                            opacity=0.70,
+                            marker=dict(color=pal["color.primary.accent.value-01.default"]),
                         )
-                        figd.add_trace(
-                            go.Bar(
-                                x=gd["date"],
-                                y=gd["incidents_shifted"],
-                                name=f"# incidencias (shift {lagd}d)",
-                                yaxis="y2",
-                                opacity=0.70,
-                                marker=dict(color=pal["color.primary.accent.value-01.default"]),
-                            )
-                        )
-                        figd.update_layout(
-                            height=360,
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-                            yaxis2=dict(
-                                title="Incidencias (shifted)", overlaying="y", side="right"
-                            ),
-                            legend=dict(orientation="h"),
-                        )
-                        st.plotly_chart(apply_plotly_theme(figd, theme), use_container_width=True)
+                    )
+                    figd.update_layout(
+                        height=360,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
+                        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
+                        legend=dict(orientation="h"),
+                    )
+                    st.plotly_chart(apply_plotly_theme(figd, theme), use_container_width=True)
 
             impact_chain(
                 [current_card],
@@ -3589,9 +3584,7 @@ def page_nps_helix_linking(
     with tab_ppt:
         default_selected_chain_keys = list(selected_chain_keys)
         label_map = {
-            str(rec.get("chain_key", "")): str(
-                rec.get("selection_label", rec.get("nps_topic", ""))
-            )
+            str(rec.get("chain_key", "")): str(rec.get("selection_label", rec.get("nps_topic", "")))
             for rec in chain_candidates_df.to_dict(orient="records")
         }
         selected_chain_keys = st.multiselect(
@@ -4055,9 +4048,7 @@ def page_nps_helix_linking(
             st.download_button(
                 "Descargar presentación (.pptx)",
                 data=bytes(cached_ppt.get("content", b"")),
-                file_name=str(
-                    cached_ppt.get("file_name", "presentacion_nps_incidencias.pptx")
-                ),
+                file_name=str(cached_ppt.get("file_name", "presentacion_nps_incidencias.pptx")),
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 use_container_width=True,
                 key="nh_download_generated_pptx",
@@ -4067,78 +4058,82 @@ def page_nps_helix_linking(
         # 5) Deep-dive pack (Markdown + JSON)
         st.markdown("### 📦 LLM Deep-Dive Pack (Markdown + JSON)")
         pack = {
-        "version": "1.0",
-        "context": {
-            "service_origin": service_origin,
-            "service_origin_n1": service_origin_n1,
-            "service_origin_n2": service_origin_n2,
-            "date_start": str(start),
-            "date_end": str(end),
-            "min_similarity": float(min_sim),
-            "max_days_apart": int(max_days_apart),
-        },
-        "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
-        "metrics_overall_daily": (
-            overall_daily.to_dict(orient="records")
-            if "overall_daily" in locals() and not overall_daily.empty
-            else []
-        ),
-        "ranked_hypotheses": rank.head(20).to_dict(orient="records") if "rank" in locals() else [],
-        "changepoints_by_topic": (
-            cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else []
-        ),
-        "best_lag_by_topic": (
-            lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else []
-        ),
-        "best_lag_days_by_topic": (
-            lag_days.to_dict(orient="records")
-            if "lag_days" in locals() and not lag_days.empty
-            else []
-        ),
-        "knowledge_cache_context_entries": (
-            kc_entries[
-                (kc_entries["service_origin"] == str(service_origin))
-                & (kc_entries["service_origin_n1"] == str(service_origin_n1))
-                & (kc_entries["service_origin_n2"] == str(service_origin_n2 or ""))
-            ].to_dict(orient="records")
-            if "kc_entries" in locals() and not kc_entries.empty
-            else []
-        ),
-        "business_rationale": {
-            "summary": {
-                "topics_analyzed": int(rationale_summary.topics_analyzed),
-                "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
-                "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
-                "top3_incident_share": float(rationale_summary.top3_incident_share),
-                "confidence_mean": float(rationale_summary.confidence_mean),
-                "peak_focus_probability": float(rationale_summary.peak_focus_probability),
-                "expected_nps_delta": float(rationale_summary.expected_nps_delta),
-                "total_nps_impact": float(rationale_summary.total_nps_impact),
-                "median_lag_weeks": (
-                    None
-                    if rationale_summary.median_lag_weeks != rationale_summary.median_lag_weeks
-                    else float(rationale_summary.median_lag_weeks)
-                ),
+            "version": "1.0",
+            "context": {
+                "service_origin": service_origin,
+                "service_origin_n1": service_origin_n1,
+                "service_origin_n2": service_origin_n2,
+                "date_start": str(start),
+                "date_end": str(end),
+                "min_similarity": float(min_sim),
+                "max_days_apart": int(max_days_apart),
             },
-            "priority_topics": (
-                rationale_df.head(25).to_dict(orient="records") if not rationale_df.empty else []
-            ),
-            "attribution_chains": (
-                chain_df.to_dict(orient="records")
-                if "chain_df" in locals() and not chain_df.empty
+            "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
+            "metrics_overall_daily": (
+                overall_daily.to_dict(orient="records")
+                if "overall_daily" in locals() and not overall_daily.empty
                 else []
             ),
-            "ppt_story_md": ppt_story_md,
-            "ppt_8slides_md": ppt_8slides_md,
-        },
-        "evidence_links_sample": (
-            links_df.head(200).to_dict(orient="records") if not links_df.empty else []
-        ),
-        "notes": [
-            "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
-            "Los links se validan con política fija: TF-IDF, similitud mínima, cruce semántico estricto y ventana temporal.",
-        ],
-    }
+            "ranked_hypotheses": (
+                rank.head(20).to_dict(orient="records") if "rank" in locals() else []
+            ),
+            "changepoints_by_topic": (
+                cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else []
+            ),
+            "best_lag_by_topic": (
+                lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else []
+            ),
+            "best_lag_days_by_topic": (
+                lag_days.to_dict(orient="records")
+                if "lag_days" in locals() and not lag_days.empty
+                else []
+            ),
+            "knowledge_cache_context_entries": (
+                kc_entries[
+                    (kc_entries["service_origin"] == str(service_origin))
+                    & (kc_entries["service_origin_n1"] == str(service_origin_n1))
+                    & (kc_entries["service_origin_n2"] == str(service_origin_n2 or ""))
+                ].to_dict(orient="records")
+                if "kc_entries" in locals() and not kc_entries.empty
+                else []
+            ),
+            "business_rationale": {
+                "summary": {
+                    "topics_analyzed": int(rationale_summary.topics_analyzed),
+                    "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
+                    "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
+                    "top3_incident_share": float(rationale_summary.top3_incident_share),
+                    "confidence_mean": float(rationale_summary.confidence_mean),
+                    "peak_focus_probability": float(rationale_summary.peak_focus_probability),
+                    "expected_nps_delta": float(rationale_summary.expected_nps_delta),
+                    "total_nps_impact": float(rationale_summary.total_nps_impact),
+                    "median_lag_weeks": (
+                        None
+                        if rationale_summary.median_lag_weeks != rationale_summary.median_lag_weeks
+                        else float(rationale_summary.median_lag_weeks)
+                    ),
+                },
+                "priority_topics": (
+                    rationale_df.head(25).to_dict(orient="records")
+                    if not rationale_df.empty
+                    else []
+                ),
+                "attribution_chains": (
+                    chain_df.to_dict(orient="records")
+                    if "chain_df" in locals() and not chain_df.empty
+                    else []
+                ),
+                "ppt_story_md": ppt_story_md,
+                "ppt_8slides_md": ppt_8slides_md,
+            },
+            "evidence_links_sample": (
+                links_df.head(200).to_dict(orient="records") if not links_df.empty else []
+            ),
+            "notes": [
+                "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
+                "Los links se validan con política fija: TF-IDF, similitud mínima, cruce semántico estricto y ventana temporal.",
+            ],
+        }
         pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
 
         md_lines = []
@@ -4175,13 +4170,17 @@ def page_nps_helix_linking(
             md_lines.append("## 2.1) Lag estimado (diario, si aplica)")
             md_lines.append("| Tópico | Lag (días) | Corr@Lag | Puntos |")
             md_lines.append("|---|---:|---:|---:|")
-            for rec in lag_days.sort_values("corr", ascending=False).head(10).to_dict(orient="records"):
+            for rec in (
+                lag_days.sort_values("corr", ascending=False).head(10).to_dict(orient="records")
+            ):
                 md_lines.append(
                     f"| {rec.get('nps_topic','')} | {int(rec.get('best_lag_days',0) or 0)} | {float(rec.get('corr',0) or 0):.3f} | {int(rec.get('points',0) or 0)} |"
                 )
             md_lines.append("")
         md_lines.append("## 3) Racional de negocio (riesgo -> recuperacion)")
-        md_lines.append(f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**")
+        md_lines.append(
+            f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**"
+        )
         md_lines.append(
             f"- NPS recuperable estimado: **{rationale_summary.nps_points_recoverable:.2f} pts**"
         )
@@ -4191,7 +4190,9 @@ def page_nps_helix_linking(
         md_lines.append(
             f"- Probabilidad máxima del foco con incidencia: **{rationale_summary.peak_focus_probability*100:.0f}%**"
         )
-        md_lines.append(f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**")
+        md_lines.append(
+            f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**"
+        )
         md_lines.append(
             f"- Concentración de incidencias en top-3: **{rationale_summary.top3_incident_share*100:.1f}%**"
         )
@@ -4244,7 +4245,9 @@ def page_nps_helix_linking(
         md_lines.append(
             "- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?"
         )
-        md_lines.append("- ¿Qué subtemas emergen en los verbatims y en las incidencias? ¿Coinciden?")
+        md_lines.append(
+            "- ¿Qué subtemas emergen en los verbatims y en las incidencias? ¿Coinciden?"
+        )
         md_lines.append(
             "- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?"
         )
@@ -4286,9 +4289,9 @@ def page_nps_helix_linking(
             _clipboard_copy_widget(wow_prompt, label="Copiar prompt WoW")
             st.text_area(
                 "Prompt recomendado",
-            value=wow_prompt,
-            height=320,
-        )
+                value=wow_prompt,
+                height=320,
+            )
 
 
 def main() -> None:
@@ -4390,9 +4393,7 @@ def main() -> None:
     # Global population time window (Año/Mes) applied everywhere.
     pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
-    t_thermal, t_helix, t_datos = st.tabs(
-        ["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"]
-    )
+    t_thermal, t_helix, t_datos = st.tabs(["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"])
 
     with t_thermal:
         df_resumen = load_context_df(

@@ -772,7 +772,11 @@ def build_incident_attribution_chains(
             for _, r in inc_ranked.iterrows()
             if str(r.get("incident_id", "")).strip()
         ]
-        incident_examples = [str(rec.get("summary", "")).strip() for rec in incident_records if str(rec.get("summary", "")).strip()]
+        incident_examples = [
+            str(rec.get("summary", "")).strip()
+            for rec in incident_records
+            if str(rec.get("summary", "")).strip()
+        ]
         comment_examples = [
             f"NPS {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
             for _, r in comment_ranked.iterrows()
