@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from html import escape
+from typing import Callable, Optional
+from urllib.parse import quote
 
+import pandas as pd
 import streamlit as st
 
 
@@ -51,7 +54,7 @@ def pills(items: list[str]) -> None:
     if not items:
         return
     html = "".join([f"<span class='nps-pill'>{i}</span> " for i in items])
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
 
 
 def executive_banner(
@@ -89,7 +92,11 @@ def executive_banner(
     )
 
 
-def impact_chain(items: list[object]) -> None:
+def impact_chain(
+    items: list[object],
+    *,
+    extra_tabs: Optional[list[tuple[str, Callable[[], None]]]] = None,
+) -> None:
     if not items:
         return
 
@@ -120,8 +127,168 @@ def impact_chain(items: list[object]) -> None:
         except Exception:
             return int(default)
 
-    if len(items) == 1:
-        item = items[0]
+    def _normalize_examples(value: object) -> list[str]:
+        if isinstance(value, list):
+            values = value
+        elif value in (None, ""):
+            values = []
+        else:
+            values = [value]
+        return [str(v).strip() for v in values if str(v).strip()]
+
+    def _widget_key(item: object) -> str:
+        raw = str(
+            _value(
+                item,
+                "chain_key",
+                f"{_value(item, 'rank', '')}-{_value(item, 'title', _value(item, 'nps_topic', ''))}",
+            )
+        )
+        normalized = "".join(ch.lower() if ch.isalnum() else "-" for ch in raw)
+        normalized = "-".join([part for part in normalized.split("-") if part])
+        return normalized[:48] or "impact-chain"
+
+    def _normalize_incident_records(item: object) -> list[dict[str, str]]:
+        raw = _value(item, "incident_records", [])
+        records: list[dict[str, str]] = []
+        if isinstance(raw, list):
+            for entry in raw:
+                if isinstance(entry, dict):
+                    incident_id = str(entry.get("incident_id", "") or "").strip()
+                    summary = str(entry.get("summary", "") or "").strip()
+                    url = str(entry.get("url", "") or "").strip()
+                    if incident_id or summary:
+                        records.append(
+                            {
+                                "incident_id": incident_id,
+                                "summary": summary,
+                                "url": url,
+                            }
+                        )
+        if records:
+            return records
+        examples = _normalize_examples(_value(item, "incident_examples", []))
+        fallback: list[dict[str, str]] = []
+        for entry in examples:
+            txt = str(entry).strip()
+            incident_id = ""
+            summary = txt
+            if ":" in txt:
+                maybe_id, maybe_summary = txt.split(":", 1)
+                if maybe_id.strip().upper().startswith("INC"):
+                    incident_id = maybe_id.strip()
+                    summary = maybe_summary.strip()
+            fallback.append(
+                {
+                    "incident_id": incident_id,
+                    "summary": summary,
+                    "url": "",
+                }
+            )
+        return fallback
+
+    def _is_clickable_url(value: str) -> bool:
+        txt = str(value or "").strip()
+        return txt.startswith("http://") or txt.startswith("https://") or txt.startswith("file://")
+
+    def _render_evidence_cards(items: list[str], *, empty_label: str, badge: str) -> None:
+        if not items:
+            st.info(empty_label)
+            return
+        cards_html = "".join(
+            [
+                (
+                    "<article class='nps-evidence-card'>"
+                    f"<div class='nps-evidence-card-index'>{badge} {idx}</div>"
+                    f"<p>{escape(text)}</p>"
+                    "</article>"
+                )
+                for idx, text in enumerate(items, start=1)
+            ]
+        )
+        st.markdown(
+            f"<div class='nps-evidence-grid'>{cards_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+    def _render_helix_record_cards(records: list[dict[str, str]], *, empty_label: str) -> None:
+        if not records:
+            st.info(empty_label)
+            return
+        cards_html = ""
+        for record in records:
+            incident_id = str(record.get("incident_id", "")).strip()
+            summary = str(record.get("summary", "")).strip()
+            url = str(record.get("url", "")).strip()
+            id_html = escape(incident_id) if incident_id else "INC"
+            if incident_id and _is_clickable_url(url):
+                href = quote(url, safe=":/?&=%#@+,-._~")
+                id_html = f"<a href='{href}' target='_blank'>{escape(incident_id)}</a>"
+            cards_html += (
+                "<article class='nps-evidence-card'>"
+                f"<div class='nps-evidence-card-index'>{id_html}</div>"
+                f"<p>{escape(summary)}</p>"
+                "</article>"
+            )
+        st.markdown(
+            f"<div class='nps-evidence-grid'>{cards_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+    def _render_evidence_table(items: list[str], *, column_label: str) -> None:
+        if not items:
+            st.info(f"Sin registros para {column_label.lower()}.")
+            return
+        table_df = pd.DataFrame(
+            {
+                "#": list(range(1, len(items) + 1)),
+                column_label: items,
+            }
+        )
+        st.dataframe(
+            table_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(420, 72 + len(items) * 42),
+        )
+
+    def _render_evidence_html_table(
+        rows: list[dict[str, str]],
+        *,
+        columns: list[tuple[str, str]],
+        empty_label: str,
+    ) -> None:
+        if not rows:
+            st.info(empty_label)
+            return
+        head_html = "".join([f"<th>{escape(label)}</th>" for _, label in columns])
+        body_html = ""
+        for row in rows:
+            cells = []
+            for key, _label in columns:
+                value = str(row.get(key, "") or "").strip()
+                if key == "incident_id" and _is_clickable_url(
+                    str(row.get("url", "") or "").strip()
+                ):
+                    href = quote(str(row.get("url", "") or "").strip(), safe=":/?&=%#@+,-._~")
+                    cell_html = f"<a href='{href}' target='_blank'>{escape(value)}</a>"
+                else:
+                    cell_html = escape(value)
+                cells.append(f"<td>{cell_html}</td>")
+            body_html += f"<tr>{''.join(cells)}</tr>"
+        st.markdown(
+            (
+                "<div class='nps-evidence-table-wrap'>"
+                "<table class='nps-evidence-table'>"
+                f"<thead><tr>{head_html}</tr></thead>"
+                f"<tbody>{body_html}</tbody>"
+                "</table>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+
+    def _render_single_item(item: object, *, key_suffix: str = "") -> None:
         rank = escape(str(_value(item, "rank", "")))
         title = escape(str(_value(item, "title", _value(item, "nps_topic", ""))))
         touchpoint = escape(str(_value(item, "touchpoint", "")))
@@ -136,6 +303,10 @@ def impact_chain(items: list[object]) -> None:
         nps_delta_expected = _value(item, "nps_delta_expected", float("nan"))
         total_nps_impact = _value(item, "total_nps_impact", 0.0)
         confidence = _value(item, "confidence", 0.0)
+        priority = _value(item, "priority", float("nan"))
+        nps_points_at_risk = _value(item, "nps_points_at_risk", float("nan"))
+        nps_points_recoverable = _value(item, "nps_points_recoverable", float("nan"))
+        owner_role = escape(str(_value(item, "owner_role", "n/d") or "n/d"))
         linked_pairs = _safe_int(_value(item, "linked_pairs", 0), default=0)
         linked_incidents = _safe_int(
             _value(item, "linked_incidents", len(_value(item, "incident_examples", []))),
@@ -145,16 +316,13 @@ def impact_chain(items: list[object]) -> None:
             _value(item, "linked_comments", len(_value(item, "comment_examples", []))),
             default=0,
         )
-        incident_examples = _value(item, "incident_examples", [])
-        comment_examples = _value(item, "comment_examples", [])
-        if not isinstance(incident_examples, list):
-            incident_examples = [] if incident_examples in (None, "") else [incident_examples]
-        if not isinstance(comment_examples, list):
-            comment_examples = [] if comment_examples in (None, "") else [comment_examples]
-        incident_examples = [str(v).strip() for v in incident_examples if str(v).strip()]
-        comment_examples = [str(v).strip() for v in comment_examples if str(v).strip()]
-        incidents_html = "".join([f"<li>{escape(str(v))}</li>" for v in incident_examples])
-        comments_html = "".join([f"<li>{escape(str(v))}</li>" for v in comment_examples])
+        incident_records = _normalize_incident_records(item)
+        incident_examples = [
+            str(record.get("summary", "")).strip()
+            for record in incident_records
+            if str(record.get("summary", "")).strip()
+        ]
+        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
         lever_label = " / ".join([v for v in [palanca, subpalanca] if v])
         st.markdown(
             f"""
@@ -184,24 +352,90 @@ def impact_chain(items: list[object]) -> None:
     <div class="nps-spotlight-metric"><span>Impacto total</span><strong>{_fmt_num(total_nps_impact)} pts</strong></div>
     <div class="nps-spotlight-metric"><span>Confianza</span><strong>{_fmt_num(confidence)}</strong></div>
     <div class="nps-spotlight-metric"><span>Links validados</span><strong>{linked_pairs}</strong></div>
-  </div>
-  <div class="nps-spotlight-evidence">
-    <section class="nps-impact-evidence">
-      <div class="nps-impact-label">Evidencia Helix ({linked_incidents})</div>
-      <ul>{incidents_html or '<li>Sin evidencia Helix visible</li>'}</ul>
-    </section>
-    <section class="nps-impact-evidence">
-      <div class="nps-impact-label">Voz del Cliente ({linked_comments})</div>
-      <ul>{comments_html or '<li>Sin evidencia VoC visible</li>'}</ul>
-    </section>
+    <div class="nps-spotlight-metric"><span>Prioridad</span><strong>{_fmt_num(priority)}</strong></div>
+    <div class="nps-spotlight-metric"><span>NPS en riesgo</span><strong>{_fmt_num(nps_points_at_risk)} pts</strong></div>
+    <div class="nps-spotlight-metric"><span>NPS recuperable</span><strong>{_fmt_num(nps_points_recoverable)} pts</strong></div>
+    <div class="nps-spotlight-metric"><span>Owner</span><strong>{owner_role}</strong></div>
   </div>
 </article>
 """,
             unsafe_allow_html=True,
         )
+        evidence_key = f"{_widget_key(item)}{key_suffix}"
+        ctl_col, meta_col = st.columns([1.4, 2.6])
+        with ctl_col:
+            evidence_view = st.radio(
+                "Vista de evidencia",
+                options=["Cards", "Tabla"],
+                horizontal=True,
+                key=f"nh_chain_evidence_view_{evidence_key}",
+                label_visibility="collapsed",
+            )
+        with meta_col:
+            st.markdown(
+                (
+                    "<div class='nps-evidence-toolbar-note'>"
+                    f"<strong>{len(incident_examples)}</strong> evidencias Helix visibles · "
+                    f"<strong>{len(comment_examples)}</strong> comentarios VoC visibles"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        tabs_spec: list[tuple[str, Callable[[], None]]] = []
+
+        def _render_helix_tab() -> None:
+            if evidence_view == "Tabla":
+                _render_evidence_html_table(
+                    incident_records,
+                    columns=[("incident_id", "ID"), ("summary", "Evidencia Helix")],
+                    empty_label="Sin evidencia Helix visible.",
+                )
+            else:
+                _render_helix_record_cards(
+                    incident_records,
+                    empty_label="Sin evidencia Helix visible.",
+                )
+
+        def _render_voc_tab() -> None:
+            if evidence_view == "Tabla":
+                _render_evidence_html_table(
+                    [{"comment": text} for text in comment_examples],
+                    columns=[("comment", "Voz del cliente")],
+                    empty_label="Sin evidencia VoC visible.",
+                )
+            else:
+                _render_evidence_cards(
+                    comment_examples,
+                    empty_label="Sin evidencia VoC visible.",
+                    badge="VoC",
+                )
+
+        tabs_spec.append(
+            (
+                f"Evidencia Helix ({linked_incidents or len(incident_examples)})",
+                _render_helix_tab,
+            )
+        )
+        tabs_spec.append(
+            (
+                f"Voz del cliente ({linked_comments or len(comment_examples)})",
+                _render_voc_tab,
+            )
+        )
+        if extra_tabs:
+            tabs_spec.extend(extra_tabs)
+
+        tabs = st.tabs([label for label, _ in tabs_spec])
+        for tab, (_label, renderer) in zip(tabs, tabs_spec):
+            with tab:
+                renderer()
+
+    if len(items) == 1:
+        _render_single_item(items[0])
         return
 
     cards: list[str] = []
+    summary_rows: list[dict[str, object]] = []
     for item in items:
         rank = escape(str(_value(item, "rank", "")))
         title = escape(str(_value(item, "title", _value(item, "nps_topic", ""))))
@@ -223,34 +457,16 @@ def impact_chain(items: list[object]) -> None:
             _value(item, "linked_comments", len(_value(item, "comment_examples", []))),
             default=0,
         )
-        incident_examples = _value(item, "incident_examples", [])
-        comment_examples = _value(item, "comment_examples", [])
-        if not isinstance(incident_examples, list):
-            incident_examples = [] if incident_examples in (None, "") else [incident_examples]
-        if not isinstance(comment_examples, list):
-            comment_examples = [] if comment_examples in (None, "") else [comment_examples]
-        incident_examples = [str(v).strip() for v in incident_examples if str(v).strip()]
-        comment_examples = [str(v).strip() for v in comment_examples if str(v).strip()]
+        incident_records = _normalize_incident_records(item)
+        incident_examples = [
+            str(record.get("summary", "")).strip()
+            for record in incident_records
+            if str(record.get("summary", "")).strip()
+        ]
+        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
         incident_sample_count = len(incident_examples)
         comment_sample_count = len(comment_examples)
-        helix_header = (
-            f"Helix ({incident_sample_count} de {linked_incidents})"
-            if incident_sample_count < linked_incidents
-            else f"Helix ({incident_sample_count})"
-        )
-        voc_header = (
-            f"VoC ({comment_sample_count} de {linked_comments})"
-            if comment_sample_count < linked_comments
-            else f"VoC ({comment_sample_count})"
-        )
-        incidents_html = ""
-        comments_html = ""
-        if incident_examples:
-            incidents_html = "".join([f"<li>{escape(str(v))}</li>" for v in incident_examples])
-            incidents_html = f"<div class='nps-impact-evidence'><div class='nps-impact-label'>{helix_header}</div><ul>{incidents_html}</ul></div>"
-        if comment_examples:
-            comments_html = "".join([f"<li>{escape(str(v))}</li>" for v in comment_examples])
-            comments_html = f"<div class='nps-impact-evidence'><div class='nps-impact-label'>{voc_header}</div><ul>{comments_html}</ul></div>"
+        linked_pairs = _safe_int(_value(item, "linked_pairs", 0), default=0)
         cards.append(
             f"""
 <article class="nps-impact-card">
@@ -275,17 +491,56 @@ def impact_chain(items: list[object]) -> None:
     <span>Confianza <strong>{_fmt_num(confidence)}</strong></span>
   </div>
   <p>{statement}</p>
-  {incidents_html}
-  {comments_html}
 </article>
 """
         )
+        summary_rows.append(
+            {
+                "Rank": _safe_int(_value(item, "rank", 0), default=0),
+                "Cadena": str(_value(item, "title", _value(item, "nps_topic", ""))),
+                "Touchpoint": str(_value(item, "touchpoint", "")),
+                "Incidencias Helix": linked_incidents or incident_sample_count,
+                "Comentarios VoC": linked_comments or comment_sample_count,
+                "Links validados": linked_pairs,
+                "Probabilidad foco": _fmt_pct(focus_probability),
+                "Delta NPS": _fmt_num(nps_delta_expected, signed=True),
+                "Impacto total": f"{_fmt_num(total_nps_impact)} pts",
+                "Confianza": _fmt_num(confidence),
+            }
+        )
 
-    st.markdown(
-        f"""
+    summary_view = st.radio(
+        "Vista de cadenas",
+        options=["Cards", "Tabla"],
+        horizontal=True,
+        key="nh_multi_chain_summary_view",
+        label_visibility="collapsed",
+    )
+    if summary_view == "Tabla":
+        st.dataframe(
+            pd.DataFrame(summary_rows),
+            use_container_width=True,
+            hide_index=True,
+            height=min(420, 72 + len(summary_rows) * 42),
+        )
+    else:
+        st.markdown(
+            f"""
 <div class="nps-impact-grid">
   {''.join(cards)}
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
+
+    if len(items) > 1:
+        st.markdown("#### Detalle por cadena")
+        detail_tabs = st.tabs(
+            [
+                f"#{_safe_int(_value(item, 'rank', idx + 1), default=idx + 1)} {str(_value(item, 'title', _value(item, 'nps_topic', '')))}"
+                for idx, item in enumerate(items)
+            ]
+        )
+        for idx, (tab, item) in enumerate(zip(detail_tabs, items)):
+            with tab:
+                _render_single_item(item, key_suffix=f"-detail-{idx}")

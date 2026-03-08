@@ -143,12 +143,31 @@ def _sample_payload() -> dict:
                 "action_lane": "Fix estructural",
                 "owner_role": "Producto + Tecnologia",
                 "eta_weeks": 6.0,
+                "incident_records": [
+                    {"incident_id": "INC00001", "summary": "problema en el login", "url": ""},
+                    {"incident_id": "INC00003", "summary": "no puedo acceder", "url": ""},
+                    {
+                        "incident_id": "INC00025",
+                        "summary": "nada mas entras se desloguea",
+                        "url": "",
+                    },
+                    {
+                        "incident_id": "INC00040",
+                        "summary": "error al autenticar usuario en acceso web",
+                        "url": "",
+                    },
+                    {
+                        "incident_id": "INC00041",
+                        "summary": "falla de sesion al entrar en portal empresas",
+                        "url": "",
+                    },
+                ],
                 "incident_examples": [
-                    "INC00001: problema en el login",
-                    "INC00003: no puedo acceder",
-                    "INC00025: nada mas entras se desloguea",
-                    "INC00040: error al autenticar usuario en acceso web",
-                    "INC00041: falla de sesion al entrar en portal empresas",
+                    "problema en el login",
+                    "no puedo acceder",
+                    "nada mas entras se desloguea",
+                    "error al autenticar usuario en acceso web",
+                    "falla de sesion al entrar en portal empresas",
                 ],
                 "comment_examples": [
                     "NPS 1: No hay quien entre a la aplicación",
@@ -172,6 +191,26 @@ def _sample_payload() -> dict:
 
 def test_generate_business_review_ppt_builds_new_story() -> None:
     payload = _sample_payload()
+    business_story = """# Informe de negocio — NPS Lens
+
+## 1) Qué está pasando
+- Muestras: 36,872 · NPS medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
+- Zona de fricción: Agregar funcionalidad · Zona fuerte: FAN
+
+## 2) Cambio vs base de comparación
+- Periodo actual: Mes actual (Febrero 2026 · 2026-02-01 → 2026-02-22) (n=20,791)
+- Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
+- Variación: Δ NPS -0.18 · Δ detractores +2.5 pp
+
+## 3) Dónde atacar primero (oportunidades)
+- Si mejoramos Palanca=Funcionamiento Continuo, el modelo estima un potencial de +57.2 puntos.
+
+## 4) Qué están diciendo (temas de texto)
+- Tema #1: fallas de continuidad, caídas y lentitud en procesos críticos.
+
+## 5) Próximos pasos recomendados
+- Validar releases, alinear owners y aterrizar quick wins del mes.
+"""
 
     out = generate_business_review_ppt(
         service_origin="BBVA México",
@@ -186,7 +225,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         nps_points_recoverable=2.4,
         top3_incident_share=0.74,
         median_lag_weeks=1.2,
-        story_md="",
+        story_md=business_story,
         script_8slides_md="",
         attribution_df=payload["attribution"],
         ranking_df=payload["rationale"],
@@ -201,10 +240,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 8
+    assert out.slide_count == 9
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 8
+    assert len(prs.slides) == 9
 
     texts = []
     for slide in prs.slides:
@@ -214,6 +253,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                     texts.append(paragraph.text or "")
 
     assert any("Resumen del periodo" in t for t in texts)
+    assert any("Informe de negocio" in t for t in texts)
+    assert any("Qué está pasando" in t for t in texts)
+    assert any("Cambio vs base de comparación" in t for t in texts)
+    assert any("Periodo actual: Mes actual" in t for t in texts)
+    assert any("Periodo base: Base histórica anterior" in t for t in texts)
     assert any("SERVICE ORIGEN" in t for t in texts)
     assert any("NIVEL N1" in t for t in texts)
     assert any("NIVEL N2" in t for t in texts)
@@ -224,8 +268,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Incidencias históricas diarias por hotspot" in t for t in texts)
     assert any("Tema prioritario 1: Login" in t for t in texts)
     assert any("Evidencia Helix" in t for t in texts)
-    assert any("INC00001: problema en el login" in t for t in texts)
-    assert any("INC00041: falla de sesion al entrar en portal empresas" in t for t in texts)
+    assert any("INC00001" in t and "problema en el login" in t for t in texts)
+    assert any(
+        "INC00041" in t and "falla de sesion al entrar en portal empresas" in t for t in texts
+    )
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert any("Priorización del tema" in t for t in texts)

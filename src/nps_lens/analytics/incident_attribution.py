@@ -10,8 +10,44 @@ import pandas as pd
 from nps_lens.analytics.nps_helix_link import build_incident_display_text
 
 TOUCHPOINT_SOURCE_DOMAIN = "domain_touchpoint"
-TOUCHPOINT_SOURCE_HELIX_N2 = "helix_assigned_n2"
+TOUCHPOINT_SOURCE_PALANCA = "palanca_touchpoint"
+TOUCHPOINT_SOURCE_BBVA_SOURCE_N2 = "bbva_source_service_n2"
 TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS = "executive_journeys"
+
+TOUCHPOINT_MODE_OPTIONS = (
+    TOUCHPOINT_SOURCE_PALANCA,
+    TOUCHPOINT_SOURCE_DOMAIN,
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
+
+TOUCHPOINT_MODE_MENU_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_CONTEXT_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_BANNER_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_SUMMARIES = {
+    TOUCHPOINT_SOURCE_PALANCA: "La lectura causal fija el touchpoint exclusivamente desde Palanca para mantener una taxonomía simple y homogénea.",
+    TOUCHPOINT_SOURCE_DOMAIN: "La lectura causal fija el touchpoint exclusivamente desde Subpalanca para reflejar el nivel operativo fino del dolor reportado.",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "La lectura causal se apoya exclusivamente en BBVA_SourceServiceN2 para reflejar el servicio origen reportado por Helix.",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "La lectura causal se reorganiza en journeys de comité para explicar dónde se rompe la experiencia y por qué cae el NPS.",
+}
 
 EXECUTIVE_JOURNEY_CATALOG = (
     {
@@ -136,6 +172,7 @@ CHAIN_COLUMNS = [
     "priority",
     "confidence",
     "causal_score",
+    "incident_records",
     "incident_examples",
     "comment_examples",
     "chain_story",
@@ -233,29 +270,20 @@ def _touchpoint(
     subpalanca: object,
     incident_topic: object,
     *,
-    helix_tier2: object = "",
+    helix_source_service_n2: object = "",
     source: str = TOUCHPOINT_SOURCE_DOMAIN,
 ) -> str:
-    if str(source or TOUCHPOINT_SOURCE_DOMAIN).strip() == TOUCHPOINT_SOURCE_HELIX_N2:
-        helix_tp = str(helix_tier2 or "").strip()
-        if helix_tp and not _is_generic(helix_tp):
-            return helix_tp
-
-    sub = str(subpalanca or "").strip()
-    if sub and not _is_generic(sub):
-        return sub
-
-    helix_tp = str(helix_tier2 or "").strip()
-    if helix_tp and not _is_generic(helix_tp):
-        return helix_tp
-
-    incident_parts = [p.strip() for p in str(incident_topic or "").split(">") if p.strip()]
-    if len(incident_parts) >= 2 and not _is_generic(incident_parts[1]):
-        return incident_parts[1]
-    pal = str(palanca or "").strip()
-    if pal and not _is_generic(pal):
-        return pal
-    return "Touchpoint sin etiquetar"
+    source_norm = str(source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+    if source_norm == TOUCHPOINT_SOURCE_PALANCA:
+        pal = str(palanca or "").strip()
+        return pal if pal and not _is_generic(pal) else ""
+    if source_norm == TOUCHPOINT_SOURCE_DOMAIN:
+        sub = str(subpalanca or "").strip()
+        return sub if sub and not _is_generic(sub) else ""
+    if source_norm == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
+        helix_source_n2 = str(helix_source_service_n2 or "").strip()
+        return helix_source_n2 if helix_source_n2 and not _is_generic(helix_source_n2) else ""
+    return ""
 
 
 def _empty_chain_df() -> pd.DataFrame:
@@ -350,8 +378,9 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
                 "incident_id",
                 "incident_date",
                 "incident_summary",
+                "incident_url",
                 "incident_topic",
-                "helix_touchpoint_n2",
+                "helix_source_service_n2",
             ]
         )
 
@@ -361,6 +390,59 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     )
     df["incident_date"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
     df["incident_summary"] = build_incident_display_text(df).astype(str).fillna("").str.strip()
+    url_candidates = [
+        "Incident URL",
+        "Incident Link",
+        "Record URL",
+        "Record Link",
+        "Document URL",
+        "Document Link",
+        "URL",
+        "Link",
+        "Href",
+    ]
+    lower_map = {str(col).strip().lower(): str(col) for col in df.columns}
+    picked_url_col = ""
+    for candidate in url_candidates:
+        hit = lower_map.get(candidate.strip().lower(), "")
+        if hit:
+            picked_url_col = hit
+            break
+    if not picked_url_col:
+        hyperlink_cols = [
+            str(col)
+            for col in df.columns
+            if str(col).strip().lower().endswith("__hyperlink")
+            and pd.Series(df.get(col, pd.Series(dtype=object))).astype(str).str.strip().ne("").any()
+        ]
+        if hyperlink_cols:
+            picked_url_col = hyperlink_cols[0]
+    if not picked_url_col:
+        fallback_cols = [
+            str(col)
+            for col in df.columns
+            if any(token in str(col).strip().lower() for token in ("url", "link", "href"))
+        ]
+        if fallback_cols:
+            picked_url_col = fallback_cols[0]
+    incident_url = (
+        df.get(picked_url_col, pd.Series([""] * len(df), index=df.index))
+        if picked_url_col and picked_url_col in df.columns
+        else pd.Series([""] * len(df), index=df.index)
+    )
+    incident_url = (
+        incident_url.astype(str)
+        .fillna("")
+        .str.strip()
+        .where(
+            incident_url.astype(str)
+            .fillna("")
+            .str.strip()
+            .str.match(r"^(https?|file)://", case=False, na=False),
+            "",
+        )
+    )
+    df["incident_url"] = incident_url
     tier1 = (
         df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index))
         .astype(str)
@@ -379,6 +461,12 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .fillna("")
         .str.strip()
     )
+    source_service_n2 = (
+        df.get("BBVA_SourceServiceN2", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     df["incident_topic"] = (tier1 + " > " + tier2 + " > " + tier3).str.replace(
         r"\s*>\s*>\s*", " > ", regex=True
     )
@@ -387,14 +475,15 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .str.replace(r"^>\s*", "", regex=True)
         .str.replace(r"\s*>$", "", regex=True)
     )
-    df["helix_touchpoint_n2"] = tier2
+    df["helix_source_service_n2"] = source_service_n2
     return df[
         [
             "incident_id",
             "incident_date",
             "incident_summary",
+            "incident_url",
             "incident_topic",
-            "helix_touchpoint_n2",
+            "helix_source_service_n2",
         ]
     ].copy()
 
@@ -455,15 +544,15 @@ def build_incident_attribution_chains(
             pal,
             sub,
             inc_topic,
-            helix_tier2=helix_t2,
+            helix_source_service_n2=helix_src_n2,
             source=touchpoint_source,
         )
-        for pal, sub, inc_topic, helix_t2 in zip(
+        for pal, sub, inc_topic, helix_src_n2 in zip(
             enriched["palanca"],
             enriched["subpalanca"],
             enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index)),
             enriched.get(
-                "helix_touchpoint_n2",
+                "helix_source_service_n2",
                 pd.Series([""] * len(enriched), index=enriched.index),
             ),
         )
@@ -644,15 +733,15 @@ def build_incident_attribution_chains(
                     palanca,
                     subpalanca,
                     "",
-                    helix_tier2=(
+                    helix_source_service_n2=(
                         str(
-                            grp.get("helix_touchpoint_n2", pd.Series([""]))
+                            grp.get("helix_source_service_n2", pd.Series([""]))
                             .astype(str)
                             .mode(dropna=True)
                             .iloc[0]
                         )
-                        if "helix_touchpoint_n2" in grp.columns
-                        and not grp.get("helix_touchpoint_n2", pd.Series(dtype=str))
+                        if "helix_source_service_n2" in grp.columns
+                        and not grp.get("helix_source_service_n2", pd.Series(dtype=str))
                         .mode(dropna=True)
                         .empty
                         else ""
@@ -674,17 +763,26 @@ def build_incident_attribution_chains(
             ["nps_score", "similarity"], ascending=[True, False], na_position="last"
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
-        incident_examples = [
-            f"{str(r.get('incident_id','')).strip()}: {' '.join(str(r.get('incident_summary','') or '').split())}"
+        incident_records = [
+            {
+                "incident_id": str(r.get("incident_id", "")).strip(),
+                "summary": " ".join(str(r.get("incident_summary", "") or "").split()),
+                "url": str(r.get("incident_url", "") or "").strip(),
+            }
             for _, r in inc_ranked.iterrows()
             if str(r.get("incident_id", "")).strip()
+        ]
+        incident_examples = [
+            str(rec.get("summary", "")).strip()
+            for rec in incident_records
+            if str(rec.get("summary", "")).strip()
         ]
         comment_examples = [
             f"NPS {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
             for _, r in comment_ranked.iterrows()
             if str(r.get("comment_txt", "")).strip()
         ]
-        if not incident_examples or not comment_examples:
+        if not incident_records or not comment_examples:
             continue
 
         detractor_probability = _safe_float(
@@ -722,7 +820,11 @@ def build_incident_attribution_chains(
         owner_role = _mode_text(grp.get("owner_role", pd.Series(dtype=object)))
         eta_weeks = _safe_float(grp.get("eta_weeks", pd.Series([np.nan])).max(), default=np.nan)
 
-        incident_ids = [s.split(":", 1)[0].strip() for s in incident_examples if ":" in str(s)]
+        incident_ids = [
+            str(rec.get("incident_id", "")).strip()
+            for rec in incident_records
+            if str(rec.get("incident_id", "")).strip()
+        ]
         incident_sample_count = len(incident_examples)
         comment_sample_count = len(comment_examples)
         incident_sample_label = (
@@ -772,6 +874,7 @@ def build_incident_attribution_chains(
                 "priority": _safe_float(grp.get("priority", pd.Series([0.0])).max(), default=0.0),
                 "confidence": confidence,
                 "causal_score": causal_score,
+                "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "chain_story": story,

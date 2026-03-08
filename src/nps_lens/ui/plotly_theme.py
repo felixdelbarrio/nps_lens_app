@@ -25,9 +25,12 @@ class PlotlyTheme:
     passive: str
     promoter: str
     text: str
+    muted: str
     grid: str
+    zero_line: str
     paper_bg: str
     plot_bg: str
+    surface: str
 
 
 def build_plotly_theme(theme: Theme) -> PlotlyTheme:
@@ -43,10 +46,13 @@ def build_plotly_theme(theme: Theme) -> PlotlyTheme:
         passive=pas,
         promoter=pro,
         text=theme.text,
+        muted=theme.muted,
         grid=theme.border,
-        # Solid hex backgrounds so exports are consistent.
-        paper_bg=theme.bg,
-        plot_bg=theme.bg,
+        zero_line=theme.border,
+        # Keep charts on raised surfaces, not on the page background.
+        paper_bg=theme.surface,
+        plot_bg=theme.surface_2,
+        surface=theme.surface,
     )
 
 
@@ -62,9 +68,32 @@ def build_plotly_template(theme: Theme) -> Dict[str, Any]:
                 "color": pt.text,
                 "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
             },
+            "title": {"font": {"color": pt.text}},
+            "margin": {"l": 16, "r": 16, "t": 20, "b": 16},
             "colorway": [pt.accent, pt.detractor, pt.passive, pt.promoter],
-            "legend": {"bgcolor": "rgba(0,0,0,0)", "bordercolor": pt.grid},
+            "legend": {
+                "bgcolor": "rgba(0,0,0,0)",
+                "bordercolor": pt.grid,
+                "font": {"color": pt.text},
+                "title": {"font": {"color": pt.text}},
+            },
             "hoverlabel": {"bgcolor": pt.paper_bg, "font": {"color": pt.text}},
+            "xaxis": {
+                "title": {"font": {"color": pt.text}},
+                "tickfont": {"color": pt.text},
+                "gridcolor": pt.grid,
+                "linecolor": pt.grid,
+                "zerolinecolor": pt.zero_line,
+                "automargin": True,
+            },
+            "yaxis": {
+                "title": {"font": {"color": pt.text}},
+                "tickfont": {"color": pt.text},
+                "gridcolor": pt.grid,
+                "linecolor": pt.grid,
+                "zerolinecolor": pt.zero_line,
+                "automargin": True,
+            },
         }
     }
 
@@ -89,6 +118,8 @@ def apply_plotly_theme(fig: Any, theme: Theme, *, template_name: str = "nps_lens
             zerolinecolor=pt.grid,
             showline=True,
             linecolor=pt.grid,
+            tickfont=dict(color=pt.text),
+            title_font=dict(color=pt.text),
         )  # type: ignore[attr-defined]
         fig.update_yaxes(
             showgrid=True,
@@ -96,6 +127,8 @@ def apply_plotly_theme(fig: Any, theme: Theme, *, template_name: str = "nps_lens
             zerolinecolor=pt.grid,
             showline=True,
             linecolor=pt.grid,
+            tickfont=dict(color=pt.text),
+            title_font=dict(color=pt.text),
         )  # type: ignore[attr-defined]
     except Exception:
         return fig

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional
 
 import numpy as np
@@ -40,6 +41,51 @@ def _date_range_label(d0: Optional[pd.Timestamp], d1: Optional[pd.Timestamp]) ->
     return f"{d0.date().isoformat()} → {d1.date().isoformat()}"
 
 
+def _month_label_es(ts: Optional[pd.Timestamp]) -> str:
+    if ts is None or pd.isna(ts):
+        return ""
+    months = {
+        1: "enero",
+        2: "febrero",
+        3: "marzo",
+        4: "abril",
+        5: "mayo",
+        6: "junio",
+        7: "julio",
+        8: "agosto",
+        9: "septiembre",
+        10: "octubre",
+        11: "noviembre",
+        12: "diciembre",
+    }
+    return f"{months.get(int(ts.month), 'mes').title()} {int(ts.year)}"
+
+
+def _period_label(
+    d0: Optional[pd.Timestamp],
+    d1: Optional[pd.Timestamp],
+    *,
+    current_anchor: Optional[pd.Timestamp],
+    kind: str,
+) -> str:
+    base = _date_range_label(d0, d1)
+    if d0 is None or d1 is None or pd.isna(d0) or pd.isna(d1):
+        return base
+
+    if kind == "current":
+        month_txt = _month_label_es(d1)
+        return f"Mes actual ({month_txt} · {base})" if month_txt else base
+
+    if current_anchor is None or pd.isna(current_anchor):
+        return base
+
+    current_month_start = current_anchor.normalize().replace(day=1)
+    if d1.normalize() < current_month_start:
+        month_txt = _month_label_es(current_anchor)
+        return f"Base histórica anterior a {month_txt} ({base})" if month_txt else base
+    return base
+
+
 def compare_periods(df_current: pd.DataFrame, df_baseline: pd.DataFrame) -> PeriodComparison:
     """Business-friendly period comparison for NPS and detractor rate."""
     cur = df_current.dropna(subset=["NPS"]) if "NPS" in df_current.columns else df_current
@@ -52,17 +98,36 @@ def compare_periods(df_current: pd.DataFrame, df_baseline: pd.DataFrame) -> Peri
     detr_cur = _safe_rate(cur["NPS"] <= 6) if n_cur else 0.0
     detr_base = _safe_rate(base["NPS"] <= 6) if n_base else 0.0
 
-    d0c = pd.to_datetime(cur.get("Fecha"), errors="coerce").min() if n_cur else None
-    d1c = pd.to_datetime(cur.get("Fecha"), errors="coerce").max() if n_cur else None
-    d0b = pd.to_datetime(base.get("Fecha"), errors="coerce").min() if n_base else None
-    d1b = pd.to_datetime(base.get("Fecha"), errors="coerce").max() if n_base else None
+    current_window = df_current.attrs.get("period_window")
+    baseline_window = df_baseline.attrs.get("period_window")
+
+    d0c = (
+        pd.Timestamp(current_window.start)
+        if current_window is not None
+        else (pd.to_datetime(cur.get("Fecha"), errors="coerce").min() if n_cur else None)
+    )
+    d1c = (
+        pd.Timestamp(current_window.end)
+        if current_window is not None
+        else (pd.to_datetime(cur.get("Fecha"), errors="coerce").max() if n_cur else None)
+    )
+    d0b = (
+        pd.Timestamp(baseline_window.start)
+        if baseline_window is not None
+        else (pd.to_datetime(base.get("Fecha"), errors="coerce").min() if n_base else None)
+    )
+    d1b = (
+        pd.Timestamp(baseline_window.end)
+        if baseline_window is not None
+        else (pd.to_datetime(base.get("Fecha"), errors="coerce").max() if n_base else None)
+    )
 
     delta_nps = (
         float(nps_cur - nps_base) if pd.notna(nps_cur) and pd.notna(nps_base) else float("nan")
     )
     return PeriodComparison(
-        label_current=_date_range_label(d0c, d1c),
-        label_baseline=_date_range_label(d0b, d1b),
+        label_current=_period_label(d0c, d1c, current_anchor=d1c, kind="current"),
+        label_baseline=_period_label(d0b, d1b, current_anchor=d1c, kind="baseline"),
         nps_current=nps_cur,
         nps_baseline=nps_base,
         delta_nps=delta_nps,
@@ -202,7 +267,7 @@ def build_executive_story(
 
     if comparison is not None and comparison.n_current and comparison.n_baseline:
         lines.append("")
-        lines.append("## 2) Cambio vs periodo anterior")
+        lines.append("## 2) Cambio vs base de comparación")
         lines.append(
             f"- Periodo actual: **{comparison.label_current}** (n={comparison.n_current:,})"
         )

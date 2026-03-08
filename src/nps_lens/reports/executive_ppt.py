@@ -404,6 +404,158 @@ def _add_period_summary_slide(
         r3.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
+def _plain_md(text: object) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"`([^`]*)`", r"\1", s)
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+    s = re.sub(r"^#+\s*", "", s)
+    return " ".join(s.split())
+
+
+def _parse_story_sections(story_md: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    title = ""
+    bullets: list[str] = []
+    for raw in str(story_md or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("## "):
+            if title:
+                sections.append((title, bullets))
+            title = _plain_md(line[3:])
+            bullets = []
+            continue
+        if line.startswith("# "):
+            continue
+        if line.startswith("- "):
+            bullets.append(_plain_md(line[2:]))
+            continue
+        if title:
+            bullets.append(_plain_md(line))
+    if title:
+        sections.append((title, bullets))
+    return sections
+
+
+def _add_story_card(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    title: str,
+    bullets: list[str],
+    fill: str = "",
+) -> None:
+    box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(left),
+        Inches(top),
+        Inches(width),
+        Inches(height),
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = _rgb(fill or BBVA_COLORS["white"])
+    box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+
+    tf = box.text_frame
+    tf.clear()
+
+    p0 = tf.paragraphs[0]
+    r0 = p0.add_run()
+    r0.text = title
+    r0.font.name = BBVA_FONT_HEAD
+    r0.font.bold = True
+    r0.font.size = Pt(18)
+    r0.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    max_bullets = 3 if height <= 1.7 else 4
+    for bullet in bullets[:max_bullets]:
+        p = tf.add_paragraph()
+        p.space_before = Pt(8)
+        p.space_after = Pt(0)
+        p.level = 0
+        r = p.add_run()
+        r.text = f"• {_clip(bullet, 150 if width > 5.5 else 120)}"
+        r.font.name = BBVA_FONT_BODY
+        r.font.size = Pt(12)
+        r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+
+def _add_business_story_slide(
+    prs: Presentation,
+    *,
+    story_md: str,
+    period_label: str,
+) -> None:
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title="Informe de negocio",
+        subtitle="Lectura ejecutiva del mes seleccionado frente al histórico anterior, lista para comité.",
+        right_note="Slide 2",
+    )
+
+    banner = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(0.70),
+        Inches(1.52),
+        Inches(11.95),
+        Inches(0.55),
+    )
+    banner.fill.solid()
+    banner.fill.fore_color.rgb = _rgb(BBVA_COLORS["ink"])
+    banner.line.fill.background()
+    btf = banner.text_frame
+    btf.clear()
+    bp = btf.paragraphs[0]
+    br = bp.add_run()
+    br.text = f"Periodo analizado: {period_label}"
+    br.font.name = BBVA_FONT_MEDIUM
+    br.font.bold = True
+    br.font.size = Pt(13)
+    br.font.color.rgb = _rgb(BBVA_COLORS["white"])
+
+    sections = _parse_story_sections(story_md)
+    section_map = {title: bullets for title, bullets in sections}
+    layout = [
+        ("1) Qué está pasando", 0.70, 2.22, 5.8, 1.75, BBVA_COLORS["white"]),
+        ("2) Cambio vs base de comparación", 6.63, 2.22, 5.8, 1.75, BBVA_COLORS["white"]),
+        ("3) Dónde atacar primero (oportunidades)", 0.70, 4.10, 5.8, 1.95, BBVA_COLORS["white"]),
+        ("4) Qué están diciendo (temas de texto)", 6.63, 4.10, 5.8, 1.95, BBVA_COLORS["white"]),
+    ]
+    for title, left, top, width, height, fill in layout:
+        _add_story_card(
+            slide,
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            title=title,
+            bullets=section_map.get(title, ["Sin contenido disponible para esta sección."]),
+            fill=fill,
+        )
+
+    _add_story_card(
+        slide,
+        left=0.70,
+        top=6.20,
+        width=11.73,
+        height=0.78,
+        title="5) Próximos pasos recomendados",
+        bullets=section_map.get(
+            "5) Próximos pasos recomendados",
+            ["Validar releases, definir hipótesis y aterrizar el plan de acción del mes."],
+        ),
+        fill=BBVA_COLORS["bg_light"],
+    )
+
+
 def _add_impact_chain_slide(
     prs: Presentation,
     *,
@@ -682,6 +834,27 @@ def _chain_header(label: str, shown: int, total: int) -> str:
     return f"{label} ({shown})"
 
 
+def _chain_incident_records(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        incident_id = str(entry.get("incident_id", "") or "").strip()
+        summary = str(entry.get("summary", "") or "").strip()
+        url = str(entry.get("url", "") or "").strip()
+        if incident_id or summary:
+            out.append(
+                {
+                    "incident_id": incident_id,
+                    "summary": summary,
+                    "url": url,
+                }
+            )
+    return out
+
+
 def _chain_priority_summary(chain_row: pd.Series, *, focus_name: str) -> list[str]:
     owner = str(chain_row.get("owner_role", "") or "").strip()
     lane = str(chain_row.get("action_lane", "") or "").strip()
@@ -739,7 +912,16 @@ def _add_chain_evidence_slide(
     presentation_mode = str(chain_row.get("presentation_mode", "") or "").strip()
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
-    helix_lines = _chain_list(chain_row.get("incident_examples"))[:5]
+    helix_records = _chain_incident_records(chain_row.get("incident_records"))[:5]
+    helix_lines = (
+        [
+            str(rec.get("summary", "")).strip()
+            for rec in helix_records
+            if str(rec.get("summary", "")).strip()
+        ]
+        if helix_records
+        else _chain_list(chain_row.get("incident_examples"))[:5]
+    )
     voc_lines = _chain_list(chain_row.get("comment_examples"))[:2]
     shown_incidents = len(helix_lines)
     shown_comments = len(voc_lines)
@@ -854,12 +1036,43 @@ def _add_chain_evidence_slide(
     hr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
     if not helix_lines:
         helix_lines = ["No hay suficiente evidencia Helix validada para elevar otro caso."]
-    for line in helix_lines:
+    for idx_line, line in enumerate(helix_lines):
         p = htf.add_paragraph()
-        p.text = f"• {_clip(line, 170)}"
         p.font.name = BBVA_FONT_BODY
         p.font.size = Pt(11.5)
         p.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        if idx_line < len(helix_records):
+            rec = helix_records[idx_line]
+            rec_id = str(rec.get("incident_id", "")).strip()
+            rec_summary = _clip(str(rec.get("summary", "")).strip(), 150)
+            rec_url = str(rec.get("url", "")).strip()
+            bullet = p.add_run()
+            bullet.text = "• "
+            bullet.font.name = BBVA_FONT_BODY
+            bullet.font.size = Pt(11.5)
+            bullet.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+            if rec_id:
+                id_run = p.add_run()
+                id_run.text = rec_id
+                id_run.font.name = BBVA_FONT_MEDIUM
+                id_run.font.size = Pt(11.5)
+                id_run.font.bold = True
+                id_run.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+                if rec_url.startswith(("http://", "https://", "file://")):
+                    id_run.hyperlink.address = rec_url
+            if rec_summary:
+                sep_run = p.add_run()
+                sep_run.text = " · " if rec_id else ""
+                sep_run.font.name = BBVA_FONT_BODY
+                sep_run.font.size = Pt(11.5)
+                sep_run.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+                text_run = p.add_run()
+                text_run.text = rec_summary
+                text_run.font.name = BBVA_FONT_BODY
+                text_run.font.size = Pt(11.5)
+                text_run.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        else:
+            p.text = f"• {_clip(line, 170)}"
 
     voc_box = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
@@ -2281,7 +2494,6 @@ def generate_business_review_ppt(
     del (
         by_topic_daily,
         by_topic_weekly,
-        story_md,
         script_8slides_md,
         template_name,
         corporate_fixed,
@@ -2302,6 +2514,7 @@ def generate_business_review_ppt(
         period_start=period_start,
         period_end=period_end,
     )
+    _add_business_story_slide(prs, story_md=story_md, period_label=period_label)
 
     daily_signals, nps_estimated = _prepare_daily_signals(
         overall_weekly,

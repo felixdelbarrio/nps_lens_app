@@ -3,8 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
-    TOUCHPOINT_SOURCE_HELIX_N2,
     build_incident_attribution_chains,
 )
 
@@ -130,9 +130,11 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     assert out.iloc[0]["linked_pairs"] == 5
     assert out.iloc[0]["linked_incidents"] == 5
     assert out.iloc[0]["linked_comments"] == 5
+    assert len(out.iloc[0]["incident_records"]) == 5
     assert len(out.iloc[0]["incident_examples"]) == 5
     assert len(out.iloc[0]["comment_examples"]) == 2
-    assert "INC00001" in out.iloc[0]["incident_examples"][0]
+    assert out.iloc[0]["incident_records"][0]["incident_id"] == "INC00001"
+    assert "problema" in out.iloc[0]["incident_examples"][0].lower()
     assert "No puedo entrar" in out.iloc[0]["comment_examples"][0]
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "2 comentarios VoC" in out.iloc[0]["chain_story"]
@@ -140,7 +142,7 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     assert out.iloc[0]["owner_role"] == "Producto + Tecnologia"
 
 
-def test_build_incident_attribution_chains_can_use_assigned_helix_n2_as_touchpoint() -> None:
+def test_build_incident_attribution_chains_can_use_bbva_source_service_n2_as_touchpoint() -> None:
     links_df = pd.DataFrame(
         {
             "nps_id": ["n1"],
@@ -167,6 +169,7 @@ def test_build_incident_attribution_chains_can_use_assigned_helix_n2_as_touchpoi
             "Product Categorization Tier 1": ["Operativa"],
             "Product Categorization Tier 2": ["Firma digital"],
             "Product Categorization Tier 3": ["Creditos"],
+            "BBVA_SourceServiceN2": ["NET CASH"],
         }
     )
 
@@ -175,11 +178,11 @@ def test_build_incident_attribution_chains_can_use_assigned_helix_n2_as_touchpoi
         nps_focus,
         helix,
         top_k=3,
-        touchpoint_source=TOUCHPOINT_SOURCE_HELIX_N2,
+        touchpoint_source=TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     )
 
     assert len(out) == 1
-    assert out.iloc[0]["touchpoint"] == "Firma digital"
+    assert out.iloc[0]["touchpoint"] == "NET CASH"
 
 
 def test_build_incident_attribution_chains_can_aggregate_to_executive_journeys() -> None:
