@@ -17,6 +17,51 @@ class PeriodWindow:
     end: date
 
 
+def selected_month_label(
+    *,
+    pop_year: str = "",
+    pop_month: str = "",
+    df: Optional[pd.DataFrame] = None,
+) -> str:
+    """Return a business-friendly label for the selected context month."""
+    months = {
+        1: "Enero",
+        2: "Febrero",
+        3: "Marzo",
+        4: "Abril",
+        5: "Mayo",
+        6: "Junio",
+        7: "Julio",
+        8: "Agosto",
+        9: "Septiembre",
+        10: "Octubre",
+        11: "Noviembre",
+        12: "Diciembre",
+    }
+
+    anchor_year: Optional[int] = None
+    anchor_month: Optional[int] = None
+    if str(pop_year or "").strip() != POP_ALL and str(pop_month or "").strip() != POP_ALL:
+        try:
+            anchor_year = int(str(pop_year).strip())
+            anchor_month = int(str(pop_month).strip())
+        except Exception:
+            anchor_year = None
+            anchor_month = None
+
+    if (anchor_year is None or anchor_month is None) and df is not None and "Fecha" in df.columns:
+        dts = pd.to_datetime(df["Fecha"], errors="coerce").dropna()
+        if not dts.empty:
+            max_d = dts.max().date()
+            anchor_year = int(max_d.year)
+            anchor_month = int(max_d.month)
+
+    if anchor_year is None or anchor_month is None or not (1 <= anchor_month <= 12):
+        return "periodo seleccionado"
+
+    return f"{months.get(anchor_month, 'Mes')} {anchor_year}"
+
+
 def default_windows(
     df: pd.DataFrame,
     days: int = 14,

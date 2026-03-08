@@ -18,6 +18,8 @@ class Theme:
     border: str
     accent: str
     on_accent: str
+    brand: str
+    on_brand: str
     danger: str
     warning: str
     success: str
@@ -39,6 +41,8 @@ def get_theme(mode: str) -> Theme:
     on_accent = p.get(
         "color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text)
     )
+    brand = p["color.primary.bg.action.default"]
+    on_brand = p.get("color.primary.text.main-inverse.default", text)
     danger = p["color.primary.bg.alert"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
@@ -52,6 +56,8 @@ def get_theme(mode: str) -> Theme:
         border=border,
         accent=accent,
         on_accent=on_accent,
+        brand=brand,
+        on_brand=on_brand,
         danger=danger,
         warning=warning,
         success=success,
@@ -91,11 +97,19 @@ def apply_theme(t: Theme) -> None:
   --nps-success: {t.success};
   --nps-radius: 18px;
   --nps-shadow: 0 10px 30px var(--nps-shadow-color);
+  --nps-font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  --nps-font-ui: "Benton Sans", "Avenir Next", "Segoe UI", sans-serif;
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
   background: var(--nps-bg);
   color: var(--nps-text);
+  font-family: var(--nps-font-ui);
+}}
+
+.block-container {{
+  padding-top: 0.65rem !important;
+  padding-bottom: 2rem !important;
 }}
 
 /* Typography */
@@ -120,15 +134,33 @@ button[data-baseweb="tab"][aria-selected="true"] {{
   border-bottom: 2px solid var(--nps-accent) !important;
 }}
 
-/* Hide Streamlit default header chrome */
+/* Hide Streamlit default chrome */
 header[data-testid="stHeader"] {{
   background: transparent;
+  height: 0;
+}}
+
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+#MainMenu,
+[data-testid="stStatusWidget"],
+.stAppDeployButton,
+button[kind="header"],
+button[title="Deploy"],
+button[aria-label="Deploy"] {{
+  display: none !important;
+  visibility: hidden !important;
 }}
 
 /* Sidebar */
 [data-testid="stSidebar"] {{
   background: var(--nps-surface);
   border-right: 1px solid var(--nps-border-soft);
+}}
+
+section[data-testid="stSidebar"] > div {{
+  background: var(--nps-surface) !important;
+  padding-top: 0.5rem !important;
 }}
 
 /* Cards */
@@ -163,6 +195,55 @@ header[data-testid="stHeader"] {{
   color: var(--nps-text);
   font-size: 12px;
   font-weight: 600;
+}}
+
+.nps-pill-row {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 26px 0;
+}}
+
+.nps-app-hero {{
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, #85c8ff 24%, transparent), transparent 30%),
+    linear-gradient(145deg, #001391 0%, #0b2ab8 100%);
+  border: 1px solid color-mix(in srgb, {t.brand} 72%, white 12%);
+  border-radius: 28px;
+  padding: 22px 28px 24px 28px;
+  margin: 2px 0 0 0;
+  box-shadow: none;
+}}
+
+.nps-app-hero__title {{
+  margin: 0;
+  color: #ffffff !important;
+  font-family: var(--nps-font-display);
+  font-size: clamp(32px, 3.4vw, 48px);
+  line-height: .96;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}}
+
+.nps-app-hero h1,
+.nps-app-hero .nps-app-hero__title,
+div[data-testid="stMarkdownContainer"] .nps-app-hero h1,
+div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__title {{
+  color: #ffffff !important;
+}}
+
+.nps-app-hero__subtitle {{
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.94) !important;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  max-width: 920px;
+}}
+
+.nps-app-hero .nps-app-hero__subtitle,
+div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
+  color: rgba(255, 255, 255, 0.94) !important;
 }}
 
 .nps-hero {{
@@ -765,11 +846,6 @@ div[data-testid="stRadio"] label, div[data-testid="stCheckbox"] label {{
 }}
 div[data-testid="stMarkdownContainer"] a {{
   color: var(--nps-accent) !important;
-}}
-
-/* Sidebar container */
-section[data-testid="stSidebar"] > div {{
-  background: var(--nps-surface) !important;
 }}
 
 /* Inputs */

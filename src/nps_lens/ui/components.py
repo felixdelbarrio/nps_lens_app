@@ -54,7 +54,7 @@ def pills(items: list[str]) -> None:
     if not items:
         return
     html = "".join([f"<span class='nps-pill'>{i}</span> " for i in items])
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
 
 
 def executive_banner(

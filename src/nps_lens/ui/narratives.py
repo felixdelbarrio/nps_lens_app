@@ -74,7 +74,7 @@ def _period_label(
 
     if kind == "current":
         month_txt = _month_label_es(d1)
-        return f"Mes actual ({month_txt} · {base})" if month_txt else base
+        return f"Mes seleccionado ({month_txt} · {base})" if month_txt else base
 
     if current_anchor is None or pd.isna(current_anchor):
         return base

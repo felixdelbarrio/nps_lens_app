@@ -10,8 +10,44 @@ import pandas as pd
 from nps_lens.analytics.nps_helix_link import build_incident_display_text
 
 TOUCHPOINT_SOURCE_DOMAIN = "domain_touchpoint"
-TOUCHPOINT_SOURCE_HELIX_N2 = "helix_assigned_n2"
+TOUCHPOINT_SOURCE_PALANCA = "palanca_touchpoint"
+TOUCHPOINT_SOURCE_BBVA_SOURCE_N2 = "bbva_source_service_n2"
 TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS = "executive_journeys"
+
+TOUCHPOINT_MODE_OPTIONS = (
+    TOUCHPOINT_SOURCE_PALANCA,
+    TOUCHPOINT_SOURCE_DOMAIN,
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
+
+TOUCHPOINT_MODE_MENU_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_CONTEXT_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_BANNER_LABELS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+}
+
+TOUCHPOINT_MODE_SUMMARIES = {
+    TOUCHPOINT_SOURCE_PALANCA: "La lectura causal fija el touchpoint exclusivamente desde Palanca para mantener una taxonomía simple y homogénea.",
+    TOUCHPOINT_SOURCE_DOMAIN: "La lectura causal fija el touchpoint exclusivamente desde Subpalanca para reflejar el nivel operativo fino del dolor reportado.",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "La lectura causal se apoya exclusivamente en BBVA_SourceServiceN2 para reflejar el servicio origen reportado por Helix.",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "La lectura causal se reorganiza en journeys de comité para explicar dónde se rompe la experiencia y por qué cae el NPS.",
+}
 
 EXECUTIVE_JOURNEY_CATALOG = (
     {
@@ -234,29 +270,20 @@ def _touchpoint(
     subpalanca: object,
     incident_topic: object,
     *,
-    helix_tier2: object = "",
+    helix_source_service_n2: object = "",
     source: str = TOUCHPOINT_SOURCE_DOMAIN,
 ) -> str:
-    if str(source or TOUCHPOINT_SOURCE_DOMAIN).strip() == TOUCHPOINT_SOURCE_HELIX_N2:
-        helix_tp = str(helix_tier2 or "").strip()
-        if helix_tp and not _is_generic(helix_tp):
-            return helix_tp
-
-    sub = str(subpalanca or "").strip()
-    if sub and not _is_generic(sub):
-        return sub
-
-    helix_tp = str(helix_tier2 or "").strip()
-    if helix_tp and not _is_generic(helix_tp):
-        return helix_tp
-
-    incident_parts = [p.strip() for p in str(incident_topic or "").split(">") if p.strip()]
-    if len(incident_parts) >= 2 and not _is_generic(incident_parts[1]):
-        return incident_parts[1]
-    pal = str(palanca or "").strip()
-    if pal and not _is_generic(pal):
-        return pal
-    return "Touchpoint sin etiquetar"
+    source_norm = str(source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+    if source_norm == TOUCHPOINT_SOURCE_PALANCA:
+        pal = str(palanca or "").strip()
+        return pal if pal and not _is_generic(pal) else ""
+    if source_norm == TOUCHPOINT_SOURCE_DOMAIN:
+        sub = str(subpalanca or "").strip()
+        return sub if sub and not _is_generic(sub) else ""
+    if source_norm == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
+        helix_source_n2 = str(helix_source_service_n2 or "").strip()
+        return helix_source_n2 if helix_source_n2 and not _is_generic(helix_source_n2) else ""
+    return ""
 
 
 def _empty_chain_df() -> pd.DataFrame:
@@ -353,7 +380,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
                 "incident_summary",
                 "incident_url",
                 "incident_topic",
-                "helix_touchpoint_n2",
+                "helix_source_service_n2",
             ]
         )
 
@@ -433,6 +460,12 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .fillna("")
         .str.strip()
     )
+    source_service_n2 = (
+        df.get("BBVA_SourceServiceN2", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     df["incident_topic"] = (tier1 + " > " + tier2 + " > " + tier3).str.replace(
         r"\s*>\s*>\s*", " > ", regex=True
     )
@@ -441,7 +474,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .str.replace(r"^>\s*", "", regex=True)
         .str.replace(r"\s*>$", "", regex=True)
     )
-    df["helix_touchpoint_n2"] = tier2
+    df["helix_source_service_n2"] = source_service_n2
     return df[
         [
             "incident_id",
@@ -449,7 +482,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
             "incident_summary",
             "incident_url",
             "incident_topic",
-            "helix_touchpoint_n2",
+            "helix_source_service_n2",
         ]
     ].copy()
 
@@ -510,15 +543,15 @@ def build_incident_attribution_chains(
             pal,
             sub,
             inc_topic,
-            helix_tier2=helix_t2,
+            helix_source_service_n2=helix_src_n2,
             source=touchpoint_source,
         )
-        for pal, sub, inc_topic, helix_t2 in zip(
+        for pal, sub, inc_topic, helix_src_n2 in zip(
             enriched["palanca"],
             enriched["subpalanca"],
             enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index)),
             enriched.get(
-                "helix_touchpoint_n2",
+                "helix_source_service_n2",
                 pd.Series([""] * len(enriched), index=enriched.index),
             ),
         )
@@ -699,15 +732,15 @@ def build_incident_attribution_chains(
                     palanca,
                     subpalanca,
                     "",
-                    helix_tier2=(
+                    helix_source_service_n2=(
                         str(
-                            grp.get("helix_touchpoint_n2", pd.Series([""]))
+                            grp.get("helix_source_service_n2", pd.Series([""]))
                             .astype(str)
                             .mode(dropna=True)
                             .iloc[0]
                         )
-                        if "helix_touchpoint_n2" in grp.columns
-                        and not grp.get("helix_touchpoint_n2", pd.Series(dtype=str))
+                        if "helix_source_service_n2" in grp.columns
+                        and not grp.get("helix_source_service_n2", pd.Series(dtype=str))
                         .mode(dropna=True)
                         .empty
                         else ""

@@ -4,7 +4,30 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Mapping, Optional
+
+from dotenv import set_key
+
+DEFAULT_UI_THEME_MODE = "light"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "domain_touchpoint"
+DEFAULT_UI_MIN_SIMILARITY = 0.25
+DEFAULT_UI_MAX_DAYS_APART = 10
+DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
+
+
+UI_PREF_ENV_KEYS = {
+    "service_origin": "NPS_LENS_UI_SERVICE_ORIGIN",
+    "service_origin_n1": "NPS_LENS_UI_SERVICE_ORIGIN_N1",
+    "service_origin_n2": "NPS_LENS_UI_SERVICE_ORIGIN_N2",
+    "pop_year": "NPS_LENS_UI_POP_YEAR",
+    "pop_month": "NPS_LENS_UI_POP_MONTH",
+    "nps_group_choice": "NPS_LENS_UI_NPS_GROUP",
+    "theme_mode": "NPS_LENS_UI_THEME_MODE",
+    "touchpoint_source": "NPS_LENS_UI_TOUCHPOINT_SOURCE",
+    "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
+    "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
+    "min_n_opportunities": "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+}
 
 
 @dataclass(frozen=True)
@@ -23,6 +46,12 @@ class Settings:
     service_origin_n1_map: Dict[str, List[str]]
     # Allowed n2 tokens (optional). If empty, UI can fall back to free text.
     service_origin_n2_values: List[str]
+
+    default_theme_mode: str
+    default_touchpoint_source: str
+    default_min_similarity: float
+    default_max_days_apart: int
+    default_min_n_opportunities: int
 
     log_level: str
 
@@ -165,6 +194,40 @@ class Settings:
             "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
             os.getenv("NPS_LENS_DEFAULT_CHANNEL", "Senda"),
         )
+        default_theme_mode = (
+            os.getenv("NPS_LENS_UI_THEME_MODE", DEFAULT_UI_THEME_MODE).strip().lower()
+            or DEFAULT_UI_THEME_MODE
+        )
+        if default_theme_mode not in {"light", "dark"}:
+            default_theme_mode = DEFAULT_UI_THEME_MODE
+        default_touchpoint_source = (
+            os.getenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", DEFAULT_UI_TOUCHPOINT_SOURCE).strip()
+            or DEFAULT_UI_TOUCHPOINT_SOURCE
+        )
+        try:
+            default_min_similarity = float(
+                os.getenv("NPS_LENS_UI_MIN_SIMILARITY", str(DEFAULT_UI_MIN_SIMILARITY))
+            )
+        except Exception:
+            default_min_similarity = DEFAULT_UI_MIN_SIMILARITY
+        try:
+            default_max_days_apart = int(
+                os.getenv("NPS_LENS_UI_MAX_DAYS_APART", str(DEFAULT_UI_MAX_DAYS_APART))
+            )
+        except Exception:
+            default_max_days_apart = DEFAULT_UI_MAX_DAYS_APART
+        try:
+            default_min_n_opportunities = int(
+                os.getenv(
+                    "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+                    str(DEFAULT_UI_MIN_N_OPPORTUNITIES),
+                )
+            )
+        except Exception:
+            default_min_n_opportunities = DEFAULT_UI_MIN_N_OPPORTUNITIES
+        default_min_similarity = min(max(default_min_similarity, 0.0), 1.0)
+        default_max_days_apart = max(0, default_max_days_apart)
+        default_min_n_opportunities = max(50, default_min_n_opportunities)
 
         # If defaults are not part of the allowed sets, make them consistent.
         if service_origin_values and default_service_origin not in service_origin_values:
@@ -182,5 +245,34 @@ class Settings:
             service_origin_values=service_origin_values,
             service_origin_n1_map=service_origin_n1_map,
             service_origin_n2_values=service_origin_n2_values,
+            default_theme_mode=default_theme_mode,
+            default_touchpoint_source=default_touchpoint_source,
+            default_min_similarity=default_min_similarity,
+            default_max_days_apart=default_max_days_apart,
+            default_min_n_opportunities=default_min_n_opportunities,
             log_level=os.getenv("NPS_LENS_LOG_LEVEL", "INFO"),
         )
+
+
+def ui_pref(name: str, default: str = "") -> str:
+    env_key = UI_PREF_ENV_KEYS.get(name)
+    if not env_key:
+        return default
+    value = os.getenv(env_key)
+    return str(value).strip() if value is not None else default
+
+
+def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
+    if dotenv_path is None:
+        return
+    dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+    if not dotenv_path.exists():
+        dotenv_path.touch()
+
+    for name, raw_value in values.items():
+        env_key = UI_PREF_ENV_KEYS.get(str(name))
+        if not env_key:
+            continue
+        value = str(raw_value)
+        os.environ[env_key] = value
+        set_key(str(dotenv_path), env_key, value, quote_mode="auto")
