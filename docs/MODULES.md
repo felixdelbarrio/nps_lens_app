@@ -15,6 +15,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
   - `design/` — tokens/escala de colores (design system)
   - `ingest/` — ingesta + normalización + validación
   - `llm/` — contratos/validación y generación de packs
+  - `reports/` — generación de presentaciones PPT para comité
   - `models/` — modelos canónicos (Pydantic)
   - `platform/` — ejecución batch + artefactos versionados
   - `quality/` — utilidades de calidad/perf (dev)
@@ -65,6 +66,8 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `drivers.py`: ranking de palancas/subpalancas por impacto/volumen
 - `text_mining.py`: tópicos / keywords (MVP)
 - `nps_helix_link.py`: linking y agregados NPS↔Helix (diario/semanal)
+- `incident_rationale.py`: modelo central de atribución incidencia -> journey -> VoC -> NPS (probabilidad de foco, delta NPS esperado, impacto total, prioridad y plan de acción)
+- `incident_attribution.py`: cadenas causales presentables basadas en links explícitos Helix ↔ VoC con evidencias reutilizables en app, pack y PPT
 - `causal.py`: score causal best‑effort con logit / heurísticas
 - `changepoints.py`: detección de cambios (ruptures opcional)
 
@@ -72,6 +75,9 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `insight_response.py`: schema + validador del JSON de respuesta del LLM
 - `knowledge_cache.py`: persistencia y recuperación de aprendizajes
 - `pack.py`: generación y export de packs (Markdown + JSON)
+
+### `nps_lens.reports.*`
+- `executive_ppt.py`: composición de PPT de negocio (scope, KPI, gráficos, Impact Chain y plan de acción) usando la misma fuente de verdad analítica que la UI
 
 ### `nps_lens.platform.*`
 - `batch.py`: ejecución headless según config JSON
@@ -81,7 +87,8 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `theme.py`: tema tokenizado (light/dark) + CSS quirúrgico
 - `population.py`: Año/Mes/Grupo como control global (y window temporal)
 - `charts.py`: charts y tablas (Plotly/Streamlit)
-- `narratives.py`: textos ejecutivos (explicaciones)
+- `narratives.py`: textos ejecutivos y narrativa causal reusable para UI/PPT
+- `components.py`: componentes visuales reutilizables, incluido el bloque `Impact Chain`
 - `business.py`: utilidades de slicing y ventanas
 
 ---
@@ -102,4 +109,3 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - **Cambiar UI (diseño)** → `design/tokens.py` + `ui/theme.py`
 - **Cambiar ranking causal** → `analytics/causal.py` + `analytics/nps_helix_link.py`
 - **Cambiar plataforma batch** → `platform/batch.py` + `platform/artifacts.py`
-

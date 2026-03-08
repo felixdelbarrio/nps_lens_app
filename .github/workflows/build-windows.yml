@@ -21,6 +21,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[build]"
 
+      - name: Runtime smoke-check (PPT/export)
+        shell: pwsh
+        run: |
+          python scripts/verify_runtime.py
+
       - name: Prepare icons
         shell: pwsh
         run: |
@@ -41,6 +46,8 @@ jobs:
             --add-data="$PWD/assets;assets" `
             --add-data="$PWD/.streamlit;.streamlit" `
             --collect-submodules webview `
+            --collect-all kaleido `
+            --collect-data pptx `
             --distpath "$out/dist" `
             --workpath "$out/work" `
             --specpath "$out/spec" `

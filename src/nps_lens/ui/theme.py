@@ -18,6 +18,8 @@ class Theme:
     border: str
     accent: str
     on_accent: str
+    brand: str
+    on_brand: str
     danger: str
     warning: str
     success: str
@@ -39,6 +41,8 @@ def get_theme(mode: str) -> Theme:
     on_accent = p.get(
         "color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text)
     )
+    brand = p["color.primary.bg.action.default"]
+    on_brand = p.get("color.primary.text.main-inverse.default", text)
     danger = p["color.primary.bg.alert"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
@@ -52,6 +56,8 @@ def get_theme(mode: str) -> Theme:
         border=border,
         accent=accent,
         on_accent=on_accent,
+        brand=brand,
+        on_brand=on_brand,
         danger=danger,
         warning=warning,
         success=success,
@@ -91,11 +97,19 @@ def apply_theme(t: Theme) -> None:
   --nps-success: {t.success};
   --nps-radius: 18px;
   --nps-shadow: 0 10px 30px var(--nps-shadow-color);
+  --nps-font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  --nps-font-ui: "Benton Sans", "Avenir Next", "Segoe UI", sans-serif;
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
   background: var(--nps-bg);
   color: var(--nps-text);
+  font-family: var(--nps-font-ui);
+}}
+
+.block-container {{
+  padding-top: 0.65rem !important;
+  padding-bottom: 2rem !important;
 }}
 
 /* Typography */
@@ -120,15 +134,33 @@ button[data-baseweb="tab"][aria-selected="true"] {{
   border-bottom: 2px solid var(--nps-accent) !important;
 }}
 
-/* Hide Streamlit default header chrome */
+/* Hide Streamlit default chrome */
 header[data-testid="stHeader"] {{
   background: transparent;
+  height: 0;
+}}
+
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+#MainMenu,
+[data-testid="stStatusWidget"],
+.stAppDeployButton,
+button[kind="header"],
+button[title="Deploy"],
+button[aria-label="Deploy"] {{
+  display: none !important;
+  visibility: hidden !important;
 }}
 
 /* Sidebar */
 [data-testid="stSidebar"] {{
   background: var(--nps-surface);
   border-right: 1px solid var(--nps-border-soft);
+}}
+
+section[data-testid="stSidebar"] > div {{
+  background: var(--nps-surface) !important;
+  padding-top: 0.5rem !important;
 }}
 
 /* Cards */
@@ -165,6 +197,443 @@ header[data-testid="stHeader"] {{
   font-weight: 600;
 }}
 
+.nps-pill-row {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 26px 0;
+}}
+
+.nps-app-hero {{
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, #85c8ff 24%, transparent), transparent 30%),
+    linear-gradient(145deg, #001391 0%, #0b2ab8 100%);
+  border: 1px solid color-mix(in srgb, {t.brand} 72%, white 12%);
+  border-radius: 28px;
+  padding: 22px 28px 24px 28px;
+  margin: 2px 0 0 0;
+  box-shadow: none;
+}}
+
+.nps-app-hero__title {{
+  margin: 0;
+  color: #ffffff !important;
+  font-family: var(--nps-font-display);
+  font-size: clamp(32px, 3.4vw, 48px);
+  line-height: .96;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}}
+
+.nps-app-hero h1,
+.nps-app-hero .nps-app-hero__title,
+div[data-testid="stMarkdownContainer"] .nps-app-hero h1,
+div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__title {{
+  color: #ffffff !important;
+}}
+
+.nps-app-hero__subtitle {{
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.94) !important;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  max-width: 920px;
+}}
+
+.nps-app-hero .nps-app-hero__subtitle,
+div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
+  color: rgba(255, 255, 255, 0.94) !important;
+}}
+
+.nps-hero {{
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--nps-accent) 24%, transparent), transparent 42%),
+    linear-gradient(160deg, color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface)) 0%, var(--nps-surface) 68%);
+  border: 1px solid var(--nps-border-soft);
+  border-radius: 26px;
+  padding: 22px;
+  margin: 10px 0 18px 0;
+  box-shadow: var(--nps-shadow);
+}}
+
+.nps-hero-kicker {{
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--nps-muted);
+}}
+
+.nps-hero h3 {{
+  margin: 8px 0 10px 0;
+  font-size: 30px;
+  line-height: 1.0;
+}}
+
+.nps-hero p {{
+  margin: 0;
+  max-width: 900px;
+  color: var(--nps-text);
+  line-height: 1.5;
+}}
+
+.nps-hero-metrics {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}}
+
+.nps-hero-metric {{
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--nps-surface-2) 88%, var(--nps-accent) 12%);
+  border: 1px solid var(--nps-border-softer);
+}}
+
+.nps-hero-metric span {{
+  display: block;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--nps-muted);
+  margin-bottom: 6px;
+}}
+
+.nps-hero-metric strong {{
+  font-size: 24px;
+  line-height: 1;
+}}
+
+.nps-impact-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin: 10px 0 18px 0;
+}}
+
+.nps-impact-card {{
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--nps-accent) 12%, var(--nps-surface)) 0%, var(--nps-surface) 58%),
+    var(--nps-surface);
+  border: 1px solid var(--nps-border-soft);
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: var(--nps-shadow);
+}}
+
+.nps-impact-card h4 {{
+  margin: 10px 0 12px 0;
+  font-size: 20px;
+  line-height: 1.1;
+}}
+
+.nps-impact-head {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}}
+
+.nps-impact-rank {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: var(--nps-accent);
+  color: var(--nps-on-accent);
+  font-weight: 800;
+}}
+
+.nps-impact-kicker {{
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--nps-muted);
+}}
+
+.nps-impact-flow {{
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px 0;
+}}
+
+.nps-impact-step {{
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--nps-accent-soft);
+  border: 1px solid var(--nps-border-strong);
+  font-size: 12px;
+  font-weight: 600;
+}}
+
+.nps-impact-arrow {{
+  color: var(--nps-muted);
+  font-weight: 800;
+}}
+
+.nps-impact-metrics {{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}}
+
+.nps-impact-metrics span {{
+  display: block;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nps-surface-2) 82%, var(--nps-accent) 18%);
+  border: 1px solid var(--nps-border-softer);
+  font-size: 12px;
+}}
+
+.nps-impact-card p {{
+  margin: 0;
+  color: var(--nps-text);
+  line-height: 1.45;
+}}
+
+.nps-spotlight {{
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--nps-accent) 22%, transparent), transparent 40%),
+    linear-gradient(160deg, color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface)) 0%, var(--nps-surface) 62%);
+  border: 1px solid var(--nps-border-soft);
+  border-radius: 28px;
+  padding: 24px;
+  box-shadow: var(--nps-shadow);
+  margin-bottom: 12px;
+}}
+
+.nps-spotlight-head {{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}}
+
+.nps-spotlight-kicker {{
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--nps-muted);
+}}
+
+.nps-spotlight h3 {{
+  margin: 8px 0 10px 0;
+  font-size: 32px;
+  line-height: 1.0;
+}}
+
+.nps-spotlight p {{
+  margin: 0;
+  line-height: 1.6;
+  max-width: 920px;
+}}
+
+.nps-spotlight-rank {{
+  min-width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--nps-accent);
+  color: var(--nps-on-accent);
+  font-weight: 800;
+  font-size: 22px;
+}}
+
+.nps-spotlight-flow {{
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0 16px 0;
+}}
+
+.nps-spotlight-metrics {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}}
+
+.nps-spotlight-metric {{
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--nps-surface-2) 86%, var(--nps-accent) 14%);
+  border: 1px solid var(--nps-border-softer);
+}}
+
+.nps-spotlight-metric span {{
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--nps-muted);
+  margin-bottom: 6px;
+}}
+
+.nps-spotlight-metric strong {{
+  font-size: 23px;
+  line-height: 1;
+}}
+
+.nps-spotlight-evidence {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}}
+
+.nps-impact-evidence {{
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nps-border-softer);
+}}
+
+.nps-impact-label {{
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--nps-muted);
+  margin-bottom: 6px;
+}}
+
+.nps-impact-evidence ul {{
+  margin: 0;
+  padding-left: 18px;
+}}
+
+.nps-impact-evidence li {{
+  margin: 0 0 6px 0;
+  line-height: 1.35;
+}}
+
+.nps-evidence-toolbar-note {{
+  margin-top: 6px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--nps-border-softer);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--nps-accent) 8%, var(--nps-surface-2)) 0%, var(--nps-surface-2) 100%);
+  color: var(--nps-muted);
+  font-size: 13px;
+}}
+
+.nps-evidence-grid {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 8px;
+}}
+
+.nps-evidence-card {{
+  position: relative;
+  min-height: 150px;
+  padding: 18px 18px 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--nps-border-softer);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--nps-accent) 14%, transparent), transparent 38%),
+    linear-gradient(180deg, color-mix(in srgb, var(--nps-accent) 4%, var(--nps-surface)) 0%, var(--nps-surface) 100%);
+  box-shadow: 0 18px 45px rgba(7, 35, 86, 0.08);
+}}
+
+.nps-evidence-card-index {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--nps-accent-soft);
+  border: 1px solid var(--nps-border-strong);
+  color: var(--nps-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}}
+
+.nps-evidence-card-index a {{
+  color: inherit;
+  text-decoration: none;
+}}
+
+.nps-evidence-card-index a:hover {{
+  text-decoration: underline;
+}}
+
+.nps-evidence-card p {{
+  margin: 0;
+  line-height: 1.55;
+  color: var(--nps-text);
+}}
+
+.nps-evidence-table-wrap {{
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 8px;
+}}
+
+.nps-evidence-table {{
+  width: 100%;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--nps-surface);
+  border: 1px solid var(--nps-border-softer);
+  border-radius: 18px;
+  overflow: hidden;
+}}
+
+.nps-evidence-table thead th {{
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface-2));
+  color: var(--nps-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: center;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--nps-border-softer);
+}}
+
+.nps-evidence-table tbody td {{
+  padding: 16px;
+  color: var(--nps-text);
+  line-height: 1.55;
+  text-align: center;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--nps-border-softer);
+  word-break: break-word;
+  white-space: normal;
+}}
+
+.nps-evidence-table tbody tr:last-child td {{
+  border-bottom: none;
+}}
+
+.nps-evidence-table a {{
+  color: var(--nps-accent);
+  font-weight: 700;
+  text-decoration: none;
+}}
+
+.nps-evidence-table a:hover {{
+  text-decoration: underline;
+}}
+
 /* Buttons */
 div.stButton > button {{
   border-radius: 12px;
@@ -190,18 +659,43 @@ button[kind="secondary"] {{
   border-radius: var(--nps-radius);
   overflow: hidden;
   border: 1px solid var(--nps-border-soft);
+  background: var(--nps-surface) !important;
+  box-shadow: var(--nps-shadow);
+  --gdg-bg-cell: var(--nps-surface);
+  --gdg-bg-header: var(--nps-surface-2);
+  --gdg-bg-header-hovered: var(--nps-surface-2);
+  --gdg-bg-header-has-focus: var(--nps-surface-2);
+  --gdg-bg-search-result: color-mix(in srgb, var(--nps-accent) 14%, var(--nps-surface));
+  --gdg-bg-search-result-hover: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-surface));
+  --gdg-border-color: var(--nps-border-soft);
+  --gdg-text-dark: var(--nps-text);
+  --gdg-text-medium: var(--nps-muted);
+  --gdg-text-light: var(--nps-muted);
+  --gdg-accent-color: var(--nps-accent);
+  --gdg-accent-fg: var(--nps-on-accent);
+  --gdg-bg-bubble: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-surface-2));
+  --gdg-font-family: inherit;
 }}
 
 /* Streamlit DataFrame uses AG-Grid under the hood */
 div[data-testid="stDataFrame"] .ag-root-wrapper,
 div[data-testid="stDataFrame"] .ag-root-wrapper-body,
 div[data-testid="stDataFrame"] .ag-center-cols-viewport,
-div[data-testid="stDataFrame"] .ag-body-viewport {{
+div[data-testid="stDataFrame"] .ag-body-viewport,
+div[data-testid="stDataFrame"] .glideDataEditor,
+div[data-testid="stDataFrame"] .glide-data-grid,
+div[data-testid="stDataFrame"] .glide-data-grid * ,
+div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"],
+div[data-testid="stDataFrame"] > div,
+div[data-testid="stDataFrame"] canvas,
+div[data-testid="stTable"] > div,
+div[data-testid="stTable"] table {{
   background: var(--nps-surface) !important;
 }}
 div[data-testid="stDataFrame"] .ag-header,
 div[data-testid="stDataFrame"] .ag-header-row,
-div[data-testid="stDataFrame"] .ag-header-cell {{
+div[data-testid="stDataFrame"] .ag-header-cell,
+div[data-testid="stDataFrame"] [role="columnheader"] {{
   background: var(--nps-surface-2) !important;
   color: var(--nps-text) !important;
   border-color: var(--nps-border-soft) !important;
@@ -216,6 +710,34 @@ div[data-testid="stDataFrame"] .ag-row:hover {{
 div[data-testid="stDataFrame"] .ag-cell {{
   color: var(--nps-text) !important;
   border-color: var(--nps-border-softer) !important;
+}}
+div[data-testid="stDataFrame"] [data-testid="StyledDataFrameCell"],
+div[data-testid="stDataFrame"] [data-testid="StyledDataFrameCell"] * {{
+  color: var(--nps-text) !important;
+  background: transparent !important;
+}}
+div[data-testid="stDataFrame"] [role="grid"],
+div[data-testid="stDataFrame"] [role="row"],
+div[data-testid="stDataFrame"] [role="columnheader"],
+div[data-testid="stDataFrame"] [role="gridcell"],
+div[data-testid="stDataFrame"] .gdg-wmyidgi,
+div[data-testid="stDataFrame"] .gdg-s1dgczr6,
+div[data-testid="stDataFrame"] .gdg-seveqep,
+div[data-testid="stDataFrame"] .gdg-d19meir1 {{
+  background: var(--nps-surface) !important;
+  color: var(--nps-text) !important;
+}}
+div[data-testid="stDataFrame"] [role="gridcell"] {{
+  border-color: var(--nps-border-softer) !important;
+}}
+div[data-testid="stTable"] table th,
+div[data-testid="stTable"] table td {{
+  background: var(--nps-surface) !important;
+  color: var(--nps-text) !important;
+  border-color: var(--nps-border-softer) !important;
+}}
+div[data-testid="stTable"] table thead th {{
+  background: var(--nps-surface-2) !important;
 }}
 
 /* Controls (BaseWeb) — keep contrast in dark mode */
@@ -233,6 +755,45 @@ div[data-baseweb="select"] input::placeholder {{
 }}
 div[data-baseweb="popover"] * {{
   color: var(--nps-text) !important;
+}}
+
+/* Plotly containers */
+[data-testid="stPlotlyChart"] {{
+  border-radius: 22px;
+  border: 1px solid var(--nps-border-soft);
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--nps-accent) 4%, var(--nps-surface)) 0%,
+      var(--nps-surface) 100%
+    ) !important;
+  padding: 14px 14px 6px 14px;
+  box-shadow: var(--nps-shadow);
+  overflow: hidden;
+}}
+
+[data-testid="stPlotlyChart"] > div {{
+  background: transparent !important;
+}}
+
+[data-testid="stPlotlyChart"] .js-plotly-plot,
+[data-testid="stPlotlyChart"] .plot-container,
+[data-testid="stPlotlyChart"] .svg-container {{
+  background: transparent !important;
+}}
+
+[data-testid="stPlotlyChart"] .modebar {{
+  background: color-mix(in srgb, var(--nps-surface-2) 88%, transparent) !important;
+  border: 1px solid var(--nps-border-softer);
+  border-radius: 999px;
+  padding: 2px 4px;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-btn svg {{
+  fill: var(--nps-muted) !important;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-btn:hover svg {{
+  fill: var(--nps-text) !important;
 }}
 /* BaseWeb popover container (Streamlit renders menus in a portal) */
 div[data-baseweb="popover"] {{
@@ -285,11 +846,6 @@ div[data-testid="stRadio"] label, div[data-testid="stCheckbox"] label {{
 }}
 div[data-testid="stMarkdownContainer"] a {{
   color: var(--nps-accent) !important;
-}}
-
-/* Sidebar container */
-section[data-testid="stSidebar"] > div {{
-  background: var(--nps-surface) !important;
 }}
 
 /* Inputs */
@@ -352,7 +908,7 @@ div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly text {{
 
 /* Tabs (BaseWeb) */
 .stTabs [data-baseweb="tab"] {{
-  color: var(--nps-text-muted) !important;
+  color: var(--nps-muted) !important;
 }}
 .stTabs [data-baseweb="tab"][aria-selected="true"] {{
   color: var(--nps-text) !important;

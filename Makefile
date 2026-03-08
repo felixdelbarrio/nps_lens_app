@@ -20,7 +20,7 @@ MYPY = $(VENV)/bin/mypy
 PYTEST = $(VENV)/bin/pytest
 STREAMLIT = $(VENV)/bin/streamlit
 
-.PHONY: ci clean format format-check help lint run run-web setup ensure-venv test typecheck check-python platform build build-linux build-mac prepare-icons
+.PHONY: ci clean format format-check help lint run run-web setup ensure-venv test typecheck check-python verify-runtime platform build build-linux build-mac prepare-icons
 
 check-python: ## Fail fast if not running on Python 3.9.x (corp target)
 	@$(PYTHON) -c "import sys; v=sys.version_info; ok=(v.major==3 and v.minor==9);\
@@ -35,9 +35,13 @@ setup: check-python ## Create virtualenv and install all dependencies (incl. Exc
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
+	$(MAKE) verify-runtime
 
 ensure-venv: ## Create env only when missing (faster repeated runs/builds)
 	@test -x "$(PY)" || $(MAKE) setup
+
+verify-runtime: ensure-venv ## Smoke-check critical runtime dependencies (PPT/export included)
+	$(PY) scripts/verify_runtime.py
 
 format: ## Auto-fix lint + format code
 	$(RUFF) check --fix .
@@ -66,6 +70,7 @@ platform: ## Run platform batch (requires CONFIG=path/to/batch.json)
 	$(VENV)/bin/nps-lens platform-batch $(CONFIG) --out-root artifacts
 
 build: ensure-venv ## Build native executable with PyInstaller (macOS/Linux). Windows builds run in GitHub Actions.
+	$(MAKE) verify-runtime
 	@uname_s=$$(uname -s); \
 	if [ "$$uname_s" = "Darwin" ]; then \
 		$(MAKE) build-mac; \
@@ -90,6 +95,8 @@ build-linux: ensure-venv
 		--add-data="$(PWD)/assets:assets" \
 		--add-data="$(PWD)/.streamlit:.streamlit" \
 		--collect-submodules webview \
+		--collect-all kaleido \
+		--collect-data pptx \
 		--distpath $$out/dist \
 		--workpath $$out/work \
 		--specpath $$out/spec \
@@ -111,6 +118,8 @@ build-mac: ensure-venv
 		--add-data="$(PWD)/assets:assets" \
 		--add-data="$(PWD)/.streamlit:.streamlit" \
 		--collect-submodules webview \
+		--collect-all kaleido \
+		--collect-data pptx \
 		--distpath $$out/dist \
 		--workpath $$out/work \
 		--specpath $$out/spec \
