@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+import calendar
 from typing import Optional
 
 import numpy as np
 import pandas as pd
+
+from nps_lens.ui.population import POP_ALL
 
 
 @dataclass(frozen=True)
@@ -15,25 +18,64 @@ class PeriodWindow:
 
 
 def default_windows(
-    df: pd.DataFrame, days: int = 14
+    df: pd.DataFrame,
+    days: int = 14,
+    *,
+    pop_year: str = "",
+    pop_month: str = "",
 ) -> tuple[Optional[PeriodWindow], Optional[PeriodWindow]]:
-    """Return default (current, baseline) windows.
+    """Return default (current, baseline) windows aligned to the selected context month.
 
-    - current: last `days` days available
-    - baseline: previous `days` days
+    - current: selected natural month in context; if no explicit month is selected,
+      the latest month available in the dataframe
+    - baseline: all historical data available before that current month
     """
+    del days
     if "Fecha" not in df.columns:
         return None, None
     dts = pd.to_datetime(df["Fecha"], errors="coerce")
     dts = dts.dropna()
     if dts.empty:
         return None, None
-    max_d = dts.max().date()
-    cur_end = max_d
-    cur_start = max_d - timedelta(days=days - 1)
-    base_end = cur_start - timedelta(days=1)
-    base_start = base_end - timedelta(days=days - 1)
-    return PeriodWindow(cur_start, cur_end), PeriodWindow(base_start, base_end)
+
+    anchor_year: Optional[int] = None
+    anchor_month: Optional[int] = None
+    if str(pop_year or "").strip() != POP_ALL and str(pop_month or "").strip() != POP_ALL:
+        try:
+            anchor_year = int(str(pop_year).strip())
+            anchor_month = int(str(pop_month).strip())
+        except Exception:
+            anchor_year = None
+            anchor_month = None
+
+    if anchor_year is None or anchor_month is None or not (1 <= anchor_month <= 12):
+        max_d = dts.max().date()
+        anchor_year = int(max_d.year)
+        anchor_month = int(max_d.month)
+
+    current_start = date(anchor_year, anchor_month, 1)
+    current_end_natural = date(
+        anchor_year,
+        anchor_month,
+        calendar.monthrange(anchor_year, anchor_month)[1],
+    )
+
+    dates_only = dts.dt.date
+    current_month_mask = (dates_only >= current_start) & (dates_only <= current_end_natural)
+    current_month_dates = dts.loc[current_month_mask]
+    current_end = (
+        current_month_dates.max().date() if not current_month_dates.empty else current_end_natural
+    )
+    current_window = PeriodWindow(current_start, current_end)
+
+    baseline_end = current_start - timedelta(days=1)
+    baseline_dates = dts.loc[dates_only <= baseline_end]
+    if baseline_dates.empty:
+        baseline_window = None
+    else:
+        baseline_window = PeriodWindow(baseline_dates.min().date(), baseline_end)
+
+    return current_window, baseline_window
 
 
 def context_period_days(df: pd.DataFrame, *, minimum: int = 1) -> int:
@@ -57,7 +99,9 @@ def slice_by_window(df: pd.DataFrame, w: PeriodWindow) -> pd.DataFrame:
     tmp = df.copy()
     tmp["Fecha"] = pd.to_datetime(tmp["Fecha"], errors="coerce")
     mask = (tmp["Fecha"].dt.date >= w.start) & (tmp["Fecha"].dt.date <= w.end)
-    return tmp.loc[mask].copy()
+    out = tmp.loc[mask].copy()
+    out.attrs["period_window"] = w
+    return out
 
 
 def driver_delta_table(

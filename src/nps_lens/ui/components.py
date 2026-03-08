@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from typing import Callable, Optional
 from urllib.parse import quote
 
 import pandas as pd
@@ -91,7 +92,11 @@ def executive_banner(
     )
 
 
-def impact_chain(items: list[object]) -> None:
+def impact_chain(
+    items: list[object],
+    *,
+    extra_tabs: Optional[list[tuple[str, Callable[[], None]]]] = None,
+) -> None:
     if not items:
         return
 
@@ -374,13 +379,9 @@ def impact_chain(items: list[object]) -> None:
                 ),
                 unsafe_allow_html=True,
             )
-        helix_tab, voc_tab = st.tabs(
-            [
-                f"Evidencia Helix ({linked_incidents or len(incident_examples)})",
-                f"Voz del cliente ({linked_comments or len(comment_examples)})",
-            ]
-        )
-        with helix_tab:
+        tabs_spec: list[tuple[str, Callable[[], None]]] = []
+
+        def _render_helix_tab() -> None:
             if evidence_view == "Tabla":
                 _render_evidence_html_table(
                     incident_records,
@@ -392,7 +393,8 @@ def impact_chain(items: list[object]) -> None:
                     incident_records,
                     empty_label="Sin evidencia Helix visible.",
                 )
-        with voc_tab:
+
+        def _render_voc_tab() -> None:
             if evidence_view == "Tabla":
                 _render_evidence_html_table(
                     [{"comment": text} for text in comment_examples],
@@ -405,6 +407,26 @@ def impact_chain(items: list[object]) -> None:
                     empty_label="Sin evidencia VoC visible.",
                     badge="VoC",
                 )
+
+        tabs_spec.append(
+            (
+                f"Evidencia Helix ({linked_incidents or len(incident_examples)})",
+                _render_helix_tab,
+            )
+        )
+        tabs_spec.append(
+            (
+                f"Voz del cliente ({linked_comments or len(comment_examples)})",
+                _render_voc_tab,
+            )
+        )
+        if extra_tabs:
+            tabs_spec.extend(extra_tabs)
+
+        tabs = st.tabs([label for label, _ in tabs_spec])
+        for tab, (_label, renderer) in zip(tabs, tabs_spec):
+            with tab:
+                renderer()
 
     if len(items) == 1:
         _render_single_item(items[0])
