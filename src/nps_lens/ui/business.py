@@ -115,10 +115,9 @@ def default_windows(
 
     baseline_end = current_start - timedelta(days=1)
     baseline_dates = dts.loc[dates_only <= baseline_end]
-    if baseline_dates.empty:
-        baseline_window = None
-    else:
-        baseline_window = PeriodWindow(baseline_dates.min().date(), baseline_end)
+    baseline_window = (
+        None if baseline_dates.empty else PeriodWindow(baseline_dates.min().date(), baseline_end)
+    )
 
     return current_window, baseline_window
 

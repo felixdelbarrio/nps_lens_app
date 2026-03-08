@@ -913,10 +913,15 @@ def _add_chain_evidence_slide(
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
     helix_records = _chain_incident_records(chain_row.get("incident_records"))[:5]
-    if helix_records:
-        helix_lines = [str(rec.get("summary", "")).strip() for rec in helix_records if str(rec.get("summary", "")).strip()]
-    else:
-        helix_lines = _chain_list(chain_row.get("incident_examples"))[:5]
+    helix_lines = (
+        [
+            str(rec.get("summary", "")).strip()
+            for rec in helix_records
+            if str(rec.get("summary", "")).strip()
+        ]
+        if helix_records
+        else _chain_list(chain_row.get("incident_examples"))[:5]
+    )
     voc_lines = _chain_list(chain_row.get("comment_examples"))[:2]
     shown_incidents = len(helix_lines)
     shown_comments = len(voc_lines)

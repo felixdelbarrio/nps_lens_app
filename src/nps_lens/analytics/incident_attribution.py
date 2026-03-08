@@ -425,10 +425,11 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         ]
         if fallback_cols:
             picked_url_col = fallback_cols[0]
-    if picked_url_col and picked_url_col in df.columns:
-        incident_url = df.get(picked_url_col, pd.Series([""] * len(df), index=df.index))
-    else:
-        incident_url = pd.Series([""] * len(df), index=df.index)
+    incident_url = (
+        df.get(picked_url_col, pd.Series([""] * len(df), index=df.index))
+        if picked_url_col and picked_url_col in df.columns
+        else pd.Series([""] * len(df), index=df.index)
+    )
     incident_url = (
         incident_url.astype(str)
         .fillna("")
