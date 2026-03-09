@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 from io import BytesIO
+import os
+from pathlib import Path
+import tempfile
 
 import pandas as pd
 from pptx import Presentation
@@ -13,9 +16,22 @@ from nps_lens.analytics.incident_attribution import (
 from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
+import nps_lens.reports.ppt_template as ppt_template_module
+from nps_lens.reports.ppt_template import (
+    build_presentation,
+    find_corporate_template_path,
+    resolve_layout,
+)
 
 
 def _sample_payload() -> dict:
+    def _nps_group(score: int) -> str:
+        if score <= 6:
+            return "DETRACTOR"
+        if score >= 9:
+            return "PROMOTER"
+        return "PASSIVE"
+
     overall_daily = pd.DataFrame(
         {
             "date": pd.date_range("2026-01-01", periods=40, freq="D"),
@@ -32,6 +48,15 @@ def _sample_payload() -> dict:
             "nps_topic": (["Pagos > SPEI"] * 40)
             + (["Acceso > Login"] * 40)
             + (["Tarjetas > Bloqueo"] * 40),
+            "responses": ([44, 46, 45, 43, 44] * 8)
+            + ([38, 37, 39, 40, 38] * 8)
+            + ([26, 27, 29, 28, 27] * 8),
+            "focus_count": ([12, 11, 13, 12, 10] * 8)
+            + ([9, 8, 10, 9, 8] * 8)
+            + ([5, 4, 5, 5, 4] * 8),
+            "nps_mean": ([6.1, 6.3, 6.0, 6.2, 6.4] * 8)
+            + ([5.8, 6.0, 5.7, 5.9, 6.1] * 8)
+            + ([7.2, 7.1, 7.0, 7.3, 7.2] * 8),
             "focus_rate": ([0.24, 0.23, 0.26, 0.27, 0.25] * 8)
             + ([0.20, 0.19, 0.21, 0.22, 0.20] * 8)
             + ([0.18, 0.17, 0.19, 0.20, 0.18] * 8),
@@ -182,6 +207,52 @@ def _sample_payload() -> dict:
         ]
     )
 
+    current_dates = pd.date_range("2026-01-01", periods=40, freq="D")
+    baseline_dates = pd.date_range("2025-11-22", periods=40, freq="D")
+    current_records: list[dict[str, object]] = []
+    baseline_records: list[dict[str, object]] = []
+    specs = [
+        ("Acceso", "Login", [2, 3, 4, 5, 4], "La app no me deja entrar"),
+        ("Pagos", "SPEI", [4, 5, 6, 5, 4], "Falla al transferir"),
+        ("Tarjetas", "Bloqueo", [7, 8, 7, 8, 9], "Se bloquea la tarjeta"),
+    ]
+    baseline_specs = [
+        ("Acceso", "Login", [6, 7, 7, 8, 8], "Accedo sin problema"),
+        ("Pagos", "SPEI", [7, 8, 8, 7, 8], "Transferencia completada"),
+        ("Tarjetas", "Bloqueo", [8, 8, 9, 9, 8], "Tarjeta operativa"),
+    ]
+    for idx, dt in enumerate(current_dates):
+        for topic_idx, (palanca, subpalanca, pattern, comment_base) in enumerate(specs):
+            score = int(pattern[idx % len(pattern)])
+            current_records.append(
+                {
+                    "ID": f"C-{idx}-{topic_idx}",
+                    "Fecha": dt,
+                    "NPS": score,
+                    "NPS Group": _nps_group(score),
+                    "Palanca": palanca,
+                    "Subpalanca": subpalanca,
+                    "Comment": f"{comment_base} · {dt.date()}",
+                }
+            )
+    for idx, dt in enumerate(baseline_dates):
+        for topic_idx, (palanca, subpalanca, pattern, comment_base) in enumerate(baseline_specs):
+            score = int(pattern[idx % len(pattern)])
+            baseline_records.append(
+                {
+                    "ID": f"B-{idx}-{topic_idx}",
+                    "Fecha": dt,
+                    "NPS": score,
+                    "NPS Group": _nps_group(score),
+                    "Palanca": palanca,
+                    "Subpalanca": subpalanca,
+                    "Comment": f"{comment_base} · {dt.date()}",
+                }
+            )
+
+    selected_nps = pd.DataFrame(current_records)
+    comparison_nps = pd.concat([pd.DataFrame(baseline_records), selected_nps], ignore_index=True)
+
     return {
         "overall_daily": overall_daily,
         "by_topic_daily": by_topic_daily,
@@ -190,6 +261,8 @@ def _sample_payload() -> dict:
         "incident_evidence": incident_evidence,
         "changepoints": changepoints,
         "attribution": attribution,
+        "selected_nps": selected_nps,
+        "comparison_nps": comparison_nps,
     }
 
 
@@ -234,6 +307,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         attribution_df=payload["attribution"],
         ranking_df=payload["rationale"],
         by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
         lag_days_by_topic=payload["lag_days"],
         by_topic_weekly=None,
         lag_weeks_by_topic=None,
@@ -244,10 +319,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 9
+    assert out.slide_count == 12
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 9
+    assert len(prs.slides) == 12
 
     texts = []
     for slide in prs.slides:
@@ -256,27 +331,22 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Informe de negocio" in t for t in texts)
-    assert any("Cambio vs base de comparación" in t for t in texts)
-    assert any("Periodo actual: Mes actual" in t for t in texts)
-    assert any("Periodo base: Base histórica anterior" in t for t in texts)
-    assert any("SERVICE ORIGEN" in t for t in texts)
-    assert any("NIVEL N1" in t for t in texts)
-    assert any("NIVEL N2" in t for t in texts)
-    assert any("MES EN CURSO" in t for t in texts)
-    assert any("Evolución histórica diaria de NPS e incidencias" in t for t in texts)
-    assert any("Marco causal" in t for t in texts)
-    assert any("Top 3 hotspots operativos" in t for t in texts)
-    assert any("Incidencias históricas diarias por hotspot" in t for t in texts)
-    assert any("Tema prioritario 1: Login" in t for t in texts)
-    assert any("Evidencia Helix" in t for t in texts)
-    assert any("INC00001" in t and "problema en el login" in t for t in texts)
-    assert any(
-        "INC00041" in t and "falla de sesion al entrar en portal empresas" in t for t in texts
-    )
+    assert any("NPS Lens" in t for t in texts)
+    assert any("1. Evolución del NPS térmico" in t for t in texts)
+    assert any("2. Qué han dicho los clientes" in t for t in texts)
+    assert any("2. Cuándo y cómo lo dicen" in t for t in texts)
+    assert any("3. Qué ha cambiado respecto al pasado" in t for t in texts)
+    assert any("4. Dónde duele por grupo de usuario" in t for t in texts)
+    assert any("5. Mayores brechas frente al promedio" in t for t in texts)
+    assert any("6. Oportunidades identificadas" in t for t in texts)
+    assert any("7. Introducción de la causalidad" in t for t in texts)
+    assert any("8. Journeys rotos del periodo" in t for t in texts)
+    assert any("9.1 Escenario causal" in t for t in texts)
+    assert any("10.1 Detalle cadena causal" in t for t in texts)
+    assert any("problema en el login" in t for t in texts)
+    assert any("falla de sesion al entrar en portal empresas" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
-    assert any("Priorización del tema" in t for t in texts)
     assert any("Fix estructural" in t for t in texts)
 
 
@@ -299,6 +369,8 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         script_8slides_md="",
         attribution_df=payload["attribution"],
         by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
         logo_path=None,
     )
 
@@ -340,6 +412,8 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         attribution_df=attribution,
         ranking_df=payload["rationale"],
         by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
         lag_days_by_topic=payload["lag_days"],
         logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
@@ -355,8 +429,8 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Journeys que explican la detracción" in t for t in texts)
-    assert any("Valor diferencial de NPS Lens" in t for t in texts)
+    assert any("Journeys rotos del periodo" in t for t in texts)
+    assert any("Journeys ejecutivos" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
@@ -394,6 +468,8 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         attribution_df=attribution,
         ranking_df=payload["rationale"],
         by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
         lag_days_by_topic=payload["lag_days"],
         logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
@@ -409,8 +485,183 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Embeddings + keywords" in t for t in texts)
-    assert any("Journey roto 1: Acceso / Login" in t for t in texts)
+    assert any("Embeddings + clustering semántico" in t for t in texts)
+    assert any("Acceso / Login" in t for t in texts)
+
+
+def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
+    payload = _sample_payload()
+    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
+    compare = executive_ppt._coerce_nps_records(payload["comparison_nps"])
+    current_period, baseline_period = executive_ppt._split_period_frames(
+        compare,
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+    )
+
+    overview = executive_ppt._period_overview(current)
+    assert int(overview["comments"]) > 0
+    assert float(overview["detractor_rate"]) > 0
+
+    palanca_change = executive_ppt._driver_change_table(
+        current_period,
+        baseline_period,
+        dimension="Palanca",
+    )
+    assert not palanca_change.empty
+    assert "delta_nps" in palanca_change.columns
+
+    group_matrix = executive_ppt._group_matrix(current, dimension="Palanca")
+    assert not group_matrix.empty
+    assert set(group_matrix["band"].tolist()) <= {"Detractor", "Pasivo", "Promotor"}
+
+    opportunities = executive_ppt._opportunities_table(current)
+    assert not opportunities.empty
+    assert {"dimension", "potential_uplift", "confidence"}.issubset(opportunities.columns)
+
+    gaps = executive_ppt._gap_vs_overall_table(current, top_k=5)
+    assert len(gaps) <= 5
+    assert not gaps.empty
+
+
+def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:
+    payload = _sample_payload()
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="Empresas Mobile",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        overall_weekly=payload["overall_daily"],
+        rationale_df=payload["rationale"].head(0),
+        nps_points_at_risk=0.0,
+        nps_points_recoverable=0.0,
+        top3_incident_share=0.0,
+        median_lag_weeks=0.0,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=pd.DataFrame(),
+        ranking_df=pd.DataFrame(),
+        by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=pd.DataFrame(),
+        lag_days_by_topic=pd.DataFrame(),
+        by_topic_weekly=None,
+        lag_weeks_by_topic=None,
+        logo_path=None,
+        incident_evidence_df=pd.DataFrame(),
+        changepoints_by_topic=pd.DataFrame(),
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert any("1. Evolución del NPS térmico" in t for t in texts)
+    assert any("8. Journeys rotos del periodo" in t for t in texts)
+    assert not any("9.1 Escenario causal" in t for t in texts)
+
+
+def test_ppt_template_fallback_builds_default_presentation() -> None:
+    prs = build_presentation(template_path=None)
+    layout = resolve_layout(prs, ["layout inexistente"], fallback_index=0)
+
+    assert prs is not None
+    assert layout is not None
+
+
+def test_ppt_template_path_resolution_supports_explicit_and_env_paths() -> None:
+    original = os.environ.get("NPS_LENS_PPT_TEMPLATE")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        pptx_path = tmp_path / "corporate-template.pptx"
+        Presentation().save(pptx_path)
+
+        found_explicit = find_corporate_template_path(explicit_path=pptx_path, workspace_root=tmp_path)
+        assert found_explicit == pptx_path
+
+        os.environ["NPS_LENS_PPT_TEMPLATE"] = str(pptx_path)
+        found_env = find_corporate_template_path(explicit_path=pptx_path, workspace_root=tmp_path)
+        assert found_env == pptx_path
+
+        fallback_prs = build_presentation(template_path=None, workspace_root=tmp_path / "missing")
+        assert fallback_prs is not None
+
+    if original is None:
+        os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
+    else:
+        os.environ["NPS_LENS_PPT_TEMPLATE"] = original
+
+
+def test_ppt_template_resolution_handles_duplicates_and_no_match() -> None:
+    original_env = os.environ.get("NPS_LENS_PPT_TEMPLATE")
+    original_names = ppt_template_module._TEMPLATE_FILE_NAMES
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            missing = tmp_path / "missing-template.pptx"
+            os.environ["NPS_LENS_PPT_TEMPLATE"] = str(missing)
+            ppt_template_module._TEMPLATE_FILE_NAMES = ()
+
+            assert (
+                find_corporate_template_path(explicit_path=missing, workspace_root=tmp_path) is None
+            )
+
+            prs = build_presentation(template_path=None, workspace_root=tmp_path)
+            assert prs is not None
+    finally:
+        ppt_template_module._TEMPLATE_FILE_NAMES = original_names
+        if original_env is None:
+            os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
+        else:
+            os.environ["NPS_LENS_PPT_TEMPLATE"] = original_env
+
+
+def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_raw_nps() -> None:
+    payload = _sample_payload()
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="Empresas Mobile",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        overall_weekly=payload["overall_daily"],
+        rationale_df=pd.DataFrame(),
+        nps_points_at_risk=0.0,
+        nps_points_recoverable=0.0,
+        top3_incident_share=0.0,
+        median_lag_weeks=0.0,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=pd.DataFrame(),
+        ranking_df=pd.DataFrame(),
+        by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=None,
+        comparison_nps_df=None,
+        lag_days_by_topic=None,
+        by_topic_weekly=None,
+        lag_weeks_by_topic=None,
+        logo_path=None,
+        incident_evidence_df=None,
+        changepoints_by_topic=None,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert any("1. Evolución del NPS térmico" in t for t in texts)
+    assert any("6. Oportunidades identificadas" in t for t in texts)
 
 
 def test_history_fig_daily_uses_requested_colors() -> None:

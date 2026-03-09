@@ -4886,6 +4886,8 @@ def page_nps_helix_linking(
                     else ""
                 )
                 ppt_8slides_md_ppt = ppt_8slides_md
+                selected_nps_for_ppt = nps_slice.copy()
+                comparison_nps_for_ppt = nps_hist.copy() if not nps_hist.empty else nps_slice.copy()
                 ppt_start = start
                 ppt_end = end
                 lag_days_for_ppt = lag_days.copy()
@@ -4900,7 +4902,7 @@ def page_nps_helix_linking(
                     else pd.DataFrame(columns=["nps_topic", "changepoints"])
                 )
                 hotspot_focus_note = ""
-                helix_for_hot_terms = helix_hist if not helix_hist.empty else helix_slice
+                helix_for_hot_terms = helix_slice if not helix_slice.empty else helix_hist
                 incident_evidence_ppt = _build_incident_evidence_payload(
                     links_mode_df,
                     focus_df,
@@ -4919,9 +4921,6 @@ def page_nps_helix_linking(
                 )
 
                 if not nps_hist.empty and not helix_hist.empty:
-                    ppt_start = pd.to_datetime(nps_hist["Fecha"].min(), errors="coerce").date()
-                    ppt_end = pd.to_datetime(nps_hist["Fecha"].max(), errors="coerce").date()
-
                     nps_hist_work = nps_hist.copy()
                     nps_hist_work["NPS Group"] = nps_hist_work.get("NPS Group", "").astype(str)
                     score_hist = pd.to_numeric(nps_hist_work.get("NPS", np.nan), errors="coerce")
@@ -5063,14 +5062,7 @@ def page_nps_helix_linking(
                             )
                             else pd.DataFrame()
                         )
-                        overall_weekly_ppt = od_hist if not od_hist.empty else ow_hist
-                        by_topic_daily_ppt = btd_hist_mode
-                        by_topic_weekly_ppt = btw_hist_mode
-                        ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
-                        rationale_df_ppt = rationale_hist
-                        rationale_summary_ppt = rationale_summary_hist
-                        chain_df_ppt = chain_hist
-                        ppt_story_md_ppt = ppt_story_md_hist
+                        comparison_nps_for_ppt = nps_hist_work.copy()
                         business_story_md_ppt = (
                             _build_business_report_md(
                                 nps_slice,
@@ -5082,28 +5074,17 @@ def page_nps_helix_linking(
                             if not nps_hist_work.empty and not nps_slice.empty
                             else ""
                         )
-                        ppt_8slides_md_ppt = ppt_8slides_md_hist
-                        lag_days_for_ppt = lag_days_hist
-                        lag_weeks_for_ppt = lag_hist
-                        changepoints_for_ppt = cp_hist
-                        incident_evidence_ppt = _build_incident_evidence_payload(
-                            links_hist_mode,
-                            focus_hist,
-                            helix_hist,
-                        )
-                        incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
-                            nps_hist_work,
-                            helix_hist,
-                            incident_evidence_ppt,
-                        )
-                        incident_timeline_ppt = _build_incident_timeline_payload(
-                            links_hist_mode,
-                            focus_hist,
-                            helix_hist,
-                            incident_evidence_ppt,
-                        )
+                        lag_days_for_ppt = lag_days_hist if not lag_days_hist.empty else lag_days_for_ppt
+                        lag_weeks_for_ppt = lag_hist if not lag_hist.empty else lag_weeks_for_ppt
+                        changepoints_for_ppt = cp_hist if not cp_hist.empty else changepoints_for_ppt
+                        if chain_df_ppt.empty and not chain_hist.empty:
+                            chain_df_ppt = chain_hist
+                        if rationale_df_ppt.empty and not rationale_hist.empty:
+                            rationale_df_ppt = rationale_hist
+                        if ranking_df_ppt.empty:
+                            ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
                         st.caption(
-                            f"La PPT usa histórico completo del contexto: {ppt_start} -> {ppt_end}."
+                            f"La PPT usa el periodo seleccionado ({ppt_start} -> {ppt_end}) y compara contra el histórico completo disponible."
                         )
 
                 hotspot_summary_ppt = summarize_hotspot_counts(
@@ -5149,6 +5130,8 @@ def page_nps_helix_linking(
                     template_name=str(template_mode),
                     corporate_fixed=True,
                     logo_path=_logo_path,
+                    selected_nps_df=selected_nps_for_ppt,
+                    comparison_nps_df=comparison_nps_for_ppt,
                     incident_evidence_df=incident_evidence_ppt,
                     changepoints_by_topic=changepoints_for_ppt,
                     incident_timeline_df=incident_timeline_ppt,

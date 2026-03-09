@@ -78,6 +78,23 @@ class DesignTokens:
         return DesignTokens(colors_light=light, colors_dark=dark)
 
 
+@dataclass(frozen=True)
+class TypographyTokens:
+    display: str
+    heading: str
+    body: str
+    medium: str
+
+
+def bbva_typography_tokens() -> TypographyTokens:
+    return TypographyTokens(
+        display="Tiempos Headline",
+        heading="BentonSansBBVA Bold",
+        body="BentonSansBBVA Book",
+        medium="BentonSansBBVA Medium",
+    )
+
+
 def palette(tokens: DesignTokens, mode: str) -> dict[str, str]:
     return tokens.colors_dark if mode == "dark" else tokens.colors_light
 
@@ -307,17 +324,19 @@ def executive_report_palette(tokens: DesignTokens, mode: str = "light") -> dict[
 
     p = palette(tokens, mode)
     return {
-        "bg_dark": "061B4E",
-        "bg_light": "F4F7FB",
+        "bg_dark": p["color.primary.bg.action.default"].lstrip("#").upper(),
+        "bg_light": "F7F8F8",
         "line": p["color.primary.bg.bar"].lstrip("#").upper(),
         "ink": p["color.primary.text.primary"].lstrip("#").upper(),
         "muted": "42526E",
         "white": "FFFFFF",
         "blue": p["color.primary.bg.action.default"].lstrip("#").upper(),
         "sky": p["color.primary.accent.value-01.default"].lstrip("#").upper(),
-        "green": p["color.primary.bg.success"].lstrip("#").upper(),
+        "green": "88E783",
         "amber": "D97706",
         "yellow": p["color.primary.bg.warning"].lstrip("#").upper(),
-        "orange": "FB923C",
+        "orange": "FFB56B",
         "red": p["color.primary.bg.alert"].lstrip("#").upper(),
+        "sand": "F7F8F8",
+        "navy": "000519",
     }
