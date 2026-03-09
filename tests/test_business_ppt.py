@@ -582,7 +582,9 @@ def test_ppt_template_path_resolution_supports_explicit_and_env_paths() -> None:
         pptx_path = tmp_path / "corporate-template.pptx"
         Presentation().save(pptx_path)
 
-        found_explicit = find_corporate_template_path(explicit_path=pptx_path, workspace_root=tmp_path)
+        found_explicit = find_corporate_template_path(
+            explicit_path=pptx_path, workspace_root=tmp_path
+        )
         assert found_explicit == pptx_path
 
         os.environ["NPS_LENS_PPT_TEMPLATE"] = str(pptx_path)

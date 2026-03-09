@@ -7,7 +7,9 @@ from typing import Iterable, Optional
 import os
 import zipfile
 
-from pptx import Presentation
+from pptx import Presentation as load_presentation
+from pptx.presentation import Presentation as PptxPresentation
+from pptx.slide import SlideLayout
 
 
 @dataclass(frozen=True)
@@ -73,29 +75,29 @@ def build_presentation(
     *,
     template_path: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
-) -> Presentation:
+) -> PptxPresentation:
     resolved = find_corporate_template_path(template_path, workspace_root=workspace_root)
     if resolved is None:
-        return Presentation()
+        return load_presentation()
 
     payload = _normalized_template_payload(resolved)
-    prs = Presentation(payload)
+    prs = load_presentation(payload)
     clear_all_slides(prs)
     return prs
 
 
-def clear_all_slides(prs: Presentation) -> None:
+def clear_all_slides(prs: PptxPresentation) -> None:
     for sld_id in list(prs.slides._sldIdLst):  # pyright: ignore[reportPrivateUsage]
         prs.part.drop_rel(sld_id.rId)
         prs.slides._sldIdLst.remove(sld_id)  # pyright: ignore[reportPrivateUsage]
 
 
 def resolve_layout(
-    prs: Presentation,
+    prs: PptxPresentation,
     preferred_names: Iterable[str],
     *,
     fallback_index: int = 0,
-):
+) -> SlideLayout:
     wanted = [str(name).strip().lower() for name in preferred_names if str(name).strip()]
     for layout in prs.slide_layouts:
         if str(layout.name or "").strip().lower() in wanted:
