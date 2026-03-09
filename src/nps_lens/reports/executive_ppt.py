@@ -56,6 +56,7 @@ from nps_lens.reports.ppt_template import (
 )
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
+    chart_broken_journeys_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
@@ -1826,10 +1827,11 @@ def _add_bullet_lines(
         tf.clear()
         for idx, line in enumerate(lines[:6]):
             p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            p.alignment = PP_ALIGN.LEFT
             p.space_before = Pt(4 if idx else 0)
             p.level = 0
             r = p.add_run()
-            r.text = _clip(line, 145 if width <= 4.0 else 170)
+            r.text = f"• {_clip(line, 145 if width <= 4.0 else 170)}"
             r.font.name = BBVA_FONT_BODY
             r.font.size = Pt(body_font_size_pt)
             r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
@@ -1849,6 +1851,7 @@ def _add_bullet_lines(
     _configure_text_frame(tf)
     for line in lines[:6]:
         p = tf.add_paragraph()
+        p.alignment = PP_ALIGN.LEFT
         p.space_before = Pt(6)
         p.level = 0
         r = p.add_run()
@@ -4908,8 +4911,7 @@ def _add_journeys_summary_slide(
     prs: Presentation,
     *,
     period_label: str,
-    touchpoint_source: str,
-    chain_df: pd.DataFrame,
+    journey_df: pd.DataFrame,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4918,83 +4920,56 @@ def _add_journeys_summary_slide(
         title="8. Experiencias afectadas del periodo",
         subtitle=f"Resumen ejecutivo de casos donde incidencias y comentarios apuntan a la misma fricción · {period_label}",
     )
-    scope = summarize_attribution_chains(chain_df)
+    journeys_df = journey_df.copy() if journey_df is not None else pd.DataFrame()
+    linked_pairs_total = int(
+        pd.to_numeric(journeys_df.get("linked_pairs"), errors="coerce").fillna(0).sum()
+    )
+    mean_cohesion = float(
+        pd.to_numeric(journeys_df.get("semantic_cohesion"), errors="coerce").fillna(0.0).mean()
+    )
     _add_stat_card(
         slide,
         left=0.66,
         top=1.48,
-        width=2.8,
+        width=3.78,
         height=1.10,
-        label="Cómo se enlaza",
-        value=_touchpoint_method_label(touchpoint_source),
+        label="Journeys detectados",
+        value=str(int(len(journeys_df))),
         accent=BBVA_COLORS["blue"],
-        hint="Incidencia -> comentario -> NPS",
     )
     _add_stat_card(
         slide,
-        left=3.62,
+        left=4.62,
         top=1.48,
-        width=2.0,
+        width=3.78,
         height=1.10,
-        label="INC vinculadas",
-        value=str(int(scope.get("linked_incidents_total", 0))),
+        label="Links validados",
+        value=str(linked_pairs_total),
         accent=BBVA_COLORS["orange"],
     )
     _add_stat_card(
         slide,
-        left=5.78,
+        left=8.58,
         top=1.48,
-        width=2.0,
+        width=3.78,
         height=1.10,
-        label="Comentarios enlazados",
-        value=str(int(scope.get("linked_comments_total", 0))),
+        label="Cohesión media",
+        value=f"{mean_cohesion:.2f}",
         accent=BBVA_COLORS["green"],
     )
-    _add_stat_card(
-        slide,
-        left=7.94,
-        top=1.48,
-        width=2.0,
-        height=1.10,
-        label="Vínculos validados",
-        value=str(int(scope.get("linked_pairs_total", 0))),
-        accent=BBVA_COLORS["red"],
-    )
-    _panel(slide, left=0.66, top=2.88, width=7.25, height=4.02, title="Casos con mayor riesgo")
+    _panel(slide, left=0.66, top=2.88, width=12.02, height=4.02, title="")
     _figure_in_panel(
         slide,
-        figure=_journeys_overview_fig(chain_df),
-        left=0.82,
-        top=3.24,
-        width=6.93,
-        height=3.36,
-        empty_note="No hay chains defendibles para resumir el periodo.",
-    )
-    rows = []
-    if chain_df is not None and not chain_df.empty:
-        for row in chain_df.head(5).itertuples():
-            rows.append(
-                [
-                    str(row.nps_topic),
-                    _fmt_num_or_nd(getattr(row, "priority", np.nan)),
-                    _fmt_num_or_nd(getattr(row, "confidence", np.nan)),
-                    _fmt_num_or_nd(getattr(row, "nps_points_at_risk", np.nan)),
-                    _clip(getattr(row, "owner_role", "") or "n/d", 20),
-                ]
-            )
-    _add_compact_table(
-        slide,
-        left=8.10,
-        top=2.88,
-        width=4.58,
-        title="Resumen por caso",
-        headers=["Caso", "Prio.", "Conf.", "Riesgo", "Equipo"],
-        rows=rows or [["Sin evidencia", "-", "-", "-", "-"]],
-        row_height=0.32,
-        col_width_ratios=[2.4, 0.6, 0.6, 0.7, 1.1],
-        clip_lengths=[34, 6, 6, 8, 18],
-        font_size_pt=9.4,
-        max_rows=4,
+        figure=chart_broken_journeys_bar(
+            journeys_df,
+            get_theme("light"),
+            top_k=min(10, len(journeys_df)) if not journeys_df.empty else 10,
+        ),
+        left=0.84,
+        top=3.16,
+        width=11.66,
+        height=3.46,
+        empty_note="No he identificado journeys rotos defendibles en esta ventana.",
     )
 
 
@@ -5253,6 +5228,7 @@ def generate_business_review_ppt(
     hotspot_focus_note: str = "",
     touchpoint_source: str = "",
     executive_journey_catalog: Optional[list[dict[str, object]]] = None,
+    broken_journeys_df: Optional[pd.DataFrame] = None,
 ) -> BusinessPptResult:
     """Build a business deck aligned to the selected period and BBVA corporate template."""
     del (
@@ -5321,6 +5297,9 @@ def generate_business_review_ppt(
     subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
     opportunities_df = _opportunities_table(selected_raw, dimension="Palanca", min_n=200)
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
+    broken_journeys = (
+        broken_journeys_df.copy() if broken_journeys_df is not None else pd.DataFrame()
+    )
 
     _add_cover_slide(
         prs,
@@ -5388,8 +5367,7 @@ def generate_business_review_ppt(
     _add_journeys_summary_slide(
         prs,
         period_label=period_label,
-        touchpoint_source=touchpoint_source,
-        chain_df=chains,
+        journey_df=broken_journeys,
     )
     if chains is not None and not chains.empty:
         for idx, (_, chain_row) in enumerate(chains.head(3).iterrows(), start=1):
