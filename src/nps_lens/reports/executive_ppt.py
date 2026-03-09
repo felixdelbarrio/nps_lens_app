@@ -54,6 +54,7 @@ from nps_lens.reports.ppt_template import (
     build_presentation,
     resolve_layout,
 )
+from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
     chart_cohort_heatmap,
     chart_daily_kpis,
@@ -64,7 +65,6 @@ from nps_lens.ui.charts import (
     chart_opportunities_bar,
     chart_topic_bars,
 )
-from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.narratives import explain_opportunities
 from nps_lens.ui.theme import get_theme
 
@@ -5309,13 +5309,6 @@ def generate_business_review_ppt(
 
     overview = _period_overview(selected_raw)
     text_topics_df = _text_topics_table(selected_raw, top_k=10)
-    palanca_change = _driver_change_table(current_period, baseline_period, dimension="Palanca")
-    subpalanca_change = _driver_change_table(
-        current_period, baseline_period, dimension="Subpalanca"
-    )
-    palanca_matrix = _group_matrix(selected_raw, dimension="Palanca")
-    subpalanca_matrix = _group_matrix(selected_raw, dimension="Subpalanca")
-    gap_df = _gap_vs_overall_table(selected_raw, top_k=10)
     palanca_gap_df = _dimension_gap_table(selected_raw, dimension="Palanca", top_k=10)
     subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
     opportunities_df = _opportunities_table(selected_raw, dimension="Palanca", min_n=200)

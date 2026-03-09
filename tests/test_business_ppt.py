@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import date
 from io import BytesIO
-import os
 from pathlib import Path
-import tempfile
 
 import pandas as pd
 import plotly.graph_objects as go
 from pptx import Presentation
 
+import nps_lens.reports.ppt_template as ppt_template_module
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -17,7 +18,6 @@ from nps_lens.analytics.incident_attribution import (
 from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
-import nps_lens.reports.ppt_template as ppt_template_module
 from nps_lens.reports.ppt_template import (
     build_presentation,
     find_corporate_template_path,

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
+import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable, Optional
-import os
-import zipfile
 
 from pptx import Presentation as load_presentation
 from pptx.presentation import Presentation as PptxPresentation
