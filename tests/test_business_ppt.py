@@ -353,7 +353,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("6. Oportunidades a priorizar" in t for t in texts)
     assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
     assert any("8. Experiencias afectadas del periodo" in t for t in texts)
-    assert any("9.1 Caso causal" in t for t in texts)
+    assert any("9.1 Análisis causal" in t for t in texts)
     assert any("10.1 Detalle del caso" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
@@ -608,7 +608,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 18
+    assert themed.layout.font.size == 20
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
     assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]

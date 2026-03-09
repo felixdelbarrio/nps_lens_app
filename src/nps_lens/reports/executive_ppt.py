@@ -1496,29 +1496,29 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=18, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=20, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
             y=-0.16,
             yanchor="top",
-            font=dict(size=17, color=ink),
-            title_font=dict(size=17, color=ink),
+            font=dict(size=19, color=ink),
+            title_font=dict(size=19, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
-            l=max(int(current_margin.get("l", 24)), 68),
-            r=max(int(current_margin.get("r", 24)), 32),
+            l=max(int(current_margin.get("l", 24)), 108),
+            r=max(int(current_margin.get("r", 24)), 52),
             t=int(current_margin.get("t", 20)),
-            b=max(int(current_margin.get("b", 24)), 82),
+            b=max(int(current_margin.get("b", 24)), 116),
         ),
         hoverlabel=dict(font=dict(family=BBVA_FONT_BODY, size=13, color=ink)),
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=17, color=ink),
-            title_font=dict(size=18, color=ink),
+            tickfont=dict(size=19, color=ink),
+            title_font=dict(size=20, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1526,8 +1526,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=17, color=ink),
-            title_font=dict(size=18, color=ink),
+            tickfont=dict(size=19, color=ink),
+            title_font=dict(size=20, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1540,7 +1540,7 @@ def _kaleido_png(fig: go.Figure, *, width: int = 1600, height: int = 900) -> Opt
     try:
         _patch_kaleido_executable_for_space_paths()
         themed = _apply_ppt_figure_theme(fig)
-        return pio.to_image(themed, format="png", width=width, height=height, scale=2)
+        return pio.to_image(themed, format="png", width=width, height=height, scale=1)
     except Exception:
         return None
 
@@ -1696,7 +1696,17 @@ def _figure_in_panel(
     height: float,
     empty_note: str,
 ) -> None:
-    img = _kaleido_png(figure) if figure is not None else None
+    img = None
+    if figure is not None:
+        base_ppi = 150
+        width_px = max(int(width * base_ppi), 1100)
+        height_px = max(int(height * base_ppi), 320)
+        scale = max(1500 / max(width_px, 1), 700 / max(height_px, 1), 1.0)
+        img = _kaleido_png(
+            figure,
+            width=int(width_px * scale),
+            height=int(height_px * scale),
+        )
     if img is not None:
         slide.shapes.add_picture(
             BytesIO(img),
@@ -1863,7 +1873,9 @@ def _add_compact_table(
     font_size_pt: float = 9.6,
     max_rows: int = 6,
 ) -> None:
-    height = 0.62 + row_height * max(len(rows), 1) + 0.12
+    title_pad = 0.62 if str(title or "").strip() else 0.24
+    visible_rows = max(min(len(rows), max(int(max_rows), 1)), 1)
+    height = title_pad + 0.54 + row_height * visible_rows
     panel = _panel(
         slide,
         left=left,
@@ -1873,7 +1885,7 @@ def _add_compact_table(
         title=title,
         fill=BBVA_COLORS["white"],
     )
-    base_top = top + 0.46
+    base_top = top + (0.46 if str(title or "").strip() else 0.18)
     if col_width_ratios and len(col_width_ratios) == len(headers):
         ratio_sum = sum(col_width_ratios) or 1.0
         column_widths = [((width - 0.16) * ratio / ratio_sum) for ratio in col_width_ratios]
@@ -4469,8 +4481,8 @@ def _add_deep_dive_slide(
         figure=chart_topic_bars(text_topics_df, get_theme("light"), top_k=10),
         left=0.82,
         top=1.82,
-        width=6.92,
-        height=2.78,
+        width=6.78,
+        height=2.84,
         empty_note="No hay suficiente volumen textual para construir el top 10.",
     )
 
@@ -4481,26 +4493,26 @@ def _add_deep_dive_slide(
             str(row.top_terms_txt),
             str(row.example_txt),
         ]
-        for row in text_topics_df.head(4).itertuples()
+        for row in text_topics_df.head(3).itertuples()
     ]
     _add_compact_table(
         slide,
         left=0.82,
         top=4.64,
         width=7.18,
-        title="Clusters",
+        title="",
         headers=["cluster_id", "n", "top_terms", "examples"],
         rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
-        row_height=0.31,
+        row_height=0.36,
         col_width_ratios=[0.8, 0.8, 2.5, 2.3],
-        clip_lengths=[8, 8, 44, 40],
-        font_size_pt=9.8,
-        max_rows=4,
+        clip_lengths=[8, 8, 36, 34],
+        font_size_pt=10.4,
+        max_rows=3,
     )
 
     bullet_lines = [
         f"{row.label}: {int(row.n):,} comentarios.".replace(",", ".")
-        for _, row in text_topics_df.head(4).iterrows()
+        for _, row in text_topics_df.head(3).iterrows()
     ] or ["No se han detectado temas con masa crítica suficiente."]
     _add_bullet_lines(
         slide,
@@ -4511,7 +4523,7 @@ def _add_deep_dive_slide(
         title="Qué destaca",
         lines=bullet_lines,
         accent=BBVA_COLORS["sky"],
-        body_font_size_pt=13.0,
+        body_font_size_pt=14.0,
     )
 
 
@@ -5000,15 +5012,16 @@ def _add_chain_scenario_slide(
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
     touchpoint = _clip(chain_row.get("touchpoint", "Touchpoint"), 36)
+    owner_role = _clip(chain_row.get("owner_role", "n/d"), 24)
     focus_label = _focus_risk_label(focus_name)
     _add_header(
         slide,
-        title=f"9.{idx} Caso causal",
+        title=f"9.{idx} Análisis causal",
         subtitle=f"{title} · {touchpoint} · {period_label}",
     )
     chain_statement = (
         f"{linked_incidents} incidencias de Helix y {linked_comments} comentarios de cliente "
-        f"convergen en '{title}' y explican riesgo de {focus_label}."
+        f"convergen en '{title}' y explican riesgo de {focus_label}. Equipo: {owner_role}."
     )
     banner = _panel(
         slide,
@@ -5065,21 +5078,16 @@ def _add_chain_scenario_slide(
             f"{_fmt_num_or_nd(chain_row.get('nps_points_recoverable', np.nan))} pts",
             BBVA_COLORS["green"],
         ),
-        (
-            "Equipo responsable",
-            _clip(chain_row.get("owner_role", "n/d"), 24),
-            BBVA_COLORS["blue"],
-        ),
     ]
     for pos, (label, value, accent) in enumerate(metrics):
-        row = pos // 3
-        col = pos % 3
+        row = pos // 4
+        col = pos % 4
         _add_stat_card(
             slide,
-            left=0.66 + col * 4.05,
-            top=2.52 + row * 1.30,
-            width=3.78,
-            height=1.08,
+            left=0.66 + col * 3.02,
+            top=2.52 + row * 1.24,
+            width=2.82,
+            height=1.02,
             label=label,
             value=value,
             accent=accent,
@@ -5088,9 +5096,9 @@ def _add_chain_scenario_slide(
     _add_bullet_lines(
         slide,
         left=0.66,
-        top=5.28,
+        top=5.12,
         width=5.75,
-        height=1.62,
+        height=1.78,
         title="Incidencias relacionadas",
         lines=[
             _clean_evidence_excerpt(line, max_len=112)
@@ -5102,9 +5110,9 @@ def _add_chain_scenario_slide(
     _add_bullet_lines(
         slide,
         left=6.63,
-        top=5.28,
+        top=5.12,
         width=6.03,
-        height=1.62,
+        height=1.78,
         title="Comentarios de cliente",
         lines=[
             _clean_evidence_excerpt(line, max_len=116)
