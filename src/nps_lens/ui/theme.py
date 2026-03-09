@@ -341,6 +341,12 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   line-height: 1;
 }}
 
+.nps-hero-metric-value {{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}}
+
 .nps-impact-grid {{
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

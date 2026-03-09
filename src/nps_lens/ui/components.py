@@ -141,6 +141,7 @@ def executive_banner(
     summary: str,
     metrics: list[tuple[str, str]] | None = None,
     metric_hints: Optional[dict[str, str]] = None,
+    metric_value_hints: Optional[dict[str, str]] = None,
 ) -> None:
     metric_html = ""
     if metrics:
@@ -158,8 +159,20 @@ def executive_banner(
                         else ""
                     )
                     + "</span>"
-                    f"<strong>{escape(str(value))}</strong>"
-                    "</div>"
+                    + (
+                        "<div class='nps-hero-metric-value'>"
+                        f"<strong>{escape(str(value))}</strong>"
+                        + (
+                            (
+                                f" <span class='nps-hero-metric-help' "
+                                f"title='{escape(metric_value_hints.get(str(label), ''))}'>?</span>"
+                            )
+                            if metric_value_hints and metric_value_hints.get(str(label))
+                            else ""
+                        )
+                        + "</div>"
+                    )
+                    + "</div>"
                 )
                 for label, value in metrics
             ]

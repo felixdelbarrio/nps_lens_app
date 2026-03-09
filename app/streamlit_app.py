@@ -4406,10 +4406,13 @@ def page_nps_helix_linking(
                     ("Comentarios enlazados", str(linked_comments_total)),
                     ("Links validados", str(linked_pairs_total)),
                 ],
-                metric_hints={
-                    "Método causal": TOUCHPOINT_MODE_FLOWS.get(
-                        str(touchpoint_source),
-                        "Incidencias -> Touchpoint -> Comentario -> NPS",
+                metric_value_hints={
+                    "Método causal": (
+                        "Flujo del método causal: "
+                        + TOUCHPOINT_MODE_FLOWS.get(
+                            str(touchpoint_source),
+                            "Incidencias -> Touchpoint -> Comentario -> NPS",
+                        )
                     )
                 },
             )
