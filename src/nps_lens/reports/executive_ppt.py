@@ -39,6 +39,7 @@ from nps_lens.analytics.incident_attribution import (
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.design.tokens import (
     DesignTokens,
     bbva_typography_tokens,
@@ -52,6 +53,8 @@ from nps_lens.reports.ppt_template import (
     build_presentation,
     resolve_layout,
 )
+from nps_lens.ui.charts import chart_topic_bars
+from nps_lens.ui.theme import get_theme
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
 BBVA_TYPOGRAPHY = bbva_typography_tokens()
@@ -544,6 +547,43 @@ def _topic_summary(by_topic_daily: Optional[pd.DataFrame]) -> pd.DataFrame:
     out["nps_topic"] = out["nps_topic"].astype(str).str.strip()
     out = out[out["nps_topic"] != ""].copy()
     return out[cols]
+
+
+def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.DataFrame:
+    cols = ["cluster_id", "n", "top_terms", "examples", "label", "top_terms_txt", "example_txt"]
+    if (
+        current_nps_df is None
+        or current_nps_df.empty
+        or "comment_txt" not in current_nps_df.columns
+    ):
+        return pd.DataFrame(columns=cols)
+
+    comments = current_nps_df["comment_txt"].astype(str).str.strip()
+    comments = comments[comments.ne("")]
+    if comments.empty:
+        return pd.DataFrame(columns=cols)
+
+    topics = extract_topics(comments, n_clusters=max(int(top_k), 10))
+    if not topics:
+        return pd.DataFrame(columns=cols)
+
+    d = (
+        pd.DataFrame([topic.__dict__ for topic in topics])
+        .sort_values("n", ascending=False)
+        .head(int(top_k))
+        .copy()
+    )
+    d["label"] = d.apply(
+        lambda row: f"#{int(row['cluster_id'])}: {', '.join(list(row['top_terms'])[:3])}",
+        axis=1,
+    )
+    d["top_terms_txt"] = d["top_terms"].apply(
+        lambda values: ", ".join([str(v).strip() for v in list(values)[:6] if str(v).strip()])
+    )
+    d["example_txt"] = d["examples"].apply(
+        lambda values: " | ".join([_clip(v, 42) for v in list(values)[:2] if str(v).strip()])
+    )
+    return d[cols].reset_index(drop=True)
 
 
 def _driver_change_table(
@@ -4302,7 +4342,7 @@ def _add_deep_dive_slide(
     prs: Presentation,
     *,
     period_label: str,
-    topics_df: pd.DataFrame,
+    text_topics_df: pd.DataFrame,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4311,23 +4351,44 @@ def _add_deep_dive_slide(
         title="2. Qué han dicho los clientes",
         subtitle=f"Temas más repetidos en los comentarios del periodo · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.2, height=5.42, title="Top 10 temas del periodo")
+    _panel(slide, left=0.66, top=1.48, width=8.2, height=5.42, title="Top temas del periodo")
     _figure_in_panel(
         slide,
-        figure=_top_topics_fig(topics_df, top_k=10),
+        figure=chart_topic_bars(text_topics_df, get_theme("light"), top_k=10),
         left=0.82,
-        top=1.86,
+        top=1.82,
         width=7.88,
-        height=4.92,
-        empty_note="No hay suficiente volumen temático para construir el top 10.",
+        height=2.55,
+        empty_note="No hay suficiente volumen textual para construir el top 10.",
+    )
+
+    table_rows = [
+        [
+            str(row.cluster_id),
+            f"{int(row.n):,}".replace(",", "."),
+            str(row.top_terms_txt),
+            str(row.example_txt),
+        ]
+        for row in text_topics_df.head(5).itertuples()
+    ]
+    _add_compact_table(
+        slide,
+        left=0.82,
+        top=4.58,
+        width=7.72,
+        title="Detalle de clusters",
+        headers=["cluster_id", "n", "top_terms", "examples"],
+        rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
+        row_height=0.31,
+        col_width_ratios=[0.9, 0.9, 3.0, 2.9],
+        clip_lengths=[8, 8, 58, 58],
+        font_size_pt=9.6,
     )
 
     bullet_lines = [
-        (
-            f"{row.nps_topic}: {int(row.comments)} comentarios y NPS medio de {_fmt_num_or_nd(row.nps_mean)}."
-        )
-        for _, row in topics_df.head(4).iterrows()
-    ] or ["No se han detectado tópicos con masa crítica suficiente."]
+        f"{row.label}: {int(row.n):,} comentarios.".replace(",", ".")
+        for _, row in text_topics_df.head(4).iterrows()
+    ] or ["No se han detectado temas con masa crítica suficiente."]
     _add_bullet_lines(
         slide,
         left=9.00,
@@ -4337,6 +4398,7 @@ def _add_deep_dive_slide(
         title="Qué destaca",
         lines=bullet_lines,
         accent=BBVA_COLORS["sky"],
+        body_font_size_pt=13.0,
     )
 
 
@@ -5015,7 +5077,7 @@ def generate_business_review_ppt(
         daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
 
     overview = _period_overview(selected_raw)
-    topics_df = _topic_summary(by_topic_daily)
+    text_topics_df = _text_topics_table(selected_raw, top_k=10)
     palanca_change = _driver_change_table(current_period, baseline_period, dimension="Palanca")
     subpalanca_change = _driver_change_table(
         current_period, baseline_period, dimension="Subpalanca"
@@ -5046,7 +5108,7 @@ def generate_business_review_ppt(
         daily_mix=daily_mix,
         overall_daily=daily_signals,
     )
-    _add_deep_dive_slide(prs, period_label=period_label, topics_df=topics_df)
+    _add_deep_dive_slide(prs, period_label=period_label, text_topics_df=text_topics_df)
     _add_topic_timing_slide(
         prs,
         period_label=period_label,
