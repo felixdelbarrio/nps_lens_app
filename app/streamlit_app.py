@@ -768,6 +768,30 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _unique_string_values(values: list[object]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(normalized)
+    return unique
+
+
+def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return _unique_string_values(
+        [
+            item.get(field_name, "")
+            for item in value
+            if isinstance(item, dict) and str(item.get(field_name, "")).strip()
+        ]
+    )
+
+
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
@@ -786,10 +810,34 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     touchpoint = (
         out.get("touchpoint", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
     )
-    out["chain_key"] = [
-        hashlib.sha1(f"{tp}|{tpnt}".encode("utf-8")).hexdigest()[:12]
-        for tp, tpnt in zip(topic.tolist(), touchpoint.tolist())
-    ]
+    base_keys: list[str] = []
+    for _, row in out.iterrows():
+        key_payload = {
+            "presentation_mode": str(row.get("presentation_mode", "") or "").strip(),
+            "nps_topic": str(row.get("nps_topic", "") or "").strip(),
+            "touchpoint": str(row.get("touchpoint", "") or "").strip(),
+            "palanca": str(row.get("palanca", "") or "").strip(),
+            "subpalanca": str(row.get("subpalanca", "") or "").strip(),
+            "journey_route": str(row.get("journey_route", "") or "").strip(),
+            "linked_pairs": _safe_int_label(row.get("linked_pairs", 0)),
+            "linked_incidents": _safe_int_label(row.get("linked_incidents", 0)),
+            "linked_comments": _safe_int_label(row.get("linked_comments", 0)),
+            "incident_ids": _chain_record_ids(row.get("incident_records"), field_name="incident_id"),
+            "comment_ids": _chain_record_ids(row.get("comment_records"), field_name="comment_id"),
+        }
+        base_keys.append(
+            hashlib.sha1(
+                json.dumps(key_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+            ).hexdigest()[:12]
+        )
+
+    key_counts: dict[str, int] = {}
+    chain_keys: list[str] = []
+    for base_key in base_keys:
+        next_count = key_counts.get(base_key, 0) + 1
+        key_counts[base_key] = next_count
+        chain_keys.append(base_key if next_count == 1 else f"{base_key}-{next_count}")
+    out["chain_key"] = chain_keys
     out["selection_label"] = [
         (
             f"{touchpoint_val or 'Touchpoint sin etiquetar'} | {topic_val or 'Tema sin etiqueta'} | "
@@ -817,7 +865,7 @@ def _sync_chain_selection_state(
         st.session_state[f"{key_prefix}_view_idx"] = 0
         return []
 
-    keys = chain_df["chain_key"].astype(str).tolist()
+    keys = _unique_string_values(chain_df["chain_key"].astype(str).tolist())
     sig = hashlib.sha1("|".join(keys).encode("utf-8")).hexdigest()
     sig_key = f"{key_prefix}_sig"
     selected_key = f"{key_prefix}_selected"
@@ -827,9 +875,9 @@ def _sync_chain_selection_state(
         st.session_state[selected_key] = keys[: min(int(default_limit), len(keys))]
         st.session_state[view_idx_key] = 0
 
-    selected = [str(k) for k in st.session_state.get(selected_key, []) if str(k) in keys][
-        : int(default_limit)
-    ]
+    selected = [
+        key for key in _unique_string_values(st.session_state.get(selected_key, [])) if key in keys
+    ][: int(default_limit)]
     if not selected:
         selected = keys[: min(int(default_limit), len(keys))]
         st.session_state[selected_key] = selected
@@ -845,18 +893,17 @@ def _sync_chain_selection_state(
 def _select_chain_rows(chain_df: pd.DataFrame, selected_keys: list[str]) -> pd.DataFrame:
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
-    if not selected_keys:
+    ordered_keys = _unique_string_values(selected_keys)
+    if not ordered_keys:
         return chain_df.head(0).copy()
 
-    selected = chain_df[
-        chain_df["chain_key"].astype(str).isin([str(k) for k in selected_keys])
-    ].copy()
+    selected = chain_df[chain_df["chain_key"].astype(str).isin(ordered_keys)].copy()
     if selected.empty:
         return selected
 
     selected["__order"] = pd.Categorical(
         selected["chain_key"].astype(str),
-        categories=[str(k) for k in selected_keys],
+        categories=ordered_keys,
         ordered=True,
     )
     selected = selected.sort_values("__order").drop(columns="__order").reset_index(drop=True)
