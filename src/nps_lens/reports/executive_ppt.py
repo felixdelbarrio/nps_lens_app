@@ -45,6 +45,7 @@ from nps_lens.design.tokens import (
     bbva_typography_tokens,
     executive_report_palette,
     nps_score_color,
+    palette,
     plotly_continuous_scale,
     plotly_risk_scale,
 )
@@ -59,9 +60,11 @@ from nps_lens.ui.charts import (
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
+    chart_opportunities_bar,
     chart_topic_bars,
 )
 from nps_lens.ui.business import driver_delta_table
+from nps_lens.ui.narratives import explain_opportunities
 from nps_lens.ui.theme import get_theme
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
@@ -1283,54 +1286,63 @@ def _causal_daily_timeline_fig(
     if daily_mix is None or daily_mix.empty:
         return None
     d = _merge_daily_incidents(daily_mix, overall_daily)
+    if d.empty:
+        return None
+    tokens = DesignTokens.default()
+    pal = palette(tokens, "light")
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
             x=d["date"],
             y=d["incidents"],
-            name="Incidencias",
-            marker=dict(color="#" + BBVA_COLORS["yellow"]),
-            opacity=0.52,
+            name="# incidencias",
+            yaxis="y2",
+            opacity=0.75,
+            marker=dict(color=pal["color.primary.accent.value-01.default"]),
         )
     )
     fig.add_trace(
         go.Scatter(
             x=d["date"],
             y=d["detractor_rate"] * 100.0,
-            mode="lines",
-            name="Detractores",
-            yaxis="y2",
-            line=dict(color="#" + BBVA_COLORS["red"], width=2.4),
+            mode="lines+markers",
+            name="% detractores",
+            line=dict(color=pal["color.primary.bg.alert"], width=2),
+            marker=dict(color=pal["color.primary.bg.alert"], size=6),
         )
     )
     fig.add_trace(
         go.Scatter(
             x=d["date"],
             y=d["passive_rate"] * 100.0,
-            mode="lines",
-            name="Pasivos",
-            yaxis="y2",
-            line=dict(color="#" + BBVA_COLORS["orange"], width=2.1),
+            mode="lines+markers",
+            name="% pasivos",
+            line=dict(color=pal["color.primary.bg.warning"], width=2),
+            marker=dict(color=pal["color.primary.bg.warning"], size=6),
         )
     )
     fig.add_trace(
         go.Scatter(
             x=d["date"],
             y=d["promoter_rate"] * 100.0,
-            mode="lines",
-            name="Promotores",
-            yaxis="y2",
-            line=dict(color="#" + BBVA_COLORS["green"], width=2.1),
+            mode="lines+markers",
+            name="% promotores",
+            line=dict(color=pal["color.primary.bg.success"], width=2),
+            marker=dict(color=pal["color.primary.bg.success"], size=6),
         )
     )
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=84, t=20, b=24),
+        margin=dict(l=24, r=48, t=20, b=24),
         legend=dict(orientation="h", x=0.0, y=1.08),
         xaxis_title="Día",
-        yaxis=dict(title="Incidencias", rangemode="tozero"),
+        yaxis=dict(title="Tasa por grupo", tickformat=".0%"),
         yaxis2=dict(
-            title="% comentarios", overlaying="y", side="right", range=[0, 100], showgrid=False
+            title="Incidencias",
+            overlaying="y",
+            side="right",
+            rangemode="tozero",
+            showgrid=False,
         ),
     )
     return fig
@@ -4703,32 +4715,40 @@ def _add_opportunity_slide(
         title="6. Oportunidades a priorizar",
         subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=7.05, height=5.42, title="Impacto potencial y solidez")
+    opp_chart_df = opportunities_df.copy()
+    if not opp_chart_df.empty and "label" not in opp_chart_df.columns:
+        opp_chart_df["label"] = opp_chart_df.apply(
+            lambda row: f"{row.get('dimension')}={row.get('value')}",
+            axis=1,
+        )
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=12.02,
+        height=4.30,
+        title="Ranking por impacto estimado x confianza",
+    )
     _figure_in_panel(
         slide,
-        figure=_opportunity_bubble_fig(opportunities_df),
-        left=0.82,
+        figure=chart_opportunities_bar(opp_chart_df, get_theme("light"), top_k=10),
+        left=0.86,
         top=1.86,
-        width=6.73,
-        height=4.92,
+        width=11.62,
+        height=3.62,
         empty_note="No se identificaron oportunidades robustas con el umbral actual.",
     )
-    lines = [
-        (
-            f"{idx + 1}. {_format_opportunity_scope(row.dimension, row.value)} puede aportar "
-            f"{float(row.potential_uplift):.1f} pts NPS; evidencia {float(row.confidence):.2f}/1 y n={int(row.n)}."
-        )
-        for idx, row in opportunities_df.head(5).iterrows()
-    ] or ["No se han identificado oportunidades defendibles para este periodo."]
+    lines = explain_opportunities(opportunities_df, max_items=5)
     _add_bullet_lines(
         slide,
-        left=7.92,
-        top=1.48,
-        width=4.76,
-        height=5.42,
-        title="Prioridades sugeridas",
+        left=0.66,
+        top=5.94,
+        width=12.02,
+        height=0.96,
+        title="",
         lines=lines,
-        accent=BBVA_COLORS["orange"],
+        accent=BBVA_COLORS["line"],
+        body_font_size_pt=12.5,
     )
 
 
@@ -4738,16 +4758,30 @@ def _add_causal_timeline_slide(
     period_label: str,
     daily_mix: pd.DataFrame,
     overall_daily: pd.DataFrame,
+    nps_points_at_risk: float,
+    nps_points_recoverable: float,
+    top3_incident_share: float,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    incidents_total = int(
+        pd.to_numeric(overall_daily.get("incidents", 0.0), errors="coerce").fillna(0.0).sum()
+    )
+    detractor_avg = float(
+        pd.to_numeric(
+            overall_daily.get(
+                "focus_rate",
+                overall_daily.get("detractor_rate", daily_mix.get("detractor_rate", 0.0)),
+            ),
+            errors="coerce",
+        )
+        .fillna(0.0)
+        .mean()
+    )
     _add_header(
         slide,
         title="7. Cuando la operación afecta a la experiencia",
-        subtitle=(
-            "Las incidencias degradan momentos críticos de la experiencia, generan experiencias negativas, "
-            f"se reflejan en comentarios y terminan afectando al NPS · {period_label}"
-        ),
+        subtitle=period_label,
     )
     _panel(
         slide,
@@ -4774,12 +4808,60 @@ def _add_causal_timeline_slide(
         height=5.42,
         title="Cómo leerlo",
         lines=[
-            "Las barras representan incidencias operativas del periodo.",
-            "Las líneas muestran cómo evoluciona el mix detractor, pasivo y promotor.",
-            "El valor está en detectar qué ocurre antes y qué ocurre después, no solo coincidencias puntuales.",
-            "Cuando el deterioro acompaña o sigue a picos operativos, la hipótesis causal gana fuerza.",
+            "Las incidencias degradan momentos críticos del journey, lo que genera experiencias negativas que se reflejan en los comentarios y finalmente en el NPS.",
         ],
         accent=BBVA_COLORS["red"],
+        body_font_size_pt=13.0,
+    )
+    _add_stat_card(
+        slide,
+        left=9.18,
+        top=3.18,
+        width=1.60,
+        height=1.00,
+        label="Incidencias del periodo",
+        value=f"{incidents_total:,}",
+        accent=BBVA_COLORS["blue"],
+    )
+    _add_stat_card(
+        slide,
+        left=10.92,
+        top=3.18,
+        width=1.60,
+        height=1.00,
+        label="% detractores medio",
+        value=f"{detractor_avg*100.0:.2f}%",
+        accent=BBVA_COLORS["red"],
+    )
+    _add_stat_card(
+        slide,
+        left=9.18,
+        top=4.36,
+        width=1.02,
+        height=1.00,
+        label="NPS en riesgo",
+        value=f"{nps_points_at_risk:.2f} pts",
+        accent=BBVA_COLORS["orange"],
+    )
+    _add_stat_card(
+        slide,
+        left=10.34,
+        top=4.36,
+        width=1.02,
+        height=1.00,
+        label="NPS recuperable",
+        value=f"{nps_points_recoverable:.2f} pts",
+        accent=BBVA_COLORS["green"],
+    )
+    _add_stat_card(
+        slide,
+        left=11.50,
+        top=4.36,
+        width=1.02,
+        height=1.00,
+        label="Concentración top-3",
+        value=f"{top3_incident_share*100.0:.1f}%",
+        accent=BBVA_COLORS["sky"],
     )
 
 
@@ -5145,9 +5227,6 @@ def generate_business_review_ppt(
         incident_evidence_df,
         incident_timeline_df,
         hotspot_focus_note,
-        nps_points_at_risk,
-        nps_points_recoverable,
-        top3_incident_share,
         median_lag_weeks,
         rationale_df,
         ranking_df,
@@ -5273,6 +5352,9 @@ def generate_business_review_ppt(
         period_label=period_label,
         daily_mix=daily_mix,
         overall_daily=daily_signals,
+        nps_points_at_risk=nps_points_at_risk,
+        nps_points_recoverable=nps_points_recoverable,
+        top3_incident_share=top3_incident_share,
     )
     _add_journeys_summary_slide(
         prs,

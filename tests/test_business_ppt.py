@@ -615,6 +615,86 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
     assert themed.data[3].marker.color == "#" + executive_ppt.BBVA_COLORS["sky"]
 
 
+def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
+    payload = _sample_payload()
+    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
+    opportunities = executive_ppt._opportunities_table(current)
+
+    prs = Presentation()
+    executive_ppt._add_opportunity_slide(
+        prs,
+        period_label="2026-02-01 -> 2026-02-22",
+        opportunities_df=opportunities,
+    )
+    executive_ppt._add_opportunity_slide(
+        prs,
+        period_label="2026-02-01 -> 2026-02-22",
+        opportunities_df=pd.DataFrame(columns=opportunities.columns),
+    )
+
+    texts: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert any("6. Oportunidades a priorizar" in text for text in texts)
+    assert any("Ranking por impacto estimado x confianza" in text for text in texts)
+    assert any("Si mejoramos" in text for text in texts)
+    assert any(
+        "No se identificaron oportunidades robustas con el umbral actual." in text for text in texts
+    )
+
+
+def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> None:
+    assert executive_ppt._fmt_pct_or_nd(0.25) == "25%"
+    assert executive_ppt._fmt_pct_or_nd(float("nan")) == "n/d"
+    assert executive_ppt._fmt_signed_or_nd(-2.34, decimals=1) == "-2.3"
+    assert executive_ppt._fmt_num_or_nd(7.891, decimals=1) == "7.9"
+    assert executive_ppt._clip("abcdefgh", 5) == "abcd…"
+    assert executive_ppt._wrap_label("", width=6, max_lines=2) == ""
+    assert executive_ppt._wrap_label("uno dos tres cuatro cinco seis", width=6, max_lines=2) != ""
+    assert executive_ppt._focus_risk_label("detractores") == "detracción"
+    assert executive_ppt._focus_probability_label("promotores") == "Prob. de promoción"
+    assert executive_ppt._focus_risk_label("otros") == "otros"
+    assert executive_ppt._action_lane_label("Fix estructural") == "Corrección estructural"
+    assert executive_ppt._format_opportunity_scope("Palanca", "Pagos") == "Pagos (palanca)"
+    assert executive_ppt._format_opportunity_scope("Subpalanca", "Login") == "Login (subpalanca)"
+    assert executive_ppt._format_opportunity_scope("nps_topic", "Tema X") == "Tema X"
+    assert executive_ppt._clean_evidence_excerpt("", max_len=20) == ""
+    assert executive_ppt._clean_evidence_excerpt("Descripción: texto de prueba", max_len=20) != ""
+    assert executive_ppt._is_cover_metric_line("NPS medio del periodo")
+
+    source_df = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-01-03", "2025-12-20"]),
+            "NPS": [8, 4, 9],
+        }
+    )
+    current, baseline = executive_ppt._split_source_period_frames(
+        source_df,
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+    )
+    assert len(current) == 2
+    assert len(baseline) == 1
+    assert str(executive_ppt._coerce_datetime_scalar("09-03-2026").date()) == "2026-03-09"
+    assert executive_ppt._coerce_datetime_series(["09-03-2026", "10-03-2026"]).notna().all()
+    assert executive_ppt._safe_date("09-03-2026") == "2026-03-09"
+    assert executive_ppt._safe_dt("09-03-2026") is not None
+    assert executive_ppt._month_label_es(date(2026, 3, 9)) == "marzo 2026"
+    assert executive_ppt._slug("") == "na"
+    assert executive_ppt._slug("Señal crítica / pagos") == "senal-critica-pagos"
+    assert executive_ppt._safe_date(object()) != ""
+    assert executive_ppt._safe_dt("no-date") is None
+    assert executive_ppt._safe_float("7.5") == 7.5
+    assert executive_ppt._safe_int("7.5") == 7
+    assert executive_ppt._nps_band(10) == "Promotor"
+    assert executive_ppt._nps_band(8) == "Pasivo"
+    assert executive_ppt._nps_band(2) == "Detractor"
+
+
 def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:
     payload = _sample_payload()
     out = generate_business_review_ppt(
