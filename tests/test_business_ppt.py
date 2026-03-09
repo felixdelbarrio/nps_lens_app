@@ -213,17 +213,17 @@ def _sample_payload() -> dict:
     current_records: list[dict[str, object]] = []
     baseline_records: list[dict[str, object]] = []
     specs = [
-        ("Acceso", "Login", [2, 3, 4, 5, 4], "La app no me deja entrar"),
-        ("Pagos", "SPEI", [4, 5, 6, 5, 4], "Falla al transferir"),
-        ("Tarjetas", "Bloqueo", [7, 8, 7, 8, 9], "Se bloquea la tarjeta"),
+        ("Acceso", "Login", "Web", [2, 3, 4, 5, 4], "La app no me deja entrar"),
+        ("Pagos", "SPEI", "BBVA", [4, 5, 6, 5, 4], "Falla al transferir"),
+        ("Tarjetas", "Bloqueo", "Otros", [7, 8, 7, 8, 9], "Se bloquea la tarjeta"),
     ]
     baseline_specs = [
-        ("Acceso", "Login", [6, 7, 7, 8, 8], "Accedo sin problema"),
-        ("Pagos", "SPEI", [7, 8, 8, 7, 8], "Transferencia completada"),
-        ("Tarjetas", "Bloqueo", [8, 8, 9, 9, 8], "Tarjeta operativa"),
+        ("Acceso", "Login", "Web", [6, 7, 7, 8, 8], "Accedo sin problema"),
+        ("Pagos", "SPEI", "BBVA", [7, 8, 8, 7, 8], "Transferencia completada"),
+        ("Tarjetas", "Bloqueo", "Otros", [8, 8, 9, 9, 8], "Tarjeta operativa"),
     ]
     for idx, dt in enumerate(current_dates):
-        for topic_idx, (palanca, subpalanca, pattern, comment_base) in enumerate(specs):
+        for topic_idx, (palanca, subpalanca, canal, pattern, comment_base) in enumerate(specs):
             score = int(pattern[idx % len(pattern)])
             current_records.append(
                 {
@@ -231,13 +231,16 @@ def _sample_payload() -> dict:
                     "Fecha": dt,
                     "NPS": score,
                     "NPS Group": _nps_group(score),
+                    "Canal": canal,
                     "Palanca": palanca,
                     "Subpalanca": subpalanca,
                     "Comment": f"{comment_base} · {dt.date()}",
                 }
             )
     for idx, dt in enumerate(baseline_dates):
-        for topic_idx, (palanca, subpalanca, pattern, comment_base) in enumerate(baseline_specs):
+        for topic_idx, (palanca, subpalanca, canal, pattern, comment_base) in enumerate(
+            baseline_specs
+        ):
             score = int(pattern[idx % len(pattern)])
             baseline_records.append(
                 {
@@ -245,6 +248,7 @@ def _sample_payload() -> dict:
                     "Fecha": dt,
                     "NPS": score,
                     "NPS Group": _nps_group(score),
+                    "Canal": canal,
                     "Palanca": palanca,
                     "Subpalanca": subpalanca,
                     "Comment": f"{comment_base} · {dt.date()}",

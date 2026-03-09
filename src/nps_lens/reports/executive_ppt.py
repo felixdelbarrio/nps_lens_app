@@ -54,6 +54,7 @@ from nps_lens.reports.ppt_template import (
     resolve_layout,
 )
 from nps_lens.ui.charts import (
+    chart_cohort_heatmap,
     chart_daily_mix_business,
     chart_daily_volume,
     chart_driver_delta,
@@ -4536,35 +4537,47 @@ def _add_pain_by_group_slide(
     prs: Presentation,
     *,
     period_label: str,
-    palanca_matrix: pd.DataFrame,
-    subpalanca_matrix: pd.DataFrame,
+    selected_nps_df: Optional[pd.DataFrame],
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    source_df = selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame()
     _add_header(
         slide,
         title="4. Dónde duele según el tipo de cliente",
-        subtitle=f"Distribución relativa de detractores, pasivos y promotores por eje de experiencia · {period_label}",
+        subtitle=f"NPS por canal y eje de experiencia dentro del periodo analizado · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palancas")
+    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palanca x Canal")
     _figure_in_panel(
         slide,
-        figure=_group_heatmap_fig(palanca_matrix, dimension="Palanca"),
+        figure=chart_cohort_heatmap(
+            source_df,
+            get_theme("light"),
+            row_dim="Palanca",
+            col_dim="Canal",
+            min_n=30,
+        ),
         left=0.82,
         top=1.86,
         width=5.68,
         height=4.92,
-        empty_note="No hay señal suficiente para la matriz por palanca.",
+        empty_note="No hay señal suficiente para mostrar la matriz Palanca x Canal.",
     )
-    _panel(slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalancas")
+    _panel(slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalanca x Canal")
     _figure_in_panel(
         slide,
-        figure=_group_heatmap_fig(subpalanca_matrix, dimension="Subpalanca"),
+        figure=chart_cohort_heatmap(
+            source_df,
+            get_theme("light"),
+            row_dim="Subpalanca",
+            col_dim="Canal",
+            min_n=30,
+        ),
         left=7.06,
         top=1.86,
         width=5.46,
         height=4.92,
-        empty_note="No hay señal suficiente para la matriz por subpalanca.",
+        empty_note="No hay señal suficiente para mostrar la matriz Subpalanca x Canal.",
     )
 
 
@@ -5189,8 +5202,7 @@ def generate_business_review_ppt(
     _add_pain_by_group_slide(
         prs,
         period_label=period_label,
-        palanca_matrix=palanca_matrix,
-        subpalanca_matrix=subpalanca_matrix,
+        selected_nps_df=selected_nps_df,
     )
     _add_gap_slide(prs, period_label=period_label, gap_df=gap_df)
     _add_opportunity_slide(prs, period_label=period_label, opportunities_df=opportunities_df)
