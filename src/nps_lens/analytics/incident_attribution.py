@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -176,6 +178,21 @@ EXECUTIVE_JOURNEY_CATALOG = (
     },
 )
 EXECUTIVE_JOURNEY_BY_ID = {str(item["id"]): item for item in EXECUTIVE_JOURNEY_CATALOG}
+
+EXECUTIVE_JOURNEY_EDITOR_COLUMNS = [
+    "id",
+    "title",
+    "what_occurs",
+    "expected_evidence",
+    "impact_label",
+    "touchpoint",
+    "palanca",
+    "subpalanca",
+    "route",
+    "cx_readout",
+    "confidence_label",
+    "keywords",
+]
 
 CHAIN_COLUMNS = [
     "nps_topic",
@@ -366,6 +383,180 @@ def _clip(value: object, max_len: int) -> str:
     return txt[: max_len - 1].rstrip() + "…"
 
 
+def _catalog_slug(value: object, *, max_len: int = 48) -> str:
+    txt = " ".join(str(value or "").split()).strip().lower()
+    txt = unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode("ascii")
+    txt = re.sub(r"[^a-z0-9]+", "-", txt).strip("-")
+    if not txt:
+        return "default"
+    return txt[:max_len].strip("-") or "default"
+
+
+def _default_executive_journey_catalog() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in EXECUTIVE_JOURNEY_CATALOG:
+        row = dict(item)
+        row["keywords"] = ", ".join(str(word).strip() for word in item.get("keywords", ()))
+        rows.append(row)
+    return rows
+
+
+def _catalog_keywords(value: object) -> tuple[str, ...]:
+    tokens = (
+        [str(token).strip().lower() for token in value if str(token).strip()]
+        if isinstance(value, (list, tuple))
+        else [
+            str(token).strip().lower()
+            for token in re.split(r"[,;\n]+", str(value or ""))
+            if str(token).strip()
+        ]
+    )
+    out: list[str] = []
+    for token in tokens:
+        norm_token = _norm(token).replace(">", " ").strip()
+        if not norm_token or norm_token in out:
+            continue
+        out.append(norm_token)
+    return tuple(out)
+
+
+def _normalize_executive_journey_entry(
+    row: dict[str, object],
+    *,
+    position: int,
+) -> Optional[dict[str, object]]:
+    base = {str(key): row.get(key) for key in EXECUTIVE_JOURNEY_EDITOR_COLUMNS}
+    if not any(str(value or "").strip() for value in base.values()):
+        return None
+
+    title = " ".join(str(base.get("title") or "").split()).strip()
+    touchpoint = " ".join(str(base.get("touchpoint") or "").split()).strip()
+    palanca = " ".join(str(base.get("palanca") or "").split()).strip()
+    subpalanca = " ".join(str(base.get("subpalanca") or "").split()).strip()
+    keywords = _catalog_keywords(base.get("keywords"))
+    if not keywords:
+        keywords = _catalog_keywords(" ".join(part for part in [title, touchpoint, palanca, subpalanca] if part))
+
+    journey_id = " ".join(str(base.get("id") or "").split()).strip().lower()
+    if not journey_id:
+        journey_id = f"executive-{_catalog_slug(title or touchpoint or palanca or f'journey-{position + 1}')}"
+
+    return {
+        "id": journey_id,
+        "title": title or f"Journey {position + 1}",
+        "what_occurs": " ".join(str(base.get("what_occurs") or "").split()).strip(),
+        "expected_evidence": " ".join(str(base.get("expected_evidence") or "").split()).strip(),
+        "impact_label": " ".join(str(base.get("impact_label") or "").split()).strip() or "Medio",
+        "touchpoint": touchpoint,
+        "palanca": palanca,
+        "subpalanca": subpalanca,
+        "route": " ".join(str(base.get("route") or "").split()).strip(),
+        "cx_readout": " ".join(str(base.get("cx_readout") or "").split()).strip(),
+        "confidence_label": " ".join(str(base.get("confidence_label") or "").split()).strip()
+        or "Medio",
+        "keywords": keywords,
+    }
+
+
+def _dedupe_executive_journey_catalog(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    seen: dict[str, int] = {}
+    out: list[dict[str, object]] = []
+    for row in rows:
+        key = str(row.get("id") or "").strip().lower()
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1:
+            row = dict(row)
+            row["id"] = f"{key}-{seen[key]:02d}"
+        out.append(row)
+    return out
+
+
+def executive_journey_catalog_path(
+    knowledge_dir: Path,
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+) -> Path:
+    directory = Path(knowledge_dir) / "journey_catalogs"
+    file_name = f"{_catalog_slug(service_origin)}__{_catalog_slug(service_origin_n1)}.json"
+    return directory / file_name
+
+
+def load_executive_journey_catalog(
+    knowledge_dir: Path,
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+) -> list[dict[str, object]]:
+    path = executive_journey_catalog_path(
+        knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
+    if not path.exists():
+        return _default_executive_journey_catalog()
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _default_executive_journey_catalog()
+
+    if not isinstance(payload, list):
+        return _default_executive_journey_catalog()
+
+    normalized: list[dict[str, object]] = []
+    for idx, item in enumerate(payload):
+        if not isinstance(item, dict):
+            continue
+        row = _normalize_executive_journey_entry(item, position=idx)
+        if row is not None:
+            normalized.append(row)
+    normalized = _dedupe_executive_journey_catalog(normalized)
+    return normalized or _default_executive_journey_catalog()
+
+
+def save_executive_journey_catalog(
+    knowledge_dir: Path,
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+    rows: list[dict[str, object]],
+) -> Path:
+    normalized: list[dict[str, object]] = []
+    for idx, item in enumerate(rows):
+        row = _normalize_executive_journey_entry(item, position=idx)
+        if row is not None:
+            normalized.append(row)
+    normalized = _dedupe_executive_journey_catalog(normalized)
+    if not normalized:
+        normalized = _default_executive_journey_catalog()
+
+    path = executive_journey_catalog_path(
+        knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = []
+    for row in normalized:
+        item = dict(row)
+        item["keywords"] = list(_catalog_keywords(item.get("keywords")))
+        payload.append(item)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def executive_journey_catalog_df(catalog: list[dict[str, object]]) -> pd.DataFrame:
+    rows = []
+    for item in catalog:
+        row = {str(key): item.get(key, "") for key in EXECUTIVE_JOURNEY_EDITOR_COLUMNS}
+        row["keywords"] = ", ".join(_catalog_keywords(row.get("keywords")))
+        rows.append(row)
+    return pd.DataFrame(rows, columns=EXECUTIVE_JOURNEY_EDITOR_COLUMNS)
+
+
 def _format_nps_score(value: object) -> str:
     score = _safe_float(value, default=np.nan)
     if not np.isfinite(score):
@@ -500,6 +691,7 @@ def _executive_journey_match(
     incident_topic: object,
     incident_summary: object,
     comment_txt: object,
+    catalog: Optional[list[dict[str, object]]] = None,
 ) -> Optional[dict[str, object]]:
     haystack = _norm(
         " ".join(
@@ -516,10 +708,13 @@ def _executive_journey_match(
     )
     best: Optional[dict[str, object]] = None
     best_score = 0
-    for journey in EXECUTIVE_JOURNEY_CATALOG:
-        score = sum(1 for kw in journey["keywords"] if str(kw) in haystack)
+    active_catalog = catalog or list(_default_executive_journey_catalog())
+    for journey in active_catalog:
+        keywords = _catalog_keywords(journey.get("keywords"))
+        score = sum(1 for kw in keywords if str(kw) in haystack)
         if score > best_score:
             best = dict(journey)
+            best["keywords"] = keywords
             best_score = score
     return best if best_score > 0 else None
 
@@ -1155,6 +1350,7 @@ def build_incident_attribution_chains(
     touchpoint_source: str = TOUCHPOINT_SOURCE_DOMAIN,
     journey_catalog_df: Optional[pd.DataFrame] = None,
     journey_links_df: Optional[pd.DataFrame] = None,
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> pd.DataFrame:
     """Return presentable evidence chains backed by exact Helix↔VoC links."""
 
@@ -1217,6 +1413,7 @@ def build_incident_attribution_chains(
         enriched["subpalanca"] = enriched["journey_subpalanca"]
         enriched["nps_topic"] = enriched["journey_title"]
     if is_executive_mode:
+        active_executive_catalog = executive_journey_catalog or _default_executive_journey_catalog()
         journey_matches = [
             _executive_journey_match(
                 nps_topic=topic,
@@ -1226,6 +1423,7 @@ def build_incident_attribution_chains(
                 incident_topic=inc_topic,
                 incident_summary=inc_summary,
                 comment_txt=comment,
+                catalog=active_executive_catalog,
             )
             for topic, tp, pal, sub, inc_topic, inc_summary, comment in zip(
                 enriched["nps_topic"],

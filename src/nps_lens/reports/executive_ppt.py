@@ -559,6 +559,7 @@ def _add_impact_chain_slide(
     focus_name: str,
     period_label: str,
     presentation_mode: str = "",
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> None:
     if str(presentation_mode or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         _add_executive_journey_summary_slide(
@@ -566,6 +567,7 @@ def _add_impact_chain_slide(
             cards=cards,
             focus_name=focus_name,
             period_label=period_label,
+            executive_journey_catalog=executive_journey_catalog,
         )
         return
 
@@ -677,6 +679,7 @@ def _add_executive_journey_summary_slide(
     cards: list[object],
     focus_name: str,
     period_label: str,
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -729,7 +732,7 @@ def _add_executive_journey_summary_slide(
     table_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
     table_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
 
-    catalog_rows = list(EXECUTIVE_JOURNEY_CATALOG)
+    catalog_rows = list(executive_journey_catalog or EXECUTIVE_JOURNEY_CATALOG)
     row_y = 2.92
     cols = [0.92, 3.15, 6.45, 10.15]
     headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en NPS"]
@@ -2519,6 +2522,7 @@ def generate_business_review_ppt(
     incident_timeline_df: Optional[pd.DataFrame] = None,
     hotspot_focus_note: str = "",
     touchpoint_source: str = "",
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> BusinessPptResult:
     """Build a business deck focused on daily NPS, matched incidents and top-3 zooms."""
     del (
@@ -2580,6 +2584,7 @@ def generate_business_review_ppt(
         focus_name=focus_name,
         period_label=period_label,
         presentation_mode=touchpoint_source,
+        executive_journey_catalog=executive_journey_catalog,
     )
 
     top_topics = _top_topics_for_zoom(rationale_df, ranking_df, max_topics=3)

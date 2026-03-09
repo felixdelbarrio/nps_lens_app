@@ -31,6 +31,7 @@ from nps_lens.analytics.hotspot_metrics import (
     summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_attribution import (
+    EXECUTIVE_JOURNEY_EDITOR_COLUMNS,
     TOUCHPOINT_MODE_BANNER_LABELS,
     TOUCHPOINT_MODE_FLOWS,
     TOUCHPOINT_MODE_MENU_LABELS,
@@ -41,8 +42,11 @@ from nps_lens.analytics.incident_attribution import (
     build_broken_journey_catalog,
     build_broken_journey_topic_map,
     build_incident_attribution_chains,
+    executive_journey_catalog_df,
+    load_executive_journey_catalog,
     remap_links_to_journeys,
     remap_topic_timeseries_to_journeys,
+    save_executive_journey_catalog,
 )
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
@@ -3314,6 +3318,90 @@ def page_llm_cache() -> None:
                     st.code(str(item.get("llm_answer") or ""), language="json")
 
 
+def page_executive_journey_catalog(
+    *,
+    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
+) -> None:
+    st.subheader("Catálogo manual de Journeys de detracción")
+    st.caption(
+        "Este catálogo alimenta el método causal manual de Journeys de detracción. "
+        "Se guarda por contexto de cliente y negocio."
+    )
+    pills([f"{service_origin}", f"{service_origin_n1}"])
+
+    catalog = load_executive_journey_catalog(
+        settings.knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
+    editor_key = (
+        f"journey_catalog_editor__{service_origin}__{service_origin_n1}".replace(" ", "_")
+    )
+    edited_df = st.data_editor(
+        executive_journey_catalog_df(catalog),
+        key=editor_key,
+        use_container_width=True,
+        num_rows="dynamic",
+        hide_index=True,
+        column_order=EXECUTIVE_JOURNEY_EDITOR_COLUMNS,
+        column_config={
+            "id": st.column_config.TextColumn("ID", required=False),
+            "title": st.column_config.TextColumn("Journey", required=True),
+            "what_occurs": st.column_config.TextColumn("Qué ocurre"),
+            "expected_evidence": st.column_config.TextColumn("Evidencia esperada"),
+            "impact_label": st.column_config.TextColumn("Impacto"),
+            "touchpoint": st.column_config.TextColumn("Touchpoint"),
+            "palanca": st.column_config.TextColumn("Palanca"),
+            "subpalanca": st.column_config.TextColumn("Subpalanca"),
+            "route": st.column_config.TextColumn("Ruta"),
+            "cx_readout": st.column_config.TextColumn("Lectura CX"),
+            "confidence_label": st.column_config.TextColumn("Confianza"),
+            "keywords": st.column_config.TextColumn("Keywords"),
+        },
+    )
+    st.caption(
+        "Puedes editar filas, dar de alta nuevas, eliminar y guardar. "
+        "En `keywords` usa coma para separar términos."
+    )
+
+    action_save, action_reset = st.columns([1, 1])
+    with action_save:
+        save_clicked = st.button(
+            "Guardar catálogo manual",
+            type="primary",
+            use_container_width=True,
+            key=f"{editor_key}_save",
+        )
+    with action_reset:
+        reset_clicked = st.button(
+            "Restaurar catálogo por defecto",
+            use_container_width=True,
+            key=f"{editor_key}_reset",
+        )
+
+    if save_clicked:
+        saved_path = save_executive_journey_catalog(
+            settings.knowledge_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            rows=edited_df.to_dict(orient="records"),
+        )
+        st.success(f"Catálogo guardado en {saved_path.name}.")
+        st.rerun()
+
+    if reset_clicked:
+        saved_path = save_executive_journey_catalog(
+            settings.knowledge_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            rows=[],
+        )
+        st.success(f"Catálogo restaurado al default en {saved_path.name}.")
+        st.rerun()
+
+
 def _normalize_empty_n2(n2: str) -> str:
     v = str(n2 or "").strip()
     if v in {"-", "—", "–"}:
@@ -3368,12 +3456,17 @@ def page_quality(
     *,
     llm_df: Optional[pd.DataFrame] = None,
     settings: Optional[Settings] = None,
+    service_origin: str = "",
+    service_origin_n1: str = "",
     min_n: int = 200,
     cache_path: Optional[Path] = None,
 ) -> None:
     tab_labels = ["NPS"]
     if helix_df is not None:
         tab_labels.append("Helix")
+    show_journey_catalog = bool(settings is not None and service_origin.strip() and service_origin_n1.strip())
+    if show_journey_catalog:
+        tab_labels.append("Journeys de detracción")
     if llm_df is not None and settings is not None:
         tab_labels.append("LLM")
     tabs = st.tabs(tab_labels)
@@ -3428,6 +3521,15 @@ def page_quality(
                 )
             view_h = helix_df if show_full_h else helix_df.head(int(sample_n_h))
             st.dataframe(view_h, use_container_width=True, height=520)
+        next_tab_idx += 1
+
+    if show_journey_catalog and settings is not None:
+        with tabs[next_tab_idx]:
+            page_executive_journey_catalog(
+                settings=settings,
+                service_origin=service_origin,
+                service_origin_n1=service_origin_n1,
+            )
         next_tab_idx += 1
 
     if llm_df is not None and settings is not None:
@@ -3496,6 +3598,11 @@ def page_nps_helix_linking(
 ) -> None:
     # Use the global app theme for any Plotly figures built directly in this page.
     theme = get_theme(theme_mode)
+    executive_journey_catalog = load_executive_journey_catalog(
+        settings.knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
     # IMPORTANT: context is only used to load the already-ingested population.
     # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
     helix_store = HelixIncidentStore(settings.data_dir / "helix")
@@ -3923,6 +4030,7 @@ def page_nps_helix_linking(
         touchpoint_source=touchpoint_source,
         journey_catalog_df=broken_journeys_df,
         journey_links_df=broken_journey_links_df,
+        executive_journey_catalog=executive_journey_catalog,
     )
     chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
     selected_chain_keys = _sync_chain_selection_state(
@@ -4875,6 +4983,7 @@ def page_nps_helix_linking(
                             touchpoint_source=touchpoint_source,
                             journey_catalog_df=broken_journeys_hist,
                             journey_links_df=broken_journey_links_hist,
+                            executive_journey_catalog=executive_journey_catalog,
                         )
                         chain_hist_all = _annotate_chain_candidates(chain_hist_all)
                         chain_hist = _select_chain_rows(chain_hist_all, selected_chain_keys)
@@ -5004,6 +5113,7 @@ def page_nps_helix_linking(
                     incident_timeline_df=incident_timeline_ppt,
                     hotspot_focus_note=hotspot_focus_note,
                     touchpoint_source=touchpoint_source,
+                    executive_journey_catalog=executive_journey_catalog,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
@@ -5331,6 +5441,8 @@ def main() -> None:
             helix_df=helix_df,
             llm_df=df_llm,
             settings=settings,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
             min_n=min_n,
             cache_path=cache_path,
         )

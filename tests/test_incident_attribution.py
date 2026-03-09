@@ -9,8 +9,10 @@ from nps_lens.analytics.incident_attribution import (
     build_broken_journey_catalog,
     build_broken_journey_topic_map,
     build_incident_attribution_chains,
+    load_executive_journey_catalog,
     remap_links_to_journeys,
     remap_topic_timeseries_to_journeys,
+    save_executive_journey_catalog,
 )
 
 
@@ -263,6 +265,99 @@ def test_build_incident_attribution_chains_can_aggregate_to_executive_journeys()
     assert len(out) == 2
     assert set(out["nps_topic"].tolist()) == {"Acceso bloqueado", "Operativa crítica fallida"}
     assert set(out["presentation_mode"].tolist()) == {TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS}
+
+
+def test_executive_journey_catalog_can_be_saved_and_reloaded(tmp_path) -> None:
+    save_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+        rows=[
+            {
+                "id": "",
+                "title": "Firma bloqueada",
+                "what_occurs": "No se puede firmar una operación",
+                "expected_evidence": "Comentarios de firma + incidencias de firma",
+                "impact_label": "Alto",
+                "touchpoint": "Firma",
+                "palanca": "Operativa",
+                "subpalanca": "Firma",
+                "route": "Operativa -> firma -> error -> detracción",
+                "cx_readout": "Bloquea la operativa crítica.",
+                "confidence_label": "Alto",
+                "keywords": "firma, token, bloqueo",
+            }
+        ],
+    )
+
+    loaded = load_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+
+    assert len(loaded) == 1
+    assert loaded[0]["title"] == "Firma bloqueada"
+    assert loaded[0]["id"] == "executive-firma-bloqueada"
+    assert loaded[0]["keywords"] == ("firma", "token", "bloqueo")
+
+
+def test_build_incident_attribution_chains_can_use_persisted_executive_catalog() -> None:
+    links_df = pd.DataFrame(
+        {
+            "nps_id": ["n1"],
+            "incident_id": ["INC00001"],
+            "similarity": [0.91],
+            "nps_topic": ["Operativa > Firma"],
+        }
+    )
+    nps_focus = pd.DataFrame(
+        {
+            "ID": ["n1"],
+            "Fecha": pd.to_datetime(["2026-02-01"]),
+            "NPS": [1],
+            "Palanca": ["Operativa"],
+            "Subpalanca": ["Firma"],
+            "Comment": ["La firma falla con el token y no me deja operar"],
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["INC00001"],
+            "Fecha": pd.to_datetime(["2026-02-01"]),
+            "Detailed Description": ["Error de firma con token en operativa empresas"],
+            "Product Categorization Tier 1": ["Operativa"],
+            "Product Categorization Tier 2": ["Firma"],
+            "Product Categorization Tier 3": ["Token"],
+        }
+    )
+
+    out = build_incident_attribution_chains(
+        links_df,
+        nps_focus,
+        helix,
+        top_k=0,
+        touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        executive_journey_catalog=[
+            {
+                "id": "executive_signature_blocked",
+                "title": "Firma bloqueada",
+                "what_occurs": "No se puede firmar",
+                "expected_evidence": "Comentarios de firma + incidencias de token",
+                "impact_label": "Alto",
+                "touchpoint": "Firma",
+                "palanca": "Operativa",
+                "subpalanca": "Firma",
+                "route": "Operativa -> firma -> token -> detracción",
+                "cx_readout": "Bloquea la operativa crítica.",
+                "confidence_label": "Alto",
+                "keywords": ["firma", "token", "operativa"],
+            }
+        ],
+    )
+
+    assert len(out) == 1
+    assert out.iloc[0]["nps_topic"] == "Firma bloqueada"
 
 
 def test_build_incident_attribution_chains_can_return_all_examples_when_limit_is_zero() -> None:
