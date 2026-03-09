@@ -6,9 +6,16 @@ from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    _catalog_keywords,
+    _catalog_slug,
+    _dedupe_executive_journey_catalog,
+    _default_executive_journey_catalog,
+    _normalize_executive_journey_entry,
     build_broken_journey_catalog,
     build_broken_journey_topic_map,
     build_incident_attribution_chains,
+    executive_journey_catalog_df,
+    executive_journey_catalog_path,
     load_executive_journey_catalog,
     remap_links_to_journeys,
     remap_topic_timeseries_to_journeys,
@@ -300,6 +307,118 @@ def test_executive_journey_catalog_can_be_saved_and_reloaded(tmp_path) -> None:
     assert loaded[0]["title"] == "Firma bloqueada"
     assert loaded[0]["id"] == "executive-firma-bloqueada"
     assert loaded[0]["keywords"] == ("firma", "token", "bloqueo")
+
+
+def test_executive_journey_catalog_helpers_normalize_and_dedupe() -> None:
+    defaults = _default_executive_journey_catalog()
+    assert defaults
+    assert _catalog_slug("BBVA México / Empresas") == "bbva-mexico-empresas"
+    assert _catalog_keywords("firma, token,\nFirma ; bloqueo") == (
+        "firma",
+        "token",
+        "bloqueo",
+    )
+
+    normalized = _normalize_executive_journey_entry(
+        {
+            "id": "",
+            "title": "  Journey de  Firma ",
+            "touchpoint": " Firma ",
+            "palanca": " Operativa ",
+            "subpalanca": " Firma ",
+            "keywords": "",
+        },
+        position=0,
+    )
+    assert normalized is not None
+    assert normalized["id"] == "executive-journey-de-firma"
+    assert normalized["keywords"] == ("journey de firma", "firma", "operativa")
+
+    deduped = _dedupe_executive_journey_catalog(
+        [
+            {"id": "dup", "title": "A", "keywords": ("a",)},
+            {"id": "dup", "title": "B", "keywords": ("b",)},
+        ]
+    )
+    assert [row["id"] for row in deduped] == ["dup", "dup-02"]
+
+
+def test_executive_journey_catalog_load_handles_missing_invalid_and_table_render(tmp_path) -> None:
+    path = executive_journey_catalog_path(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+    missing = load_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+    assert missing
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not-json", encoding="utf-8")
+    invalid = load_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+    assert invalid
+
+    path.write_text('"not-a-list"', encoding="utf-8")
+    invalid_shape = load_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+    assert invalid_shape
+
+    save_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+        rows=[
+            {},
+            {
+                "id": "dup",
+                "title": "Acceso roto",
+                "what_occurs": "No se puede acceder",
+                "expected_evidence": "Login",
+                "impact_label": "Alto",
+                "touchpoint": "Login",
+                "palanca": "Acceso",
+                "subpalanca": "Login",
+                "route": "Acceso -> login -> error",
+                "cx_readout": "Bloquea acceso",
+                "confidence_label": "Alto",
+                "keywords": ["login", "acceso"],
+            },
+            {
+                "id": "dup",
+                "title": "Acceso roto 2",
+                "what_occurs": "No se puede acceder",
+                "expected_evidence": "OTP",
+                "impact_label": "Medio",
+                "touchpoint": "Login",
+                "palanca": "Acceso",
+                "subpalanca": "OTP",
+                "route": "Acceso -> otp -> error",
+                "cx_readout": "Bloquea acceso",
+                "confidence_label": "Medio",
+                "keywords": "otp, acceso",
+            },
+        ],
+    )
+    loaded = load_executive_journey_catalog(
+        tmp_path,
+        service_origin="BBVA México",
+        service_origin_n1="Empresas",
+    )
+    table = executive_journey_catalog_df(loaded)
+
+    assert len(loaded) == 2
+    assert [row["id"] for row in loaded] == ["dup", "dup-02"]
+    assert list(table["keywords"]) == ["login, acceso", "otp, acceso"]
 
 
 def test_build_incident_attribution_chains_can_use_persisted_executive_catalog() -> None:

@@ -435,7 +435,9 @@ def _normalize_executive_journey_entry(
     subpalanca = " ".join(str(base.get("subpalanca") or "").split()).strip()
     keywords = _catalog_keywords(base.get("keywords"))
     if not keywords:
-        keywords = _catalog_keywords(" ".join(part for part in [title, touchpoint, palanca, subpalanca] if part))
+        keywords = _catalog_keywords(
+            [part for part in [title, touchpoint, palanca, subpalanca] if part]
+        )
 
     journey_id = " ".join(str(base.get("id") or "").split()).strip().lower()
     if not journey_id:

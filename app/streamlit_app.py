@@ -3336,9 +3336,7 @@ def page_executive_journey_catalog(
         service_origin=service_origin,
         service_origin_n1=service_origin_n1,
     )
-    editor_key = (
-        f"journey_catalog_editor__{service_origin}__{service_origin_n1}".replace(" ", "_")
-    )
+    editor_key = f"journey_catalog_editor__{service_origin}__{service_origin_n1}".replace(" ", "_")
     edited_df = st.data_editor(
         executive_journey_catalog_df(catalog),
         key=editor_key,
@@ -3464,7 +3462,9 @@ def page_quality(
     tab_labels = ["NPS"]
     if helix_df is not None:
         tab_labels.append("Helix")
-    show_journey_catalog = bool(settings is not None and service_origin.strip() and service_origin_n1.strip())
+    show_journey_catalog = bool(
+        settings is not None and service_origin.strip() and service_origin_n1.strip()
+    )
     if show_journey_catalog:
         tab_labels.append("Journeys de detracción")
     if llm_df is not None and settings is not None:
