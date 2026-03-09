@@ -608,7 +608,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 15
+    assert themed.layout.font.size == 17
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
     assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]

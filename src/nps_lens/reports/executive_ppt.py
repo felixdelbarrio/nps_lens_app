@@ -1489,15 +1489,15 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=15, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=17, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
             y=-0.16,
             yanchor="top",
-            font=dict(size=14, color=ink),
-            title_font=dict(size=14, color=ink),
+            font=dict(size=16, color=ink),
+            title_font=dict(size=16, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
@@ -1510,8 +1510,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=14, color=ink),
-            title_font=dict(size=15, color=ink),
+            tickfont=dict(size=16, color=ink),
+            title_font=dict(size=17, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1519,8 +1519,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=14, color=ink),
-            title_font=dict(size=15, color=ink),
+            tickfont=dict(size=16, color=ink),
+            title_font=dict(size=17, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -4461,8 +4461,8 @@ def _add_deep_dive_slide(
         figure=chart_topic_bars(text_topics_df, get_theme("light"), top_k=10),
         left=0.82,
         top=1.82,
-        width=7.88,
-        height=2.55,
+        width=7.18,
+        height=2.72,
         empty_note="No hay suficiente volumen textual para construir el top 10.",
     )
 
@@ -4473,20 +4473,20 @@ def _add_deep_dive_slide(
             str(row.top_terms_txt),
             str(row.example_txt),
         ]
-        for row in text_topics_df.head(5).itertuples()
+        for row in text_topics_df.head(4).itertuples()
     ]
     _add_compact_table(
         slide,
         left=0.82,
-        top=4.58,
-        width=7.72,
-        title="Detalle de clusters",
+        top=4.64,
+        width=7.18,
+        title="Clusters",
         headers=["cluster_id", "n", "top_terms", "examples"],
         rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
         row_height=0.31,
-        col_width_ratios=[0.9, 0.9, 3.0, 2.9],
-        clip_lengths=[8, 8, 58, 58],
-        font_size_pt=9.6,
+        col_width_ratios=[0.8, 0.8, 2.5, 2.3],
+        clip_lengths=[8, 8, 44, 40],
+        font_size_pt=9.2,
     )
 
     bullet_lines = [
