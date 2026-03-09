@@ -32,6 +32,7 @@ from nps_lens.analytics.hotspot_metrics import (
 )
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_MODE_BANNER_LABELS,
+    TOUCHPOINT_MODE_FLOWS,
     TOUCHPOINT_MODE_MENU_LABELS,
     TOUCHPOINT_MODE_OPTIONS,
     TOUCHPOINT_MODE_SUMMARIES,
@@ -2526,11 +2527,14 @@ def render_sidebar(  # noqa: PLR0915
         if current_touchpoint_mode not in TOUCHPOINT_MODE_MENU_LABELS:
             current_touchpoint_mode = TOUCHPOINT_SOURCE_DOMAIN
         touchpoint_source = st.radio(
-            "Modo de lectura causal",
+            "Método causal para el análisis",
             options=list(TOUCHPOINT_MODE_OPTIONS),
             index=list(TOUCHPOINT_MODE_OPTIONS).index(current_touchpoint_mode),
             format_func=lambda key: TOUCHPOINT_MODE_MENU_LABELS.get(str(key), str(key)),
-            help="Elige si el racional se construye exclusivamente por Palanca, Subpalanca, BBVA_SourceServiceN2 o con una lectura ejecutiva de journeys.",
+            help=(
+                "Elige si el racional se construye por Palanca, Subpalanca, "
+                "Helix Source Service N2 o con una lectura ejecutiva de journeys."
+            ),
         )
         st.session_state["_touchpoint_source"] = touchpoint_source
 
@@ -4083,7 +4087,7 @@ def page_nps_helix_linking(
                 ),
                 metrics=[
                     (
-                        "Modo causal",
+                        "Método causal",
                         TOUCHPOINT_MODE_BANNER_LABELS.get(
                             str(touchpoint_source), str(touchpoint_source)
                         ),
@@ -4092,6 +4096,12 @@ def page_nps_helix_linking(
                     ("Comentarios enlazados", str(linked_comments_total)),
                     ("Links validados", str(linked_pairs_total)),
                 ],
+                metric_hints={
+                    "Método causal": TOUCHPOINT_MODE_FLOWS.get(
+                        str(touchpoint_source),
+                        "Incidencias -> Touchpoint -> Comentario -> NPS",
+                    )
+                },
             )
             pills(
                 [

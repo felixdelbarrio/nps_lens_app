@@ -301,6 +301,22 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   margin-bottom: 6px;
 }}
 
+.nps-hero-metric-help {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--nps-border-soft);
+  background: color-mix(in srgb, var(--nps-surface) 88%, var(--nps-accent) 12%);
+  color: var(--nps-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
+}}
+
 .nps-hero-metric strong {{
   font-size: 24px;
   line-height: 1;

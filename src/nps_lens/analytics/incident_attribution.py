@@ -22,23 +22,23 @@ TOUCHPOINT_MODE_OPTIONS = (
 )
 
 TOUCHPOINT_MODE_MENU_LABELS = {
-    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
-    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
-    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
 }
 
 TOUCHPOINT_MODE_CONTEXT_LABELS = {
-    TOUCHPOINT_SOURCE_PALANCA: "Palanca",
-    TOUCHPOINT_SOURCE_DOMAIN: "Subpalanca",
-    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
 }
 
 TOUCHPOINT_MODE_BANNER_LABELS = {
-    TOUCHPOINT_SOURCE_PALANCA: "Causalidad por Palanca",
-    TOUCHPOINT_SOURCE_DOMAIN: "Causalidad por Subpalanca",
-    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Causalidad por BBVA_SourceServiceN2",
+    TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
+    TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
 }
 
@@ -47,6 +47,16 @@ TOUCHPOINT_MODE_SUMMARIES = {
     TOUCHPOINT_SOURCE_DOMAIN: "La lectura causal fija el touchpoint exclusivamente desde Subpalanca para reflejar el nivel operativo fino del dolor reportado.",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "La lectura causal se apoya exclusivamente en BBVA_SourceServiceN2 para reflejar el servicio origen reportado por Helix.",
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "La lectura causal se reorganiza en journeys de comité para explicar dónde se rompe la experiencia y por qué cae el NPS.",
+}
+
+TOUCHPOINT_MODE_FLOWS = {
+    TOUCHPOINT_SOURCE_PALANCA: "Incidencias -> Touchpoint afectado -> Palanca -> Comentario -> NPS",
+    TOUCHPOINT_SOURCE_DOMAIN: "Incidencias -> Touchpoint afectado -> Subpalanca -> Comentario -> NPS",
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Incidencias -> Helix Source Service N2 -> Comentario -> NPS",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: (
+        "Incidencias + comentario + tópico NPS -> Journey ejecutivo del catálogo -> "
+        "Touchpoint / Palanca / Subpalanca -> NPS"
+    ),
 }
 
 EXECUTIVE_JOURNEY_CATALOG = (

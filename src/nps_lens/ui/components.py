@@ -63,6 +63,7 @@ def executive_banner(
     title: str,
     summary: str,
     metrics: list[tuple[str, str]] | None = None,
+    metric_hints: Optional[dict[str, str]] = None,
 ) -> None:
     metric_html = ""
     if metrics:
@@ -70,7 +71,16 @@ def executive_banner(
             [
                 (
                     "<div class='nps-hero-metric'>"
-                    f"<span>{escape(str(label))}</span>"
+                    f"<span>{escape(str(label))}"
+                    + (
+                        (
+                            f" <span class='nps-hero-metric-help' "
+                            f"title='{escape(metric_hints.get(str(label), ''))}'>?</span>"
+                        )
+                        if metric_hints and metric_hints.get(str(label))
+                        else ""
+                    )
+                    + "</span>"
                     f"<strong>{escape(str(value))}</strong>"
                     "</div>"
                 )
