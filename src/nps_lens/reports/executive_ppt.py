@@ -1328,10 +1328,110 @@ def _patch_kaleido_executable_for_space_paths() -> None:
     cls._nps_lens_kaleido_patched = True
 
 
+def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
+    ink = "#" + BBVA_COLORS["ink"]
+    grid = "#" + BBVA_COLORS["line"]
+    white = "#" + BBVA_COLORS["white"]
+
+    for trace in fig.data:
+        name = str(getattr(trace, "name", "") or "").strip().lower()
+        trace_type = str(getattr(trace, "type", "") or "").strip().lower()
+        is_incidents = "incid" in name or "helix" in name
+        is_detractor = any(token in name for token in ["detrac", "crit", "alto", "foco"])
+        is_passive = any(token in name for token in ["pasiv", "moderad"])
+        is_promoter = "promot" in name
+        is_nps = "nps" in name
+
+        if trace_type == "bar":
+            color = None
+            if is_incidents:
+                color = "#" + BBVA_COLORS["sky"]
+            elif is_promoter:
+                color = "#" + BBVA_COLORS["green"]
+            elif is_passive:
+                color = "#" + BBVA_COLORS["yellow"]
+            elif is_detractor or is_nps:
+                color = "#" + BBVA_COLORS["red"]
+            if color:
+                with contextlib.suppress(Exception):
+                    trace.marker.color = color
+        elif trace_type == "scatter":
+            if is_nps:
+                with contextlib.suppress(Exception):
+                    trace.line.color = "#" + BBVA_COLORS["blue"]
+                if "markers" in str(getattr(trace, "mode", "") or ""):
+                    with contextlib.suppress(Exception):
+                        if not isinstance(
+                            getattr(trace.marker, "color", None), (list, tuple, np.ndarray)
+                        ):
+                            trace.marker.color = "#" + BBVA_COLORS["sky"]
+                    with contextlib.suppress(Exception):
+                        trace.marker.size = max(8, int(getattr(trace.marker, "size", 8) or 8))
+            elif is_incidents:
+                with contextlib.suppress(Exception):
+                    trace.line.color = "#" + BBVA_COLORS["sky"]
+                with contextlib.suppress(Exception):
+                    trace.marker.color = "#" + BBVA_COLORS["sky"]
+            elif is_promoter:
+                with contextlib.suppress(Exception):
+                    trace.line.color = "#" + BBVA_COLORS["green"]
+            elif is_passive:
+                with contextlib.suppress(Exception):
+                    trace.line.color = "#" + BBVA_COLORS["yellow"]
+            elif is_detractor:
+                with contextlib.suppress(Exception):
+                    trace.line.color = "#" + BBVA_COLORS["red"]
+
+    current_margin = fig.layout.margin.to_plotly_json() if fig.layout.margin else {}
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor=white,
+        plot_bgcolor=white,
+        font=dict(family=BBVA_FONT_BODY, size=14, color=ink),
+        legend=dict(
+            orientation="h",
+            x=0.0,
+            xanchor="left",
+            y=-0.16,
+            yanchor="top",
+            font=dict(size=13, color=ink),
+            title_font=dict(size=13, color=ink),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=dict(
+            l=int(current_margin.get("l", 24)),
+            r=int(current_margin.get("r", 24)),
+            t=int(current_margin.get("t", 20)),
+            b=max(int(current_margin.get("b", 24)), 72),
+        ),
+        hoverlabel=dict(font=dict(family=BBVA_FONT_BODY, size=13, color=ink)),
+    )
+    fig.for_each_xaxis(
+        lambda axis: axis.update(
+            tickfont=dict(size=13, color=ink),
+            title_font=dict(size=14, color=ink),
+            automargin=True,
+            gridcolor=grid,
+            linecolor=grid,
+        )
+    )
+    fig.for_each_yaxis(
+        lambda axis: axis.update(
+            tickfont=dict(size=13, color=ink),
+            title_font=dict(size=14, color=ink),
+            automargin=True,
+            gridcolor=grid,
+            linecolor=grid,
+        )
+    )
+    return fig
+
+
 def _kaleido_png(fig: go.Figure, *, width: int = 1600, height: int = 900) -> Optional[bytes]:
     try:
         _patch_kaleido_executable_for_space_paths()
-        return pio.to_image(fig, format="png", width=width, height=height, scale=2)
+        themed = _apply_ppt_figure_theme(fig)
+        return pio.to_image(themed, format="png", width=width, height=height, scale=2)
     except Exception:
         return None
 
@@ -1576,6 +1676,7 @@ def _add_bullet_lines(
     title: str,
     lines: list[str],
     accent: str = "",
+    body_font_size_pt: float = 11.0,
 ) -> None:
     panel = _panel(
         slide,
@@ -1596,7 +1697,7 @@ def _add_bullet_lines(
         r = p.add_run()
         r.text = f"• {_clip(line, 145 if width <= 4.0 else 170)}"
         r.font.name = BBVA_FONT_BODY
-        r.font.size = Pt(11)
+        r.font.size = Pt(body_font_size_pt)
         r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
@@ -4148,6 +4249,7 @@ def _add_overview_slide(
     service_origin: str,
     service_origin_n1: str,
     period_label: str,
+    period_end: date,
     overview: dict[str, object],
     daily_mix: pd.DataFrame,
     overall_daily: pd.DataFrame,
@@ -4163,7 +4265,7 @@ def _add_overview_slide(
         slide,
         left=0.66,
         top=1.48,
-        width=8.3,
+        width=9.00,
         height=5.42,
         title="NPS clásico y peso detractor",
     )
@@ -4171,12 +4273,13 @@ def _add_overview_slide(
         slide,
         figure=_nps_evolution_fig(daily_mix, overall_daily),
         left=0.82,
-        top=1.90,
-        width=7.96,
-        height=4.74,
+        top=1.84,
+        width=8.68,
+        height=4.84,
         empty_note="No hay suficiente señal diaria para construir la evolución del periodo.",
     )
 
+    month_label = _month_label_es(period_end).title()
     trend_lines = [
         f"El periodo arranca con NPS clásico {_fmt_num_or_nd(overview.get('start_classic', np.nan))} y termina en {_fmt_num_or_nd(overview.get('end_classic', np.nan))}.",
         f"El peso detractor pasa de {_fmt_pct_or_nd(overview.get('start_detr', np.nan))} a {_fmt_pct_or_nd(overview.get('end_detr', np.nan))}.",
@@ -4184,54 +4287,14 @@ def _add_overview_slide(
     ]
     _add_bullet_lines(
         slide,
-        left=9.08,
+        left=9.92,
         top=1.48,
-        width=3.6,
-        height=2.18,
-        title="Lectura rápida",
+        width=2.76,
+        height=5.42,
+        title=f"As-Is {month_label}",
         lines=trend_lines,
         accent=BBVA_COLORS["orange"],
-    )
-
-    _add_stat_card(
-        slide,
-        left=9.08,
-        top=3.88,
-        width=1.72,
-        height=1.24,
-        label="Comentarios",
-        value=str(int(_safe_int(overview.get("comments", 0)))),
-        accent=BBVA_COLORS["blue"],
-    )
-    _add_stat_card(
-        slide,
-        left=10.94,
-        top=3.88,
-        width=1.72,
-        height=1.24,
-        label="NPS medio",
-        value=_fmt_num_or_nd(overview.get("nps_mean", np.nan)),
-        accent=BBVA_COLORS["green"],
-    )
-    _add_stat_card(
-        slide,
-        left=9.08,
-        top=5.34,
-        width=1.72,
-        height=1.24,
-        label="% detrac.",
-        value=_fmt_pct_or_nd(overview.get("detractor_rate", np.nan)),
-        accent=BBVA_COLORS["red"],
-    )
-    _add_stat_card(
-        slide,
-        left=10.94,
-        top=5.34,
-        width=1.72,
-        height=1.24,
-        label="% prom.",
-        value=_fmt_pct_or_nd(overview.get("promoter_rate", np.nan)),
-        accent=BBVA_COLORS["green"],
+        body_font_size_pt=13.0,
     )
 
 
@@ -4978,6 +5041,7 @@ def generate_business_review_ppt(
         service_origin=service_origin,
         service_origin_n1=service_origin_n1,
         period_label=period_label,
+        period_end=period_end,
         overview=overview,
         daily_mix=daily_mix,
         overall_daily=daily_signals,
