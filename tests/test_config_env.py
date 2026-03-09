@@ -17,12 +17,14 @@ def test_settings_reads_context_values_from_env(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", "SN2A, SN2B")
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "BBVA México")
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "Senda")
+    monkeypatch.setenv("NPS_LENS_UI_MIN_N_CROSS_COMPARISONS", "40")
 
     s = Settings.from_env()
 
     assert s.service_origin_values == ["BBVA México", "BBVA España"]
     assert s.service_origin_n1_map["BBVA México"] == ["Senda", "Helix"]
     assert s.service_origin_n2_values == ["SN2A", "SN2B"]
+    assert s.default_min_n_cross_comparisons == 40
 
 
 def test_settings_accepts_compact_n1_format(monkeypatch):

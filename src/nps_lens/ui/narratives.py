@@ -9,6 +9,7 @@ import pandas as pd
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
 
@@ -327,10 +328,12 @@ def build_incident_ppt_story(
     rationale_df: pd.DataFrame,
     *,
     attribution_df: Optional[pd.DataFrame] = None,
+    attribution_summary: Optional[dict[str, int]] = None,
     focus_name: str = "detractores",
     top_k: int = 5,
 ) -> str:
     """Narrative ready for PowerPoint committee sessions."""
+    scope = attribution_summary or summarize_attribution_chains(attribution_df)
     cards = (
         attribution_df.head(int(top_k)).to_dict(orient="records")
         if attribution_df is not None and not attribution_df.empty
@@ -362,6 +365,14 @@ def build_incident_ppt_story(
     lines.append(
         f"- El delta NPS esperado en los journeys afectados es de **{summary.expected_nps_delta:+.1f} puntos**."
     )
+    if int(scope.get("chains_total", 0)) > 0:
+        lines.append(
+            "- La cobertura consolidada del método causal suma "
+            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
+            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
+            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
+            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
+        )
 
     lines.append("")
     lines.append("## 2) Cadena de impacto")
@@ -459,6 +470,7 @@ def build_ppt_8slide_script(
     rationale_df: pd.DataFrame,
     *,
     attribution_df: Optional[pd.DataFrame] = None,
+    attribution_summary: Optional[dict[str, int]] = None,
     touchpoint_source: str = "",
     service_origin: str,
     service_origin_n1: str,
@@ -467,6 +479,7 @@ def build_ppt_8slide_script(
     top_k: int = 5,
 ) -> str:
     """Generate a business-first 8-slide script for periodic committee sessions."""
+    scope = attribution_summary or summarize_attribution_chains(attribution_df)
     top = rationale_df.head(int(top_k)).copy() if rationale_df is not None else pd.DataFrame()
     cards = (
         attribution_df.head(3).to_dict(orient="records")
@@ -516,6 +529,14 @@ def build_ppt_8slide_script(
         lines.append("## Slide 3 — Impact Chain")
         lines.append(
             "- Narrativa obligatoria: incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS."
+        )
+    if int(scope.get("chains_total", 0)) > 0:
+        lines.append(
+            "- Cobertura consolidada del método: "
+            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
+            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
+            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
+            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
         )
     if not cards:
         lines.append("- No hay evidencia suficiente para construir la cadena con rigor.")
