@@ -451,49 +451,6 @@ def build_incident_ppt_story(
     return "\n".join(lines) + "\n"
 
 
-def build_wow_prompt(
-    *,
-    objective: str,
-    business_story_md: str,
-    top_topics_df: pd.DataFrame,
-    deep_dive_pack_json: str,
-) -> str:
-    """Prompt template for copy/paste workflows with ChatGPT (no API required)."""
-    topic_lines: list[str] = []
-    for _, r in top_topics_df.head(8).iterrows():
-        topic_lines.append(
-            (
-                f"- {str(r.get('nps_topic',''))} | risk={float(r.get('nps_points_at_risk',0.0)):.2f} "
-                f"| recoverable={float(r.get('nps_points_recoverable',0.0)):.2f} "
-                f"| priority={float(r.get('priority',0.0)):.2f} "
-                f"| lane={str(r.get('action_lane',''))}"
-            )
-        )
-    topics_block = "\n".join(topic_lines) if topic_lines else "- Sin topicos priorizados."
-
-    return (
-        "Actua como Principal Consultant de banca empresas para comite de negocio.\n"
-        "Objetivo de negocio:\n"
-        f"{objective}\n\n"
-        "Entregable obligatorio (en ESPANOL y en formato Markdown):\n"
-        "1) Mensaje principal (max 8 lineas).\n"
-        "2) Mapa de causa-efecto incidencia -> NPS (tabla con confidence y riesgos).\n"
-        "3) Plan semanal de ejecucion (owner, ETA, KPI leading/lagging, criterio de exito).\n"
-        "4) 3 experimentos de mejora continua (diseno, muestra, metrica, regla go/no-go).\n"
-        "5) Guion de 6 slides para PowerPoint (titulo + bullets por slide).\n\n"
-        "Reglas:\n"
-        "- No inventes datos. Usa solo la evidencia entregada.\n"
-        "- Si falta evidencia, dilo explicitamente y propone como medirla.\n"
-        "- Prioriza impacto economico y velocidad de recuperacion del NPS.\n\n"
-        "Narrativa base de negocio:\n"
-        f"{business_story_md}\n\n"
-        "Topicos priorizados:\n"
-        f"{topics_block}\n\n"
-        "Deep-Dive Pack JSON:\n"
-        f"{deep_dive_pack_json}\n"
-    )
-
-
 def build_ppt_8slide_script(
     summary: IncidentRationaleSummary,
     rationale_df: pd.DataFrame,

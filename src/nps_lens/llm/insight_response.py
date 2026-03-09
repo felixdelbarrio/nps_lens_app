@@ -99,6 +99,11 @@ class InsightResponseV1(BaseModel):
     next_questions: List[str] = Field(default_factory=list)
     tags: TagsV1 = Field(default_factory=TagsV1)
 
+    @field_validator("insight_id", "title", "executive_summary")
+    @classmethod
+    def _clean_required_text(cls, v: str) -> str:
+        return str(v or "").strip()
+
     @field_validator("confidence")
     @classmethod
     def _conf_range(cls, v: float) -> float:
@@ -121,6 +126,12 @@ class InsightResponseV1(BaseModel):
     @classmethod
     def _clean_segments(cls, v: List[str]) -> List[str]:
         return [str(item).strip() for item in v if str(item).strip()]
+
+    @field_validator("journey_route")
+    @classmethod
+    def _clean_route(cls, v: str) -> str:
+        txt = str(v or "").strip()
+        return txt or "unknown"
 
     @field_validator("root_causes")
     @classmethod
