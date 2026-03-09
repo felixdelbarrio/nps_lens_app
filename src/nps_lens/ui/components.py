@@ -7,6 +7,15 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
+from nps_lens.design.tokens import (
+    DesignTokens,
+    nps_group_band,
+    nps_score_band,
+    nps_semantic_palette,
+    nps_semantic_surface,
+)
+from nps_lens.ui.theme import Theme
+
 
 def card(title: str, body_html: str, *, flat: bool = False) -> None:
     klass = "nps-card nps-card--flat" if flat else "nps-card"
@@ -55,6 +64,74 @@ def pills(items: list[str]) -> None:
         return
     html = "".join([f"<span class='nps-pill'>{i}</span> " for i in items])
     st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
+
+
+def _pill_class_for_band(band: str) -> str:
+    normalized = str(band or "").strip().lower()
+    if normalized in {"detractor", "passive", "promoter"}:
+        return f"nps-pill nps-pill--{normalized}"
+    return "nps-pill"
+
+
+def _semantic_table_band(key: str, row: dict[str, str]) -> str:
+    normalized = str(key or "").strip().lower()
+    if normalized == "nps":
+        return nps_score_band(row.get("nps"))
+    if normalized == "group":
+        return nps_group_band(row.get("group"), row.get("nps"))
+    return "unknown"
+
+
+def _semantic_column_kind(column_name: object) -> str:
+    name = str(column_name or "").strip().lower()
+    if not name:
+        return ""
+    if name in {"grupo", "group", "nps_group", "nps group"}:
+        return "group"
+    if "nps" in name and not any(
+        token in name for token in ("clasic", "clásic", "delta", "riesgo", "%")
+    ):
+        return "nps"
+    return ""
+
+
+def _semantic_style_for_band(band: str, theme: Theme) -> str:
+    normalized = str(band or "").strip().lower()
+    if normalized not in {"detractor", "passive", "promoter"}:
+        return ""
+    tokens = DesignTokens.default()
+    semantic = nps_semantic_palette(tokens, theme.mode)
+    surface = nps_semantic_surface(tokens, theme.mode, normalized)
+    return (
+        f"background-color: {surface}; "
+        f"border: 1px solid {semantic.get(normalized, semantic['neutral'])}; "
+        "font-weight: 700;"
+    )
+
+
+def style_semantic_dataframe(df: pd.DataFrame, theme: Theme):
+    """Apply centralized NPS semantics to dataframe cells.
+
+    Raw 0-10 NPS columns and detractor/passive/promoter group columns are
+    highlighted using the same absolute rules as charts and pills.
+    """
+
+    styler = df.style
+    for column in df.columns:
+        kind = _semantic_column_kind(column)
+        if not kind:
+            continue
+        if kind == "nps":
+            styler = styler.map(
+                lambda value: _semantic_style_for_band(nps_score_band(value), theme),
+                subset=pd.IndexSlice[:, [column]],
+            )
+            continue
+        styler = styler.map(
+            lambda value: _semantic_style_for_band(nps_group_band(value), theme),
+            subset=pd.IndexSlice[:, [column]],
+        )
+    return styler
 
 
 def executive_banner(
@@ -253,8 +330,12 @@ def impact_chain(
                     "<div class='nps-pill-row'>"
                     f"<span class='nps-pill'>ID: {escape(record.get('comment_id') or '-')}</span>"
                     f"<span class='nps-pill'>Fecha: {escape(record.get('date') or '-')}</span>"
-                    f"<span class='nps-pill'>NPS: {escape(record.get('nps') or '-')}</span>"
-                    f"<span class='nps-pill'>Grupo: {escape(record.get('group') or '-')}</span>"
+                    f"<span class='{_pill_class_for_band(nps_score_band(record.get('nps')))}'>"
+                    f"NPS: {escape(record.get('nps') or '-')}"
+                    "</span>"
+                    f"<span class='{_pill_class_for_band(nps_group_band(record.get('group'), record.get('nps')))}'>"
+                    f"Grupo: {escape(record.get('group') or '-')}"
+                    "</span>"
                     f"<span class='nps-pill'>Palanca: {escape(record.get('palanca') or '-')}</span>"
                     f"<span class='nps-pill'>Subpalanca: {escape(record.get('subpalanca') or '-')}</span>"
                     "</div>"
@@ -332,7 +413,9 @@ def impact_chain(
                     cell_html = f"<a href='{href}' target='_blank'>{escape(value)}</a>"
                 else:
                     cell_html = escape(value)
-                cells.append(f"<td>{cell_html}</td>")
+                band = _semantic_table_band(key, row)
+                cell_class = f" class='nps-band--{band}'" if band != "unknown" else ""
+                cells.append(f"<td{cell_class}>{cell_html}</td>")
             body_html += f"<tr>{''.join(cells)}</tr>"
         st.markdown(
             (

@@ -106,7 +106,14 @@ from nps_lens.ui.charts import (
     chart_nps_trend,
     chart_topic_bars,
 )
-from nps_lens.ui.components import executive_banner, impact_chain, kpi, pills, section
+from nps_lens.ui.components import (
+    executive_banner,
+    impact_chain,
+    kpi,
+    pills,
+    section,
+    style_semantic_dataframe,
+)
 from nps_lens.ui.narratives import (
     build_executive_story,
     build_incident_ppt_story,
@@ -4269,42 +4276,43 @@ def page_nps_helix_linking(
             if fig_broken is not None:
                 st.plotly_chart(fig_broken, use_container_width=True)
 
+            broken_journeys_view = broken_journeys_df.rename(
+                columns={
+                    "journey_label": "Journey roto",
+                    "touchpoint": "Touchpoint detectado",
+                    "palanca": "Palanca dominante",
+                    "subpalanca": "Subpalanca dominante",
+                    "helix_source_service_n2": "Helix Source Service N2",
+                    "journey_keywords": "Keywords",
+                    "linked_pairs": "Links validados",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "avg_similarity": "Similaridad media",
+                    "avg_nps": "NPS medio",
+                    "semantic_cohesion": "Cohesión semántica",
+                    "journey_confidence_label": "Confianza",
+                    "journey_impact_label": "Impacto",
+                }
+            )[
+                [
+                    "Journey roto",
+                    "Touchpoint detectado",
+                    "Palanca dominante",
+                    "Subpalanca dominante",
+                    "Helix Source Service N2",
+                    "Keywords",
+                    "Links validados",
+                    "Incidencias",
+                    "Comentarios VoC",
+                    "NPS medio",
+                    "Similaridad media",
+                    "Cohesión semántica",
+                    "Confianza",
+                    "Impacto",
+                ]
+            ]
             st.dataframe(
-                broken_journeys_df.rename(
-                    columns={
-                        "journey_label": "Journey roto",
-                        "touchpoint": "Touchpoint detectado",
-                        "palanca": "Palanca dominante",
-                        "subpalanca": "Subpalanca dominante",
-                        "helix_source_service_n2": "Helix Source Service N2",
-                        "journey_keywords": "Keywords",
-                        "linked_pairs": "Links validados",
-                        "linked_incidents": "Incidencias",
-                        "linked_comments": "Comentarios VoC",
-                        "avg_similarity": "Similaridad media",
-                        "avg_nps": "NPS medio",
-                        "semantic_cohesion": "Cohesión semántica",
-                        "journey_confidence_label": "Confianza",
-                        "journey_impact_label": "Impacto",
-                    }
-                )[
-                    [
-                        "Journey roto",
-                        "Touchpoint detectado",
-                        "Palanca dominante",
-                        "Subpalanca dominante",
-                        "Helix Source Service N2",
-                        "Keywords",
-                        "Links validados",
-                        "Incidencias",
-                        "Comentarios VoC",
-                        "NPS medio",
-                        "Similaridad media",
-                        "Cohesión semántica",
-                        "Confianza",
-                        "Impacto",
-                    ]
-                ],
+                style_semantic_dataframe(broken_journeys_view, theme),
                 use_container_width=True,
                 height=320,
             )

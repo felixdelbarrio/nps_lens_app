@@ -6,7 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from nps_lens.design.tokens import DesignTokens, palette, primary_accent
+from nps_lens.design.tokens import (
+    DesignTokens,
+    nps_score_color,
+    palette,
+    plotly_nps_score_scale,
+    primary_accent,
+)
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
 
@@ -143,8 +149,13 @@ def _diverging_colors(theme: Theme, values: pd.Series) -> list[str]:
 
 
 def _colorscale_rgy(theme: Theme) -> list[list[object]]:
-    detr_c, pas_c, pro_c = _status_colors(theme)
-    return [[0.0, detr_c], [0.5, pas_c], [1.0, pro_c]]
+    tokens = DesignTokens.default()
+    return plotly_nps_score_scale(tokens, theme.mode)
+
+
+def _nps_score_colors(theme: Theme, values: pd.Series) -> list[str]:
+    tokens = DesignTokens.default()
+    return [nps_score_color(tokens, theme.mode, value) for value in values.tolist()]
 
 
 def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
@@ -177,9 +188,15 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         markers=True,
         hover_data={"n": True, "nps": ":.2f"},
     )
-    fig.update_traces(line=dict(width=3), marker=dict(size=8))
-    _, _, pro_c = _status_colors(theme)
-    fig.update_traces(line_color=pro_c, marker_color=pro_c)
+    marker_colors = _nps_score_colors(theme, agg["nps"])
+    fig.update_traces(
+        line=dict(width=3, color=th.accent),
+        marker=dict(
+            size=8,
+            color=marker_colors,
+            line=dict(color=th.paper_bg, width=1),
+        ),
+    )
     fig.update_layout(
         yaxis_title="NPS (media del score 0-10)",
         xaxis_title="Periodo",
@@ -604,6 +621,7 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
         orientation="h",
         color="avg_nps",
         color_continuous_scale=_colorscale_rgy(theme),
+        range_color=(0.0, 10.0),
         text="linked_pairs",
         hover_data={
             "touchpoint": True,
@@ -618,7 +636,15 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
     fig.update_layout(
         xaxis_title="Links validados Helix↔VoC",
         yaxis_title="Journey roto",
-        coloraxis_colorbar_title="NPS medio",
+        coloraxis=dict(
+            cmin=0.0,
+            cmax=10.0,
+            colorbar=dict(
+                title="NPS medio",
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+            ),
+        ),
     )
     _layout_common(fig, th, height=max(320, 56 * len(tmp) + 80))
     return apply_plotly_template(fig, theme)
@@ -942,6 +968,12 @@ def chart_cohort_heatmap(
         zmin=0,
         zmax=10,
     )
-    fig.update_layout(coloraxis_colorbar=dict(title="NPS"))
+    fig.update_layout(
+        coloraxis=dict(
+            cmin=0.0,
+            cmax=10.0,
+            colorbar=dict(title="NPS", tickmode="array", tickvals=[0, 2, 6, 8, 10]),
+        )
+    )
     _layout_common(fig, th, height=420)
     return apply_plotly_template(fig, theme)

@@ -10,6 +10,7 @@ from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
+from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 
@@ -423,7 +424,13 @@ def test_history_fig_daily_uses_requested_colors() -> None:
     )
     fig = executive_ppt._history_fig(daily, focus_name="detractores")
     assert fig is not None
-    assert fig.data[0]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["green"]
+    expected_markers = [
+        nps_score_color(DesignTokens.default(), "light", value)
+        for value in daily["nps_mean"].tolist()
+    ]
+    assert fig.data[0]["mode"] == "lines+markers"
+    assert fig.data[0]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
+    assert list(fig.data[0]["marker"]["color"]) == expected_markers
     assert fig.data[2]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["yellow"]
 
 
@@ -680,6 +687,6 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> 
     assert any(str(t) == "INC-1" for t in fig.data[4]["text"])
     assert fig.data[5]["name"] == "NPS medio"
     assert fig.data[5]["type"] == "scatter"
-    assert fig.data[5]["mode"] == "lines"
+    assert fig.data[5]["mode"] == "lines+markers"
     assert fig.data[5]["yaxis"] == "y3"
-    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["green"]
+    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]

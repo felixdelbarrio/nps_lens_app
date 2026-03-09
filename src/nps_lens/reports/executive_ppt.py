@@ -34,13 +34,23 @@ from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
-from nps_lens.design.tokens import DesignTokens, executive_report_palette
+from nps_lens.design.tokens import (
+    DesignTokens,
+    executive_report_palette,
+    nps_score_color,
+)
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
 
 BBVA_FONT_HEAD = "BentonSansBBVA Bold"
 BBVA_FONT_BODY = "BentonSansBBVA Book"
 BBVA_FONT_MEDIUM = "BentonSansBBVA Medium"
+
+
+def _ppt_nps_marker_colors(values: pd.Series | list[object]) -> list[str]:
+    series = values if isinstance(values, pd.Series) else pd.Series(list(values))
+    tokens = DesignTokens.default()
+    return [nps_score_color(tokens, "light", value) for value in series.tolist()]
 
 
 @dataclass(frozen=True)
@@ -1310,8 +1320,13 @@ def _history_fig(daily: pd.DataFrame, *, focus_name: str) -> Optional[go.Figure]
             x=d["date"],
             y=d["nps_mean"],
             name="NPS medio",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["green"], width=3.2),
+            mode="lines+markers",
+            line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
+            marker=dict(
+                size=8,
+                color=_ppt_nps_marker_colors(d["nps_mean"]),
+                line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+            ),
         )
     )
     fig.add_trace(
@@ -1648,8 +1663,13 @@ def _month_overlap_fig(
             x=d["date"],
             y=d["nps_mean"],
             name="NPS medio",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["green"], width=3.2),
+            mode="lines+markers",
+            line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
+            marker=dict(
+                size=8,
+                color=_ppt_nps_marker_colors(d["nps_mean"]),
+                line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+            ),
         )
     )
     fig.add_trace(
@@ -2411,8 +2431,13 @@ def _zoom_incident_fig(
                 y=nps_series["nps_mean"],
                 name="NPS medio",
                 yaxis="y3",
-                mode="lines",
-                line=dict(color="#" + BBVA_COLORS["green"], width=2.6),
+                mode="lines+markers",
+                line=dict(color="#" + BBVA_COLORS["blue"], width=2.6),
+                marker=dict(
+                    size=6,
+                    color=_ppt_nps_marker_colors(nps_series["nps_mean"]),
+                    line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+                ),
             )
         )
 
@@ -2564,7 +2589,7 @@ def generate_business_review_ppt(
         figure=tfig,
         rationale_title="Racional",
         rationale_lines=[
-            "La línea verde refleja el NPS medio diario para ver tendencia real y no solo ruido puntual.",
+            "La línea azul muestra el NPS medio diario y sus marcadores conservan la semántica NPS real del score 0-10.",
             f"La línea roja sigue la evolución de opiniones de {focus_name} y permite detectar tensión en experiencia.",
             "Las columnas amarillas muestran incidencias registradas para relacionar operación y percepción cliente.",
             "Este gráfico es la base para explicar causalidad operativa en comité.",
@@ -2845,7 +2870,7 @@ def generate_business_review_ppt(
                 (
                     f"Timeline del zoom: barras rojas apiladas por intensidad "
                     f"(moderado/alto/crítico), puntos azules (etiqueta INC cuando cabe) "
-                    f"para días con incidencias del hotspot y línea verde de NPS medio diario "
+                    f"para días con incidencias del hotspot y línea azul de NPS medio diario "
                     f"({int(chart_days)} días con evidencia)."
                 ),
                 f"Lag estimado: {int(lag_days)} días ({lag_weeks_txt}) · change points detectados: {len(cp_list)}.",
