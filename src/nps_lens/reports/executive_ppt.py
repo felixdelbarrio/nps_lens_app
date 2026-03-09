@@ -4843,57 +4843,47 @@ def _add_causal_timeline_slide(
         "negativas que se reflejan en los comentarios y finalmente en el NPS."
     )
     text_r.font.name = BBVA_FONT_BODY
-    text_r.font.size = Pt(13)
+    text_r.font.size = Pt(12.5)
     text_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
     _add_stat_card(
         slide,
         left=9.18,
-        top=3.28,
+        top=3.48,
         width=1.60,
-        height=1.00,
-        label="Incidencias del periodo",
+        height=1.12,
+        label="Incidencias",
         value=f"{incidents_total:,}",
         accent=BBVA_COLORS["blue"],
     )
     _add_stat_card(
         slide,
         left=10.92,
-        top=3.28,
+        top=3.48,
         width=1.60,
-        height=1.00,
-        label="% detractores medio",
+        height=1.12,
+        label="% detractores",
         value=f"{detractor_avg*100.0:.2f}%",
         accent=BBVA_COLORS["red"],
     )
     _add_stat_card(
         slide,
         left=9.18,
-        top=4.52,
-        width=1.06,
-        height=1.00,
+        top=4.78,
+        width=1.60,
+        height=1.12,
         label="NPS en riesgo",
         value=f"{nps_points_at_risk:.2f} pts",
         accent=BBVA_COLORS["orange"],
     )
     _add_stat_card(
         slide,
-        left=10.36,
-        top=4.52,
-        width=1.06,
-        height=1.00,
+        left=10.92,
+        top=4.78,
+        width=1.60,
+        height=1.12,
         label="NPS recuperable",
         value=f"{nps_points_recoverable:.2f} pts",
         accent=BBVA_COLORS["green"],
-    )
-    _add_stat_card(
-        slide,
-        left=11.54,
-        top=4.52,
-        width=1.06,
-        height=1.00,
-        label="Concentración top-3",
-        value=f"{top3_incident_share*100.0:.1f}%",
-        accent=BBVA_COLORS["sky"],
     )
 
 
