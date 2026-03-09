@@ -54,3 +54,40 @@ def test_validate_insight_response_missing_fields():
     assert not ok
     assert norm is None
     assert errs
+
+
+def test_validate_insight_response_cleans_blank_route_and_text_fields():
+    obj = {
+        "schema_version": "1.0",
+        "insight_id": "  bbva-be-unknown-unknown-001  ",
+        "title": "  Insight limpio  ",
+        "executive_summary": "  Resumen limpio  ",
+        "confidence": "0.8",
+        "severity": "4",
+        "journey_route": " ",
+        "segments_most_affected": [" segmento a ", "", "segmento b"],
+        "root_causes": [],
+        "assumptions": [],
+        "risks": [],
+        "next_questions": [],
+        "tags": {
+            "geo": "",
+            "channel": "  mobile  ",
+            "lever": "",
+            "sublever": "",
+            "period": "",
+            "route_signature": "",
+        },
+    }
+
+    ok, errs, norm = validate_insight_response(obj)
+    assert ok
+    assert errs == []
+    assert norm is not None
+    assert norm["insight_id"] == "bbva-be-unknown-unknown-001"
+    assert norm["title"] == "Insight limpio"
+    assert norm["executive_summary"] == "Resumen limpio"
+    assert norm["journey_route"] == "unknown"
+    assert norm["segments_most_affected"] == ["segmento a", "segmento b"]
+    assert norm["tags"]["geo"] == "unknown"
+    assert norm["tags"]["channel"] == "mobile"
