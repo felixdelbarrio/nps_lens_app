@@ -4,8 +4,13 @@ import pandas as pd
 
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    build_broken_journey_catalog,
+    build_broken_journey_topic_map,
     build_incident_attribution_chains,
+    remap_links_to_journeys,
+    remap_topic_timeseries_to_journeys,
 )
 
 
@@ -351,3 +356,183 @@ def test_build_incident_attribution_chains_filters_compound_generic_topics() -> 
     )
 
     assert out.empty
+
+
+def test_broken_journey_catalog_groups_related_links_without_manual_table() -> None:
+    links_df = pd.DataFrame(
+        {
+            "nps_id": ["n1", "n2", "n3", "n4"],
+            "incident_id": ["INC00001", "INC00002", "INC00003", "INC00004"],
+            "similarity": [0.92, 0.90, 0.89, 0.87],
+            "nps_topic": [
+                "Acceso > Login",
+                "Acceso > Login",
+                "Operativa > Pagos",
+                "Operativa > Pagos",
+            ],
+        }
+    )
+    nps_focus = pd.DataFrame(
+        {
+            "ID": ["n1", "n2", "n3", "n4"],
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04"]),
+            "NPS": [1, 2, 2, 3],
+            "NPS Group": ["DETRACTOR", "DETRACTOR", "DETRACTOR", "DETRACTOR"],
+            "Palanca": ["Acceso", "Acceso", "Operativa", "Operativa"],
+            "Subpalanca": ["Login", "Login", "Pagos", "Pagos"],
+            "_text_norm": [
+                "no puedo entrar el login falla y pide otp",
+                "la autenticacion expulsa al usuario de empresas",
+                "la transferencia no se completa por timeout",
+                "error al firmar pagos y transferencias",
+            ],
+            "Comment": [
+                "No puedo entrar",
+                "Me expulsa al autenticar",
+                "La transferencia no se completa",
+                "Falla la firma de pagos",
+            ],
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["INC00001", "INC00002", "INC00003", "INC00004"],
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04"]),
+            "Detailed Description": [
+                "Error de login y OTP en acceso digital",
+                "Problema de autenticacion en portal empresas",
+                "Timeout en pagos SPEI y transferencias",
+                "Error de firma en pagos empresariales",
+            ],
+            "BBVA_SourceServiceN2": ["Auth", "Auth", "Pagos", "Pagos"],
+            "Product Categorization Tier 1": ["Acceso", "Acceso", "Operativa", "Operativa"],
+            "Product Categorization Tier 2": ["Login", "Login", "Pagos", "Pagos"],
+            "Product Categorization Tier 3": [
+                "Autenticación",
+                "Autenticación",
+                "Transferencias",
+                "Firma",
+            ],
+        }
+    )
+
+    catalog, journey_links = build_broken_journey_catalog(links_df, nps_focus, helix)
+
+    assert len(catalog) == 2
+    assert set(catalog["touchpoint"].tolist()) == {"Login", "Pagos"}
+    assert set(journey_links["journey_label"].astype(str).tolist()) == {
+        "Acceso / Login",
+        "Operativa / Pagos",
+    }
+
+
+def test_broken_journey_remap_reuses_detected_clusters_in_timeseries_and_chains() -> None:
+    links_df = pd.DataFrame(
+        {
+            "nps_id": ["n1", "n2", "n3", "n4"],
+            "incident_id": ["INC00001", "INC00002", "INC00003", "INC00004"],
+            "similarity": [0.92, 0.90, 0.89, 0.87],
+            "nps_topic": [
+                "Acceso > Login",
+                "Acceso > Login",
+                "Operativa > Pagos",
+                "Operativa > Pagos",
+            ],
+        }
+    )
+    nps_focus = pd.DataFrame(
+        {
+            "ID": ["n1", "n2", "n3", "n4"],
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-08", "2026-02-01", "2026-02-08"]),
+            "NPS": [1, 2, 2, 3],
+            "NPS Group": ["DETRACTOR", "DETRACTOR", "DETRACTOR", "DETRACTOR"],
+            "Palanca": ["Acceso", "Acceso", "Operativa", "Operativa"],
+            "Subpalanca": ["Login", "Login", "Pagos", "Pagos"],
+            "_text_norm": [
+                "no puedo entrar el login falla y pide otp",
+                "la autenticacion expulsa al usuario de empresas",
+                "la transferencia no se completa por timeout",
+                "error al firmar pagos y transferencias",
+            ],
+            "Comment": [
+                "No puedo entrar",
+                "Me expulsa al autenticar",
+                "La transferencia no se completa",
+                "Falla la firma de pagos",
+            ],
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["INC00001", "INC00002", "INC00003", "INC00004"],
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-08", "2026-02-01", "2026-02-08"]),
+            "Detailed Description": [
+                "Error de login y OTP en acceso digital",
+                "Problema de autenticacion en portal empresas",
+                "Timeout en pagos SPEI y transferencias",
+                "Error de firma en pagos empresariales",
+            ],
+            "BBVA_SourceServiceN2": ["Auth", "Auth", "Pagos", "Pagos"],
+            "Product Categorization Tier 1": ["Acceso", "Acceso", "Operativa", "Operativa"],
+            "Product Categorization Tier 2": ["Login", "Login", "Pagos", "Pagos"],
+            "Product Categorization Tier 3": [
+                "Autenticación",
+                "Autenticación",
+                "Transferencias",
+                "Firma",
+            ],
+        }
+    )
+    weekly = pd.DataFrame(
+        {
+            "week": pd.to_datetime(["2026-01-26", "2026-02-02", "2026-01-26", "2026-02-02"]),
+            "nps_topic": [
+                "Acceso > Login",
+                "Acceso > Login",
+                "Operativa > Pagos",
+                "Operativa > Pagos",
+            ],
+            "responses": [10, 12, 9, 11],
+            "focus_count": [4, 5, 3, 4],
+            "nps_mean": [3.0, 3.2, 4.1, 4.3],
+            "focus_rate": [0.40, 0.42, 0.33, 0.36],
+            "incidents": [2, 2, 1, 2],
+        }
+    )
+
+    catalog, journey_links = build_broken_journey_catalog(links_df, nps_focus, helix)
+    topic_map = build_broken_journey_topic_map(journey_links)
+    links_mode = remap_links_to_journeys(links_df, journey_links)
+    weekly_mode = remap_topic_timeseries_to_journeys(weekly, topic_map)
+    rationale_df = pd.DataFrame(
+        {
+            "nps_topic": ["Acceso / Login", "Operativa / Pagos"],
+            "priority": [0.82, 0.74],
+            "confidence": [0.78, 0.70],
+            "causal_score": [0.81, 0.71],
+            "focus_probability_with_incident": [0.41, 0.34],
+            "nps_delta_expected": [-4.1, -3.6],
+            "total_nps_impact": [1.6, 1.1],
+            "nps_points_at_risk": [1.6, 1.1],
+            "nps_points_recoverable": [1.0, 0.7],
+            "delta_focus_rate_pp": [22.0, 17.0],
+            "incident_rate_per_100_responses": [8.0, 6.0],
+            "incidents": [4, 3],
+            "responses": [22, 20],
+        }
+    )
+
+    chains = build_incident_attribution_chains(
+        links_mode,
+        nps_focus,
+        helix,
+        rationale_df=rationale_df,
+        top_k=0,
+        touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+        journey_catalog_df=catalog,
+        journey_links_df=journey_links,
+    )
+
+    assert set(weekly_mode["nps_topic"].tolist()) == {"Acceso / Login", "Operativa / Pagos"}
+    assert set(chains["presentation_mode"].tolist()) == {TOUCHPOINT_SOURCE_BROKEN_JOURNEYS}
+    assert set(chains["nps_topic"].tolist()) == {"Acceso / Login", "Operativa / Pagos"}

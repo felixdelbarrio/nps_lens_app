@@ -6,18 +6,23 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.decomposition import TruncatedSVD
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from nps_lens.analytics.nps_helix_link import build_incident_display_text
 
 TOUCHPOINT_SOURCE_DOMAIN = "domain_touchpoint"
 TOUCHPOINT_SOURCE_PALANCA = "palanca_touchpoint"
 TOUCHPOINT_SOURCE_BBVA_SOURCE_N2 = "bbva_source_service_n2"
+TOUCHPOINT_SOURCE_BROKEN_JOURNEYS = "broken_journeys"
 TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS = "executive_journeys"
 
 TOUCHPOINT_MODE_OPTIONS = (
     TOUCHPOINT_SOURCE_PALANCA,
     TOUCHPOINT_SOURCE_DOMAIN,
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
 
@@ -25,27 +30,31 @@ TOUCHPOINT_MODE_MENU_LABELS = {
     TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
     TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: "Journeys rotos",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys de detracción",
 }
 
 TOUCHPOINT_MODE_CONTEXT_LABELS = {
     TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
     TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: "Journeys rotos",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys de detracción",
 }
 
 TOUCHPOINT_MODE_BANNER_LABELS = {
     TOUCHPOINT_SOURCE_PALANCA: "Por Palanca",
     TOUCHPOINT_SOURCE_DOMAIN: "Por Subpalanca",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Helix : Source Service N2",
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys ejecutivos de detracción",
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: "Journeys rotos",
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "Journeys de detracción",
 }
 
 TOUCHPOINT_MODE_SUMMARIES = {
     TOUCHPOINT_SOURCE_PALANCA: "La lectura causal fija el touchpoint exclusivamente desde Palanca para mantener una taxonomía simple y homogénea.",
     TOUCHPOINT_SOURCE_DOMAIN: "La lectura causal fija el touchpoint exclusivamente desde Subpalanca para reflejar el nivel operativo fino del dolor reportado.",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "La lectura causal se apoya exclusivamente en BBVA_SourceServiceN2 para reflejar el servicio origen reportado por Helix.",
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: "La lectura causal detecta journeys rotos sin tabla manual, combinando embeddings ligeros, keywords y clustering semántico sobre Helix y Voz del Cliente.",
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: "La lectura causal se reorganiza en journeys de comité para explicar dónde se rompe la experiencia y por qué cae el NPS.",
 }
 
@@ -53,6 +62,10 @@ TOUCHPOINT_MODE_FLOWS = {
     TOUCHPOINT_SOURCE_PALANCA: "Incidencias -> Touchpoint afectado -> Palanca -> Comentario -> NPS",
     TOUCHPOINT_SOURCE_DOMAIN: "Incidencias -> Touchpoint afectado -> Subpalanca -> Comentario -> NPS",
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: "Incidencias -> Helix Source Service N2 -> Comentario -> NPS",
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: (
+        "Incidencias + comentario + embeddings + keywords + clustering semántico -> "
+        "Journey roto -> Touchpoint detectado -> NPS"
+    ),
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: (
         "Incidencias + comentario + tópico NPS -> Journey ejecutivo del catálogo -> "
         "Touchpoint / Palanca / Subpalanca -> NPS"
@@ -202,6 +215,27 @@ CHAIN_COLUMNS = [
     "journey_confidence_label",
 ]
 
+BROKEN_JOURNEY_COLUMNS = [
+    "journey_id",
+    "journey_label",
+    "touchpoint",
+    "palanca",
+    "subpalanca",
+    "helix_source_service_n2",
+    "journey_keywords",
+    "journey_route",
+    "journey_expected_evidence",
+    "journey_cx_readout",
+    "journey_impact_label",
+    "journey_confidence_label",
+    "linked_pairs",
+    "linked_incidents",
+    "linked_comments",
+    "avg_similarity",
+    "avg_nps",
+    "semantic_cohesion",
+]
+
 _GENERIC_LABELS = {
     "",
     "nan",
@@ -214,6 +248,43 @@ _GENERIC_LABELS = {
     "sincomentarios",
     "no comment",
     "no comments",
+}
+
+_BROKEN_JOURNEY_STOPWORDS = {
+    "app",
+    "apps",
+    "bbva",
+    "cliente",
+    "clientes",
+    "comentario",
+    "comentarios",
+    "con",
+    "del",
+    "desde",
+    "dia",
+    "dias",
+    "el",
+    "en",
+    "error",
+    "esta",
+    "este",
+    "la",
+    "las",
+    "los",
+    "muy",
+    "no",
+    "para",
+    "pero",
+    "portal",
+    "por",
+    "que",
+    "se",
+    "sin",
+    "sobre",
+    "una",
+    "uno",
+    "web",
+    "ya",
 }
 
 
@@ -269,6 +340,25 @@ def _mode_text(series: pd.Series) -> str:
     return str(mode.iloc[0]).strip()
 
 
+def _dominant_non_generic(series: pd.Series) -> str:
+    if series is None:
+        return ""
+    txt = pd.Series(series).astype(str).fillna("").str.strip()
+    txt = txt[txt.ne("") & ~txt.map(_is_generic)]
+    if txt.empty:
+        return ""
+    mode = txt.mode(dropna=True)
+    if not mode.empty:
+        return str(mode.iloc[0]).strip()
+    return str(txt.iloc[0]).strip()
+
+
+def _non_generic_nunique(series: pd.Series) -> int:
+    txt = pd.Series(series).astype(str).fillna("").str.strip()
+    txt = txt[txt.ne("") & ~txt.map(_is_generic)]
+    return int(txt.nunique())
+
+
 def _clip(value: object, max_len: int) -> str:
     txt = " ".join(str(value or "").split())
     if len(txt) <= int(max_len):
@@ -290,6 +380,72 @@ def _format_nps_date(value: object) -> str:
     if ts is None or pd.isna(ts):
         return ""
     return ts.strftime("%d-%m-%Y")
+
+
+def _slug(value: object, *, max_len: int = 36) -> str:
+    txt = _norm(value).replace(">", " ").replace("/", " ").replace(" ", "-")
+    txt = re.sub(r"-+", "-", txt).strip("-")
+    if not txt:
+        return "unknown"
+    return txt[:max_len].strip("-") or "unknown"
+
+
+def _broken_journey_cluster_count(n_rows: int, candidate_axes: int) -> int:
+    if n_rows <= 1:
+        return 1
+    if n_rows <= 4:
+        return min(2, n_rows)
+    heuristic = int(round(np.sqrt(float(n_rows))))
+    bounded_axes = max(1, min(int(candidate_axes), heuristic if heuristic > 0 else 1))
+    return max(2, min(8, min(n_rows, bounded_axes)))
+
+
+def _broken_journey_title_case(value: object) -> str:
+    tokens = [part for part in re.split(r"[\s_/]+", str(value or "").strip()) if part]
+    return " ".join(tok.capitalize() for tok in tokens[:3]).strip()
+
+
+def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Series) -> list[str]:
+    feature_names = vectorizer.get_feature_names_out()
+    if len(feature_names) == 0:
+        return []
+    weights = np.asarray(matrix[mask.to_numpy()].mean(axis=0)).ravel()
+    if weights.size == 0:
+        return []
+    order = np.argsort(weights)[::-1]
+    out: list[str] = []
+    for idx in order.tolist():
+        token = str(feature_names[idx]).strip().lower()
+        if (
+            not token
+            or token in _BROKEN_JOURNEY_STOPWORDS
+            or len(token) < 3
+            or token.isdigit()
+            or token.replace(" ", "") in _BROKEN_JOURNEY_STOPWORDS
+        ):
+            continue
+        out.append(token)
+        if len(out) >= 5:
+            break
+    return out
+
+
+def _broken_journey_impact_label(linked_pairs: int, avg_nps: float) -> str:
+    if linked_pairs >= 10 or avg_nps <= 2.0:
+        return "Muy alto"
+    if linked_pairs >= 6 or avg_nps <= 4.0:
+        return "Alto"
+    if linked_pairs >= 3:
+        return "Medio"
+    return "Bajo"
+
+
+def _broken_journey_confidence_label(semantic_score: float, avg_similarity: float) -> str:
+    if semantic_score >= 0.72 and avg_similarity >= 0.85:
+        return "Alto"
+    if semantic_score >= 0.55 and avg_similarity >= 0.75:
+        return "Medio"
+    return "Bajo"
 
 
 def _derive_nps_group(group_value: object, score_value: object) -> str:
@@ -329,6 +485,10 @@ def _touchpoint(
 
 def _empty_chain_df() -> pd.DataFrame:
     return pd.DataFrame(columns=CHAIN_COLUMNS)
+
+
+def _empty_broken_journey_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=BROKEN_JOURNEY_COLUMNS)
 
 
 def _executive_journey_match(
@@ -551,35 +711,32 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     ].copy()
 
 
-def build_incident_attribution_chains(
+def _prepare_enriched_links(
     links_df: Optional[pd.DataFrame],
     nps_focus_df: Optional[pd.DataFrame],
     helix_df: Optional[pd.DataFrame],
     *,
-    rationale_df: Optional[pd.DataFrame] = None,
-    top_k: int = 3,
-    max_incident_examples: int = 5,
-    max_comment_examples: int = 2,
-    min_links_per_topic: int = 1,
     touchpoint_source: str = TOUCHPOINT_SOURCE_DOMAIN,
 ) -> pd.DataFrame:
-    """Return presentable evidence chains backed by exact Helix↔VoC links."""
-
     if links_df is None or links_df.empty:
-        return _empty_chain_df()
+        return pd.DataFrame()
 
     nps_ref = _prepare_nps_chain_ref(nps_focus_df)
     helix_ref = _prepare_helix_chain_ref(helix_df)
     if nps_ref.empty or helix_ref.empty:
-        return _empty_chain_df()
+        return pd.DataFrame()
 
     links = links_df.copy()
     links["incident_id"] = links.get("incident_id", "").astype(str).str.strip()
     links["nps_id"] = links.get("nps_id", "").astype(str).str.strip()
     links["similarity"] = pd.to_numeric(links.get("similarity"), errors="coerce").fillna(0.0)
     links["nps_topic"] = links.get("nps_topic", "").astype(str).fillna("").str.strip()
+    links = links[
+        links["incident_id"].astype(str).str.strip().ne("")
+        & links["nps_id"].astype(str).str.strip().ne("")
+    ].copy()
     if links.empty:
-        return _empty_chain_df()
+        return pd.DataFrame()
 
     enriched = (
         links.merge(nps_ref, on=["nps_id"], how="left", suffixes=("", "_nps"))
@@ -587,7 +744,7 @@ def build_incident_attribution_chains(
         .copy()
     )
     if enriched.empty:
-        return _empty_chain_df()
+        return pd.DataFrame()
 
     topic_from_nps = enriched.get(
         "nps_topic_nps", pd.Series([""] * len(enriched), index=enriched.index)
@@ -599,9 +756,25 @@ def build_incident_attribution_chains(
         .str.strip()
     )
     enriched["comment_txt"] = enriched["comment_txt"].astype(str).fillna("").str.strip()
+    enriched["comment_norm"] = enriched["comment_norm"].astype(str).fillna("").str.strip()
     enriched["incident_summary"] = enriched["incident_summary"].astype(str).fillna("").str.strip()
+    enriched["incident_topic"] = (
+        enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     enriched["palanca"] = enriched["palanca"].astype(str).fillna("").str.strip()
     enriched["subpalanca"] = enriched["subpalanca"].astype(str).fillna("").str.strip()
+    enriched["helix_source_service_n2"] = (
+        enriched.get(
+            "helix_source_service_n2",
+            pd.Series([""] * len(enriched), index=enriched.index),
+        )
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     enriched["touchpoint"] = [
         _touchpoint(
             pal,
@@ -613,17 +786,437 @@ def build_incident_attribution_chains(
         for pal, sub, inc_topic, helix_src_n2 in zip(
             enriched["palanca"],
             enriched["subpalanca"],
-            enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index)),
-            enriched.get(
-                "helix_source_service_n2",
-                pd.Series([""] * len(enriched), index=enriched.index),
-            ),
+            enriched["incident_topic"],
+            enriched["helix_source_service_n2"],
         )
     ]
-    if (
+    enriched = enriched.sort_values(
+        ["similarity", "incident_date", "nps_date"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).drop_duplicates(["incident_id", "nps_id"])
+    return enriched.reset_index(drop=True)
+
+
+def build_broken_journey_catalog(
+    links_df: Optional[pd.DataFrame],
+    nps_focus_df: Optional[pd.DataFrame],
+    helix_df: Optional[pd.DataFrame],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Infer broken journeys from validated Helix↔VoC links with lightweight semantics."""
+
+    enriched = _prepare_enriched_links(
+        links_df,
+        nps_focus_df,
+        helix_df,
+        touchpoint_source=TOUCHPOINT_SOURCE_DOMAIN,
+    )
+    if enriched.empty:
+        return _empty_broken_journey_df(), pd.DataFrame()
+
+    enriched = enriched[
+        enriched["comment_txt"].astype(str).str.strip().ne("")
+        & (~enriched["comment_txt"].map(_is_generic))
+        & (~enriched["nps_topic"].map(_is_generic))
+    ].copy()
+    if enriched.empty:
+        return _empty_broken_journey_df(), pd.DataFrame()
+
+    enriched["source_nps_topic"] = enriched["nps_topic"].astype(str).str.strip()
+    enriched["semantic_text"] = (
+        enriched["palanca"].fillna("")
+        + " "
+        + enriched["subpalanca"].fillna("")
+        + " "
+        + enriched["helix_source_service_n2"].fillna("")
+        + " "
+        + enriched["incident_topic"].fillna("")
+        + " "
+        + enriched["source_nps_topic"].fillna("")
+        + " "
+        + enriched["incident_summary"].fillna("")
+        + " "
+        + enriched["comment_norm"].where(
+            enriched["comment_norm"].astype(str).str.strip().ne(""),
+            enriched["comment_txt"],
+        )
+    ).astype(str)
+
+    texts = enriched["semantic_text"].astype(str).str.strip().tolist()
+    if not texts:
+        return _empty_broken_journey_df(), pd.DataFrame()
+
+    vectorizer = TfidfVectorizer(
+        strip_accents="unicode",
+        lowercase=True,
+        ngram_range=(1, 2),
+        max_features=384,
+    )
+    try:
+        matrix = vectorizer.fit_transform(texts)
+    except ValueError:
+        return _empty_broken_journey_df(), pd.DataFrame()
+    candidate_axes = max(
+        1,
+        _non_generic_nunique(enriched["subpalanca"]),
+        _non_generic_nunique(enriched["helix_source_service_n2"]),
+        _non_generic_nunique(enriched["palanca"]),
+    )
+    n_clusters = _broken_journey_cluster_count(len(enriched), int(candidate_axes))
+
+    if len(enriched) == 1 or n_clusters <= 1 or matrix.shape[0] <= 1:
+        labels = np.zeros(len(enriched), dtype=int)
+        semantic_score = np.ones(len(enriched), dtype=float)
+    else:
+        max_components = min(24, max(1, min(matrix.shape[0] - 1, matrix.shape[1] - 1)))
+        dense = (
+            TruncatedSVD(n_components=max_components, random_state=7).fit_transform(matrix)
+            if max_components >= 2
+            else matrix.toarray()
+        )
+        model = MiniBatchKMeans(
+            n_clusters=int(min(n_clusters, len(enriched))),
+            random_state=7,
+            n_init=10,
+            batch_size=min(64, len(enriched)),
+        )
+        labels = model.fit_predict(dense)
+        row_norm = np.linalg.norm(dense, axis=1)
+        centers = model.cluster_centers_[labels]
+        center_norm = np.linalg.norm(centers, axis=1)
+        denom = np.where((row_norm * center_norm) > 0, row_norm * center_norm, 1.0)
+        semantic_score = np.clip((dense * centers).sum(axis=1) / denom, 0.0, 1.0)
+
+    enriched["journey_cluster"] = labels.astype(int)
+    enriched["semantic_score"] = semantic_score.astype(float)
+
+    cluster_rows: list[dict[str, object]] = []
+    for cluster_id, grp in enriched.groupby("journey_cluster", dropna=False, observed=True):
+        grp = grp.copy()
+        palanca = _dominant_non_generic(grp["palanca"])
+        subpalanca = _dominant_non_generic(grp["subpalanca"])
+        helix_source_n2 = _dominant_non_generic(grp["helix_source_service_n2"])
+        keywords = _broken_journey_keywords(
+            vectorizer, matrix, enriched["journey_cluster"] == cluster_id
+        )
+        touchpoint = subpalanca or helix_source_n2
+        if not touchpoint:
+            touchpoint = " / ".join(
+                _broken_journey_title_case(word) for word in keywords[:2]
+            ).strip()
+        if not touchpoint:
+            touchpoint = palanca or str(grp["source_nps_topic"].mode(dropna=True).iloc[0]).strip()
+        label = touchpoint
+        if palanca and touchpoint and _norm(palanca) != _norm(touchpoint):
+            label = f"{palanca} / {touchpoint}"
+        label = label.strip() or "Journey roto sin etiqueta"
+        linked_pairs = int(len(grp[["incident_id", "nps_id"]].drop_duplicates()))
+        linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
+        linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
+        avg_similarity = _safe_float(grp["similarity"].mean(), default=0.0)
+        avg_nps = _safe_float(
+            pd.to_numeric(grp["nps_score"], errors="coerce").mean(), default=np.nan
+        )
+        semantic_cohesion = _safe_float(grp["semantic_score"].mean(), default=0.0)
+        impact_label = _broken_journey_impact_label(linked_pairs, avg_nps)
+        confidence_label = _broken_journey_confidence_label(semantic_cohesion, avg_similarity)
+        keyword_text = ", ".join(_broken_journey_title_case(word) for word in keywords[:4])
+        cluster_rows.append(
+            {
+                "journey_cluster": int(cluster_id),
+                "journey_label": label,
+                "touchpoint": touchpoint,
+                "palanca": palanca,
+                "subpalanca": subpalanca,
+                "helix_source_service_n2": helix_source_n2,
+                "journey_keywords": keyword_text,
+                "journey_route": (
+                    f"Incidencia -> {touchpoint or 'touchpoint detectado'} -> "
+                    f"{palanca or 'palanca'} / {subpalanca or 'señal semántica'} -> comentario VoC -> NPS"
+                ),
+                "journey_expected_evidence": (
+                    f"Keywords semánticas: {keyword_text or 'n/d'}. "
+                    f"Helix Source Service N2 dominante: {helix_source_n2 or 'n/d'}."
+                ),
+                "journey_cx_readout": (
+                    f"{linked_pairs} links Helix↔VoC convergen en este journey roto; "
+                    f"predominan {palanca or 'sin palanca'} / {subpalanca or 'sin subpalanca'} "
+                    f"y el NPS medio asociado es {avg_nps:.1f}."
+                ),
+                "journey_impact_label": impact_label,
+                "journey_confidence_label": confidence_label,
+                "linked_pairs": linked_pairs,
+                "linked_incidents": linked_incidents,
+                "linked_comments": linked_comments,
+                "avg_similarity": avg_similarity,
+                "avg_nps": avg_nps,
+                "semantic_cohesion": semantic_cohesion,
+            }
+        )
+
+    catalog = pd.DataFrame(cluster_rows)
+    if catalog.empty:
+        return _empty_broken_journey_df(), pd.DataFrame()
+
+    catalog = catalog.sort_values(
+        ["linked_pairs", "semantic_cohesion", "avg_similarity", "journey_label"],
+        ascending=[False, False, False, True],
+    ).reset_index(drop=True)
+    seen: dict[str, int] = {}
+    journey_ids: list[str] = []
+    for idx, row in catalog.iterrows():
+        base = _slug(row.get("journey_label"))
+        seen[base] = seen.get(base, 0) + 1
+        suffix = f"-{seen[base]:02d}" if seen[base] > 1 else ""
+        journey_ids.append(f"broken-journey-{idx + 1:02d}-{base}{suffix}")
+    catalog["journey_id"] = journey_ids
+    catalog = catalog[
+        [
+            "journey_cluster",
+            "journey_id",
+            "journey_label",
+            "touchpoint",
+            "palanca",
+            "subpalanca",
+            "helix_source_service_n2",
+            "journey_keywords",
+            "journey_route",
+            "journey_expected_evidence",
+            "journey_cx_readout",
+            "journey_impact_label",
+            "journey_confidence_label",
+            "linked_pairs",
+            "linked_incidents",
+            "linked_comments",
+            "avg_similarity",
+            "avg_nps",
+            "semantic_cohesion",
+        ]
+    ].copy()
+
+    journey_links = enriched.merge(
+        catalog, on="journey_cluster", how="left", suffixes=("", "_journey")
+    )
+    return catalog[BROKEN_JOURNEY_COLUMNS].copy(), journey_links
+
+
+def build_broken_journey_topic_map(journey_links_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if journey_links_df is None or journey_links_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "source_nps_topic",
+                "journey_id",
+                "journey_label",
+                "touchpoint",
+                "palanca",
+                "subpalanca",
+            ]
+        )
+
+    df = journey_links_df.copy()
+    df["source_nps_topic"] = df.get("source_nps_topic", "").astype(str).str.strip()
+    df["journey_label"] = df.get("journey_label", "").astype(str).str.strip()
+    df = df[
+        df["source_nps_topic"].ne("")
+        & df["journey_label"].ne("")
+        & df.get("journey_id", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .str.strip()
+        .ne("")
+    ].copy()
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "source_nps_topic",
+                "journey_id",
+                "journey_label",
+                "touchpoint",
+                "palanca",
+                "subpalanca",
+            ]
+        )
+
+    grouped = (
+        df.groupby(
+            [
+                "source_nps_topic",
+                "journey_id",
+                "journey_label",
+                "touchpoint",
+                "palanca",
+                "subpalanca",
+            ],
+            dropna=False,
+            observed=True,
+        )
+        .agg(
+            linked_pairs=("incident_id", "count"),
+            avg_similarity=("similarity", "mean"),
+        )
+        .reset_index()
+        .sort_values(
+            ["source_nps_topic", "linked_pairs", "avg_similarity", "journey_label"],
+            ascending=[True, False, False, True],
+        )
+        .drop_duplicates(["source_nps_topic"])
+    )
+    return grouped[
+        ["source_nps_topic", "journey_id", "journey_label", "touchpoint", "palanca", "subpalanca"]
+    ].reset_index(drop=True)
+
+
+def remap_links_to_journeys(
+    links_df: Optional[pd.DataFrame], journey_links_df: Optional[pd.DataFrame]
+) -> pd.DataFrame:
+    if links_df is None or links_df.empty or journey_links_df is None or journey_links_df.empty:
+        return pd.DataFrame(columns=list((links_df.columns if links_df is not None else [])))
+
+    journey_map = journey_links_df[
+        [
+            "incident_id",
+            "nps_id",
+            "journey_id",
+            "journey_label",
+            "touchpoint",
+            "palanca",
+            "subpalanca",
+        ]
+    ].drop_duplicates(["incident_id", "nps_id"])
+    out = links_df.copy().merge(journey_map, on=["incident_id", "nps_id"], how="inner")
+    if out.empty:
+        return out
+    out["source_nps_topic"] = out.get("nps_topic", "").astype(str).str.strip()
+    out["nps_topic"] = out["journey_label"].astype(str).str.strip()
+    return out
+
+
+def remap_topic_timeseries_to_journeys(
+    by_topic_df: Optional[pd.DataFrame], journey_topic_map: Optional[pd.DataFrame]
+) -> pd.DataFrame:
+    if by_topic_df is None or by_topic_df.empty:
+        return pd.DataFrame(columns=list((by_topic_df.columns if by_topic_df is not None else [])))
+    if journey_topic_map is None or journey_topic_map.empty:
+        return pd.DataFrame(columns=list(by_topic_df.columns))
+
+    df = by_topic_df.copy()
+    mapping = journey_topic_map.copy()
+    df["nps_topic"] = df.get("nps_topic", "").astype(str).str.strip()
+    mapping["source_nps_topic"] = mapping["source_nps_topic"].astype(str).str.strip()
+    merged = df.merge(mapping, left_on="nps_topic", right_on="source_nps_topic", how="inner")
+    if merged.empty:
+        return pd.DataFrame(columns=list(by_topic_df.columns))
+
+    merged["journey_label"] = merged["journey_label"].astype(str).str.strip()
+    merged["responses"] = pd.to_numeric(merged.get("responses"), errors="coerce").fillna(0.0)
+    merged["focus_count"] = pd.to_numeric(merged.get("focus_count"), errors="coerce").fillna(0.0)
+    merged["incidents"] = pd.to_numeric(merged.get("incidents"), errors="coerce").fillna(0.0)
+    merged["nps_mean"] = pd.to_numeric(merged.get("nps_mean"), errors="coerce")
+    merged["nps_weighted_sum"] = merged["nps_mean"].fillna(0.0) * merged["responses"]
+
+    time_col = "week" if "week" in merged.columns else ("date" if "date" in merged.columns else "")
+    if not time_col:
+        return pd.DataFrame(columns=list(by_topic_df.columns))
+
+    grouped = (
+        merged.groupby([time_col, "journey_label"], dropna=False, observed=True)
+        .agg(
+            responses=("responses", "sum"),
+            focus_count=("focus_count", "sum"),
+            incidents=("incidents", "sum"),
+            nps_weighted_sum=("nps_weighted_sum", "sum"),
+        )
+        .reset_index()
+    )
+    grouped["nps_mean"] = grouped["nps_weighted_sum"] / grouped["responses"].replace({0: np.nan})
+    grouped["focus_rate"] = grouped["focus_count"] / grouped["responses"].replace({0: np.nan})
+    grouped["nps_topic"] = grouped["journey_label"].astype(str)
+    keep_cols = [
+        time_col,
+        "nps_topic",
+        "responses",
+        "focus_count",
+        "nps_mean",
+        "focus_rate",
+        "incidents",
+    ]
+    return grouped[keep_cols].sort_values([time_col, "nps_topic"]).reset_index(drop=True)
+
+
+def build_incident_attribution_chains(
+    links_df: Optional[pd.DataFrame],
+    nps_focus_df: Optional[pd.DataFrame],
+    helix_df: Optional[pd.DataFrame],
+    *,
+    rationale_df: Optional[pd.DataFrame] = None,
+    top_k: int = 3,
+    max_incident_examples: int = 5,
+    max_comment_examples: int = 2,
+    min_links_per_topic: int = 1,
+    touchpoint_source: str = TOUCHPOINT_SOURCE_DOMAIN,
+    journey_catalog_df: Optional[pd.DataFrame] = None,
+    journey_links_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Return presentable evidence chains backed by exact Helix↔VoC links."""
+
+    if links_df is None or links_df.empty:
+        return _empty_chain_df()
+
+    enriched = _prepare_enriched_links(
+        links_df,
+        nps_focus_df,
+        helix_df,
+        touchpoint_source=touchpoint_source,
+    )
+    if enriched.empty:
+        return _empty_chain_df()
+    is_broken_mode = (
+        str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+        == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+    )
+    is_executive_mode = (
         str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
         == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-    ):
+    )
+    if is_broken_mode:
+        local_links = journey_links_df.copy() if journey_links_df is not None else None
+        if local_links is None or local_links.empty:
+            _, local_links = build_broken_journey_catalog(links_df, nps_focus_df, helix_df)
+        if local_links is None or local_links.empty:
+            return _empty_chain_df()
+        journey_cols = [
+            "incident_id",
+            "nps_id",
+            "journey_id",
+            "journey_label",
+            "touchpoint",
+            "palanca",
+            "subpalanca",
+            "journey_route",
+            "journey_expected_evidence",
+            "journey_cx_readout",
+            "journey_impact_label",
+            "journey_confidence_label",
+        ]
+        journey_map = local_links[journey_cols].drop_duplicates(["incident_id", "nps_id"])
+        enriched = enriched.drop(
+            columns=[c for c in ["touchpoint"] if c in enriched.columns]
+        ).merge(
+            journey_map,
+            on=["incident_id", "nps_id"],
+            how="inner",
+            suffixes=("", "_journey"),
+        )
+        if enriched.empty:
+            return _empty_chain_df()
+        enriched["journey_touchpoint"] = enriched["touchpoint"].astype(str).fillna("").str.strip()
+        enriched["journey_palanca"] = enriched["palanca"].astype(str).fillna("").str.strip()
+        enriched["journey_subpalanca"] = enriched["subpalanca"].astype(str).fillna("").str.strip()
+        enriched["journey_title"] = enriched["journey_label"].astype(str).fillna("").str.strip()
+        enriched["touchpoint"] = enriched["journey_touchpoint"]
+        enriched["palanca"] = enriched["journey_palanca"]
+        enriched["subpalanca"] = enriched["journey_subpalanca"]
+        enriched["nps_topic"] = enriched["journey_title"]
+    if is_executive_mode:
         journey_matches = [
             _executive_journey_match(
                 nps_topic=topic,
@@ -706,23 +1299,14 @@ def build_incident_attribution_chains(
         )
 
     rows: list[dict[str, object]] = []
-    group_col = (
-        "journey_id"
-        if str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
-        == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-        else "nps_topic"
-    )
+    group_col = "journey_id" if (is_executive_mode or is_broken_mode) else "nps_topic"
     for topic, grp in enriched.groupby(group_col, dropna=False, observed=True):
         grp = grp.copy()
         linked_pairs = int(len(grp[["incident_id", "nps_id"]].drop_duplicates()))
         if linked_pairs < int(min_links_per_topic):
             continue
 
-        is_executive_mode = (
-            str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
-            == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-        )
-        if is_executive_mode:
+        if is_executive_mode or is_broken_mode:
             topic_label = (
                 str(grp["journey_title"].mode(dropna=True).iloc[0])
                 if "journey_title" in grp.columns
@@ -922,6 +1506,13 @@ def build_incident_attribution_chains(
                 f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
                 f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
             )
+        elif is_broken_mode:
+            story = (
+                f"{journey_route}. {journey_cx_readout} "
+                f"Keywords del cluster: {journey_expected_evidence}. "
+                f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
+                f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
+            )
         else:
             story = (
                 f"{incident_sample_count} incidencias Helix "
@@ -965,8 +1556,8 @@ def build_incident_attribution_chains(
                 "owner_role": owner_role,
                 "eta_weeks": eta_weeks,
                 "presentation_mode": (
-                    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-                    if is_executive_mode
+                    str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
+                    if (is_executive_mode or is_broken_mode)
                     else str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
                 ),
                 "journey_route": journey_route,

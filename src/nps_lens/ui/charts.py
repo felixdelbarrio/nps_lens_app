@@ -574,6 +574,56 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     return apply_plotly_template(fig, theme)
 
 
+def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int = 10):
+    """Horizontal ranking of detected broken journeys."""
+
+    if journey_df.empty:
+        return None
+
+    tmp = journey_df.copy()
+    tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
+    tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
+    tmp["semantic_cohesion"] = pd.to_numeric(tmp.get("semantic_cohesion"), errors="coerce").fillna(
+        0.0
+    )
+    tmp = tmp.sort_values(
+        ["linked_pairs", "semantic_cohesion", "avg_nps"],
+        ascending=[False, False, True],
+    ).head(int(top_k))
+    if tmp.empty:
+        return None
+
+    th = chart_theme(theme)
+    import plotly.express as px
+
+    tmp = tmp.iloc[::-1].copy()
+    fig = px.bar(
+        tmp,
+        x="linked_pairs",
+        y="journey_label",
+        orientation="h",
+        color="avg_nps",
+        color_continuous_scale=_colorscale_rgy(theme),
+        text="linked_pairs",
+        hover_data={
+            "touchpoint": True,
+            "palanca": True,
+            "subpalanca": True,
+            "journey_keywords": True,
+            "semantic_cohesion": ":.2f",
+            "avg_nps": ":.2f",
+        },
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        xaxis_title="Links validados Helix↔VoC",
+        yaxis_title="Journey roto",
+        coloraxis_colorbar_title="NPS medio",
+    )
+    _layout_common(fig, th, height=max(320, 56 * len(tmp) + 80))
+    return apply_plotly_template(fig, theme)
+
+
 def chart_incident_priority_matrix(
     rationale_df: pd.DataFrame,
     theme: Theme,

@@ -31,6 +31,7 @@ from nps_lens.analytics.hotspot_metrics import (
 )
 from nps_lens.analytics.incident_attribution import (
     EXECUTIVE_JOURNEY_CATALOG,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
 from nps_lens.design.tokens import DesignTokens, executive_report_palette
@@ -570,30 +571,60 @@ def _add_impact_chain_slide(
 
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    is_broken_journey_mode = (
+        str(presentation_mode or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+    )
     _add_header(
         slide,
         title="Marco causal",
-        subtitle=f"Cómo se atribuye el impacto: incidencia -> touchpoint -> VoC -> NPS · periodo {period_label}",
+        subtitle=(
+            "Cómo se atribuye el impacto: incidencia -> embeddings / clustering -> journey roto -> VoC -> NPS "
+            f"· periodo {period_label}"
+            if is_broken_journey_mode
+            else f"Cómo se atribuye el impacto: incidencia -> touchpoint -> VoC -> NPS · periodo {period_label}"
+        ),
     )
-    steps = [
-        ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
-        (
-            "2. Touchpoint",
-            "Se identifica el momento del journey afectado, no solo el sistema técnico.",
-        ),
-        (
-            "3. Palanca / subpalanca",
-            "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app.",
-        ),
-        (
-            "4. Comentario VoC",
-            "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
-        ),
-        (
-            "5. NPS",
-            f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
-        ),
-    ]
+    steps = (
+        [
+            ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
+            (
+                "2. Embeddings + keywords",
+                "La app agrupa señales semánticas similares sin depender de una tabla manual de journeys.",
+            ),
+            (
+                "3. Journey roto",
+                "Cada cluster se convierte en un touchpoint roto defendible con su palanca dominante.",
+            ),
+            (
+                "4. Comentario VoC",
+                "Se muestran verbatims reales enlazados con el cluster, no frases genéricas ni heurísticas aisladas.",
+            ),
+            (
+                "5. NPS",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+            ),
+        ]
+        if is_broken_journey_mode
+        else [
+            ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
+            (
+                "2. Touchpoint",
+                "Se identifica el momento del journey afectado, no solo el sistema técnico.",
+            ),
+            (
+                "3. Palanca / subpalanca",
+                "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app.",
+            ),
+            (
+                "4. Comentario VoC",
+                "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
+            ),
+            (
+                "5. NPS",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+            ),
+        ]
+    )
     left = 0.80
     top = 1.70
     width = 11.7
@@ -923,7 +954,11 @@ def _add_chain_evidence_slide(
     header_title = (
         f"Journey {idx}: {topic}"
         if presentation_mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-        else f"Tema prioritario {idx}: {touchpoint}"
+        else (
+            f"Journey roto {idx}: {topic}"
+            if presentation_mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+            else f"Tema prioritario {idx}: {touchpoint}"
+        )
     )
     _add_header(
         slide,
