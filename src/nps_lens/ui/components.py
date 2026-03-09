@@ -143,6 +143,15 @@ def executive_banner(
     metric_hints: Optional[dict[str, str]] = None,
     metric_value_hints: Optional[dict[str, str]] = None,
 ) -> None:
+    def _help_html(text: str) -> str:
+        safe_text = escape(text)
+        return (
+            "<span class='nps-hero-metric-help' tabindex='0'>"
+            "?"
+            f"<span class='nps-hero-metric-help-tooltip'>{safe_text}</span>"
+            "</span>"
+        )
+
     metric_html = ""
     if metrics:
         metric_html = "".join(
@@ -151,10 +160,7 @@ def executive_banner(
                     "<div class='nps-hero-metric'>"
                     f"<span>{escape(str(label))}"
                     + (
-                        (
-                            f" <span class='nps-hero-metric-help' "
-                            f"title='{escape(metric_hints.get(str(label), ''))}'>?</span>"
-                        )
+                        f" {_help_html(metric_hints.get(str(label), ''))}"
                         if metric_hints and metric_hints.get(str(label))
                         else ""
                     )
@@ -163,10 +169,7 @@ def executive_banner(
                         "<div class='nps-hero-metric-value'>"
                         f"<strong>{escape(str(value))}</strong>"
                         + (
-                            (
-                                f" <span class='nps-hero-metric-help' "
-                                f"title='{escape(metric_value_hints.get(str(label), ''))}'>?</span>"
-                            )
+                            f"{_help_html(metric_value_hints.get(str(label), ''))}"
                             if metric_value_hints and metric_value_hints.get(str(label))
                             else ""
                         )

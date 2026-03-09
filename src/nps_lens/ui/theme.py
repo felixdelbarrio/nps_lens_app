@@ -311,7 +311,7 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   border: 1px solid var(--nps-border-softer);
 }}
 
-.nps-hero-metric span {{
+.nps-hero-metric > span {{
   display: block;
   font-size: 11px;
   letter-spacing: .08em;
@@ -324,27 +324,63 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   margin-left: 6px;
   border-radius: 999px;
   border: 1px solid var(--nps-border-soft);
   background: color-mix(in srgb, var(--nps-surface) 88%, var(--nps-accent) 12%);
   color: var(--nps-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   cursor: help;
+  position: relative;
+  flex: 0 0 auto;
+}}
+
+.nps-hero-metric-help-tooltip {{
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(320px, 60vw);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--nps-surface-2);
+  border: 1px solid var(--nps-border-soft);
+  box-shadow: var(--nps-shadow);
+  color: var(--nps-text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 20;
+}}
+
+.nps-hero-metric-help:hover .nps-hero-metric-help-tooltip,
+.nps-hero-metric-help:focus .nps-hero-metric-help-tooltip,
+.nps-hero-metric-help:focus-visible .nps-hero-metric-help-tooltip {{
+  opacity: 1;
+  transform: translateY(0);
 }}
 
 .nps-hero-metric strong {{
   font-size: 24px;
-  line-height: 1;
+  line-height: 1.05;
+  flex: 1 1 auto;
+  display: block;
 }}
 
 .nps-hero-metric-value {{
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
 }}
 
 .nps-impact-grid {{
