@@ -20,7 +20,7 @@ import plotly.io as pio
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
+from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
@@ -56,6 +56,7 @@ from nps_lens.reports.ppt_template import (
 )
 from nps_lens.ui.charts import (
     chart_cohort_heatmap,
+    chart_daily_kpis,
     chart_daily_mix_business,
     chart_daily_volume,
     chart_driver_bar,
@@ -1559,7 +1560,16 @@ def _new_slide(prs: Presentation, *, kind: str = "content") -> object:
         preferred,
         fallback_index=_layout_fallback_index(prs, kind),
     )
-    return prs.slides.add_slide(layout)
+    slide = prs.slides.add_slide(layout)
+    for shape in list(slide.shapes):
+        if not getattr(shape, "is_placeholder", False):
+            continue
+        try:
+            sp = shape._element
+            sp.getparent().remove(sp)
+        except Exception:
+            continue
+    return slide
 
 
 def _add_bg(slide: object, color: str) -> None:
@@ -1738,8 +1748,10 @@ def _add_stat_card(
     accent_bar.line.fill.background()
 
     tf = box.text_frame
+    tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
     tf.clear()
     p0 = tf.paragraphs[0]
+    p0.alignment = PP_ALIGN.CENTER
     r0 = p0.add_run()
     r0.text = label.upper()
     r0.font.name = BBVA_FONT_MEDIUM
@@ -1749,6 +1761,7 @@ def _add_stat_card(
 
     p1 = tf.add_paragraph()
     p1.space_before = Pt(10)
+    p1.alignment = PP_ALIGN.CENTER
     r1 = p1.add_run()
     r1.text = value
     r1.font.name = BBVA_FONT_DISPLAY
@@ -1760,6 +1773,7 @@ def _add_stat_card(
     if hint:
         p2 = tf.add_paragraph()
         p2.space_before = Pt(6)
+        p2.alignment = PP_ALIGN.CENTER
         r2 = p2.add_run()
         r2.text = hint
         r2.font.name = BBVA_FONT_BODY
@@ -4315,9 +4329,9 @@ def _add_cover_slide(
     _add_bullet_lines(
         slide,
         left=0.70,
-        top=2.10,
+        top=2.02,
         width=6.75,
-        height=3.42,
+        height=3.36,
         title="Mensaje clave del periodo",
         lines=summary_lines,
         accent=BBVA_COLORS["sky"],
@@ -4326,7 +4340,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=7.68,
-        top=2.10,
+        top=2.02,
         width=2.3,
         height=1.58,
         label="Comentarios",
@@ -4337,7 +4351,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=10.12,
-        top=2.10,
+        top=2.02,
         width=2.3,
         height=1.58,
         label="NPS medio",
@@ -4348,7 +4362,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=7.68,
-        top=3.82,
+        top=3.74,
         width=2.3,
         height=1.58,
         label="% detractores",
@@ -4359,7 +4373,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=10.12,
-        top=3.82,
+        top=3.74,
         width=2.3,
         height=1.58,
         label="% promotores",
@@ -4377,8 +4391,8 @@ def _add_overview_slide(
     period_label: str,
     period_end: date,
     overview: dict[str, object],
-    daily_mix: pd.DataFrame,
-    overall_daily: pd.DataFrame,
+    selected_nps_df: Optional[pd.DataFrame],
+    period_days: int,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4397,7 +4411,11 @@ def _add_overview_slide(
     )
     _figure_in_panel(
         slide,
-        figure=_nps_evolution_fig(daily_mix, overall_daily),
+        figure=chart_daily_kpis(
+            selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame(),
+            get_theme("light"),
+            days=max(int(period_days), 1),
+        ),
         left=0.82,
         top=1.84,
         width=8.68,
@@ -4716,6 +4734,10 @@ def _add_opportunity_slide(
         subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
     opp_chart_df = opportunities_df.copy()
+    if not opp_chart_df.empty and "dimension" in opp_chart_df.columns:
+        palanca_df = opp_chart_df[opp_chart_df["dimension"].astype(str) == "Palanca"].copy()
+        if not palanca_df.empty:
+            opp_chart_df = palanca_df
     if not opp_chart_df.empty and "label" not in opp_chart_df.columns:
         opp_chart_df["label"] = opp_chart_df.apply(
             lambda row: f"{row.get('dimension')}={row.get('value')}",
@@ -4738,7 +4760,7 @@ def _add_opportunity_slide(
         height=3.62,
         empty_note="No se identificaron oportunidades robustas con el umbral actual.",
     )
-    lines = explain_opportunities(opportunities_df, max_items=5)
+    lines = explain_opportunities(opp_chart_df, max_items=5)
     _add_bullet_lines(
         slide,
         left=0.66,
@@ -4800,23 +4822,33 @@ def _add_causal_timeline_slide(
         height=4.92,
         empty_note="No hay cobertura diaria suficiente para el timeline causal.",
     )
-    _add_bullet_lines(
+    _panel(
         slide,
         left=9.02,
         top=1.48,
         width=3.66,
         height=5.42,
         title="Cómo leerlo",
-        lines=[
-            "Las incidencias degradan momentos críticos del journey, lo que genera experiencias negativas que se reflejan en los comentarios y finalmente en el NPS.",
-        ],
-        accent=BBVA_COLORS["red"],
-        body_font_size_pt=13.0,
+        border=BBVA_COLORS["red"],
     )
+    text_box = slide.shapes.add_textbox(Inches(9.22), Inches(2.02), Inches(3.26), Inches(1.05))
+    text_tf = text_box.text_frame
+    _configure_text_frame(text_tf)
+    text_tf.clear()
+    text_p = text_tf.paragraphs[0]
+    text_p.alignment = PP_ALIGN.LEFT
+    text_r = text_p.add_run()
+    text_r.text = (
+        "Las incidencias degradan momentos críticos del journey, lo que genera experiencias "
+        "negativas que se reflejan en los comentarios y finalmente en el NPS."
+    )
+    text_r.font.name = BBVA_FONT_BODY
+    text_r.font.size = Pt(13)
+    text_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
     _add_stat_card(
         slide,
         left=9.18,
-        top=3.18,
+        top=3.28,
         width=1.60,
         height=1.00,
         label="Incidencias del periodo",
@@ -4826,7 +4858,7 @@ def _add_causal_timeline_slide(
     _add_stat_card(
         slide,
         left=10.92,
-        top=3.18,
+        top=3.28,
         width=1.60,
         height=1.00,
         label="% detractores medio",
@@ -4836,8 +4868,8 @@ def _add_causal_timeline_slide(
     _add_stat_card(
         slide,
         left=9.18,
-        top=4.36,
-        width=1.02,
+        top=4.52,
+        width=1.06,
         height=1.00,
         label="NPS en riesgo",
         value=f"{nps_points_at_risk:.2f} pts",
@@ -4845,9 +4877,9 @@ def _add_causal_timeline_slide(
     )
     _add_stat_card(
         slide,
-        left=10.34,
-        top=4.36,
-        width=1.02,
+        left=10.36,
+        top=4.52,
+        width=1.06,
         height=1.00,
         label="NPS recuperable",
         value=f"{nps_points_recoverable:.2f} pts",
@@ -4855,9 +4887,9 @@ def _add_causal_timeline_slide(
     )
     _add_stat_card(
         slide,
-        left=11.50,
-        top=4.36,
-        width=1.02,
+        left=11.54,
+        top=4.52,
+        width=1.06,
         height=1.00,
         label="Concentración top-3",
         value=f"{top3_incident_share*100.0:.1f}%",
@@ -5310,8 +5342,8 @@ def generate_business_review_ppt(
         period_label=period_label,
         period_end=period_end,
         overview=overview,
-        daily_mix=daily_mix,
-        overall_daily=daily_signals,
+        selected_nps_df=selected_nps_df,
+        period_days=(pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1,
     )
     _add_deep_dive_slide(prs, period_label=period_label, text_topics_df=text_topics_df)
     _add_topic_timing_slide(
