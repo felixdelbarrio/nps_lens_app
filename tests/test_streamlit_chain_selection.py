@@ -91,4 +91,3 @@ def test_select_chain_rows_ignores_duplicate_selected_keys() -> None:
     out = streamlit_app._select_chain_rows(annotated, selected_keys)
 
     assert out["chain_key"].tolist() == annotated["chain_key"].tolist()
-

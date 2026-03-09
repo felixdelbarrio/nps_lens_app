@@ -822,7 +822,9 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
             "linked_pairs": _safe_int_label(row.get("linked_pairs", 0)),
             "linked_incidents": _safe_int_label(row.get("linked_incidents", 0)),
             "linked_comments": _safe_int_label(row.get("linked_comments", 0)),
-            "incident_ids": _chain_record_ids(row.get("incident_records"), field_name="incident_id"),
+            "incident_ids": _chain_record_ids(
+                row.get("incident_records"), field_name="incident_id"
+            ),
             "comment_ids": _chain_record_ids(row.get("comment_records"), field_name="comment_id"),
         }
         base_keys.append(
