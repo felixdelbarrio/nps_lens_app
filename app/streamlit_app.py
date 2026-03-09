@@ -3,14 +3,12 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
-from html import escape
 import json
-import os
 import re
 import shutil
-import subprocess
 import sys
 from dataclasses import asdict
+from html import escape
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
@@ -33,14 +31,11 @@ from nps_lens.analytics.hotspot_metrics import (
     summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_attribution import (
-    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
-    TOUCHPOINT_SOURCE_DOMAIN,
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     TOUCHPOINT_MODE_BANNER_LABELS,
-    TOUCHPOINT_MODE_CONTEXT_LABELS,
     TOUCHPOINT_MODE_MENU_LABELS,
     TOUCHPOINT_MODE_OPTIONS,
     TOUCHPOINT_MODE_SUMMARIES,
+    TOUCHPOINT_SOURCE_DOMAIN,
     build_incident_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
@@ -100,7 +95,7 @@ from nps_lens.ui.charts import (
     chart_nps_trend,
     chart_topic_bars,
 )
-from nps_lens.ui.components import card, executive_banner, impact_chain, kpi, pills, section
+from nps_lens.ui.components import executive_banner, impact_chain, kpi, pills, section
 from nps_lens.ui.narratives import (
     build_executive_story,
     build_incident_ppt_story,
@@ -307,7 +302,13 @@ LLM_RESPONSE_TEMPLATE = {
             "cause": "Causa raiz concreta",
             "why": "Mecanismo causal o hipotesis respaldada por evidencia.",
             "evidence": {
-                "quant": [{"metric": "Nombre de la metrica", "value": "12.4%", "context": "Periodo analizado"}],
+                "quant": [
+                    {
+                        "metric": "Nombre de la metrica",
+                        "value": "12.4%",
+                        "context": "Periodo analizado",
+                    }
+                ],
                 "qual": ["Verbatim literal del pack sin PII"],
             },
             "assumptions": [],
@@ -1362,7 +1363,9 @@ def _quant_evidence_list(value: Any) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for item in raw_items:
         if isinstance(item, dict):
-            metric = str(item.get("metric") or item.get("metrica") or item.get("name") or "").strip()
+            metric = str(
+                item.get("metric") or item.get("metrica") or item.get("name") or ""
+            ).strip()
             val = str(item.get("value") or item.get("valor") or "").strip()
             ctx = str(item.get("context") or item.get("contexto") or "").strip()
             if metric or val or ctx:
@@ -1391,7 +1394,11 @@ def _root_cause_list(value: Any) -> list[dict[str, Any]]:
     for item in raw_items:
         if isinstance(item, dict):
             cause = str(
-                item.get("cause") or item.get("causa") or item.get("title") or item.get("name") or ""
+                item.get("cause")
+                or item.get("causa")
+                or item.get("title")
+                or item.get("name")
+                or ""
             ).strip()
             why = str(item.get("why") or item.get("porque") or item.get("rationale") or "").strip()
             evidence = _evidence_object(item.get("evidence") or item.get("evidencias"))
@@ -1486,7 +1493,10 @@ def _normalize_insight_candidate(
         root_causes = _root_cause_list(candidate.get("analysis") or candidate.get("summary"))
 
     title = str(
-        candidate.get("title") or candidate.get("titulo") or candidate.get("headline") or fallback_title
+        candidate.get("title")
+        or candidate.get("titulo")
+        or candidate.get("headline")
+        or fallback_title
     ).strip()
     executive_summary = str(
         candidate.get("executive_summary")
@@ -1502,7 +1512,9 @@ def _normalize_insight_candidate(
 
     return {
         "schema_version": "1.0",
-        "insight_id": _slugify_text(candidate.get("insight_id") or fallback_id, default=fallback_id),
+        "insight_id": _slugify_text(
+            candidate.get("insight_id") or fallback_id, default=fallback_id
+        ),
         "title": title or fallback_title,
         "executive_summary": executive_summary,
         "confidence": candidate.get("confidence", 0.0),
@@ -1736,7 +1748,9 @@ def _render_daily_llm_assistant(
 
     comments: list[str] = []
     if "Comment" in slice_df.columns:
-        comments = [c.strip() for c in slice_df["Comment"].dropna().astype(str).head(10).tolist() if c]
+        comments = [
+            c.strip() for c in slice_df["Comment"].dropna().astype(str).head(10).tolist() if c
+        ]
     tops: list[str] = []
     if "Palanca" in slice_df.columns:
         vc = slice_df["Palanca"].astype(str).value_counts().head(5)
@@ -1744,8 +1758,7 @@ def _render_daily_llm_assistant(
 
     rr = active["row"]
     prompt = (
-        _llm_prompt_header(active["title"])
-        + "EVIDENCIA DEL CASO\n"
+        _llm_prompt_header(active["title"]) + "EVIDENCIA DEL CASO\n"
         f"- service_origin: {service_origin}\n"
         f"- service_origin_n1: {service_origin_n1}\n"
         f"- service_origin_n2: {service_origin_n2 or '-'}\n"
@@ -1886,11 +1899,15 @@ def _render_opportunity_llm_assistant(
             selection_label=label,
             default_tags={
                 "geo": service_origin or "unknown",
-                "channel": str(selected.value)
-                if str(selected.dimension) == "Canal"
-                else (service_origin_n1 or "unknown"),
+                "channel": (
+                    str(selected.value)
+                    if str(selected.dimension) == "Canal"
+                    else (service_origin_n1 or "unknown")
+                ),
                 "lever": str(selected.value) if str(selected.dimension) == "Palanca" else "unknown",
-                "sublever": str(selected.value) if str(selected.dimension) == "Subpalanca" else "unknown",
+                "sublever": (
+                    str(selected.value) if str(selected.dimension) == "Subpalanca" else "unknown"
+                ),
                 "period": "unknown",
                 "route_signature": "unknown",
             },
@@ -2918,7 +2935,9 @@ def _llm_save_workflow_response(
     )
     ok, errs, normalized = validate_insight_response(normalized_candidate)
     if not ok or normalized is None:
-        st.error("El JSON se pudo reparar/parsear, pero aún no cumple el esquema: " + "; ".join(errs))
+        st.error(
+            "El JSON se pudo reparar/parsear, pero aún no cumple el esquema: " + "; ".join(errs)
+        )
         with st.expander("JSON normalizado que la app intentó validar", expanded=False):
             st.code(
                 json.dumps(normalized_candidate, ensure_ascii=False, indent=2),

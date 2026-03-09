@@ -17,15 +17,26 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
             {
                 "cause": "Causa concreta",
                 "why": "Mecanismo",
-                "evidence": ["dato1"],
+                "evidence": {
+                    "quant": [{"metric": "NPS", "value": "8.5", "context": "Periodo actual"}],
+                    "qual": ["dato1"],
+                },
                 "assumptions": ["as1"],
                 "actions": [{"action": "Fix", "owner": "Tech", "eta": "2w"}],
+                "tests_or_checks": ["Validar muestra"],
             }
         ],
         "assumptions": ["a"],
         "risks": ["r"],
         "next_questions": ["q"],
-        "tags": ["t"],
+        "tags": {
+            "geo": "mx",
+            "channel": "mobile",
+            "lever": "unknown",
+            "sublever": "unknown",
+            "period": "2026w10",
+            "route_signature": "test",
+        },
     }
 
     ok, errs, norm = validate_insight_response(obj)
@@ -34,6 +45,8 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
     assert norm is not None
     assert norm["confidence"] == 1.0
     assert norm["severity"] == 5
+    assert norm["root_causes"][0]["evidence"]["qual"] == ["dato1"]
+    assert norm["tags"]["channel"] == "mobile"
 
 
 def test_validate_insight_response_missing_fields():
