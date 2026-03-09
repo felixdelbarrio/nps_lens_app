@@ -104,3 +104,13 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
 
     monkeypatch.delenv("NPS_LENS_UI_SERVICE_ORIGIN", raising=False)
     persist_ui_prefs(None, {"service_origin": "No-op"})
+
+
+def test_settings_parsers_ignore_invalid_and_blank_mapping_entries(monkeypatch):
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "MX")
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"": ["skip"], "MX": "Senda,Helix"}')
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", '{"unexpected": "object"}')
+
+    s = Settings.from_env()
+    assert s.service_origin_n1_map == {"MX": ["Senda", "Helix"]}
+    assert s.service_origin_n2_values == ['{"unexpected": "object"}']

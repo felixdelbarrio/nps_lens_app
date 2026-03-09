@@ -990,14 +990,17 @@ def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
     payload = _sample_payload()
     row = payload["attribution"].iloc[0]
 
-    assert executive_ppt._chain_temporal_fig(
-        row,
-        focus_name="detractores",
-        by_topic_daily=pd.DataFrame(),
-        lag_days_by_topic=payload["lag_days"],
-        lag_weeks_by_topic=None,
-        changepoints_by_topic=None,
-    ) is None
+    assert (
+        executive_ppt._chain_temporal_fig(
+            row,
+            focus_name="detractores",
+            by_topic_daily=pd.DataFrame(),
+            lag_days_by_topic=payload["lag_days"],
+            lag_weeks_by_topic=None,
+            changepoints_by_topic=None,
+        )
+        is None
+    )
 
     temporal_fig = executive_ppt._chain_temporal_fig(
         row,
@@ -1108,6 +1111,21 @@ def test_add_story_card_caps_bullets_by_height() -> None:
     texts = [p.text for p in shape.text_frame.paragraphs]
     assert texts[0] == "Resumen"
     assert len([t for t in texts[1:] if t]) == 3
+
+
+def test_executive_ppt_helper_guards_return_empty_or_none_cleanly() -> None:
+    assert executive_ppt._chain_portfolio_fig(pd.DataFrame(), highlight_topic="x") is None
+    assert executive_ppt._nps_evolution_fig(pd.DataFrame(), pd.DataFrame()) is None
+    assert executive_ppt._delta_bars_fig(pd.DataFrame(), metric="delta_nps", x_title="x") is None
+    assert executive_ppt._group_heatmap_fig(pd.DataFrame(), dimension="Palanca") is None
+    assert executive_ppt._gap_vs_overall_fig(pd.DataFrame()) is None
+    assert executive_ppt._opportunity_bubble_fig(pd.DataFrame()) is None
+    assert executive_ppt._hotspot_matches_by_day(
+        None,
+        None,
+        month_start=pd.Timestamp("2026-02-01"),
+        month_end=pd.Timestamp("2026-02-28"),
+    ).empty
 
 
 def test_top_hotspots_fig_uses_top3_colors_and_inbar_labels() -> None:
