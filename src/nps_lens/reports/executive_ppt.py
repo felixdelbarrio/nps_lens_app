@@ -57,6 +57,7 @@ from nps_lens.ui.charts import (
     chart_cohort_heatmap,
     chart_daily_mix_business,
     chart_daily_volume,
+    chart_driver_bar,
     chart_driver_delta,
     chart_topic_bars,
 )
@@ -718,6 +719,23 @@ def _gap_vs_overall_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> p
     stats = stats[stats["n"] > 0].copy()
     stats = stats.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(int(top_k))
     return stats[["value", "n", "nps", "gap_vs_overall"]]
+
+
+def _dimension_gap_table(
+    current_nps_df: pd.DataFrame,
+    *,
+    dimension: str,
+    top_k: int = 10,
+) -> pd.DataFrame:
+    cols = ["value", "n", "nps", "gap_vs_overall"]
+    if current_nps_df is None or current_nps_df.empty or dimension not in current_nps_df.columns:
+        return pd.DataFrame(columns=cols)
+    stats = pd.DataFrame([s.__dict__ for s in driver_table(current_nps_df, dimension=dimension)])
+    if stats.empty:
+        return pd.DataFrame(columns=cols)
+    stats = stats[stats["n"] > 0].copy()
+    stats = stats.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(int(top_k))
+    return stats[cols]
 
 
 def _opportunities_table(current_nps_df: pd.DataFrame) -> pd.DataFrame:
@@ -1749,6 +1767,31 @@ def _add_bullet_lines(
     accent: str = "",
     body_font_size_pt: float = 11.0,
 ) -> None:
+    if not str(title or "").strip():
+        box = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+            Inches(left),
+            Inches(top),
+            Inches(width),
+            Inches(height),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+        box.line.color.rgb = _rgb(accent or BBVA_COLORS["line"])
+        tf = box.text_frame
+        _configure_text_frame(tf)
+        tf.clear()
+        for idx, line in enumerate(lines[:6]):
+            p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+            p.space_before = Pt(4 if idx else 0)
+            p.level = 0
+            r = p.add_run()
+            r.text = _clip(line, 145 if width <= 4.0 else 170)
+            r.font.name = BBVA_FONT_BODY
+            r.font.size = Pt(body_font_size_pt)
+            r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        return
+
     panel = _panel(
         slide,
         left=left,
@@ -4585,7 +4628,8 @@ def _add_gap_slide(
     prs: Presentation,
     *,
     period_label: str,
-    gap_df: pd.DataFrame,
+    palanca_gap_df: pd.DataFrame,
+    subpalanca_gap_df: pd.DataFrame,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4594,44 +4638,55 @@ def _add_gap_slide(
         title="5. Casos más alejados del promedio",
         subtitle=f"Top de casos con peor diferencia frente al NPS medio general · {period_label}",
     )
-    _panel(
-        slide,
-        left=0.66,
-        top=1.48,
-        width=7.2,
-        height=5.42,
-        title="Diferencia frente al NPS medio",
-    )
+    _panel(slide, left=0.66, top=1.48, width=8.15, height=2.38, title="Palanca")
     _figure_in_panel(
         slide,
-        figure=_gap_vs_overall_fig(gap_df),
+        figure=chart_driver_bar(palanca_gap_df, get_theme("light"), top_k=10),
         left=0.82,
-        top=1.86,
-        width=6.88,
-        height=4.92,
-        empty_note="No hay suficiente señal para el ranking de brechas.",
+        top=1.80,
+        width=7.82,
+        height=1.86,
+        empty_note="No hay suficiente señal para el ranking de brechas por palanca.",
     )
-    rows = [
-        [
-            str(row.value),
-            f"{int(row.n)}",
-            _fmt_num_or_nd(row.nps),
-            f"{float(row.gap_vs_overall):+.1f}",
-        ]
-        for row in gap_df.head(10).itertuples()
+
+    palanca_lines = [
+        f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
+        for idx, row in enumerate(palanca_gap_df.head(5).itertuples())
     ]
-    _add_compact_table(
+    _add_bullet_lines(
         slide,
-        left=8.06,
+        left=8.98,
         top=1.48,
-        width=4.62,
-        title="Detalle de casos",
-        headers=["Caso", "n", "NPS", "Gap"],
-        rows=rows,
-        row_height=0.30,
-        col_width_ratios=[2.7, 0.6, 0.75, 0.75],
-        clip_lengths=[42, 6, 8, 8],
-        font_size_pt=9.1,
+        width=3.70,
+        height=2.38,
+        title="",
+        lines=palanca_lines,
+        body_font_size_pt=11.0,
+    )
+
+    _panel(slide, left=0.66, top=4.02, width=8.15, height=2.88, title="Subpalanca")
+    _figure_in_panel(
+        slide,
+        figure=chart_driver_bar(subpalanca_gap_df, get_theme("light"), top_k=10),
+        left=0.82,
+        top=4.34,
+        width=7.82,
+        height=2.26,
+        empty_note="No hay suficiente señal para el ranking de brechas por subpalanca.",
+    )
+    subpalanca_lines = [
+        f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
+        for idx, row in enumerate(subpalanca_gap_df.head(5).itertuples())
+    ]
+    _add_bullet_lines(
+        slide,
+        left=8.98,
+        top=4.02,
+        width=3.70,
+        height=2.88,
+        title="",
+        lines=subpalanca_lines,
+        body_font_size_pt=11.0,
     )
 
 
@@ -5154,6 +5209,8 @@ def generate_business_review_ppt(
     palanca_matrix = _group_matrix(selected_raw, dimension="Palanca")
     subpalanca_matrix = _group_matrix(selected_raw, dimension="Subpalanca")
     gap_df = _gap_vs_overall_table(selected_raw, top_k=10)
+    palanca_gap_df = _dimension_gap_table(selected_raw, dimension="Palanca", top_k=10)
+    subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
     opportunities_df = _opportunities_table(selected_raw)
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
 
@@ -5204,7 +5261,12 @@ def generate_business_review_ppt(
         period_label=period_label,
         selected_nps_df=selected_nps_df,
     )
-    _add_gap_slide(prs, period_label=period_label, gap_df=gap_df)
+    _add_gap_slide(
+        prs,
+        period_label=period_label,
+        palanca_gap_df=palanca_gap_df,
+        subpalanca_gap_df=subpalanca_gap_df,
+    )
     _add_opportunity_slide(prs, period_label=period_label, opportunities_df=opportunities_df)
     _add_causal_timeline_slide(
         prs,
