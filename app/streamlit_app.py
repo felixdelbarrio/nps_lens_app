@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+from html import escape
 import json
 import os
 import re
@@ -91,7 +92,6 @@ from nps_lens.ui.charts import (
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
-    chart_daily_score_semaforo,
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
@@ -240,6 +240,30 @@ LLM_BUSINESS_QUESTIONS = [
     "Disena un playbook semanal: top 3 palancas, owner por rol, ETA y KPI leading/lagging para recuperar NPS termico.",
     "Genera guion de 8 slides: mensaje principal, señal temporal, causas, impacto, prioridades, plan 30-60-90, gobierno KPI y decisiones de comité.",
 ]
+
+LLM_RESPONSE_TEMPLATE = {
+    "schema_version": "1.0",
+    "insight_id": "bbva-be-unknown-route-001",
+    "title": "Titulo corto del insight",
+    "executive_summary": "Resumen ejecutivo de 2-4 frases, basado solo en la evidencia.",
+    "confidence": 0.75,
+    "severity": 3,
+    "journey_route": "unknown",
+    "segments_most_affected": [],
+    "root_causes": [
+        {
+            "cause": "Causa raiz concreta",
+            "why": "Mecanismo causal o hipotesis respaldada por evidencia.",
+            "evidence": [],
+            "assumptions": [],
+            "actions": [{"action": "Accion concreta", "owner": "Rol owner", "eta": "2w"}],
+        }
+    ],
+    "assumptions": [],
+    "risks": [],
+    "next_questions": [],
+    "tags": [],
+}
 
 
 DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento")
@@ -409,7 +433,6 @@ CHART_COLUMNS = {
     "daily_mix": ("Fecha", "NPS"),
     "daily_volume": ("Fecha", "NPS"),
     "daily_kpis": ("Fecha", "NPS"),
-    "daily_semaforo": ("Fecha", "NPS"),
     "daily_llm": (
         "Fecha",
         "NPS",
@@ -1698,16 +1721,12 @@ def page_executive(
     service_origin_n1: str,
     service_origin_n2: str,
     *,
+    text_df: Optional[pd.DataFrame] = None,
     history_df: Optional[pd.DataFrame] = None,
     pop_year: str = "",
     pop_month: str = "",
     min_n: int = 200,
 ) -> None:
-    section(
-        "Resumen del periodo",
-        "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
-    )
-
     s = executive_summary(df)
     context_days = context_period_days(df, minimum=14)
 
@@ -1722,228 +1741,194 @@ def page_executive(
     with c4:
         kpi("Promotores (>=9)", f"{s.promoter_rate*100:.1f}%", hint="Lealtad")
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    tab_w, tab_text, tab_when, tab_how, tab_kpis = st.tabs(
+        [
+            "Media semanal",
+            "Que dicen los clientes",
+            "Cuando lo dicen",
+            "Como lo dicen",
+            "NPS clasico vs % evol. detractores",
+        ]
+    )
+    with tab_w:
+        fig = chart_nps_trend(df, theme, freq="W")
+        if fig is None:
+            st.info("No hay suficientes datos para construir una tendencia.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        card("Tendencia", "<div class='nps-muted'>Evolución del NPS medio.</div>", flat=True)
-        tab_w, tab_dm, tab_adv = st.tabs(
-            ["Semanal (media)", "Diaria (mix negocio)", "Detalle (semaforo)"]
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        report_md = _build_business_report_md(
+            df,
+            compare_df=history_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            min_n=min_n,
         )
-        with tab_w:
-            fig = chart_nps_trend(df, theme, freq="W")
-            if fig is None:
-                st.info("No hay suficientes datos para construir una tendencia.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
-
-        with tab_dm:
-            st.markdown(
-                "<div class='nps-card nps-muted'>"
-                "<b>Cómo leerlo:</b> más <b>rojo</b> (detractores) empeora NPS; "
-                "más <b>verde</b> (promotores) lo mejora. "
-                "Usa la barra de <b>volumen</b> (n) para no sobre-interpretar días con pocas respuestas."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            # Load only the requested window with predicate pushdown (partitioned parquet).
-            end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
-            end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
-            if end_day is not None:
-                start_day = end_day - pd.Timedelta(days=int(context_days) - 1)
-                df_win = load_context_df(
-                    store_dir,
-                    service_origin,
-                    service_origin_n1,
-                    service_origin_n2,
-                    st.session_state.get("_nps_group_choice", POP_ALL),
-                    CHART_COLUMNS["daily_mix"],
-                    date_start=str(start_day.date()),
-                    date_end=str(end_day.date()),
-                )
-            else:
-                df_win = df
-
-            fig_mix = chart_daily_mix_business(df_win, theme, days=int(context_days))
-            if fig_mix is None:
-                st.info("No hay suficientes datos para construir la vista diaria.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                fig_vol = chart_daily_volume(df_win, theme, days=int(context_days))
-                if fig_vol is not None:
-                    st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                st.caption(
-                    "Lectura diaria: NPS clásico (promotores - detractores) y % detractores."
-                )
-                fig_k = chart_daily_kpis(df_win, theme, days=int(context_days))
-                if fig_k is not None:
-                    st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
-
-                with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
-                    st.caption(
-                        "Selecciona un día extremo (muy bueno o muy malo) y genera un prompt "
-                        "para pedirle al GPT una explicación con hipótesis y acciones."
-                    )
-
-                    df_llm_win = load_context_df(
-                        store_dir,
-                        service_origin,
-                        service_origin_n1,
-                        service_origin_n2,
-                        st.session_state.get("_nps_group_choice", POP_ALL),
-                        CHART_COLUMNS["daily_llm"],
-                        date_start=str(start_day.date()) if end_day is not None else None,
-                        date_end=str(end_day.date()) if end_day is not None else None,
-                    )
-                    metrics = _daily_metrics(df_llm_win, days=int(context_days))
-                    if metrics.empty:
-                        st.info("No hay suficientes datos diarios para construir el asistente.")
-                    else:
-                        worst = metrics.sort_values(
-                            ["det_pct", "n"], ascending=[False, False]
-                        ).head(3)
-                        best = metrics.sort_values(
-                            ["classic_nps", "n"], ascending=[False, False]
-                        ).head(3)
-                        picks = []
-                        for _, r in worst.iterrows():
-                            picks.append(
-                                (
-                                    f"🔻 Peor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
-                                    r["day"],
-                                )
-                            )
-                        for _, r in best.iterrows():
-                            picks.append(
-                                (
-                                    f"🔺 Mejor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
-                                    r["day"],
-                                )
-                            )
-                        labels = [p[0] for p in picks]
-                        label = st.selectbox("Día a explicar", labels)
-                        chosen_day = picks[labels.index(label)][1]
-
-                        day_df = df.copy()
-                        day_df["_day"] = day_df["Fecha"].dt.floor("D")
-                        slice_df = day_df.loc[day_df["_day"] == chosen_day].copy()
-
-                        # Small business facts for the chosen day
-                        row = metrics.loc[metrics["day"] == chosen_day].head(1)
-                        if row.empty:
-                            st.warning("No se pudo preparar el día seleccionado.")
-                        else:
-                            rr = row.iloc[0]
-                            # Verbative samples
-                            verb = []
-                            if "Comment" in slice_df.columns:
-                                verb = slice_df["Comment"].dropna().astype(str).head(12).tolist()
-
-                            # Top levers that day (if available)
-                            tops = []
-                            if "Palanca" in slice_df.columns:
-                                vc = slice_df["Palanca"].astype(str).value_counts().head(5)
-                                tops = [f"{idx} (n={int(v)})" for idx, v in vc.items()]
-
-                            prompt = (
-                                "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
-                                "1) Resumen del periodo (max 10 líneas)\n"
-                                "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
-                                f"Contexto:\n- service_origin: {service_origin}\n- service_origin_n1: {service_origin_n1}\n- service_origin_n2: {service_origin_n2 or '-'}\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
-                                "Hechos del día (métricas):\n"
-                                f"- n: {int(rr['n'])}\n"
-                                f"- % detractores (0-6): {rr['det_pct']:.1f}%\n"
-                                f"- % pasivos (7-8): {rr['pas_pct']:.1f}%\n"
-                                f"- % promotores (9-10): {rr['pro_pct']:.1f}%\n"
-                                f"- NPS clásico (promotores - detractores): {rr['classic_nps']:.1f} pp\n\n"
-                                "Hipótesis: explica qué pudo provocar este comportamiento (muy malo o muy bueno), "
-                                "separa fricción digital vs operativa vs pricing si aplica, y propone acciones.\n\n"
-                                "Palancas más presentes ese día (por volumen):\n"
-                                + "\n".join([f"- {t}" for t in tops])
-                                + "\n\n"
-                                "Verbatims (muestras):\n"
-                                + "\n".join([f"- {v}" for v in verb])
-                                + "\n\n"
-                                "Requisitos de respuesta:\n"
-                                "- No inventes métricas.\n"
-                                "- Si falta evidencia, dilo en riesgos y baja confidence.\n"
-                                "- Incluye 3-5 acciones concretas con owner/eta.\n"
-                            )
-
-                            _clipboard_copy_widget(prompt, label="Copiar prompt del día")
-                            st.download_button(
-                                "Descargar prompt (md)",
-                                data=prompt,
-                                file_name=f"prompt_dia_{chosen_day.strftime('%Y%m%d')}.md",
-                            )
-
-        with tab_adv:
-            st.markdown(
-                "<div class='nps-card nps-muted'>"
-                "<b>Detalle semáforo:</b> cada columna es un día. "
-                "Rojo=0-6, Amarillo=7-8, Verde=9-10. "
-                "Más intenso = más respuestas ese día en esa categoría."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            # Same windowed load for the semáforo detail.
-            if end_day is not None:
-                df_sema = load_context_df(
-                    store_dir,
-                    service_origin,
-                    service_origin_n1,
-                    service_origin_n2,
-                    st.session_state.get("_nps_group_choice", POP_ALL),
-                    CHART_COLUMNS["daily_semaforo"],
-                    date_start=str(start_day.date()),
-                    date_end=str(end_day.date()),
-                )
-            else:
-                df_sema = df
-
-            fig2 = chart_daily_score_semaforo(df_sema, theme, days=int(context_days))
-            if fig2 is None:
-                st.info("No hay suficientes datos para construir la escalera.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
-
-    with col_b:
-        det = s.top_detractor_driver
-        pro = s.top_promoter_driver
-        card(
-            "Lectura rápida",
+        st.markdown(
             (
-                "<ul style='margin:0; padding-left: 18px;'>"
-                f"<li><b>Zona de fricción</b>: {det}</li>"
-                f"<li><b>Zona fuerte</b>: {pro}</li>"
-                "</ul>"
-                "<div class='nps-muted' style='margin-top:10px;'>"
-                "Siguiente paso: abre <b>Dónde el NPS se separa del global</b> u <b>Oportunidades priorizadas</b> para priorizar por impacto."
+                "<div class='nps-card'>"
+                "<div class='nps-muted' "
+                "style='font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;'>"
+                "Informe de negocio"
+                "</div>"
+                "<div style='height:10px'></div>"
+                "<pre style='margin:0; white-space:pre-wrap; word-break:break-word; "
+                "font-family:var(--nps-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); "
+                "font-size:13px; line-height:1.5;'>"
+                f"{escape(report_md)}"
+                "</pre>"
                 "</div>"
             ),
+            unsafe_allow_html=True,
         )
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    section("Informe de negocio", "Copy/paste listo para comité / daily.")
+    with tab_text:
+        if text_df is None or text_df.empty:
+            st.info("No hay texto suficiente para esta vista.")
+        else:
+            page_text(text_df, theme, embedded=True)
 
-    report_md = _build_business_report_md(
-        df,
-        compare_df=history_df,
-        pop_year=pop_year,
-        pop_month=pop_month,
-        min_n=min_n,
-    )
-    st.text_area("Informe de negocio", report_md, height=260)
-    st.download_button(
-        "Descargar informe .md",
-        data=report_md.encode("utf-8"),
-        file_name="informe_negocio_nps_lens.md",
-        mime="text/markdown",
-    )
+    # Load only the requested window with predicate pushdown (partitioned parquet).
+    end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
+    end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
+    if end_day is not None:
+        start_day = end_day - pd.Timedelta(days=int(context_days) - 1)
+        df_win = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            st.session_state.get("_nps_group_choice", POP_ALL),
+            CHART_COLUMNS["daily_mix"],
+            date_start=str(start_day.date()),
+            date_end=str(end_day.date()),
+        )
+    else:
+        start_day = None
+        df_win = df
+
+    with tab_when:
+        fig_vol = chart_daily_volume(df_win, theme, days=int(context_days))
+        if fig_vol is None:
+            st.info("No hay suficientes datos para construir la vista de volumen diario.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
+
+    with tab_how:
+        st.markdown(
+            "<div class='nps-card nps-muted'>"
+            "<b>Cómo leerlo:</b> más <b>rojo</b> (detractores) empeora NPS; "
+            "más <b>verde</b> (promotores) lo mejora. "
+            "Usa la barra de <b>volumen</b> (n) para no sobre-interpretar días con pocas respuestas."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        fig_mix = chart_daily_mix_business(df_win, theme, days=int(context_days))
+        if fig_mix is None:
+            st.info("No hay suficientes datos para construir la vista diaria.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
+
+    with tab_kpis:
+        st.caption("Lectura diaria: NPS clásico (promotores - detractores) y % detractores.")
+        fig_k = chart_daily_kpis(df_win, theme, days=int(context_days))
+        if fig_k is None:
+            st.info("No hay suficientes datos para construir la vista diaria de NPS clásico.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
+
+        with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
+            st.caption(
+                "Selecciona un día extremo (muy bueno o muy malo) y genera un prompt "
+                "para pedirle al GPT una explicación con hipótesis y acciones."
+            )
+
+            df_llm_win = load_context_df(
+                store_dir,
+                service_origin,
+                service_origin_n1,
+                service_origin_n2,
+                st.session_state.get("_nps_group_choice", POP_ALL),
+                CHART_COLUMNS["daily_llm"],
+                date_start=str(start_day.date()) if start_day is not None else None,
+                date_end=str(end_day.date()) if end_day is not None else None,
+            )
+            metrics = _daily_metrics(df_llm_win, days=int(context_days))
+            if metrics.empty:
+                st.info("No hay suficientes datos diarios para construir el asistente.")
+            else:
+                worst = metrics.sort_values(["det_pct", "n"], ascending=[False, False]).head(3)
+                best = metrics.sort_values(["classic_nps", "n"], ascending=[False, False]).head(3)
+                picks = []
+                for _, r in worst.iterrows():
+                    picks.append(
+                        (
+                            f"🔻 Peor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
+                            r["day"],
+                        )
+                    )
+                for _, r in best.iterrows():
+                    picks.append(
+                        (
+                            f"🔺 Mejor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
+                            r["day"],
+                        )
+                    )
+                labels = [p[0] for p in picks]
+                label = st.selectbox("Día a explicar", labels)
+                chosen_day = picks[labels.index(label)][1]
+
+                day_df = df.copy()
+                day_df["_day"] = day_df["Fecha"].dt.floor("D")
+                slice_df = day_df.loc[day_df["_day"] == chosen_day].copy()
+
+                row = metrics.loc[metrics["day"] == chosen_day].head(1)
+                if row.empty:
+                    st.warning("No se pudo preparar el día seleccionado.")
+                else:
+                    rr = row.iloc[0]
+                    verb = []
+                    if "Comment" in slice_df.columns:
+                        verb = slice_df["Comment"].dropna().astype(str).head(12).tolist()
+
+                    tops = []
+                    if "Palanca" in slice_df.columns:
+                        vc = slice_df["Palanca"].astype(str).value_counts().head(5)
+                        tops = [f"{idx} (n={int(v)})" for idx, v in vc.items()]
+
+                    prompt = (
+                        "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
+                        "1) Resumen del periodo (max 10 líneas)\n"
+                        "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
+                        f"Contexto:\n- service_origin: {service_origin}\n- service_origin_n1: {service_origin_n1}\n- service_origin_n2: {service_origin_n2 or '-'}\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
+                        "Hechos del día (métricas):\n"
+                        f"- n: {int(rr['n'])}\n"
+                        f"- % detractores (0-6): {rr['det_pct']:.1f}%\n"
+                        f"- % pasivos (7-8): {rr['pas_pct']:.1f}%\n"
+                        f"- % promotores (9-10): {rr['pro_pct']:.1f}%\n"
+                        f"- NPS clásico (promotores - detractores): {rr['classic_nps']:.1f} pp\n\n"
+                        "Hipótesis: explica qué pudo provocar este comportamiento (muy malo o muy bueno), "
+                        "separa fricción digital vs operativa vs pricing si aplica, y propone acciones.\n\n"
+                        "Palancas más presentes ese día (por volumen):\n"
+                        + "\n".join([f"- {t}" for t in tops])
+                        + "\n\n"
+                        "Verbatims (muestras):\n"
+                        + "\n".join([f"- {v}" for v in verb])
+                        + "\n\n"
+                        "Requisitos de respuesta:\n"
+                        "- No inventes métricas.\n"
+                        "- Si falta evidencia, dilo en riesgos y baja confidence.\n"
+                        "- Incluye 3-5 acciones concretas con owner/eta.\n"
+                    )
+
+                    _clipboard_copy_widget(prompt, label="Copiar prompt del día")
+                    st.download_button(
+                        "Descargar prompt (md)",
+                        data=prompt,
+                        file_name=f"prompt_dia_{chosen_day.strftime('%Y%m%d')}.md",
+                    )
 
     section("✨ Insights LLM integrados")
     _render_llm_insights(theme)
@@ -2117,14 +2102,15 @@ def page_prioritized_opportunities(df: pd.DataFrame, theme: Theme, min_n: int) -
         st.dataframe(opp_df.head(25), use_container_width=True)
 
 
-def page_text(df: pd.DataFrame, theme: Theme) -> None:
+def page_text(df: pd.DataFrame, theme: Theme, *, embedded: bool = False) -> None:
     comment_col = "Comment" if "Comment" in df.columns else "Comentario"
     texts = df[comment_col].astype(str)
 
     topics = extract_topics(texts, n_clusters=10)
     topics_df = pd.DataFrame([t.__dict__ for t in topics])
 
-    section("Temas con más volumen", "Clusters de texto para entender fricciones.")
+    if not embedded:
+        section("Temas con más volumen", "Clusters de texto para entender fricciones.")
     fig = chart_topic_bars(topics_df, theme)
     if fig is None:
         st.info("No hay texto suficiente para extraer temas.")
@@ -4452,14 +4438,13 @@ def main() -> None:
             month_filter=pop_month_filter,
         )
 
-        s1, s2, s3, s4, s5, s6 = st.tabs(
+        s1, s2, s3, s4, s5 = st.tabs(
             [
                 "Sumario del Periodo",
                 "Cambios respeto al historico",
                 "Comparativas cruzadas del periodo",
                 "Dónde el NPS se separa del global",
                 "Oportunidades priorizadas",
-                "Que dicen los clientes",
             ]
         )
         with s1:
@@ -4470,6 +4455,7 @@ def main() -> None:
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
+                text_df=df_texto,
                 history_df=df_resumen_hist,
                 pop_year=pop_year,
                 pop_month=pop_month,
@@ -4489,8 +4475,6 @@ def main() -> None:
             page_driver_gaps(df_prior, theme)
         with s5:
             page_prioritized_opportunities(df_prior, theme, min_n=min_n)
-        with s6:
-            page_text(df_texto, theme)
 
     with t_helix:
         df_resumen = load_context_df(

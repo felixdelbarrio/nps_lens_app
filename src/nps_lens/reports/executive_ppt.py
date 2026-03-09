@@ -341,11 +341,6 @@ def _add_period_summary_slide(
 ) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
-    _add_header(
-        slide,
-        title="Resumen del periodo",
-        subtitle="Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
-    )
 
     month_txt = _month_label_es(period_end)
     p_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
@@ -357,7 +352,7 @@ def _add_period_summary_slide(
     ]
 
     left0 = 0.65
-    top = 1.55
+    top = 0.85
     card_w = 3.18
     gap = 0.35
     card_h = 3.05

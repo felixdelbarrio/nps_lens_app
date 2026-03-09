@@ -275,109 +275,14 @@ def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> N
     step = max(1, int(len(days) / max_ticks))
     tick_days = days[::step]
     ticktext = [f"{_weekday_letter_es(d)}<br>{d.strftime('%b %d')}" for d in tick_days]
-    fig.update_xaxes(tickmode="array", tickvals=tick_days, ticktext=ticktext)
-
-
-def chart_daily_score_semaforo(
-    df: pd.DataFrame,
-    theme: Theme,
-    *,
-    days: int = 60,
-    date_col: str = "Fecha",
-    score_col: str = "NPS",
-):
-    """Daily distribution as a traffic-light heatmap (business-first).
-
-    Instead of an 11-row ladder, we aggregate scores into the standard NPS groups:
-    - Detractores (0-6)
-    - Pasivos (7-8)
-    - Promotores (9-10)
-
-    This makes it immediately clear what is "bad" vs "good" while retaining
-    intensity (count) per day.
-    """
-
-    if date_col not in df.columns or score_col not in df.columns:
-        return None
-
-    tmp = df.dropna(subset=[date_col, score_col]).copy()
-    if tmp.empty:
-        return None
-
-    day = pd.to_datetime(tmp[date_col], errors="coerce")
-    # Strip timezone to avoid window comparisons dropping all rows.
-    with contextlib.suppress(Exception):
-        day = day.dt.tz_localize(None)
-    tmp["day"] = day.dt.floor("D")
-    tmp = tmp.dropna(subset=["day"]).copy()
-    if tmp.empty:
-        return None
-
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return None
-
-    scores = pd.to_numeric(tmp[score_col], errors="coerce")
-    tmp["score"] = scores.clip(lower=0, upper=10)
-    tmp = tmp.dropna(subset=["score"]).copy()
-    if tmp.empty:
-        return None
-
-    def _grp(v: float) -> str:
-        if v <= 6:
-            return "Detractores (0-6)"
-        if v <= 8:
-            return "Pasivos (7-8)"
-        return "Promotores (9-10)"
-
-    tmp["grp"] = tmp["score"].map(_grp)
-    agg = tmp.groupby(["day", "grp"], as_index=False).agg(n=("score", "size"))
-    pivot = agg.pivot(index="grp", columns="day", values="n").fillna(0.0)
-
-    order = ["Detractores (0-6)", "Pasivos (7-8)", "Promotores (9-10)"]
-    for g in order:
-        if g not in pivot.index:
-            pivot.loc[g] = 0.0
-    pivot = pivot.loc[order]
-
-    th = chart_theme(theme)
-    detr_c, pas_c, pro_c = _status_colors(theme)
-
-    import plotly.graph_objects as go
-
-    days_list = [pd.Timestamp(d) for d in pivot.columns.to_list()]
-    zmax = float(pivot.to_numpy().max()) if pivot.to_numpy().size else 1.0
-
-    fig = go.Figure()
-    for grp, color in [
-        ("Detractores (0-6)", detr_c),
-        ("Pasivos (7-8)", pas_c),
-        ("Promotores (9-10)", pro_c),
-    ]:
-        z = [pivot.loc[grp].to_list()]
-        fig.add_trace(
-            go.Heatmap(
-                x=days_list,
-                y=[grp],
-                z=z,
-                zmin=0,
-                zmax=zmax,
-                colorscale=[
-                    [0.0, _shade(color, toward=th.paper_bg, t=0.85)],
-                    [0.35, _shade(color, toward=th.paper_bg, t=0.55)],
-                    [1.0, color],
-                ],
-                showscale=False,
-                hovertemplate=("Día=%{x|%Y-%m-%d}<br>" + grp + "=%{z}<extra></extra>"),
-            )
-        )
-
-    fig.update_layout(xaxis_title="Día", yaxis_title="", showlegend=False)
-    _layout_common(fig, th, height=220)
-    _apply_day_ticks(fig, days_list, max_ticks=28)
-    return apply_plotly_template(fig, theme)
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=tick_days,
+        ticktext=ticktext,
+        tickangle=0,
+        ticklabelposition="outside",
+        automargin=True,
+    )
 
 
 def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -466,7 +371,7 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     fig.update_yaxes(title_text="% detractores", secondary_y=True)
 
     _layout_common(fig, th, height=300)
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     return apply_plotly_template(fig, theme)
 
 
@@ -573,7 +478,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
         legend_title_text="Cómo leerlo",
     )
     _layout_common(fig, th, height=320)
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     fig.update_yaxes(range=[0, 100])
     return apply_plotly_template(fig, theme)
 
