@@ -16,9 +16,12 @@
 
 - Copia `.env.example` → `.env`
 - Variables típicas:
-  - `NPS_LENS_SERVICE_ORIGIN_VALUES=...`
+  - `NPS_LENS_SERVICE_ORIGIN_BUUG=...`
   - `NPS_LENS_SERVICE_ORIGIN_N1=...` (map JSON)
-  - paths de data/cache/knowledge
+  - `NPS_LENS_SERVICE_ORIGIN_N2=...` (opcional)
+  - `NPS_LENS_UI_MIN_N_CROSS_COMPARISONS=...`
+  - paths de data/knowledge
+  - `NPS_LENS_PPT_TEMPLATE=...` (opcional)
 
 **Nota**: cualquier dato sensible debe vivir en `.env` o en secrets de CI, nunca en git.
 
@@ -51,4 +54,3 @@
 ## 5) Logs
 - La ingesta devuelve `issues` (INFO/WARN/ERROR) visibles en UI.
 - Evita imprimir datasets completos.
-

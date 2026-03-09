@@ -31,7 +31,7 @@ help: ## Show this help
 	@awk 'BEGIN {FS=":.*##"} /^[a-zA-Z0-9_\-]+:.*##/ {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 
-setup: check-python ## Create virtualenv and install all dependencies (incl. Excel engine + dev tools)
+setup: check-python ## Create virtualenv and install runtime + dev dependencies
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install -U pip
 	$(PIP) install -e ".[dev]"
@@ -82,7 +82,7 @@ build: ensure-venv ## Build native executable with PyInstaller (macOS/Linux). Wi
 		exit 1; \
 	fi
 
-build-linux: ensure-venv
+build-linux: ensure-venv ## Build Linux binary with PyInstaller (+ Pillow icon tooling)
 	$(PIP) install -e ".[build]"
 	$(MAKE) prepare-icons
 	@out=build/pyinstaller/linux; \
@@ -103,7 +103,7 @@ build-linux: ensure-venv
 		$(DESKTOP_SCRIPT)
 	@echo "Built: build/pyinstaller/linux/dist/nps-lens"
 
-build-mac: ensure-venv
+build-mac: ensure-venv ## Build macOS binary with optional signing/notarization inputs
 	$(PIP) install -e ".[build]"
 	$(MAKE) prepare-icons
 	@out=build/pyinstaller/macos; \
@@ -137,7 +137,7 @@ build-mac: ensure-venv
 	$(VENV)/bin/pyinstaller "$$@"
 	@echo "Built: build/pyinstaller/macos/dist/nps-lens"
 
-prepare-icons: ensure-venv ## Generate .png/.ico/.icns from assets/logo.png
+prepare-icons: ensure-venv ## Generate .png/.ico/.icns from assets/logo.png (requires Pillow via .[build])
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 
 ci: check-python ensure-venv lint format-check typecheck test ## Run full CI checks locally

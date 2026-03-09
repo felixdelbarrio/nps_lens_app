@@ -47,6 +47,7 @@ from nps_lens.analytics.incident_attribution import (
     remap_links_to_journeys,
     remap_topic_timeseries_to_journeys,
     save_executive_journey_catalog,
+    summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
@@ -2262,6 +2263,7 @@ def render_sidebar(  # noqa: PLR0915
 ) -> tuple[
     Optional[Path],
     int,
+    int,
     float,
     int,
     str,
@@ -2321,6 +2323,7 @@ def render_sidebar(  # noqa: PLR0915
     defaults = {
         "theme_mode": settings.default_theme_mode,
         "min_n": settings.default_min_n_opportunities,
+        "min_n_cross_comparisons": settings.default_min_n_cross_comparisons,
         "min_similarity": settings.default_min_similarity,
         "max_days_apart": settings.default_max_days_apart,
     }
@@ -2587,22 +2590,6 @@ def render_sidebar(  # noqa: PLR0915
             ["light", "dark"],
             index=0 if str(defaults["theme_mode"]) == "light" else 1,
         )
-        current_touchpoint_mode = str(
-            st.session_state.get("_touchpoint_source", settings.default_touchpoint_source)
-        )
-        if current_touchpoint_mode not in TOUCHPOINT_MODE_MENU_LABELS:
-            current_touchpoint_mode = TOUCHPOINT_SOURCE_DOMAIN
-        touchpoint_source = st.radio(
-            "Método causal para el análisis",
-            options=list(TOUCHPOINT_MODE_OPTIONS),
-            index=list(TOUCHPOINT_MODE_OPTIONS).index(current_touchpoint_mode),
-            format_func=lambda key: TOUCHPOINT_MODE_MENU_LABELS.get(str(key), str(key)),
-            help=(
-                "Elige si el racional se construye por Palanca, Subpalanca, "
-                "Helix Source Service N2 o con una lectura ejecutiva de journeys."
-            ),
-        )
-        st.session_state["_touchpoint_source"] = touchpoint_source
 
         st.divider()
         st.header("Ajustes de la muestra")
@@ -2631,10 +2618,35 @@ def render_sidebar(  # noqa: PLR0915
             step=50,
             help="Exige un tamaño mínimo de muestra por dimensión para que una oportunidad entre en el ranking. A mayor N mínimo, más robustez y menos sensibilidad; a menor N mínimo, más cobertura pero también más ruido.",
         )
+        min_n_cross_comparisons = st.slider(
+            "Mínimo N para comparativas cruzadas",
+            10,
+            200,
+            int(defaults["min_n_cross_comparisons"]),
+            step=10,
+            help="Se aplica de forma transversal a cohortes y comparativas entre cortes para evitar sobreinterpretar celdas o segmentos con poca muestra.",
+        )
+        current_touchpoint_mode = str(
+            st.session_state.get("_touchpoint_source", settings.default_touchpoint_source)
+        )
+        if current_touchpoint_mode not in TOUCHPOINT_MODE_MENU_LABELS:
+            current_touchpoint_mode = TOUCHPOINT_SOURCE_DOMAIN
+        touchpoint_source = st.radio(
+            "Método causal para el análisis",
+            options=list(TOUCHPOINT_MODE_OPTIONS),
+            index=list(TOUCHPOINT_MODE_OPTIONS).index(current_touchpoint_mode),
+            format_func=lambda key: TOUCHPOINT_MODE_MENU_LABELS.get(str(key), str(key)),
+            help=(
+                "Elige si el racional se construye por Palanca, Subpalanca, "
+                "Helix Source Service N2 o con una lectura ejecutiva de journeys."
+            ),
+        )
+        st.session_state["_touchpoint_source"] = touchpoint_source
 
         st.session_state["_controls"] = {
             "theme_mode": theme_mode,
             "min_n": int(min_n),
+            "min_n_cross_comparisons": int(min_n_cross_comparisons),
             "min_similarity": float(min_similarity),
             "max_days_apart": int(max_days_apart),
         }
@@ -2651,6 +2663,7 @@ def render_sidebar(  # noqa: PLR0915
             "min_similarity": f"{float(min_similarity):.2f}",
             "max_days_apart": int(max_days_apart),
             "min_n_opportunities": int(min_n),
+            "min_n_cross_comparisons": int(min_n_cross_comparisons),
         }
         prefs_fp = json.dumps(prefs_payload, sort_keys=True, ensure_ascii=True)
         if st.session_state.get("_ui_prefs_fp") != prefs_fp:
@@ -2694,6 +2707,7 @@ def render_sidebar(  # noqa: PLR0915
     return (
         data_path,
         int(st.session_state.get("_controls", defaults)["min_n"]),
+        int(st.session_state.get("_controls", defaults)["min_n_cross_comparisons"]),
         float(st.session_state.get("_controls", defaults)["min_similarity"]),
         int(st.session_state.get("_controls", defaults)["max_days_apart"]),
         service_origin,
@@ -2870,6 +2884,7 @@ def page_comparisons(
     history_df: Optional[pd.DataFrame] = None,
     pop_year: str = "",
     pop_month: str = "",
+    min_n: int = 30,
 ) -> None:
     source_df = history_df if history_df is not None and not history_df.empty else df
     month_label = selected_month_label(pop_year=pop_year, pop_month=pop_month, df=source_df)
@@ -2904,11 +2919,11 @@ def page_comparisons(
 
     section("Qué palancas cambian", "Deltas vs periodo base por dimensión seleccionada.")
     dim = st.selectbox("Dimensión", ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"], index=0)
-    delta = driver_delta_table(cur_df, base_df, dimension=dim, min_n=50)
+    delta = driver_delta_table(cur_df, base_df, dimension=dim, min_n=int(min_n))
     if delta.empty:
         st.info(
             "No hay suficiente N para comparar en esa dimensión. "
-            "Prueba ampliar la ventana o bajar min_n."
+            "Prueba ampliar la ventana o bajar el mínimo N para comparativas cruzadas."
         )
         return
     fig = chart_driver_delta(delta, theme)
@@ -2918,7 +2933,7 @@ def page_comparisons(
         st.dataframe(delta.head(30), use_container_width=True)
 
 
-def page_cohorts(df: pd.DataFrame, theme: Theme) -> None:
+def page_cohorts(df: pd.DataFrame, theme: Theme, *, min_n: int = 30) -> None:
     st.subheader("Cohortes: dónde duele según segmento / usuario")
     st.markdown(
         "<div class='nps-card nps-muted'>"
@@ -2940,13 +2955,12 @@ def page_cohorts(df: pd.DataFrame, theme: Theme) -> None:
     col_label = st.selectbox("Columnas", ["Canal", "Usuario", "NPSGROUP"], index=0)
     row_dim = dim_alias[row_label]
     col_dim = dim_alias[col_label]
-    min_n = st.slider("Mínimo N por celda", 10, 200, 30, step=10)
 
-    fig = chart_cohort_heatmap(df, theme, row_dim=row_dim, col_dim=col_dim, min_n=min_n)
+    fig = chart_cohort_heatmap(df, theme, row_dim=row_dim, col_dim=col_dim, min_n=int(min_n))
     if fig is None:
         st.info(
             "No hay suficiente información para construir la matriz "
-            "(revisa columnas y N mínimo)."
+            "(revisa columnas y el mínimo N para comparativas cruzadas)."
         )
         return
     st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
@@ -4089,6 +4103,7 @@ def page_nps_helix_linking(
         executive_journey_catalog=executive_journey_catalog,
     )
     chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
+    chain_candidates_summary = summarize_attribution_chains(chain_candidates_df)
     selected_chain_keys = _sync_chain_selection_state(
         chain_candidates_df,
         key_prefix="nh_chain_candidates",
@@ -4099,54 +4114,16 @@ def page_nps_helix_linking(
         max_incident_examples=5,
         max_comment_examples=2,
     )
-    linked_topics_total = (
-        int(
-            links_mode_df.get("nps_topic", pd.Series(dtype=str))
-            .astype(str)
-            .str.strip()
-            .replace("", np.nan)
-            .dropna()
-            .nunique()
-        )
-        if links_mode_df is not None and not links_mode_df.empty
-        else 0
-    )
-    assigned_incidents_total = (
-        int(
-            assign_df.get("incident_id", pd.Series(dtype=str))
-            .astype(str)
-            .str.strip()
-            .replace("", np.nan)
-            .dropna()
-            .nunique()
-        )
-        if assign_df is not None and not assign_df.empty
-        else 0
-    )
-    linked_pairs_total = (
-        int(len(links_mode_df[["incident_id", "nps_id"]].drop_duplicates()))
-        if links_mode_df is not None
-        and not links_mode_df.empty
-        and {"incident_id", "nps_id"}.issubset(set(links_mode_df.columns))
-        else 0
-    )
-    linked_comments_total = (
-        int(
-            links_mode_df.get("nps_id", pd.Series(dtype=str))
-            .astype(str)
-            .str.strip()
-            .replace("", np.nan)
-            .dropna()
-            .nunique()
-        )
-        if links_mode_df is not None and not links_mode_df.empty
-        else 0
-    )
+    linked_topics_total = int(chain_candidates_summary["topics_total"])
+    assigned_incidents_total = int(chain_candidates_summary["linked_incidents_total"])
+    linked_pairs_total = int(chain_candidates_summary["linked_pairs_total"])
+    linked_comments_total = int(chain_candidates_summary["linked_comments_total"])
     ppt_story_md = (
         build_incident_ppt_story(
             rationale_summary,
             rationale_df,
             attribution_df=chain_df,
+            attribution_summary=chain_candidates_summary,
             focus_name=focus_name,
             top_k=6,
         )
@@ -4158,6 +4135,7 @@ def page_nps_helix_linking(
         rationale_summary,
         rationale_df,
         attribution_df=chain_df,
+        attribution_summary=chain_candidates_summary,
         touchpoint_source=touchpoint_source,
         service_origin=service_origin,
         service_origin_n1=service_origin_n1,
@@ -4420,7 +4398,7 @@ def page_nps_helix_linking(
                 [
                     "Solo cadena completa defendible",
                     f"{linked_topics_total} tópicos linkados",
-                    f"{len(chain_candidates_df)} cadenas causales",
+                    f"{int(chain_candidates_summary['chains_total'])} cadenas causales",
                 ]
             )
             st.markdown("#### Cadena activa")
@@ -4908,6 +4886,8 @@ def page_nps_helix_linking(
                     else ""
                 )
                 ppt_8slides_md_ppt = ppt_8slides_md
+                selected_nps_for_ppt = nps_slice.copy()
+                comparison_nps_for_ppt = nps_hist.copy() if not nps_hist.empty else nps_slice.copy()
                 ppt_start = start
                 ppt_end = end
                 lag_days_for_ppt = lag_days.copy()
@@ -4922,7 +4902,7 @@ def page_nps_helix_linking(
                     else pd.DataFrame(columns=["nps_topic", "changepoints"])
                 )
                 hotspot_focus_note = ""
-                helix_for_hot_terms = helix_hist if not helix_hist.empty else helix_slice
+                helix_for_hot_terms = helix_slice if not helix_slice.empty else helix_hist
                 incident_evidence_ppt = _build_incident_evidence_payload(
                     links_mode_df,
                     focus_df,
@@ -4941,9 +4921,6 @@ def page_nps_helix_linking(
                 )
 
                 if not nps_hist.empty and not helix_hist.empty:
-                    ppt_start = pd.to_datetime(nps_hist["Fecha"].min(), errors="coerce").date()
-                    ppt_end = pd.to_datetime(nps_hist["Fecha"].max(), errors="coerce").date()
-
                     nps_hist_work = nps_hist.copy()
                     nps_hist_work["NPS Group"] = nps_hist_work.get("NPS Group", "").astype(str)
                     score_hist = pd.to_numeric(nps_hist_work.get("NPS", np.nan), errors="coerce")
@@ -5046,6 +5023,7 @@ def page_nps_helix_linking(
                             executive_journey_catalog=executive_journey_catalog,
                         )
                         chain_hist_all = _annotate_chain_candidates(chain_hist_all)
+                        chain_hist_summary = summarize_attribution_chains(chain_hist_all)
                         chain_hist = _select_chain_rows(chain_hist_all, selected_chain_keys)
                         if chain_hist.empty and not chain_hist_all.empty:
                             chain_hist = chain_hist_all.head(min(3, len(chain_hist_all))).copy()
@@ -5057,6 +5035,7 @@ def page_nps_helix_linking(
                             rationale_summary_hist,
                             rationale_hist,
                             attribution_df=chain_hist,
+                            attribution_summary=chain_hist_summary,
                             focus_name=focus_name,
                             top_k=6,
                         )
@@ -5064,6 +5043,7 @@ def page_nps_helix_linking(
                             rationale_summary_hist,
                             rationale_hist,
                             attribution_df=chain_hist,
+                            attribution_summary=chain_hist_summary,
                             touchpoint_source=touchpoint_source,
                             service_origin=service_origin,
                             service_origin_n1=service_origin_n1,
@@ -5082,14 +5062,7 @@ def page_nps_helix_linking(
                             )
                             else pd.DataFrame()
                         )
-                        overall_weekly_ppt = od_hist if not od_hist.empty else ow_hist
-                        by_topic_daily_ppt = btd_hist_mode
-                        by_topic_weekly_ppt = btw_hist_mode
-                        ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
-                        rationale_df_ppt = rationale_hist
-                        rationale_summary_ppt = rationale_summary_hist
-                        chain_df_ppt = chain_hist
-                        ppt_story_md_ppt = ppt_story_md_hist
+                        comparison_nps_for_ppt = nps_hist_work.copy()
                         business_story_md_ppt = (
                             _build_business_report_md(
                                 nps_slice,
@@ -5101,28 +5074,25 @@ def page_nps_helix_linking(
                             if not nps_hist_work.empty and not nps_slice.empty
                             else ""
                         )
-                        ppt_8slides_md_ppt = ppt_8slides_md_hist
-                        lag_days_for_ppt = lag_days_hist
-                        lag_weeks_for_ppt = lag_hist
-                        changepoints_for_ppt = cp_hist
-                        incident_evidence_ppt = _build_incident_evidence_payload(
-                            links_hist_mode,
-                            focus_hist,
-                            helix_hist,
-                        )
-                        incident_evidence_ppt, hotspot_focus_note = _align_evidence_to_best_axis(
-                            nps_hist_work,
-                            helix_hist,
-                            incident_evidence_ppt,
-                        )
-                        incident_timeline_ppt = _build_incident_timeline_payload(
-                            links_hist_mode,
-                            focus_hist,
-                            helix_hist,
-                            incident_evidence_ppt,
-                        )
+                        if chain_df_ppt.empty and not chain_hist.empty:
+                            chain_df_ppt = chain_hist
+                            by_topic_daily_ppt = btd_hist_mode
+                            by_topic_weekly_ppt = btw_hist_mode
+                            lag_days_for_ppt = (
+                                lag_days_hist if not lag_days_hist.empty else lag_days_for_ppt
+                            )
+                            lag_weeks_for_ppt = (
+                                lag_hist if not lag_hist.empty else lag_weeks_for_ppt
+                            )
+                            changepoints_for_ppt = (
+                                cp_hist if not cp_hist.empty else changepoints_for_ppt
+                            )
+                        if rationale_df_ppt.empty and not rationale_hist.empty:
+                            rationale_df_ppt = rationale_hist
+                        if ranking_df_ppt.empty:
+                            ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
                         st.caption(
-                            f"La PPT usa histórico completo del contexto: {ppt_start} -> {ppt_end}."
+                            f"La PPT usa el periodo seleccionado ({ppt_start} -> {ppt_end}) y compara contra el histórico completo disponible."
                         )
 
                 hotspot_summary_ppt = summarize_hotspot_counts(
@@ -5168,12 +5138,15 @@ def page_nps_helix_linking(
                     template_name=str(template_mode),
                     corporate_fixed=True,
                     logo_path=_logo_path,
+                    selected_nps_df=selected_nps_for_ppt,
+                    comparison_nps_df=comparison_nps_for_ppt,
                     incident_evidence_df=incident_evidence_ppt,
                     changepoints_by_topic=changepoints_for_ppt,
                     incident_timeline_df=incident_timeline_ppt,
                     hotspot_focus_note=hotspot_focus_note,
                     touchpoint_source=touchpoint_source,
                     executive_journey_catalog=executive_journey_catalog,
+                    broken_journeys_df=broken_journeys_df,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
@@ -5271,6 +5244,7 @@ def main() -> None:
     (
         data_path,
         min_n,
+        min_n_cross_comparisons,
         min_similarity,
         max_days_apart,
         service_origin,
@@ -5420,9 +5394,10 @@ def main() -> None:
                 history_df=df_prior_hist,
                 pop_year=pop_year,
                 pop_month=pop_month,
+                min_n=min_n_cross_comparisons,
             )
         with s3:
-            page_cohorts(df_prior, theme)
+            page_cohorts(df_prior, theme, min_n=min_n_cross_comparisons)
         with s4:
             page_driver_gaps(df_prior, theme)
         with s5:

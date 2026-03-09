@@ -232,6 +232,53 @@ CHAIN_COLUMNS = [
     "journey_confidence_label",
 ]
 
+
+def summarize_attribution_chains(attribution_df: Optional[pd.DataFrame]) -> dict[str, int]:
+    """Centralized totals for the chain rows shown in app and PPT."""
+    empty = {
+        "chains_total": 0,
+        "topics_total": 0,
+        "linked_incidents_total": 0,
+        "linked_comments_total": 0,
+        "linked_pairs_total": 0,
+    }
+    if attribution_df is None or attribution_df.empty:
+        return empty
+
+    df = attribution_df.copy()
+
+    def _sum_metric(column: str, *, fallback_column: str = "") -> int:
+        if column in df.columns:
+            values = pd.to_numeric(df[column], errors="coerce")
+            if values.notna().any():
+                return int(values.fillna(0).clip(lower=0).sum())
+        if fallback_column and fallback_column in df.columns:
+            return int(
+                df[fallback_column]
+                .map(lambda value: len(value) if isinstance(value, list) else 0)
+                .fillna(0)
+                .sum()
+            )
+        return 0
+
+    topics = (
+        df.get("nps_topic", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .str.strip()
+        .replace("", np.nan)
+        .dropna()
+    )
+    return {
+        "chains_total": int(len(df)),
+        "topics_total": int(topics.nunique()),
+        "linked_incidents_total": _sum_metric(
+            "linked_incidents", fallback_column="incident_records"
+        ),
+        "linked_comments_total": _sum_metric("linked_comments", fallback_column="comment_records"),
+        "linked_pairs_total": _sum_metric("linked_pairs"),
+    }
+
+
 BROKEN_JOURNEY_COLUMNS = [
     "journey_id",
     "journey_label",

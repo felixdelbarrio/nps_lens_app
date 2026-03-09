@@ -3,6 +3,14 @@ from __future__ import annotations
 import pandas as pd
 
 from nps_lens.analytics.incident_rationale import (
+    _action_plan,
+    _clip01,
+    _focus_group_norm,
+    _norm_by_max,
+    _rank_lookup,
+    _risk_delta,
+    _safe_num,
+    _touchpoint_from_topic,
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
 )
@@ -67,3 +75,67 @@ def test_build_incident_nps_rationale_handles_empty_input() -> None:
     summary = summarize_incident_nps_rationale(out)
     assert summary.topics_analyzed == 0
     assert summary.nps_points_at_risk == 0.0
+
+
+def test_incident_rationale_helper_functions_cover_normalization_paths() -> None:
+    assert _clip01("bad") == 0.0
+    assert _clip01(1.4) == 1.0
+    assert _safe_num("bad", default=3.0) == 3.0
+    assert _safe_num("2.5") == 2.5
+    assert _focus_group_norm("PROMOTER") == "promoter"
+    assert _focus_group_norm("passive") == "passive"
+    assert _focus_group_norm("other") == "detractor"
+    assert _risk_delta(-0.2, "promoter") == 0.2
+    assert _risk_delta(-0.2, "detractor") == 0.0
+    assert _touchpoint_from_topic("Pagos > SPEI") == "Pagos"
+    assert _touchpoint_from_topic("") == "Journey sin etiquetar"
+
+    norm = _norm_by_max(pd.Series([0, 5, 10]))
+    assert norm.tolist() == [0.0, 0.5, 1.0]
+    assert _norm_by_max(pd.Series([0, 0])).tolist() == [0.0, 0.0]
+
+    assert _action_plan(0.8, 3.0, 0.7) == ("Fix estructural", "Producto + Tecnologia", 6)
+    assert _action_plan(0.5, 1.0, 0.2) == ("Quick win operativo", "Canal + Operaciones", 2)
+    assert _action_plan(0.2, 5.0, 0.2) == ("Instrumentacion + validacion", "VoC + Analitica", 3)
+
+    lookup = _rank_lookup(
+        pd.DataFrame(
+            {
+                "nps_topic": ["Pagos > SPEI"],
+                "score": [0.8],
+                "corr": [0.5],
+                "best_lag_weeks": [2],
+                "max_cp_stability": [0.6],
+                "incidents_lead_changepoint_share": [70],
+            }
+        )
+    )
+    assert lookup["Pagos > SPEI"]["lead_share"] == 70.0
+    assert _rank_lookup(pd.DataFrame()) == {}
+
+
+def test_build_incident_nps_rationale_handles_promoter_focus_and_sparse_topics() -> None:
+    weeks = pd.date_range("2026-01-05", periods=6, freq="W-MON")
+    by_topic = pd.DataFrame(
+        {
+            "week": list(weeks) * 2,
+            "nps_topic": ["Canales > Web"] * 6 + ["Ruido > Poco"] * 6,
+            "responses": [120] * 6 + [5] * 6,
+            "focus_rate": [0.60, 0.58, 0.57, 0.40, 0.39, 0.38] + [0.4] * 6,
+            "incidents": [1, 1, 2, 7, 8, 9] + [0, 0, 0, 0, 0, 0],
+            "nps_mean": [8.0, 8.1, 8.2, 6.4, 6.2, 6.1] + [7.0] * 6,
+        }
+    )
+
+    out = build_incident_nps_rationale(
+        by_topic,
+        focus_group="promoter",
+        rank_df=None,
+        min_topic_responses=50,
+        recovery_factor=0.5,
+    )
+
+    assert not out.empty
+    assert out.iloc[0]["nps_topic"] == "Canales > Web"
+    assert float(out.iloc[0]["nps_points_at_risk"]) > 0.0
+    assert out["nps_topic"].tolist() == ["Canales > Web"]
