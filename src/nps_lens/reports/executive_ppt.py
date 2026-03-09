@@ -35,7 +35,6 @@ from nps_lens.analytics.incident_attribution import (
     EXECUTIVE_JOURNEY_CATALOG,
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
-    summarize_attribution_chains,
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.opportunities import rank_opportunities
@@ -63,6 +62,7 @@ from nps_lens.ui.charts import (
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
+    chart_incident_risk_recovery,
     chart_opportunities_bar,
     chart_topic_bars,
 )
@@ -791,58 +791,42 @@ def _matching_topic_for_chain(
     return ""
 
 
-def _chain_comment_heatmap_fig(chain_row: pd.Series) -> Optional[go.Figure]:
-    comment_records = chain_row.get("comment_records")
-    if not isinstance(comment_records, list) or not comment_records:
+def _chain_comment_heatmap_fig(
+    chain_row: pd.Series,
+    *,
+    by_topic_daily: Optional[pd.DataFrame],
+) -> Optional[go.Figure]:
+    if by_topic_daily is None or by_topic_daily.empty:
         return None
-    rows = pd.DataFrame(comment_records)
-    if rows.empty or "date" not in rows.columns or "group" not in rows.columns:
+    topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
+    if not topic_key:
         return None
-    rows["date"] = _coerce_datetime_series(rows["date"])
-    rows = rows.dropna(subset=["date"]).copy()
-    if rows.empty:
+    g_heat = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
+    if g_heat.empty:
         return None
-    rows["group"] = (
-        rows["group"]
-        .astype(str)
-        .replace(
-            {
-                "Promoter": "Promotor",
-                "Passive": "Pasivo",
-                "Detractor": "Detractor",
-                "PROMOTER": "Promotor",
-                "PASSIVE": "Pasivo",
-                "DETRACTOR": "Detractor",
-            }
-        )
-    )
-    rows["count"] = 1
-    heat = (
-        rows.groupby(["group", "date"], as_index=False)
-        .agg(count=("count", "sum"))
-        .pivot(index="group", columns="date", values="count")
-        .fillna(0.0)
-    )
-    if heat.empty:
+    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
+    g_heat = g_heat.dropna(subset=["date"]).sort_values("date")
+    if g_heat.empty:
         return None
-    heat = heat.reindex(["Detractor", "Pasivo", "Promotor"]).dropna(how="all")
+    incidents = pd.to_numeric(g_heat["incidents"], errors="coerce").fillna(0.0).astype(float)
     fig = go.Figure(
-        data=go.Heatmap(
-            z=heat.to_numpy(),
-            x=list(heat.columns),
-            y=list(heat.index),
-            colorscale=plotly_continuous_scale(DesignTokens.default(), "light"),
-            showscale=False,
-            text=heat.to_numpy(dtype=int),
-            texttemplate="%{text}",
-            hovertemplate="%{y}<br>%{x|%d %b}: %{z:.0f} comentarios<extra></extra>",
-        )
+        data=[
+            go.Heatmap(
+                x=g_heat["date"].dt.date.tolist(),
+                y=["Incidencias"],
+                z=[incidents.tolist()],
+                zmin=0,
+                colorscale=plotly_risk_scale(DesignTokens.default(), "light"),
+                colorbar=dict(title="Incidencias"),
+                hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
+            )
+        ]
     )
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=16, t=20, b=34),
-        xaxis_title="Día",
-        yaxis_title="Grupo",
+        height=260,
+        margin=dict(l=10, r=10, t=10, b=10),
+        yaxis=dict(showticklabels=True),
     )
     return fig
 
@@ -896,6 +880,7 @@ def _chain_portfolio_fig(
 def _chain_temporal_fig(
     chain_row: pd.Series,
     *,
+    focus_name: str,
     by_topic_daily: Optional[pd.DataFrame],
     lag_days_by_topic: Optional[pd.DataFrame],
     lag_weeks_by_topic: Optional[pd.DataFrame],
@@ -906,6 +891,16 @@ def _chain_temporal_fig(
     topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
     if not topic_key:
         return None
+    active_lag_days = (
+        lag_days_by_topic[
+            lag_days_by_topic["nps_topic"].astype(str).str.strip() == topic_key
+        ].copy()
+        if lag_days_by_topic is not None and not lag_days_by_topic.empty
+        else pd.DataFrame()
+    )
+    if active_lag_days.empty:
+        return None
+    lagd = int(active_lag_days.iloc[0]["best_lag_days"])
     data = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
     if data.empty:
         return None
@@ -913,74 +908,35 @@ def _chain_temporal_fig(
     data = data.dropna(subset=["date"]).sort_values("date")
     data["focus_rate"] = pd.to_numeric(data.get("focus_rate"), errors="coerce").fillna(0.0)
     data["incidents"] = pd.to_numeric(data.get("incidents"), errors="coerce").fillna(0.0)
-    data["nps_mean"] = pd.to_numeric(data.get("nps_mean"), errors="coerce")
+    data["incidents_shifted"] = data["incidents"].shift(lagd)
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=data["date"],
-            y=data["incidents"],
-            name="Incidencias",
-            marker=dict(color="#" + BBVA_COLORS["yellow"]),
-            opacity=0.56,
-        )
-    )
     fig.add_trace(
         go.Scatter(
             x=data["date"],
-            y=data["focus_rate"] * 100.0,
-            name="% foco",
+            y=data["focus_rate"],
+            name=f"% {focus_name}",
             mode="lines",
+            line=dict(color="#" + BBVA_COLORS["red"], width=2),
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=data["date"],
+            y=data["incidents_shifted"],
+            name=f"# incidencias (shift {lagd}d)",
             yaxis="y2",
-            line=dict(color="#" + BBVA_COLORS["red"], width=2.4),
+            opacity=0.70,
+            marker=dict(color="#" + BBVA_COLORS["sky"]),
         )
     )
-    if data["nps_mean"].notna().any():
-        fig.add_trace(
-            go.Scatter(
-                x=data["date"],
-                y=data["nps_mean"],
-                name="NPS medio",
-                yaxis="y3",
-                mode="lines+markers",
-                line=dict(color="#" + BBVA_COLORS["blue"], width=2.4),
-                marker=dict(size=6, color=_ppt_nps_marker_colors(data["nps_mean"])),
-            )
-        )
-    cp_map = _changepoints_map(changepoints_by_topic)
-    for cp in cp_map.get(topic_key, []):
-        fig.add_vline(x=cp, line_dash="dot", line_color="#" + BBVA_COLORS["sky"], line_width=1.2)
-    lag_days = _lag_days_for_topic(
-        topic_key,
-        lag_days_by_topic=lag_days_by_topic,
-        lag_weeks_by_topic=lag_weeks_by_topic,
-        rationale_df=pd.DataFrame(),
-        ranking_df=None,
-    )
-    if lag_days > 0 and not data.empty:
-        anchor = data["date"].min() + pd.Timedelta(days=lag_days)
-        if anchor <= data["date"].max():
-            fig.add_vline(
-                x=anchor,
-                line_dash="dash",
-                line_color="#" + BBVA_COLORS["orange"],
-                line_width=1.2,
-            )
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=84, t=20, b=28),
+        height=360,
+        margin=dict(l=10, r=10, t=10, b=10),
         legend=dict(orientation="h", x=0.0, y=1.08),
         xaxis_title="Día",
-        yaxis=dict(title="Incidencias", rangemode="tozero"),
-        yaxis2=dict(title="% foco", overlaying="y", side="right", range=[0, 100], showgrid=False),
-        yaxis3=dict(
-            title="NPS medio",
-            overlaying="y",
-            side="right",
-            anchor="free",
-            position=0.92,
-            showgrid=False,
-            range=[0, 10],
-        ),
+        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
+        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
     )
     return fig
 
@@ -4802,9 +4758,11 @@ def _add_causal_timeline_slide(
         title="Cómo leerlo",
         border=BBVA_COLORS["red"],
     )
-    text_box = slide.shapes.add_textbox(Inches(9.22), Inches(2.02), Inches(3.26), Inches(1.05))
+    text_box = slide.shapes.add_textbox(Inches(9.22), Inches(1.98), Inches(3.26), Inches(1.34))
     text_tf = text_box.text_frame
     _configure_text_frame(text_tf)
+    text_tf.word_wrap = True
+    text_tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     text_tf.clear()
     text_p = text_tf.paragraphs[0]
     text_p.alignment = PP_ALIGN.LEFT
@@ -4814,12 +4772,12 @@ def _add_causal_timeline_slide(
         "negativas que se reflejan en los comentarios y finalmente en el NPS."
     )
     text_r.font.name = BBVA_FONT_BODY
-    text_r.font.size = Pt(12.5)
+    text_r.font.size = Pt(12.0)
     text_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
     _add_stat_card(
         slide,
         left=9.18,
-        top=3.48,
+        top=3.62,
         width=1.60,
         height=1.12,
         label="Incidencias",
@@ -4829,7 +4787,7 @@ def _add_causal_timeline_slide(
     _add_stat_card(
         slide,
         left=10.92,
-        top=3.48,
+        top=3.62,
         width=1.60,
         height=1.12,
         label="% detractores",
@@ -4839,7 +4797,7 @@ def _add_causal_timeline_slide(
     _add_stat_card(
         slide,
         left=9.18,
-        top=4.78,
+        top=4.94,
         width=1.60,
         height=1.12,
         label="NPS en riesgo",
@@ -4849,7 +4807,7 @@ def _add_causal_timeline_slide(
     _add_stat_card(
         slide,
         left=10.92,
-        top=4.78,
+        top=4.94,
         width=1.60,
         height=1.12,
         label="NPS recuperable",
@@ -5078,6 +5036,7 @@ def _add_chain_detail_slide(
     *,
     chain_row: pd.Series,
     idx: int,
+    focus_name: str,
     period_label: str,
     chain_df: pd.DataFrame,
     by_topic_daily: Optional[pd.DataFrame],
@@ -5093,10 +5052,14 @@ def _add_chain_detail_slide(
         title=f"10.{idx} Detalle del caso",
         subtitle=f"{title} · posición del caso, comentarios y secuencia temporal · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Posición del caso")
+    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Matriz visual")
     _figure_in_panel(
         slide,
-        figure=_chain_portfolio_fig(chain_df, highlight_topic=str(chain_row.get("nps_topic", ""))),
+        figure=chart_incident_risk_recovery(
+            pd.DataFrame([chain_row]).copy(),
+            get_theme("light"),
+            top_k=1,
+        ),
         left=0.82,
         top=1.84,
         width=3.73,
@@ -5121,21 +5084,22 @@ def _add_chain_detail_slide(
         lines=quant_lines,
         accent=BBVA_COLORS["blue"],
     )
-    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Mapa de comentarios")
+    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Heat map")
     _figure_in_panel(
         slide,
-        figure=_chain_comment_heatmap_fig(chain_row),
+        figure=_chain_comment_heatmap_fig(chain_row, by_topic_daily=by_topic_daily),
         left=8.56,
         top=1.84,
         width=3.94,
         height=1.83,
         empty_note="No hay suficiente detalle temporal en los comentarios vinculados.",
     )
-    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Secuencia temporal")
+    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Lag en días")
     _figure_in_panel(
         slide,
         figure=_chain_temporal_fig(
             chain_row,
+            focus_name=focus_name,
             by_topic_daily=by_topic_daily,
             lag_days_by_topic=lag_days_by_topic,
             lag_weeks_by_topic=lag_weeks_by_topic,
@@ -5358,6 +5322,7 @@ def generate_business_review_ppt(
                 prs,
                 chain_row=chain_row,
                 idx=idx,
+                focus_name=focus_name,
                 period_label=period_label,
                 chain_df=chains,
                 by_topic_daily=by_topic_daily,

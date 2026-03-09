@@ -916,6 +916,200 @@ def test_month_overlap_highlights_matched_incidents_with_labels() -> None:
     assert list(fig.data[3]["text"]) == ["2", "", "1"]
 
 
+def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
+    payload = _sample_payload()
+
+    chain_fig = executive_ppt._chain_portfolio_fig(
+        payload["attribution"],
+        highlight_topic="Acceso > Login",
+    )
+    assert chain_fig is not None
+    assert chain_fig.data[0]["marker"]["color"][0] == "#" + executive_ppt.BBVA_COLORS["red"]
+    assert len(chain_fig.data[0]["x"]) == 1
+
+    evo = executive_ppt._nps_evolution_fig(
+        executive_ppt._daily_group_mix(executive_ppt._coerce_nps_records(payload["selected_nps"])),
+        payload["overall_daily"],
+    )
+    assert evo is not None
+    assert len(evo.data) == 3
+    assert evo.data[0]["name"] == "NPS clásico"
+    assert evo.data[1]["name"] == "% detractores"
+
+    change_df = pd.DataFrame(
+        {
+            "value": ["A", "B", "C"],
+            "n_current": [20, 10, 5],
+            "delta_nps": [1.2, -2.5, 0.5],
+        }
+    )
+    delta_fig = executive_ppt._delta_bars_fig(
+        change_df,
+        metric="delta_nps",
+        x_title="Cambio NPS",
+    )
+    assert delta_fig is not None
+    assert delta_fig.data[0]["orientation"] == "h"
+
+    matrix_df = pd.DataFrame(
+        {
+            "Palanca": ["Pagos", "Pagos", "Pagos", "Acceso", "Acceso", "Acceso"],
+            "band": ["Detractor", "Pasivo", "Promotor"] * 2,
+            "share": [0.5, 0.3, 0.2, 0.2, 0.4, 0.4],
+        }
+    )
+    heatmap = executive_ppt._group_heatmap_fig(matrix_df, dimension="Palanca")
+    assert heatmap is not None
+    assert len(heatmap.data) == 1
+
+    gaps = pd.DataFrame(
+        {
+            "value": ["Pagos", "Acceso"],
+            "gap_vs_overall": [-10.5, -3.2],
+        }
+    )
+    gap_fig = executive_ppt._gap_vs_overall_fig(gaps)
+    assert gap_fig is not None
+    assert gap_fig.data[0]["orientation"] == "h"
+
+    opps = pd.DataFrame(
+        {
+            "dimension": ["Palanca", "Subpalanca", "nps_topic"],
+            "value": ["Pagos", "Login", "Transferencias lentas"],
+            "confidence": [0.7, 0.4, 0.5],
+            "potential_uplift": [4.2, 2.1, 1.3],
+            "n": [100, 64, 25],
+        }
+    )
+    opp_fig = executive_ppt._opportunity_bubble_fig(opps)
+    assert opp_fig is not None
+    assert len(opp_fig.data) == 1
+
+
+def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
+    payload = _sample_payload()
+    row = payload["attribution"].iloc[0]
+
+    assert executive_ppt._chain_temporal_fig(
+        row,
+        focus_name="detractores",
+        by_topic_daily=pd.DataFrame(),
+        lag_days_by_topic=payload["lag_days"],
+        lag_weeks_by_topic=None,
+        changepoints_by_topic=None,
+    ) is None
+
+    temporal_fig = executive_ppt._chain_temporal_fig(
+        row,
+        focus_name="detractores",
+        by_topic_daily=payload["by_topic_daily"],
+        lag_days_by_topic=payload["lag_days"],
+        lag_weeks_by_topic=None,
+        changepoints_by_topic=None,
+    )
+    assert temporal_fig is not None
+    assert temporal_fig.data[0]["name"] == "% detractores"
+    assert "shift 3d" in temporal_fig.data[1]["name"]
+
+    assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
+    assert executive_ppt._chain_list(None) == []
+    assert executive_ppt._chain_list("uno") == ["uno"]
+    assert executive_ppt._chain_header("Helix", shown=2, total=5) == "Helix (2 de 5)"
+    assert executive_ppt._chain_header("Helix", shown=2, total=2) == "Helix (2)"
+    assert executive_ppt._chain_incident_records([{"incident_id": "INC1", "summary": "hola"}]) == [
+        {"incident_id": "INC1", "summary": "hola", "url": ""}
+    ]
+    assert executive_ppt._chain_incident_records(["bad"]) == []
+
+
+def test_build_incident_timeline_daily_filters_to_matching_hot_terms() -> None:
+    timeline = pd.DataFrame(
+        {
+            "date": [
+                "2026-02-10",
+                "2026-02-10",
+                "2026-02-12",
+                "2026-02-13",
+                "2026-03-01",
+            ],
+            "helix_records": [2, 1, 3, 0, 5],
+            "nps_comments": [1, 2, 1, 4, 1],
+            "hot_term": ["pagos", "login", "pagos", "pagos", "pagos"],
+        }
+    )
+    evidence = pd.DataFrame(
+        {
+            "hot_term": ["pagos", "login", "otros"],
+            "hot_rank": [1, 2, 4],
+        }
+    )
+
+    out = executive_ppt._hotspot_matches_by_day(
+        timeline,
+        evidence,
+        month_start=pd.Timestamp("2026-02-01"),
+        month_end=pd.Timestamp("2026-02-28"),
+    )
+
+    assert list(out["matched_incidents"]) == [3, 3]
+    assert out["date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-10", "2026-02-12"]
+
+    missing = executive_ppt._hotspot_matches_by_day(
+        pd.DataFrame({"date": ["2026-02-10"]}),
+        evidence,
+        month_start=pd.Timestamp("2026-02-01"),
+        month_end=pd.Timestamp("2026-02-28"),
+    )
+    assert missing.empty
+
+
+def test_topic_metrics_and_placeholder_text_helpers() -> None:
+    payload = _sample_payload()
+    metrics = executive_ppt._topic_metrics("Pagos > SPEI", payload["rationale"])
+    assert metrics["risk"] == 1.9
+    assert metrics["recoverable"] == 1.2
+    assert executive_ppt._topic_metrics("Inexistente", payload["rationale"]) == {}
+    assert executive_ppt._topic_metrics("Pagos > SPEI", pd.DataFrame()) == {}
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    executive_ppt._set_placeholder_text(
+        slide,
+        0,
+        "Titulo de prueba",
+        font_name=executive_ppt.BBVA_FONT_HEAD,
+        size_pt=24,
+    )
+    assert slide.placeholders[0].text == "Titulo de prueba"
+    executive_ppt._set_placeholder_text(
+        slide,
+        99,
+        "Ignorado",
+        font_name=executive_ppt.BBVA_FONT_HEAD,
+        size_pt=24,
+    )
+
+
+def test_add_story_card_caps_bullets_by_height() -> None:
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    executive_ppt._add_story_card(
+        slide,
+        left=1.0,
+        top=1.0,
+        width=4.0,
+        height=1.5,
+        title="Resumen",
+        bullets=["uno", "dos", "tres", "cuatro", "cinco"],
+    )
+
+    shape = slide.shapes[-1]
+    texts = [p.text for p in shape.text_frame.paragraphs]
+    assert texts[0] == "Resumen"
+    assert len([t for t in texts[1:] if t]) == 3
+
+
 def test_top_hotspots_fig_uses_top3_colors_and_inbar_labels() -> None:
     evidence = pd.DataFrame(
         {

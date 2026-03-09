@@ -5074,15 +5074,19 @@ def page_nps_helix_linking(
                             if not nps_hist_work.empty and not nps_slice.empty
                             else ""
                         )
-                        lag_days_for_ppt = (
-                            lag_days_hist if not lag_days_hist.empty else lag_days_for_ppt
-                        )
-                        lag_weeks_for_ppt = lag_hist if not lag_hist.empty else lag_weeks_for_ppt
-                        changepoints_for_ppt = (
-                            cp_hist if not cp_hist.empty else changepoints_for_ppt
-                        )
                         if chain_df_ppt.empty and not chain_hist.empty:
                             chain_df_ppt = chain_hist
+                            by_topic_daily_ppt = btd_hist_mode
+                            by_topic_weekly_ppt = btw_hist_mode
+                            lag_days_for_ppt = (
+                                lag_days_hist if not lag_days_hist.empty else lag_days_for_ppt
+                            )
+                            lag_weeks_for_ppt = (
+                                lag_hist if not lag_hist.empty else lag_weeks_for_ppt
+                            )
+                            changepoints_for_ppt = (
+                                cp_hist if not cp_hist.empty else changepoints_for_ppt
+                            )
                         if rationale_df_ppt.empty and not rationale_hist.empty:
                             rationale_df_ppt = rationale_hist
                         if ranking_df_ppt.empty:
