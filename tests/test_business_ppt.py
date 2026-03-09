@@ -331,23 +331,31 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
+    cover_texts = []
+    for shape in prs.slides[0].shapes:
+        if getattr(shape, "has_text_frame", False):
+            for paragraph in shape.text_frame.paragraphs:
+                cover_texts.append(paragraph.text or "")
+
     assert any("NPS Lens" in t for t in texts)
-    assert any("1. Evolución del NPS térmico" in t for t in texts)
+    assert any("Mensaje clave del periodo" in t for t in texts)
+    assert any("1. Evolución del NPS del periodo" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
     assert any("2. Cuándo y cómo lo dicen" in t for t in texts)
     assert any("3. Qué ha cambiado respecto al pasado" in t for t in texts)
-    assert any("4. Dónde duele por grupo de usuario" in t for t in texts)
-    assert any("5. Mayores brechas frente al promedio" in t for t in texts)
-    assert any("6. Oportunidades identificadas" in t for t in texts)
-    assert any("7. Introducción de la causalidad" in t for t in texts)
-    assert any("8. Journeys rotos del periodo" in t for t in texts)
-    assert any("9.1 Escenario causal" in t for t in texts)
-    assert any("10.1 Detalle cadena causal" in t for t in texts)
+    assert any("4. Dónde duele según el tipo de cliente" in t for t in texts)
+    assert any("5. Casos más alejados del promedio" in t for t in texts)
+    assert any("6. Oportunidades a priorizar" in t for t in texts)
+    assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
+    assert any("8. Experiencias afectadas del periodo" in t for t in texts)
+    assert any("9.1 Caso causal" in t for t in texts)
+    assert any("10.1 Detalle del caso" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
-    assert any("falla de sesion al entrar en portal empresas" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
-    assert any("Fix estructural" in t for t in texts)
+    assert any("Corrección estructural" in t for t in texts)
+    assert not any("Muestras" in t for t in cover_texts)
+    assert not any("VoC" in t for t in texts)
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -429,8 +437,8 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Journeys rotos del periodo" in t for t in texts)
-    assert any("Journeys ejecutivos" in t for t in texts)
+    assert any("Experiencias afectadas del periodo" in t for t in texts)
+    assert any("Catálogo ejecutivo de journeys" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
@@ -485,7 +493,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Embeddings + clustering semántico" in t for t in texts)
+    assert any("Cruce semántico incidencias-comentarios" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -562,9 +570,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS térmico" in t for t in texts)
-    assert any("8. Journeys rotos del periodo" in t for t in texts)
-    assert not any("9.1 Escenario causal" in t for t in texts)
+    assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("8. Experiencias afectadas del periodo" in t for t in texts)
+    assert not any("9.1 Caso causal" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:
@@ -662,8 +670,8 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS térmico" in t for t in texts)
-    assert any("6. Oportunidades identificadas" in t for t in texts)
+    assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("6. Oportunidades a priorizar" in t for t in texts)
 
 
 def test_history_fig_daily_uses_requested_colors() -> None:

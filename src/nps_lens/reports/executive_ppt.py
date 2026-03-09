@@ -5,6 +5,7 @@ import contextlib
 import os
 import re
 import tempfile
+import textwrap
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -19,7 +20,7 @@ import plotly.io as pio
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Inches, Pt
 
 from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
@@ -145,6 +146,115 @@ def _clip(txt: object, max_len: int) -> str:
     return s[: max_len - 1].rstrip() + "…"
 
 
+def _coerce_datetime_scalar(value: object) -> pd.Timestamp:
+    try:
+        return pd.Timestamp(pd.to_datetime(value, format="mixed", dayfirst=True, errors="coerce"))
+    except TypeError:
+        return pd.Timestamp(pd.to_datetime(value, dayfirst=True, errors="coerce"))
+
+
+def _coerce_datetime_series(values: object) -> pd.Series:
+    series = values if isinstance(values, pd.Series) else pd.Series(values)
+    try:
+        return pd.to_datetime(series, format="mixed", dayfirst=True, errors="coerce")
+    except TypeError:
+        return pd.to_datetime(series, dayfirst=True, errors="coerce")
+
+
+def _wrap_label(
+    txt: object,
+    *,
+    width: int = 24,
+    max_lines: int = 2,
+    joiner: str = "<br>",
+) -> str:
+    clean = " ".join(str(txt or "").split())
+    if not clean:
+        return ""
+    lines = textwrap.wrap(clean, width=max(int(width), 8)) or [clean]
+    if len(lines) > max(int(max_lines), 1):
+        lines = lines[:max_lines]
+        lines[-1] = _clip(lines[-1], max(int(width) - 1, 8))
+    return joiner.join(lines)
+
+
+def _configure_text_frame(tf: object) -> None:
+    with contextlib.suppress(Exception):
+        tf.word_wrap = True
+    with contextlib.suppress(Exception):
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+
+def _focus_risk_label(focus_name: str) -> str:
+    focus = str(focus_name or "").strip().lower()
+    if focus in {"detractores", "detractor", "detraccion", "detracción"}:
+        return "detracción"
+    if focus in {"promotores", "promotor"}:
+        return "promoción"
+    return str(focus_name or "impacto").strip()
+
+
+def _focus_probability_label(focus_name: str) -> str:
+    focus_label = _focus_risk_label(focus_name)
+    return f"Prob. de {focus_label}"
+
+
+def _action_lane_label(value: object) -> str:
+    lane = str(value or "").strip()
+    normalized = unicodedata.normalize("NFKD", lane).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"\s+", " ", normalized).strip().lower()
+    mapping = {
+        "quick win operativo": "Corrección operativa inmediata",
+        "fix estructural": "Corrección estructural",
+        "instrumentacion + validacion": "Revisión de medición y validación",
+        "instrumentacion+validacion": "Revisión de medición y validación",
+        "voc + analitica": "Análisis y validación adicional",
+        "canal + operaciones": "Canal y operaciones",
+        "producto + tecnologia": "Producto y tecnología",
+    }
+    return mapping.get(normalized, lane or "n/d")
+
+
+def _format_opportunity_scope(dimension: object, value: object) -> str:
+    dim = str(dimension or "").strip().lower()
+    clean_value = _clip(value, 42)
+    if dim == "palanca":
+        return f"{clean_value} (palanca)"
+    if dim == "subpalanca":
+        return f"{clean_value} (subpalanca)"
+    if dim == "nps_topic":
+        return clean_value
+    return clean_value
+
+
+def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
+    clean = " ".join(str(text or "").split())
+    if not clean:
+        return ""
+    for marker in ["Síntoma:", "Sintoma:", "Descripcion:", "Descripción:"]:
+        if marker in clean:
+            clean = clean.split(marker, 1)[1].strip()
+            break
+    clean = re.sub(r"^(ACOTAMIENTO IRD|Acotamiento IRD)\s*", "", clean)
+    return _clip(clean, max_len)
+
+
+def _is_cover_metric_line(text: str) -> bool:
+    low = str(text or "").strip().lower()
+    return any(
+        token in low
+        for token in [
+            "muestras",
+            "comentarios analizados",
+            "nps medio",
+            "nps clásico",
+            "nps clasico",
+            "detractores",
+            "promotores",
+        ]
+    )
+
+
 def _slug(value: object, *, max_len: int = 42) -> str:
     raw = str(value or "").strip().lower()
     if not raw:
@@ -159,14 +269,15 @@ def _slug(value: object, *, max_len: int = 42) -> str:
 
 def _safe_date(value: object) -> str:
     try:
-        return str(pd.to_datetime(value).date())
+        ts = _coerce_datetime_scalar(value)
+        return str(ts.date())
     except Exception:
         return str(value or "")
 
 
 def _safe_dt(value: object) -> Optional[pd.Timestamp]:
     try:
-        ts = pd.to_datetime(value, errors="coerce")
+        ts = _coerce_datetime_scalar(value)
     except Exception:
         return None
     if pd.isna(ts):
@@ -224,7 +335,7 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
 
     out = nps_df.copy()
-    out["date"] = pd.to_datetime(out.get("Fecha"), errors="coerce").dt.normalize()
+    out["date"] = _coerce_datetime_series(out.get("Fecha")).dt.normalize()
     out["NPS"] = pd.to_numeric(out.get("NPS"), errors="coerce")
     comment_col = _comment_column(out)
     out["comment_txt"] = (
@@ -303,6 +414,25 @@ def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
         if not daily_mix.empty
         else float("nan")
     )
+    driver_col = "Subpalanca" if current_nps_df.get("Subpalanca") is not None else "Palanca"
+    if driver_col not in current_nps_df.columns:
+        driver_col = "Palanca"
+    pain_point = ""
+    strength_point = ""
+    if driver_col in current_nps_df.columns and "NPS" in current_nps_df.columns:
+        driver_view = current_nps_df[[driver_col, "NPS"]].copy().dropna(subset=["NPS"])
+        if not driver_view.empty:
+            driver_view[driver_col] = driver_view[driver_col].astype(str).str.strip()
+            driver_view = driver_view[driver_view[driver_col] != ""]
+            if not driver_view.empty:
+                ranking = (
+                    driver_view.groupby(driver_col, dropna=False)
+                    .agg(nps_mean=("NPS", "mean"), n=("NPS", "size"))
+                    .sort_values(["nps_mean", "n"], ascending=[True, False])
+                )
+                if not ranking.empty:
+                    pain_point = str(ranking.index[0])
+                    strength_point = str(ranking.index[-1])
     return {
         "comments": comment_count,
         "nps_mean": nps_mean,
@@ -312,8 +442,20 @@ def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
         "classic_nps": classic_nps,
         "start_classic": start_classic,
         "end_classic": end_classic,
+        "classic_delta": (
+            end_classic - start_classic
+            if np.isfinite(start_classic) and np.isfinite(end_classic)
+            else float("nan")
+        ),
         "start_detr": start_detr,
         "end_detr": end_detr,
+        "detractor_delta_pp": (
+            ((end_detr - start_detr) * 100.0)
+            if np.isfinite(start_detr) and np.isfinite(end_detr)
+            else float("nan")
+        ),
+        "pain_point": pain_point,
+        "strength_point": strength_point,
     }
 
 
@@ -332,7 +474,7 @@ def _daily_group_mix(nps_df: pd.DataFrame) -> pd.DataFrame:
         )
 
     work = nps_df.copy()
-    work["date"] = pd.to_datetime(work["date"], errors="coerce")
+    work["date"] = _coerce_datetime_series(work["date"])
     work = work.dropna(subset=["date"]).copy()
     if work.empty:
         return pd.DataFrame()
@@ -361,12 +503,12 @@ def _merge_daily_incidents(base_df: pd.DataFrame, overall_daily: pd.DataFrame) -
     if base.empty:
         return base
     out = base.copy()
-    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.normalize()
+    out["date"] = _coerce_datetime_series(out["date"]).dt.normalize()
     if overall_daily is None or overall_daily.empty or "date" not in overall_daily.columns:
         out["incidents"] = 0.0
         return out
     inc = overall_daily.copy()
-    inc["date"] = pd.to_datetime(inc["date"], errors="coerce").dt.normalize()
+    inc["date"] = _coerce_datetime_series(inc["date"]).dt.normalize()
     inc["incidents"] = pd.to_numeric(inc.get("incidents"), errors="coerce").fillna(0.0)
     inc = inc.groupby("date", as_index=False).agg(incidents=("incidents", "sum"))
     out = out.merge(inc, on="date", how="left")
@@ -555,7 +697,7 @@ def _chain_comment_heatmap_fig(chain_row: pd.Series) -> Optional[go.Figure]:
     rows = pd.DataFrame(comment_records)
     if rows.empty or "date" not in rows.columns or "group" not in rows.columns:
         return None
-    rows["date"] = pd.to_datetime(rows["date"], errors="coerce")
+    rows["date"] = _coerce_datetime_series(rows["date"])
     rows = rows.dropna(subset=["date"]).copy()
     if rows.empty:
         return None
@@ -630,18 +772,20 @@ def _chain_portfolio_fig(
             x=d["confidence"],
             y=d["impact"],
             mode="markers+text",
-            text=d["nps_topic"].astype(str).str.slice(0, 20),
+            text=d["nps_topic"].astype(str).map(lambda value: _wrap_label(value, width=14)),
             textposition="top center",
             marker=dict(size=12 + d["links"] * 3.0, color=colors, opacity=0.88),
+            customdata=d[["links"]].to_numpy(),
             hovertemplate=(
-                "%{text}<br>Confianza=%{x:.2f}<br>Impacto=%{y:.2f} pts<br>Links=%{marker.size:.0f}<extra></extra>"
+                "%{text}<br>Solidez=%{x:.2f}<br>Impacto=%{y:.2f} pts"
+                "<br>Vínculos=%{customdata[0]:.0f}<extra></extra>"
             ),
         )
     )
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=24, r=16, t=20, b=30),
-        xaxis=dict(title="Confianza", range=[0, 1]),
+        xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
         yaxis=dict(title="Impacto total (pts NPS)", rangemode="tozero"),
         showlegend=False,
     )
@@ -664,7 +808,7 @@ def _chain_temporal_fig(
     data = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
     if data.empty:
         return None
-    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data["date"] = _coerce_datetime_series(data["date"])
     data = data.dropna(subset=["date"]).sort_values("date")
     data["focus_rate"] = pd.to_numeric(data.get("focus_rate"), errors="coerce").fillna(0.0)
     data["incidents"] = pd.to_numeric(data.get("incidents"), errors="coerce").fillna(0.0)
@@ -801,21 +945,23 @@ def _top_topics_fig(topics_df: pd.DataFrame, *, top_k: int = 10) -> Optional[go.
     if topics_df is None or topics_df.empty:
         return None
     d = topics_df.head(int(top_k)).copy().iloc[::-1]
+    d["topic_label"] = d["nps_topic"].astype(str).map(lambda value: _wrap_label(value, width=26))
     fig = go.Figure(
         go.Bar(
             x=d["comments"],
-            y=d["nps_topic"].astype(str).str.slice(0, 48),
+            y=d["topic_label"],
             orientation="h",
             marker=dict(color=_ppt_nps_marker_colors(d["nps_mean"])),
             text=[f"{int(v)} · {s*100:.0f}%" for v, s in zip(d["comments"], d["share"])],
             textposition="outside",
-            customdata=np.column_stack([d["nps_mean"].fillna(np.nan)]),
-            hovertemplate="%{y}<br>Comentarios=%{x:.0f}<br>NPS medio=%{customdata[0]:.2f}<extra></extra>",
+            cliponaxis=False,
+            customdata=np.column_stack([d["nps_mean"].fillna(np.nan), d["nps_topic"].astype(str)]),
+            hovertemplate="%{customdata[1]}<br>Comentarios=%{x:.0f}<br>NPS medio=%{customdata[0]:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=24, t=20, b=24),
+        margin=dict(l=34, r=28, t=20, b=24),
         xaxis_title="Comentarios",
         yaxis_title="",
         showlegend=False,
@@ -830,7 +976,7 @@ def _topic_heatmap_fig(
     if top.empty or by_topic_daily is None or by_topic_daily.empty:
         return None
     d = by_topic_daily.copy()
-    d["date"] = pd.to_datetime(d["date"], errors="coerce")
+    d["date"] = _coerce_datetime_series(d["date"])
     d["responses"] = pd.to_numeric(d.get("responses"), errors="coerce").fillna(0.0)
     d = d[d["nps_topic"].astype(str).isin(top["nps_topic"].astype(str).tolist())].copy()
     if d.empty:
@@ -842,6 +988,7 @@ def _topic_heatmap_fig(
         .fillna(0.0)
     )
     pivot = pivot.reindex(top["nps_topic"].tolist()).fillna(0.0)
+    pivot.index = [_wrap_label(value, width=24) for value in pivot.index]
     fig = go.Figure(
         data=go.Heatmap(
             z=pivot.to_numpy(),
@@ -911,14 +1058,16 @@ def _delta_bars_fig(change_df: pd.DataFrame, *, metric: str, x_title: str) -> Op
     d["abs_metric"] = d[metric].abs()
     d = d.sort_values(["abs_metric", "n_current"], ascending=[False, False]).head(8).iloc[::-1]
     d["color"] = np.where(d[metric] < 0, "#" + BBVA_COLORS["red"], "#" + BBVA_COLORS["green"])
+    d["axis_label"] = d["value"].astype(str).map(lambda value: _wrap_label(value, width=20))
     fig = go.Figure(
         go.Bar(
             x=d[metric],
-            y=d["value"].astype(str).str.slice(0, 36),
+            y=d["axis_label"],
             orientation="h",
             marker=dict(color=d["color"].tolist()),
             text=[f"{v:+.1f}" for v in d[metric].tolist()],
             textposition="outside",
+            cliponaxis=False,
             showlegend=False,
         )
     )
@@ -942,6 +1091,7 @@ def _group_heatmap_fig(matrix_df: pd.DataFrame, *, dimension: str) -> Optional[g
     )
     if pivot.empty:
         return None
+    pivot.index = [_wrap_label(value, width=18) for value in pivot.index]
     fig = go.Figure(
         data=go.Heatmap(
             z=(pivot.to_numpy() * 100.0),
@@ -967,21 +1117,23 @@ def _gap_vs_overall_fig(gap_df: pd.DataFrame) -> Optional[go.Figure]:
     if gap_df is None or gap_df.empty:
         return None
     d = gap_df.copy().iloc[::-1]
+    d["axis_label"] = d["value"].astype(str).map(lambda value: _wrap_label(value, width=22))
     fig = go.Figure(
         go.Bar(
             x=d["gap_vs_overall"],
-            y=d["value"].astype(str).str.slice(0, 40),
+            y=d["axis_label"],
             orientation="h",
             marker=dict(color="#" + BBVA_COLORS["red"]),
             text=[f"{v:+.1f}" for v in d["gap_vs_overall"].tolist()],
             textposition="outside",
+            cliponaxis=False,
         )
     )
     fig.add_vline(x=0, line_color="#" + BBVA_COLORS["line"], line_width=1)
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=24, t=20, b=24),
-        xaxis_title="Brecha NPS vs promedio",
+        margin=dict(l=32, r=28, t=20, b=24),
+        xaxis_title="Diferencia frente al NPS medio",
         yaxis_title="",
         showlegend=False,
     )
@@ -993,6 +1145,12 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     d = opps_df.head(10).copy()
     d["size"] = np.clip(np.sqrt(pd.to_numeric(d["n"], errors="coerce").fillna(0.0)) * 2.4, 12, 40)
+    d["plot_label"] = d.apply(
+        lambda row: _wrap_label(
+            _format_opportunity_scope(row.get("dimension"), row.get("value")), width=16
+        ),
+        axis=1,
+    )
     colors = {
         "Palanca": "#" + BBVA_COLORS["blue"],
         "Subpalanca": "#" + BBVA_COLORS["orange"],
@@ -1003,7 +1161,7 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
             x=d["confidence"],
             y=d["potential_uplift"],
             mode="markers+text",
-            text=d["value"].astype(str).str.slice(0, 18),
+            text=d["plot_label"],
             textposition="top center",
             marker=dict(
                 size=d["size"],
@@ -1014,17 +1172,17 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
                 opacity=0.82,
             ),
             hovertemplate=(
-                "%{text}<br>Dimensión=%{customdata[0]}<br>Potencial=%{y:.1f} pts"
+                "%{customdata[2]}<br>Dimensión=%{customdata[0]}<br>Potencial=%{y:.1f} pts"
                 "<br>Confianza=%{x:.2f}<br>n=%{customdata[1]:.0f}<extra></extra>"
             ),
-            customdata=d[["dimension", "n"]].to_numpy(),
+            customdata=d[["dimension", "n", "value"]].to_numpy(),
         )
     )
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=24, r=24, t=20, b=24),
-        xaxis=dict(title="Confianza", range=[0, 1]),
-        yaxis=dict(title="Potencial de uplift (pts NPS)", rangemode="tozero"),
+        xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
+        yaxis=dict(title="Impacto potencial (pts NPS)", rangemode="tozero"),
         showlegend=False,
     )
     return fig
@@ -1101,10 +1259,11 @@ def _journeys_overview_fig(chain_df: Optional[pd.DataFrame]) -> Optional[go.Figu
     d = d.sort_values(["impact", "linked_pairs"], ascending=False).head(3).iloc[::-1]
     if d.empty:
         return None
+    d["axis_label"] = d["nps_topic"].astype(str).map(lambda value: _wrap_label(value, width=20))
     fig = go.Figure(
         go.Bar(
             x=d["impact"],
-            y=d["nps_topic"].astype(str).str.slice(0, 36),
+            y=d["axis_label"],
             orientation="h",
             marker=dict(
                 color=[
@@ -1115,12 +1274,13 @@ def _journeys_overview_fig(chain_df: Optional[pd.DataFrame]) -> Optional[go.Figu
             ),
             text=[f"{v:.2f} pts" for v in d["impact"].tolist()],
             textposition="outside",
+            cliponaxis=False,
         )
     )
     fig.update_layout(
         template="plotly_white",
-        margin=dict(l=24, r=24, t=20, b=24),
-        xaxis_title="NPS en riesgo / impacto priorizado",
+        margin=dict(l=32, r=28, t=20, b=24),
+        xaxis_title="NPS en riesgo",
         yaxis_title="",
         showlegend=False,
     )
@@ -1218,6 +1378,7 @@ def _add_header(
 
     box = slide.shapes.add_textbox(Inches(0.65), Inches(0.28), Inches(9.8), Inches(0.85))
     tf = box.text_frame
+    _configure_text_frame(tf)
     tf.clear()
     p = tf.paragraphs[0]
     r = p.add_run()
@@ -1229,6 +1390,7 @@ def _add_header(
 
     sb = slide.shapes.add_textbox(Inches(0.65), Inches(0.95), Inches(11.5), Inches(0.42))
     stf = sb.text_frame
+    _configure_text_frame(stf)
     stf.clear()
     sp = stf.paragraphs[0]
     sr = sp.add_run()
@@ -1240,6 +1402,7 @@ def _add_header(
     if right_note.strip():
         rb = slide.shapes.add_textbox(Inches(10.4), Inches(0.35), Inches(2.2), Inches(0.30))
         rtf = rb.text_frame
+        _configure_text_frame(rtf)
         rtf.clear()
         rp = rtf.paragraphs[0]
         rp.alignment = PP_ALIGN.RIGHT
@@ -1284,6 +1447,7 @@ def _panel(
         return box
 
     tf = box.text_frame
+    _configure_text_frame(tf)
     tf.clear()
     if title:
         p0 = tf.paragraphs[0]
@@ -1327,6 +1491,7 @@ def _figure_in_panel(
 
     box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
     tf = box.text_frame
+    _configure_text_frame(tf)
     tf.clear()
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER
@@ -1423,12 +1588,13 @@ def _add_bullet_lines(
         border=accent or BBVA_COLORS["line"],
     )
     tf = panel.text_frame
-    for line in lines[:8]:
+    _configure_text_frame(tf)
+    for line in lines[:6]:
         p = tf.add_paragraph()
         p.space_before = Pt(6)
         p.level = 0
         r = p.add_run()
-        r.text = f"• {_clip(line, 170)}"
+        r.text = f"• {_clip(line, 145 if width <= 4.0 else 170)}"
         r.font.name = BBVA_FONT_BODY
         r.font.size = Pt(11)
         r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
@@ -1444,6 +1610,9 @@ def _add_compact_table(
     headers: list[str],
     rows: list[list[str]],
     row_height: float = 0.34,
+    col_width_ratios: Optional[list[float]] = None,
+    clip_lengths: Optional[list[int]] = None,
+    font_size_pt: float = 9.6,
 ) -> None:
     height = 0.62 + row_height * max(len(rows), 1) + 0.12
     panel = _panel(
@@ -1456,17 +1625,26 @@ def _add_compact_table(
         fill=BBVA_COLORS["white"],
     )
     base_top = top + 0.46
-    x_positions = [left + (width * idx / max(len(headers), 1)) for idx in range(len(headers))]
-    col_width = (width - 0.16) / max(len(headers), 1)
+    if col_width_ratios and len(col_width_ratios) == len(headers):
+        ratio_sum = sum(col_width_ratios) or 1.0
+        column_widths = [((width - 0.16) * ratio / ratio_sum) for ratio in col_width_ratios]
+    else:
+        column_widths = [(width - 0.16) / max(len(headers), 1)] * len(headers)
+    x_positions: list[float] = []
+    cursor = left
+    for col_width in column_widths:
+        x_positions.append(cursor)
+        cursor += col_width
 
     for idx, header in enumerate(headers):
         tb = slide.shapes.add_textbox(
             Inches(x_positions[idx] + 0.05),
             Inches(base_top),
-            Inches(col_width - 0.08),
+            Inches(column_widths[idx] - 0.08),
             Inches(0.20),
         )
         tf = tb.text_frame
+        _configure_text_frame(tf)
         tf.clear()
         p = tf.paragraphs[0]
         r = p.add_run()
@@ -1482,16 +1660,22 @@ def _add_compact_table(
             tb = slide.shapes.add_textbox(
                 Inches(x_positions[col_idx] + 0.05),
                 Inches(current_top),
-                Inches(col_width - 0.08),
+                Inches(column_widths[col_idx] - 0.08),
                 Inches(0.24),
             )
             tf = tb.text_frame
+            _configure_text_frame(tf)
             tf.clear()
             p = tf.paragraphs[0]
             r = p.add_run()
-            r.text = _clip(value, 48)
+            clip_len = (
+                clip_lengths[col_idx]
+                if clip_lengths is not None and col_idx < len(clip_lengths)
+                else 48
+            )
+            r.text = _clip(value, clip_len)
             r.font.name = BBVA_FONT_BODY
-            r.font.size = Pt(9.6)
+            r.font.size = Pt(font_size_pt)
             r.font.color.rgb = _rgb(BBVA_COLORS["muted"] if col_idx else BBVA_COLORS["ink"])
 
     del panel
@@ -1664,6 +1848,59 @@ def _parse_story_sections(story_md: str) -> list[tuple[str, list[str]]]:
     if title:
         sections.append((title, bullets))
     return sections
+
+
+def _cover_summary_lines(overview: dict[str, object], story_md: str) -> list[str]:
+    lines: list[str] = []
+    pain_point = str(overview.get("pain_point", "") or "").strip()
+    strength_point = str(overview.get("strength_point", "") or "").strip()
+    classic_delta = _safe_float(overview.get("classic_delta"), default=float("nan"))
+    detractor_delta_pp = _safe_float(overview.get("detractor_delta_pp"), default=float("nan"))
+
+    if pain_point:
+        lines.append(f"La mayor fricción del periodo se concentra en {pain_point}.")
+    if strength_point and strength_point != pain_point:
+        lines.append(f"La mejor señal de experiencia se observa en {strength_point}.")
+    if np.isfinite(classic_delta) and abs(classic_delta) >= 0.1:
+        direction = "sube" if classic_delta > 0 else "cae"
+        lines.append(
+            f"Del inicio al cierre del periodo, el NPS clásico {direction} {abs(classic_delta):.1f} puntos."
+        )
+    if np.isfinite(detractor_delta_pp) and abs(detractor_delta_pp) >= 0.1:
+        direction = "sube" if detractor_delta_pp > 0 else "baja"
+        lines.append(
+            f"El peso detractor {direction} {abs(detractor_delta_pp):.1f} puntos porcentuales en la ventana analizada."
+        )
+
+    for _, bullets in _parse_story_sections(story_md):
+        for bullet in bullets:
+            clean = str(bullet or "").strip()
+            if not clean or _is_cover_metric_line(clean):
+                continue
+            if clean.lower().startswith(
+                (
+                    "zona de fricción",
+                    "zona de friccion",
+                    "zona fuerte",
+                    "periodo actual",
+                    "periodo base",
+                )
+            ):
+                continue
+            clean = (
+                clean.replace("VoC", "comentarios de cliente")
+                .replace("quick wins", "acciones rápidas")
+                .replace("owners", "equipos responsables")
+                .replace("owner", "equipo responsable")
+                .replace("Si mejoramos Palanca=", "La oportunidad más clara está en ")
+                .replace("Si mejoramos Subpalanca=", "La oportunidad más clara está en ")
+                .replace("el modelo estima un potencial de", "con un impacto potencial de")
+            )
+            if clean not in lines:
+                lines.append(clean)
+            if len(lines) >= 4:
+                return lines[:4]
+    return lines[:4]
 
 
 def _add_story_card(
@@ -2430,7 +2667,7 @@ def _prepare_daily_signals(
     if not time_col:
         return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
 
-    d[time_col] = pd.to_datetime(d[time_col], errors="coerce")
+    d[time_col] = _coerce_datetime_series(d[time_col])
     d = d.dropna(subset=[time_col]).copy()
     if d.empty:
         return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
@@ -2803,7 +3040,7 @@ def _hotspot_matches_by_day(
     if not req.issubset(set(t.columns)):
         return pd.DataFrame(columns=cols)
 
-    t["date"] = pd.to_datetime(t["date"], errors="coerce")
+    t["date"] = _coerce_datetime_series(t["date"])
     t = t.dropna(subset=["date"])
     t = t[(t["date"] >= month_start) & (t["date"] <= month_end)].copy()
     if t.empty:
@@ -2875,7 +3112,7 @@ def _month_overlap_fig(
         if matched_daily is not None
         else pd.DataFrame(columns=["date", "matched_incidents"])
     )
-    m["date"] = pd.to_datetime(m.get("date"), errors="coerce")
+    m["date"] = _coerce_datetime_series(m.get("date"))
     m = m.dropna(subset=["date"])
     m = m.groupby("date", as_index=False).agg(matched_incidents=("matched_incidents", "sum"))
     d = d.merge(m, on="date", how="left")
@@ -3043,7 +3280,7 @@ def _prepare_incident_evidence(  # pragma: no cover - legacy helper kept for bac
     out = pd.DataFrame(
         {
             "incident_id": d[id_col].astype(str) if id_col else "",
-            "incident_date": pd.to_datetime(d[date_col], errors="coerce") if date_col else pd.NaT,
+            "incident_date": _coerce_datetime_series(d[date_col]) if date_col else pd.NaT,
             "nps_topic": d[topic_col].astype(str) if topic_col else "",
             "incident_summary": incident_summary,
             "detractor_comment": d[comment_col].astype(str) if comment_col else "",
@@ -3395,7 +3632,7 @@ def _incident_related_timeline(
     if d.empty:
         return pd.DataFrame(columns=cols)
 
-    d["date"] = pd.to_datetime(d["date"], errors="coerce")
+    d["date"] = _coerce_datetime_series(d["date"])
     d = d.dropna(subset=["date"])
     if d.empty:
         return pd.DataFrame(columns=cols)
@@ -3477,7 +3714,7 @@ def _zoom_incident_fig(
 
     rel = related_timeline.copy() if related_timeline is not None else pd.DataFrame()
     if not rel.empty:
-        rel["date"] = pd.to_datetime(rel["date"], errors="coerce")
+        rel["date"] = _coerce_datetime_series(rel["date"])
         rel = rel.dropna(subset=["date"]).sort_values("date")
         rel["helix_records"] = (
             pd.to_numeric(rel["helix_records"], errors="coerce").fillna(0.0).clip(lower=0.0)
@@ -3560,7 +3797,7 @@ def _zoom_incident_fig(
         and {"date", "nps_mean"}.issubset(set(topic_daily.columns))
     ):
         nps_series = topic_daily[["date", "nps_mean"]].copy()
-        nps_series["date"] = pd.to_datetime(nps_series["date"], errors="coerce")
+        nps_series["date"] = _coerce_datetime_series(nps_series["date"])
         nps_series["nps_mean"] = pd.to_numeric(nps_series["nps_mean"], errors="coerce")
         nps_series = nps_series.dropna(subset=["date", "nps_mean"])
         nps_series = (
@@ -3746,10 +3983,10 @@ def _topic_metrics(topic: str, rationale_df: pd.DataFrame) -> dict[str, float]:
 def _touchpoint_method_label(source: str) -> str:
     mode = str(source or "").strip()
     if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-        return "Journeys ejecutivos"
+        return "Catálogo ejecutivo de journeys"
     if mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-        return "Embeddings + clustering semántico"
-    return "Incidencia -> touchpoint -> VoC -> NPS"
+        return "Cruce semántico incidencias-comentarios"
+    return "Relación incidencia -> comentario -> NPS"
 
 
 def _set_placeholder_text(
@@ -3788,13 +4025,45 @@ def _add_cover_slide(
         subtitle = f"{subtitle} · {service_origin_n2}".strip(" ·")
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
 
-    _set_placeholder_text(slide, 0, title, font_name=BBVA_FONT_DISPLAY, size_pt=28)
-    _set_placeholder_text(slide, 1, subtitle, font_name=BBVA_FONT_BODY, size_pt=14)
+    eyebrow = slide.shapes.add_textbox(Inches(0.70), Inches(0.36), Inches(2.4), Inches(0.26))
+    etf = eyebrow.text_frame
+    _configure_text_frame(etf)
+    etf.clear()
+    ep = etf.paragraphs[0]
+    er = ep.add_run()
+    er.text = "Lectura ejecutiva"
+    er.font.name = BBVA_FONT_MEDIUM
+    er.font.size = Pt(10.5)
+    er.font.bold = True
+    er.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+
+    hero = slide.shapes.add_textbox(Inches(0.70), Inches(0.58), Inches(5.8), Inches(0.55))
+    htf = hero.text_frame
+    _configure_text_frame(htf)
+    htf.clear()
+    hp = htf.paragraphs[0]
+    hr = hp.add_run()
+    hr.text = title
+    hr.font.name = BBVA_FONT_DISPLAY
+    hr.font.size = Pt(30)
+    hr.font.bold = True
+    hr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    sub = slide.shapes.add_textbox(Inches(0.70), Inches(0.98), Inches(6.2), Inches(0.34))
+    stf = sub.text_frame
+    _configure_text_frame(stf)
+    stf.clear()
+    sp = stf.paragraphs[0]
+    sr = sp.add_run()
+    sr.text = subtitle
+    sr.font.name = BBVA_FONT_BODY
+    sr.font.size = Pt(14)
+    sr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
     ribbon = slide.shapes.add_shape(
         MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
         Inches(0.62),
-        Inches(1.18),
+        Inches(1.36),
         Inches(12.0),
         Inches(0.52),
     )
@@ -3811,23 +4080,18 @@ def _add_cover_slide(
     rr.font.bold = True
     rr.font.color.rgb = _rgb(BBVA_COLORS["white"])
 
-    summary_lines = [
-        f"NPS medio { _fmt_num_or_nd(overview.get('nps_mean', np.nan)) } · NPS clásico {_fmt_num_or_nd(overview.get('classic_nps', np.nan))}",
-        f"Detractores {_fmt_pct_or_nd(overview.get('detractor_rate', np.nan))} · Promotores {_fmt_pct_or_nd(overview.get('promoter_rate', np.nan))}",
-        f"Comentarios analizados {int(_safe_int(overview.get('comments', 0)))}",
+    summary_lines = _cover_summary_lines(overview, story_md) or [
+        "La lectura combina señal de experiencia, comentarios y evolución del periodo.",
+        "Las tarjetas de la derecha recogen el tamaño de muestra y el equilibrio entre detractores y promotores.",
+        "El resto del deck explica qué temas pesan más y dónde conviene priorizar acciones.",
     ]
-    story_sections = _parse_story_sections(story_md)
-    if story_sections:
-        first_title, first_lines = story_sections[0]
-        summary_lines.insert(0, first_title)
-        summary_lines.extend(first_lines[:2])
     _add_bullet_lines(
         slide,
         left=0.70,
-        top=1.90,
-        width=6.7,
-        height=3.65,
-        title="Lectura ejecutiva",
+        top=2.10,
+        width=6.75,
+        height=3.42,
+        title="Mensaje clave del periodo",
         lines=summary_lines,
         accent=BBVA_COLORS["sky"],
     )
@@ -3835,7 +4099,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=7.68,
-        top=1.90,
+        top=2.10,
         width=2.3,
         height=1.58,
         label="Comentarios",
@@ -3846,7 +4110,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=10.12,
-        top=1.90,
+        top=2.10,
         width=2.3,
         height=1.58,
         label="NPS medio",
@@ -3857,7 +4121,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=7.68,
-        top=3.62,
+        top=3.82,
         width=2.3,
         height=1.58,
         label="% detractores",
@@ -3868,7 +4132,7 @@ def _add_cover_slide(
     _add_stat_card(
         slide,
         left=10.12,
-        top=3.62,
+        top=3.82,
         width=2.3,
         height=1.58,
         label="% promotores",
@@ -3892,10 +4156,17 @@ def _add_overview_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="1. Evolución del NPS térmico",
+        title="1. Evolución del NPS del periodo",
         subtitle=f"{service_origin} · {service_origin_n1} · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.3, height=5.42, title="NPS clásico vs detractores")
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=8.3,
+        height=5.42,
+        title="NPS clásico y peso detractor",
+    )
     _figure_in_panel(
         slide,
         figure=_nps_evolution_fig(daily_mix, overall_daily),
@@ -3909,7 +4180,7 @@ def _add_overview_slide(
     trend_lines = [
         f"El periodo arranca con NPS clásico {_fmt_num_or_nd(overview.get('start_classic', np.nan))} y termina en {_fmt_num_or_nd(overview.get('end_classic', np.nan))}.",
         f"El peso detractor pasa de {_fmt_pct_or_nd(overview.get('start_detr', np.nan))} a {_fmt_pct_or_nd(overview.get('end_detr', np.nan))}.",
-        "La lectura combina percepción cliente e incidencias del mismo periodo analizado.",
+        "NPS clásico = promotores menos detractores; se usa para seguir la señal neta del periodo.",
     ]
     _add_bullet_lines(
         slide,
@@ -3938,7 +4209,7 @@ def _add_overview_slide(
         top=3.88,
         width=1.72,
         height=1.24,
-        label="NPS 0-10",
+        label="NPS medio",
         value=_fmt_num_or_nd(overview.get("nps_mean", np.nan)),
         accent=BBVA_COLORS["green"],
     )
@@ -3975,9 +4246,9 @@ def _add_deep_dive_slide(
     _add_header(
         slide,
         title="2. Qué han dicho los clientes",
-        subtitle=f"Top 10 de tópicos sobre el NPS térmico · {period_label}",
+        subtitle=f"Temas más repetidos en los comentarios del periodo · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.2, height=5.42, title="Top temas del periodo")
+    _panel(slide, left=0.66, top=1.48, width=8.2, height=5.42, title="Top 10 temas del periodo")
     _figure_in_panel(
         slide,
         figure=_top_topics_fig(topics_df, top_k=10),
@@ -3990,10 +4261,9 @@ def _add_deep_dive_slide(
 
     bullet_lines = [
         (
-            f"{idx + 1}. {row.nps_topic}: {int(row.comments)} comentarios · "
-            f"NPS medio {_fmt_num_or_nd(row.nps_mean)} · share {_fmt_pct_or_nd(row.share)}"
+            f"{row.nps_topic}: {int(row.comments)} comentarios y NPS medio de {_fmt_num_or_nd(row.nps_mean)}."
         )
-        for idx, row in topics_df.head(6).iterrows()
+        for _, row in topics_df.head(4).iterrows()
     ] or ["No se han detectado tópicos con masa crítica suficiente."]
     _add_bullet_lines(
         slide,
@@ -4001,7 +4271,7 @@ def _add_deep_dive_slide(
         top=1.48,
         width=3.68,
         height=5.42,
-        title="Lectura del top 10",
+        title="Qué destaca",
         lines=bullet_lines,
         accent=BBVA_COLORS["sky"],
     )
@@ -4019,9 +4289,11 @@ def _add_topic_timing_slide(
     _add_header(
         slide,
         title="2. Cuándo y cómo lo dicen",
-        subtitle=f"Distribución diaria de temas y mix promotor/pasivo/detractor · {period_label}",
+        subtitle=f"Evolución diaria de temas y reparto de promotores, pasivos y detractores · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=6.1, height=5.42, title="Distribución diaria de temas")
+    _panel(
+        slide, left=0.66, top=1.48, width=6.1, height=5.42, title="Cuándo se intensifica cada tema"
+    )
     _figure_in_panel(
         slide,
         figure=_topic_heatmap_fig(by_topic_daily, top_k=10),
@@ -4031,7 +4303,14 @@ def _add_topic_timing_slide(
         height=4.92,
         empty_note="No hay cobertura diaria suficiente para el heatmap de tópicos.",
     )
-    _panel(slide, left=6.98, top=1.48, width=5.70, height=5.42, title="Mix diario de grupos NPS")
+    _panel(
+        slide,
+        left=6.98,
+        top=1.48,
+        width=5.70,
+        height=5.42,
+        title="Reparto diario de grupos NPS",
+    )
     _figure_in_panel(
         slide,
         figure=_daily_group_mix_fig(daily_mix),
@@ -4057,24 +4336,24 @@ def _add_change_vs_past_slide(
     _add_header(
         slide,
         title="3. Qué ha cambiado respecto al pasado",
-        subtitle=f"Comparativa actual vs base histórica · actual {current_label} · base {baseline_label}",
+        subtitle=f"Periodo actual frente a la base histórica anterior · actual {current_label} · base {baseline_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palancas con mayor cambio")
+    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palancas que más cambian")
     _figure_in_panel(
         slide,
-        figure=_delta_bars_fig(palanca_change, metric="delta_nps", x_title="Δ NPS vs base"),
+        figure=_delta_bars_fig(palanca_change, metric="delta_nps", x_title="Cambio en NPS vs base"),
         left=0.82,
         top=1.86,
         width=5.68,
         height=4.92,
         empty_note="No hay base histórica suficiente para comparar por palanca.",
     )
-    _panel(
-        slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalancas con mayor cambio"
-    )
+    _panel(slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalancas que más cambian")
     _figure_in_panel(
         slide,
-        figure=_delta_bars_fig(subpalanca_change, metric="delta_nps", x_title="Δ NPS vs base"),
+        figure=_delta_bars_fig(
+            subpalanca_change, metric="delta_nps", x_title="Cambio en NPS vs base"
+        ),
         left=7.06,
         top=1.86,
         width=5.46,
@@ -4094,8 +4373,8 @@ def _add_pain_by_group_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="4. Dónde duele por grupo de usuario",
-        subtitle=f"Distribución relativa detractor/pasivo/promotor por eje de experiencia · {period_label}",
+        title="4. Dónde duele según el tipo de cliente",
+        subtitle=f"Distribución relativa de detractores, pasivos y promotores por eje de experiencia · {period_label}",
     )
     _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palancas")
     _figure_in_panel(
@@ -4129,10 +4408,17 @@ def _add_gap_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="5. Mayores brechas frente al promedio",
-        subtitle=f"Top 10 de casos con peor gap de NPS respecto al promedio general · {period_label}",
+        title="5. Casos más alejados del promedio",
+        subtitle=f"Top de casos con peor diferencia frente al NPS medio general · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=7.2, height=5.42, title="Brecha NPS vs promedio")
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=7.2,
+        height=5.42,
+        title="Diferencia frente al NPS medio",
+    )
     _figure_in_panel(
         slide,
         figure=_gap_vs_overall_fig(gap_df),
@@ -4156,10 +4442,13 @@ def _add_gap_slide(
         left=8.06,
         top=1.48,
         width=4.62,
-        title="Top 10 casos",
+        title="Detalle de casos",
         headers=["Caso", "n", "NPS", "Gap"],
         rows=rows,
         row_height=0.30,
+        col_width_ratios=[2.7, 0.6, 0.75, 0.75],
+        clip_lengths=[42, 6, 8, 8],
+        font_size_pt=9.1,
     )
 
 
@@ -4173,10 +4462,10 @@ def _add_opportunity_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="6. Oportunidades identificadas",
-        subtitle=f"Ranking de oportunidades por potencial y confianza · {period_label}",
+        title="6. Oportunidades a priorizar",
+        subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=7.05, height=5.42, title="Potencial vs confianza")
+    _panel(slide, left=0.66, top=1.48, width=7.05, height=5.42, title="Impacto potencial y solidez")
     _figure_in_panel(
         slide,
         figure=_opportunity_bubble_fig(opportunities_df),
@@ -4188,10 +4477,10 @@ def _add_opportunity_slide(
     )
     lines = [
         (
-            f"{idx + 1}. {row.dimension}={row.value} · potencial {float(row.potential_uplift):.1f} pts · "
-            f"confianza {float(row.confidence):.2f} · n={int(row.n)}"
+            f"{idx + 1}. {_format_opportunity_scope(row.dimension, row.value)} puede aportar "
+            f"{float(row.potential_uplift):.1f} pts NPS; evidencia {float(row.confidence):.2f}/1 y n={int(row.n)}."
         )
-        for idx, row in opportunities_df.head(8).iterrows()
+        for idx, row in opportunities_df.head(5).iterrows()
     ] or ["No se han identificado oportunidades defendibles para este periodo."]
     _add_bullet_lines(
         slide,
@@ -4199,7 +4488,7 @@ def _add_opportunity_slide(
         top=1.48,
         width=4.76,
         height=5.42,
-        title="Backlog priorizado",
+        title="Prioridades sugeridas",
         lines=lines,
         accent=BBVA_COLORS["orange"],
     )
@@ -4216,13 +4505,20 @@ def _add_causal_timeline_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="7. Introducción de la causalidad",
+        title="7. Cuando la operación afecta a la experiencia",
         subtitle=(
-            "Las incidencias degradan momentos críticos del journey, generan experiencias negativas, "
+            "Las incidencias degradan momentos críticos de la experiencia, generan experiencias negativas, "
             f"se reflejan en comentarios y terminan afectando al NPS · {period_label}"
         ),
     )
-    _panel(slide, left=0.66, top=1.48, width=8.15, height=5.42, title="Timeline causal diario")
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=8.15,
+        height=5.42,
+        title="Evolución diaria de incidencias y grupos NPS",
+    )
     _figure_in_panel(
         slide,
         figure=_causal_daily_timeline_fig(daily_mix, overall_daily),
@@ -4242,8 +4538,8 @@ def _add_causal_timeline_slide(
         lines=[
             "Las barras representan incidencias operativas del periodo.",
             "Las líneas muestran cómo evoluciona el mix detractor, pasivo y promotor.",
-            "El valor está en detectar precedencia, no solo coincidencia puntual.",
-            "Cuando el deterioro de grupos acompaña o sigue a picos operativos, la hipótesis causal gana fuerza.",
+            "El valor está en detectar qué ocurre antes y qué ocurre después, no solo coincidencias puntuales.",
+            "Cuando el deterioro acompaña o sigue a picos operativos, la hipótesis causal gana fuerza.",
         ],
         accent=BBVA_COLORS["red"],
     )
@@ -4260,8 +4556,8 @@ def _add_journeys_summary_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="8. Journeys rotos del periodo",
-        subtitle=f"Resumen ejecutivo de journeys con evidencia causal defendible · {period_label}",
+        title="8. Experiencias afectadas del periodo",
+        subtitle=f"Resumen ejecutivo de casos donde incidencias y comentarios apuntan a la misma fricción · {period_label}",
     )
     scope = summarize_attribution_chains(chain_df)
     _add_stat_card(
@@ -4270,9 +4566,10 @@ def _add_journeys_summary_slide(
         top=1.48,
         width=2.8,
         height=1.10,
-        label="Método causal",
+        label="Cómo se enlaza",
         value=_touchpoint_method_label(touchpoint_source),
         accent=BBVA_COLORS["blue"],
+        hint="Incidencia -> comentario -> NPS",
     )
     _add_stat_card(
         slide,
@@ -4280,7 +4577,7 @@ def _add_journeys_summary_slide(
         top=1.48,
         width=2.0,
         height=1.10,
-        label="INC con match",
+        label="INC vinculadas",
         value=str(int(scope.get("linked_incidents_total", 0))),
         accent=BBVA_COLORS["orange"],
     )
@@ -4290,7 +4587,7 @@ def _add_journeys_summary_slide(
         top=1.48,
         width=2.0,
         height=1.10,
-        label="Comentarios",
+        label="Comentarios enlazados",
         value=str(int(scope.get("linked_comments_total", 0))),
         accent=BBVA_COLORS["green"],
     )
@@ -4300,11 +4597,11 @@ def _add_journeys_summary_slide(
         top=1.48,
         width=2.0,
         height=1.10,
-        label="Links",
+        label="Vínculos validados",
         value=str(int(scope.get("linked_pairs_total", 0))),
         accent=BBVA_COLORS["red"],
     )
-    _panel(slide, left=0.66, top=2.88, width=7.25, height=4.02, title="Ranking de journeys rotos")
+    _panel(slide, left=0.66, top=2.88, width=7.25, height=4.02, title="Casos con mayor riesgo")
     _figure_in_panel(
         slide,
         figure=_journeys_overview_fig(chain_df),
@@ -4331,10 +4628,13 @@ def _add_journeys_summary_slide(
         left=8.10,
         top=2.88,
         width=4.58,
-        title="Datos relevantes",
-        headers=["Journey", "Prio.", "Conf.", "Riesgo", "Owner"],
+        title="Resumen por caso",
+        headers=["Caso", "Prio.", "Conf.", "Riesgo", "Equipo"],
         rows=rows or [["Sin evidencia", "-", "-", "-", "-"]],
         row_height=0.32,
+        col_width_ratios=[2.4, 0.6, 0.6, 0.7, 1.1],
+        clip_lengths=[34, 6, 6, 8, 18],
+        font_size_pt=8.9,
     )
 
 
@@ -4352,15 +4652,15 @@ def _add_chain_scenario_slide(
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
     touchpoint = _clip(chain_row.get("touchpoint", "Touchpoint"), 36)
+    focus_label = _focus_risk_label(focus_name)
     _add_header(
         slide,
-        title=f"9.{idx} Escenario causal",
+        title=f"9.{idx} Caso causal",
         subtitle=f"{title} · {touchpoint} · {period_label}",
     )
     chain_statement = (
-        f"({linked_incidents}) incidencias Helix -> {touchpoint} / "
-        f"{_clip(chain_row.get('palanca', 'n/d'), 24)} / {_clip(chain_row.get('subpalanca', 'n/d'), 24)} "
-        f"-> ({linked_comments}) comentarios VoC -> riesgo {focus_name}"
+        f"{linked_incidents} incidencias de Helix y {linked_comments} comentarios de cliente "
+        f"convergen en '{title}' y explican riesgo de {focus_label}."
     )
     banner = _panel(
         slide,
@@ -4378,12 +4678,12 @@ def _add_chain_scenario_slide(
 
     metrics = [
         (
-            "Probabilidad foco",
+            _focus_probability_label(focus_name),
             _fmt_pct_or_nd(chain_row.get("detractor_probability", np.nan)),
             BBVA_COLORS["red"],
         ),
         (
-            "Delta NPS",
+            "Cambio esperado en NPS",
             _fmt_signed_or_nd(chain_row.get("nps_delta_expected", np.nan)),
             BBVA_COLORS["orange"],
         ),
@@ -4392,24 +4692,36 @@ def _add_chain_scenario_slide(
             f"{_fmt_num_or_nd(chain_row.get('total_nps_impact', np.nan))} pts",
             BBVA_COLORS["blue"],
         ),
-        ("Confianza", _fmt_num_or_nd(chain_row.get("confidence", np.nan)), BBVA_COLORS["green"]),
         (
-            "Links",
+            "Solidez de la evidencia",
+            _fmt_num_or_nd(chain_row.get("confidence", np.nan)),
+            BBVA_COLORS["green"],
+        ),
+        (
+            "Vínculos validados",
             str(int(_safe_int(chain_row.get("linked_pairs", 0), default=0))),
             BBVA_COLORS["sky"],
         ),
-        ("Prioridad", _fmt_num_or_nd(chain_row.get("priority", np.nan)), BBVA_COLORS["red"]),
         (
-            "NPS riesgo",
+            "Prioridad sugerida",
+            _fmt_num_or_nd(chain_row.get("priority", np.nan)),
+            BBVA_COLORS["red"],
+        ),
+        (
+            "NPS en riesgo",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_at_risk', np.nan))} pts",
             BBVA_COLORS["red"],
         ),
         (
-            "Recuperable",
+            "NPS recuperable",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_recoverable', np.nan))} pts",
             BBVA_COLORS["green"],
         ),
-        ("Owner", _clip(chain_row.get("owner_role", "n/d"), 20), BBVA_COLORS["blue"]),
+        (
+            "Equipo responsable",
+            _clip(chain_row.get("owner_role", "n/d"), 24),
+            BBVA_COLORS["blue"],
+        ),
     ]
     for pos, (label, value, accent) in enumerate(metrics):
         row = pos // 3
@@ -4431,8 +4743,11 @@ def _add_chain_scenario_slide(
         top=5.28,
         width=5.75,
         height=1.62,
-        title="Evidencias de Helix",
-        lines=_chain_list(chain_row.get("incident_examples"))[:5]
+        title="Incidencias relacionadas",
+        lines=[
+            _clean_evidence_excerpt(line, max_len=112)
+            for line in _chain_list(chain_row.get("incident_examples"))[:3]
+        ]
         or ["No se han encontrado evidencias Helix adicionales para este escenario."],
         accent=BBVA_COLORS["orange"],
     )
@@ -4442,8 +4757,11 @@ def _add_chain_scenario_slide(
         top=5.28,
         width=6.03,
         height=1.62,
-        title="Voz del cliente",
-        lines=_chain_list(chain_row.get("comment_examples"))[:3]
+        title="Comentarios de cliente",
+        lines=[
+            _clean_evidence_excerpt(line, max_len=116)
+            for line in _chain_list(chain_row.get("comment_examples"))[:2]
+        ]
         or ["No se han encontrado verbatims adicionales para este escenario."],
         accent=BBVA_COLORS["red"],
     )
@@ -4466,10 +4784,10 @@ def _add_chain_detail_slide(
     title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
     _add_header(
         slide,
-        title=f"10.{idx} Detalle cadena causal",
-        subtitle=f"{title} · matriz visual, heat map y lectura temporal · {period_label}",
+        title=f"10.{idx} Detalle del caso",
+        subtitle=f"{title} · posición del caso, comentarios y secuencia temporal · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Matriz visual")
+    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Posición del caso")
     _figure_in_panel(
         slide,
         figure=_chain_portfolio_fig(chain_df, highlight_topic=str(chain_row.get("nps_topic", ""))),
@@ -4477,15 +4795,15 @@ def _add_chain_detail_slide(
         top=1.84,
         width=3.73,
         height=1.83,
-        empty_note="No hay cartera suficiente para la matriz visual.",
+        empty_note="No hay cartera suficiente para posicionar el caso.",
     )
     quant_lines = [
         f"Palanca: {_clip(chain_row.get('palanca', 'n/d'), 28)}",
         f"Subpalanca: {_clip(chain_row.get('subpalanca', 'n/d'), 28)}",
-        f"Lag en días: {_lag_days_for_topic(_matching_topic_for_chain(chain_row, by_topic_daily), lag_days_by_topic=lag_days_by_topic, lag_weeks_by_topic=lag_weeks_by_topic, rationale_df=pd.DataFrame(), ranking_df=None)}",
-        f"Changepoints: {len(_changepoints_map(changepoints_by_topic).get(_matching_topic_for_chain(chain_row, by_topic_daily), []))}",
-        f"Lane: {_clip(chain_row.get('action_lane', 'n/d'), 30)}",
-        f"Owner: {_clip(chain_row.get('owner_role', 'n/d'), 30)}",
+        f"Retraso estimado: {_lag_days_for_topic(_matching_topic_for_chain(chain_row, by_topic_daily), lag_days_by_topic=lag_days_by_topic, lag_weeks_by_topic=lag_weeks_by_topic, rationale_df=pd.DataFrame(), ranking_df=None)} días",
+        f"Puntos de cambio: {len(_changepoints_map(changepoints_by_topic).get(_matching_topic_for_chain(chain_row, by_topic_daily), []))}",
+        f"Tipo de acción: {_clip(_action_lane_label(chain_row.get('action_lane', 'n/d')), 34)}",
+        f"Equipo responsable: {_clip(chain_row.get('owner_role', 'n/d'), 30)}",
     ]
     _add_bullet_lines(
         slide,
@@ -4493,11 +4811,11 @@ def _add_chain_detail_slide(
         top=1.48,
         width=3.28,
         height=2.35,
-        title="Ficha cuantitativa",
+        title="Resumen cuantitativo",
         lines=quant_lines,
         accent=BBVA_COLORS["blue"],
     )
-    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Heat map VoC")
+    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Mapa de comentarios")
     _figure_in_panel(
         slide,
         figure=_chain_comment_heatmap_fig(chain_row),
@@ -4505,9 +4823,9 @@ def _add_chain_detail_slide(
         top=1.84,
         width=3.94,
         height=1.83,
-        empty_note="No hay suficiente detalle temporal en la evidencia VoC.",
+        empty_note="No hay suficiente detalle temporal en los comentarios vinculados.",
     )
-    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Changepoint + lag")
+    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Secuencia temporal")
     _figure_in_panel(
         slide,
         figure=_chain_temporal_fig(
@@ -4529,10 +4847,16 @@ def _add_chain_detail_slide(
         top=4.06,
         width=3.56,
         height=2.84,
-        title="Evidencias",
+        title="Evidencias clave",
         lines=(
-            [f"Helix: {line}" for line in _chain_list(chain_row.get("incident_examples"))[:2]]
-            + [f"VoC: {line}" for line in _chain_list(chain_row.get("comment_examples"))[:2]]
+            [
+                f"Helix: {_clean_evidence_excerpt(line, max_len=98)}"
+                for line in _chain_list(chain_row.get("incident_examples"))[:2]
+            ]
+            + [
+                f"Cliente: {_clean_evidence_excerpt(line, max_len=98)}"
+                for line in _chain_list(chain_row.get("comment_examples"))[:2]
+            ]
         )
         or ["Sin evidencias adicionales en el detalle."],
         accent=BBVA_COLORS["orange"],
