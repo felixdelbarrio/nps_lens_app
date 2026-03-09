@@ -874,6 +874,29 @@ def _cap_chain_evidence_rows(
             return values
         return values[:max_items]
 
+    def _normalize_records(value: object) -> list[dict[str, str]]:
+        if isinstance(value, list):
+            values = value
+        elif value in (None, ""):
+            values = []
+        else:
+            values = [value]
+        records: list[dict[str, str]] = []
+        for entry in values:
+            if not isinstance(entry, dict):
+                continue
+            records.append({str(k): str(v or "").strip() for k, v in entry.items()})
+        return records
+
+    def _cap_records(values: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+        try:
+            max_items = int(limit)
+        except Exception:
+            return values
+        if max_items <= 0:
+            return values
+        return values[:max_items]
+
     out["incident_examples"] = [
         _cap(_normalize_list(v), max_incident_examples)
         for v in out.get("incident_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
@@ -881,6 +904,10 @@ def _cap_chain_evidence_rows(
     out["comment_examples"] = [
         _cap(_normalize_list(v), max_comment_examples)
         for v in out.get("comment_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
+    ]
+    out["comment_records"] = [
+        _cap_records(_normalize_records(v), max_comment_examples)
+        for v in out.get("comment_records", pd.Series([[]] * len(out), index=out.index)).tolist()
     ]
     return out
 

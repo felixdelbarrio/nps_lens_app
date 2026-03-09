@@ -40,6 +40,14 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 ["2026-02-01", "2026-02-01", "2026-02-01", "2026-02-02", "2026-02-02", "2026-02-02"]
             ),
             "NPS": [1, 1, 2, 2, 3, 2],
+            "NPS Group": [
+                "DETRACTOR",
+                "DETRACTOR",
+                "DETRACTOR",
+                "DETRACTOR",
+                "DETRACTOR",
+                "DETRACTOR",
+            ],
             "Palanca": ["Acceso", "Acceso", "Acceso", "Acceso", "Acceso", "Sin Comentarios"],
             "Subpalanca": ["Login", "Login", "Login", "Login", "Login", "Sin Comentarios"],
             "Comment": [
@@ -49,6 +57,14 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 "Se desloguea apenas inicia",
                 "La sesión se cae al entrar",
                 "Sin comentarios",
+            ],
+            "_text_norm": [
+                "no puedo entrar a la aplicacion de empresas",
+                "nada mas entro y la web me saca",
+                "no permite acceder con mis credenciales",
+                "se desloguea apenas inicia",
+                "la sesion se cae al entrar",
+                "sin comentarios",
             ],
         }
     )
@@ -133,9 +149,19 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     assert len(out.iloc[0]["incident_records"]) == 5
     assert len(out.iloc[0]["incident_examples"]) == 5
     assert len(out.iloc[0]["comment_examples"]) == 2
+    assert len(out.iloc[0]["comment_records"]) == 2
     assert out.iloc[0]["incident_records"][0]["incident_id"] == "INC00001"
     assert "problema" in out.iloc[0]["incident_examples"][0].lower()
     assert "No puedo entrar" in out.iloc[0]["comment_examples"][0]
+    assert out.iloc[0]["comment_records"][0] == {
+        "comment_id": "n1",
+        "date": "01-02-2026",
+        "nps": "1",
+        "group": "DETRACTOR",
+        "palanca": "Acceso",
+        "subpalanca": "Login",
+        "comment": "no puedo entrar a la aplicacion de empresas",
+    }
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "2 comentarios VoC" in out.iloc[0]["chain_story"]
     assert out.iloc[0]["action_lane"] == "Fix estructural"
@@ -284,6 +310,7 @@ def test_build_incident_attribution_chains_can_return_all_examples_when_limit_is
     assert len(out) == 1
     assert len(out.iloc[0]["incident_examples"]) == 3
     assert len(out.iloc[0]["comment_examples"]) == 3
+    assert len(out.iloc[0]["comment_records"]) == 3
 
 
 def test_build_incident_attribution_chains_filters_compound_generic_topics() -> None:

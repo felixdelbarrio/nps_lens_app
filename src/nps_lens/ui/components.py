@@ -187,23 +187,71 @@ def impact_chain(
             )
         return fallback
 
+    def _normalize_comment_records(item: object) -> list[dict[str, str]]:
+        raw = _value(item, "comment_records", [])
+        records: list[dict[str, str]] = []
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                comment = str(entry.get("comment", "") or "").strip()
+                if not comment:
+                    continue
+                records.append(
+                    {
+                        "comment_id": str(entry.get("comment_id", "") or "").strip(),
+                        "date": str(entry.get("date", "") or "").strip(),
+                        "nps": str(entry.get("nps", "") or "").strip(),
+                        "group": str(entry.get("group", "") or "").strip(),
+                        "palanca": str(entry.get("palanca", "") or "").strip(),
+                        "subpalanca": str(entry.get("subpalanca", "") or "").strip(),
+                        "comment": comment,
+                    }
+                )
+        if records:
+            return records
+
+        fallback: list[dict[str, str]] = []
+        for idx, text in enumerate(
+            _normalize_examples(_value(item, "comment_examples", [])), start=1
+        ):
+            fallback.append(
+                {
+                    "comment_id": str(idx),
+                    "date": "",
+                    "nps": "",
+                    "group": "",
+                    "palanca": "",
+                    "subpalanca": "",
+                    "comment": text,
+                }
+            )
+        return fallback
+
     def _is_clickable_url(value: str) -> bool:
         txt = str(value or "").strip()
         return txt.startswith("http://") or txt.startswith("https://") or txt.startswith("file://")
 
-    def _render_evidence_cards(items: list[str], *, empty_label: str, badge: str) -> None:
-        if not items:
+    def _render_voc_record_cards(records: list[dict[str, str]], *, empty_label: str) -> None:
+        if not records:
             st.info(empty_label)
             return
         cards_html = "".join(
             [
                 (
                     "<article class='nps-evidence-card'>"
-                    f"<div class='nps-evidence-card-index'>{badge} {idx}</div>"
-                    f"<p>{escape(text)}</p>"
+                    "<div class='nps-pill-row'>"
+                    f"<span class='nps-pill'>ID: {escape(record.get('comment_id') or '-')}</span>"
+                    f"<span class='nps-pill'>Fecha: {escape(record.get('date') or '-')}</span>"
+                    f"<span class='nps-pill'>NPS: {escape(record.get('nps') or '-')}</span>"
+                    f"<span class='nps-pill'>Grupo: {escape(record.get('group') or '-')}</span>"
+                    f"<span class='nps-pill'>Palanca: {escape(record.get('palanca') or '-')}</span>"
+                    f"<span class='nps-pill'>Subpalanca: {escape(record.get('subpalanca') or '-')}</span>"
+                    "</div>"
+                    f"<p>{escape(record.get('comment') or '')}</p>"
                     "</article>"
                 )
-                for idx, text in enumerate(items, start=1)
+                for record in records
             ]
         )
         st.markdown(
@@ -322,7 +370,7 @@ def impact_chain(
             for record in incident_records
             if str(record.get("summary", "")).strip()
         ]
-        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
+        comment_records = _normalize_comment_records(item)
         lever_label = " / ".join([v for v in [palanca, subpalanca] if v])
         st.markdown(
             f"""
@@ -376,7 +424,7 @@ def impact_chain(
                 (
                     "<div class='nps-evidence-toolbar-note'>"
                     f"<strong>{len(incident_examples)}</strong> evidencias Helix visibles · "
-                    f"<strong>{len(comment_examples)}</strong> comentarios VoC visibles"
+                    f"<strong>{len(comment_records)}</strong> comentarios VoC visibles"
                     "</div>"
                 ),
                 unsafe_allow_html=True,
@@ -399,15 +447,22 @@ def impact_chain(
         def _render_voc_tab() -> None:
             if evidence_view == "Tabla":
                 _render_evidence_html_table(
-                    [{"comment": text} for text in comment_examples],
-                    columns=[("comment", "Voz del cliente")],
+                    comment_records,
+                    columns=[
+                        ("comment_id", "ID"),
+                        ("date", "Fecha"),
+                        ("nps", "NPS"),
+                        ("group", "Grupo"),
+                        ("palanca", "Palanca"),
+                        ("subpalanca", "Subpalanca"),
+                        ("comment", "Comentario"),
+                    ],
                     empty_label="Sin evidencia VoC visible.",
                 )
             else:
-                _render_evidence_cards(
-                    comment_examples,
+                _render_voc_record_cards(
+                    comment_records,
                     empty_label="Sin evidencia VoC visible.",
-                    badge="VoC",
                 )
 
         tabs_spec.append(
@@ -418,7 +473,7 @@ def impact_chain(
         )
         tabs_spec.append(
             (
-                f"Voz del cliente ({linked_comments or len(comment_examples)})",
+                f"Voz del cliente ({linked_comments or len(comment_records)})",
                 _render_voc_tab,
             )
         )
@@ -463,9 +518,9 @@ def impact_chain(
             for record in incident_records
             if str(record.get("summary", "")).strip()
         ]
-        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
+        comment_records = _normalize_comment_records(item)
         incident_sample_count = len(incident_examples)
-        comment_sample_count = len(comment_examples)
+        comment_sample_count = len(comment_records)
         linked_pairs = _safe_int(_value(item, "linked_pairs", 0), default=0)
         cards.append(
             f"""

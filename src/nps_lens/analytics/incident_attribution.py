@@ -175,6 +175,7 @@ CHAIN_COLUMNS = [
     "incident_records",
     "incident_examples",
     "comment_examples",
+    "comment_records",
     "chain_story",
     "delta_focus_rate_pp",
     "incident_rate_per_100_responses",
@@ -265,6 +266,36 @@ def _clip(value: object, max_len: int) -> str:
     return txt[: max_len - 1].rstrip() + "…"
 
 
+def _format_nps_score(value: object) -> str:
+    score = _safe_float(value, default=np.nan)
+    if not np.isfinite(score):
+        return ""
+    if float(score).is_integer():
+        return str(int(score))
+    return f"{score:.1f}"
+
+
+def _format_nps_date(value: object) -> str:
+    ts = pd.to_datetime(value, errors="coerce")
+    if ts is None or pd.isna(ts):
+        return ""
+    return ts.strftime("%d-%m-%Y")
+
+
+def _derive_nps_group(group_value: object, score_value: object) -> str:
+    group_txt = str(group_value or "").strip()
+    if group_txt:
+        return group_txt
+    score = _safe_float(score_value, default=np.nan)
+    if not np.isfinite(score):
+        return ""
+    if score <= 6:
+        return "DETRACTOR"
+    if score >= 9:
+        return "PROMOTER"
+    return "PASSIVE"
+
+
 def _touchpoint(
     palanca: object,
     subpalanca: object,
@@ -329,7 +360,9 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
             columns=[
                 "nps_id",
                 "nps_score",
+                "nps_group",
                 "comment_txt",
+                "comment_norm",
                 "palanca",
                 "subpalanca",
                 "nps_date",
@@ -344,6 +377,16 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
     if comment_series is None:
         comment_series = df.get("Comentario", pd.Series([""] * len(df), index=df.index))
     df["comment_txt"] = comment_series.astype(str).fillna("").str.strip()
+    comment_norm_series = df.get("_text_norm")
+    if comment_norm_series is None:
+        comment_norm_series = df["comment_txt"]
+    df["comment_norm"] = comment_norm_series.astype(str).fillna("").str.strip()
+    df["nps_group"] = (
+        df.get("NPS Group", pd.Series([""] * len(df), index=df.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
     df["palanca"] = (
         df.get("Palanca", pd.Series([""] * len(df), index=df.index))
         .astype(str)
@@ -367,7 +410,17 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
         .str.replace(r"\s*>$", "", regex=True)
     )
     return df[
-        ["nps_id", "nps_score", "comment_txt", "palanca", "subpalanca", "nps_date", "nps_topic"]
+        [
+            "nps_id",
+            "nps_score",
+            "nps_group",
+            "comment_txt",
+            "comment_norm",
+            "palanca",
+            "subpalanca",
+            "nps_date",
+            "nps_topic",
+        ]
     ].copy()
 
 
@@ -782,7 +835,22 @@ def build_incident_attribution_chains(
             for _, r in comment_ranked.iterrows()
             if str(r.get("comment_txt", "")).strip()
         ]
-        if not incident_records or not comment_examples:
+        comment_records = [
+            {
+                "comment_id": str(r.get("nps_id", "") or "").strip(),
+                "date": _format_nps_date(r.get("nps_date")),
+                "nps": _format_nps_score(r.get("nps_score")),
+                "group": _derive_nps_group(r.get("nps_group"), r.get("nps_score")),
+                "palanca": str(r.get("palanca", "") or "").strip(),
+                "subpalanca": str(r.get("subpalanca", "") or "").strip(),
+                "comment": " ".join(
+                    str(r.get("comment_norm") or r.get("comment_txt") or "").split()
+                ),
+            }
+            for _, r in comment_ranked.iterrows()
+            if str(r.get("comment_norm") or r.get("comment_txt") or "").strip()
+        ]
+        if not incident_records or not comment_records:
             continue
 
         detractor_probability = _safe_float(
@@ -826,7 +894,7 @@ def build_incident_attribution_chains(
             if str(rec.get("incident_id", "")).strip()
         ]
         incident_sample_count = len(incident_examples)
-        comment_sample_count = len(comment_examples)
+        comment_sample_count = len(comment_records)
         incident_sample_label = (
             ", ".join(incident_ids[:3])
             if incident_ids
@@ -877,6 +945,7 @@ def build_incident_attribution_chains(
                 "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
+                "comment_records": comment_records,
                 "chain_story": story,
                 "delta_focus_rate_pp": delta_focus_rate_pp,
                 "incident_rate_per_100_responses": incident_rate_per_100_responses,
