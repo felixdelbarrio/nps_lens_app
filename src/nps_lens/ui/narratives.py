@@ -6,7 +6,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.incident_attribution import TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
 from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
 
 
@@ -498,10 +501,16 @@ def build_ppt_8slide_script(
     lines.append("- Mensaje clave: cuándo la incidencia precede el deterioro NPS.")
     lines.append("")
 
-    if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+    mode = str(touchpoint_source or "").strip()
+    if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         lines.append("## Slide 3 — Journeys que explican la detracción")
         lines.append(
             "- Objetivo: identificar rutas de degradación de experiencia que conectan incidencias con la voz del cliente para priorizar causas raíz accionables."
+        )
+    elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+        lines.append("## Slide 3 — Journeys rotos detectados")
+        lines.append(
+            "- Narrativa obligatoria: incidencia -> embeddings / keywords / clustering semántico -> touchpoint roto -> comentario -> NPS."
         )
     else:
         lines.append("## Slide 3 — Impact Chain")
@@ -525,12 +534,22 @@ def build_ppt_8slide_script(
             comment_examples = _evidence_list(card, "comment_examples", 2)
             incident_total = _evidence_total(card, "linked_incidents", "incident_examples", 5)
             comment_total = _evidence_total(card, "linked_comments", "comment_examples", 2)
-            if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+            if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
                 expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
                 impact_label = str(_card_value(card, "journey_impact_label", "")).strip()
                 lines.append(
                     f"- {title}: {expected_evidence or 'journey causal defendible'} | "
                     f"impacto esperado {impact_label or 'alto'} | "
+                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
+                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"impacto {impact:.2f} pts | "
+                    f"evidencia validada {incident_total}/{comment_total}."
+                )
+            elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+                expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
+                lines.append(
+                    f"- {title}: {expected_evidence or 'cluster semántico defendible'} | "
+                    f"touchpoint {touchpoint or 'detectado automáticamente'} | "
                     f"probabilidad {focus_name} {_fmt_pct(probability)} | "
                     f"Δ NPS {_fmt_delta(delta_nps)} | "
                     f"impacto {impact:.2f} pts | "

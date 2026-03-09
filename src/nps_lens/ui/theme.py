@@ -21,6 +21,7 @@ class Theme:
     brand: str
     on_brand: str
     danger: str
+    danger_soft: str
     warning: str
     success: str
 
@@ -44,6 +45,7 @@ def get_theme(mode: str) -> Theme:
     brand = p["color.primary.bg.action.default"]
     on_brand = p.get("color.primary.text.main-inverse.default", text)
     danger = p["color.primary.bg.alert"]
+    danger_soft = p["color.primary.accent.value-07.default"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
     return Theme(
@@ -59,6 +61,7 @@ def get_theme(mode: str) -> Theme:
         brand=brand,
         on_brand=on_brand,
         danger=danger,
+        danger_soft=danger_soft,
         warning=warning,
         success=success,
     )
@@ -93,6 +96,7 @@ def apply_theme(t: Theme) -> None:
   --nps-accent-soft: color-mix(in srgb, var(--nps-accent) 18%, transparent);
   --nps-accent-strong: color-mix(in srgb, var(--nps-accent) 45%, transparent);
   --nps-danger: {t.danger};
+  --nps-danger-soft: {t.danger_soft};
   --nps-warning: {t.warning};
   --nps-success: {t.success};
   --nps-radius: 18px;
@@ -195,6 +199,21 @@ section[data-testid="stSidebar"] > div {{
   color: var(--nps-text);
   font-size: 12px;
   font-weight: 600;
+}}
+
+.nps-pill--detractor {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 18%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-danger-soft) 54%, var(--nps-surface));
+}}
+
+.nps-pill--passive {{
+  background: color-mix(in srgb, var(--nps-warning) 22%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-warning) 62%, var(--nps-surface));
+}}
+
+.nps-pill--promoter {{
+  background: color-mix(in srgb, var(--nps-success) 18%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-success) 52%, var(--nps-surface));
 }}
 
 .nps-pill-row {{
@@ -301,9 +320,31 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   margin-bottom: 6px;
 }}
 
+.nps-hero-metric-help {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--nps-border-soft);
+  background: color-mix(in srgb, var(--nps-surface) 88%, var(--nps-accent) 12%);
+  color: var(--nps-muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: help;
+}}
+
 .nps-hero-metric strong {{
   font-size: 24px;
   line-height: 1;
+}}
+
+.nps-hero-metric-value {{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }}
 
 .nps-impact-grid {{
@@ -618,6 +659,18 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   border-bottom: 1px solid var(--nps-border-softer);
   word-break: break-word;
   white-space: normal;
+}}
+
+.nps-evidence-table tbody td.nps-band--detractor {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 14%, var(--nps-surface));
+}}
+
+.nps-evidence-table tbody td.nps-band--passive {{
+  background: color-mix(in srgb, var(--nps-warning) 16%, var(--nps-surface));
+}}
+
+.nps-evidence-table tbody td.nps-band--promoter {{
+  background: color-mix(in srgb, var(--nps-success) 14%, var(--nps-surface));
 }}
 
 .nps-evidence-table tbody tr:last-child td {{

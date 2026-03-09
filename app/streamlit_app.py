@@ -31,12 +31,22 @@ from nps_lens.analytics.hotspot_metrics import (
     summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_attribution import (
+    EXECUTIVE_JOURNEY_EDITOR_COLUMNS,
     TOUCHPOINT_MODE_BANNER_LABELS,
+    TOUCHPOINT_MODE_FLOWS,
     TOUCHPOINT_MODE_MENU_LABELS,
     TOUCHPOINT_MODE_OPTIONS,
     TOUCHPOINT_MODE_SUMMARIES,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_DOMAIN,
+    build_broken_journey_catalog,
+    build_broken_journey_topic_map,
     build_incident_attribution_chains,
+    executive_journey_catalog_df,
+    load_executive_journey_catalog,
+    remap_links_to_journeys,
+    remap_topic_timeseries_to_journeys,
+    save_executive_journey_catalog,
 )
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
@@ -84,6 +94,7 @@ from nps_lens.ui.business import (
     slice_by_window,
 )
 from nps_lens.ui.charts import (
+    chart_broken_journeys_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
@@ -95,7 +106,14 @@ from nps_lens.ui.charts import (
     chart_nps_trend,
     chart_topic_bars,
 )
-from nps_lens.ui.components import executive_banner, impact_chain, kpi, pills, section
+from nps_lens.ui.components import (
+    executive_banner,
+    impact_chain,
+    kpi,
+    pills,
+    section,
+    style_semantic_dataframe,
+)
 from nps_lens.ui.narratives import (
     build_executive_story,
     build_incident_ppt_story,
@@ -750,6 +768,30 @@ def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _unique_string_values(values: list[object]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(normalized)
+    return unique
+
+
+def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return _unique_string_values(
+        [
+            item.get(field_name, "")
+            for item in value
+            if isinstance(item, dict) and str(item.get(field_name, "")).strip()
+        ]
+    )
+
+
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
@@ -768,10 +810,36 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     touchpoint = (
         out.get("touchpoint", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
     )
-    out["chain_key"] = [
-        hashlib.sha1(f"{tp}|{tpnt}".encode("utf-8")).hexdigest()[:12]
-        for tp, tpnt in zip(topic.tolist(), touchpoint.tolist())
-    ]
+    base_keys: list[str] = []
+    for _, row in out.iterrows():
+        key_payload = {
+            "presentation_mode": str(row.get("presentation_mode", "") or "").strip(),
+            "nps_topic": str(row.get("nps_topic", "") or "").strip(),
+            "touchpoint": str(row.get("touchpoint", "") or "").strip(),
+            "palanca": str(row.get("palanca", "") or "").strip(),
+            "subpalanca": str(row.get("subpalanca", "") or "").strip(),
+            "journey_route": str(row.get("journey_route", "") or "").strip(),
+            "linked_pairs": _safe_int_label(row.get("linked_pairs", 0)),
+            "linked_incidents": _safe_int_label(row.get("linked_incidents", 0)),
+            "linked_comments": _safe_int_label(row.get("linked_comments", 0)),
+            "incident_ids": _chain_record_ids(
+                row.get("incident_records"), field_name="incident_id"
+            ),
+            "comment_ids": _chain_record_ids(row.get("comment_records"), field_name="comment_id"),
+        }
+        base_keys.append(
+            hashlib.sha1(
+                json.dumps(key_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+            ).hexdigest()[:12]
+        )
+
+    key_counts: dict[str, int] = {}
+    chain_keys: list[str] = []
+    for base_key in base_keys:
+        next_count = key_counts.get(base_key, 0) + 1
+        key_counts[base_key] = next_count
+        chain_keys.append(base_key if next_count == 1 else f"{base_key}-{next_count}")
+    out["chain_key"] = chain_keys
     out["selection_label"] = [
         (
             f"{touchpoint_val or 'Touchpoint sin etiquetar'} | {topic_val or 'Tema sin etiqueta'} | "
@@ -799,7 +867,7 @@ def _sync_chain_selection_state(
         st.session_state[f"{key_prefix}_view_idx"] = 0
         return []
 
-    keys = chain_df["chain_key"].astype(str).tolist()
+    keys = _unique_string_values(chain_df["chain_key"].astype(str).tolist())
     sig = hashlib.sha1("|".join(keys).encode("utf-8")).hexdigest()
     sig_key = f"{key_prefix}_sig"
     selected_key = f"{key_prefix}_selected"
@@ -809,9 +877,9 @@ def _sync_chain_selection_state(
         st.session_state[selected_key] = keys[: min(int(default_limit), len(keys))]
         st.session_state[view_idx_key] = 0
 
-    selected = [str(k) for k in st.session_state.get(selected_key, []) if str(k) in keys][
-        : int(default_limit)
-    ]
+    selected = [
+        key for key in _unique_string_values(st.session_state.get(selected_key, [])) if key in keys
+    ][: int(default_limit)]
     if not selected:
         selected = keys[: min(int(default_limit), len(keys))]
         st.session_state[selected_key] = selected
@@ -827,18 +895,17 @@ def _sync_chain_selection_state(
 def _select_chain_rows(chain_df: pd.DataFrame, selected_keys: list[str]) -> pd.DataFrame:
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
-    if not selected_keys:
+    ordered_keys = _unique_string_values(selected_keys)
+    if not ordered_keys:
         return chain_df.head(0).copy()
 
-    selected = chain_df[
-        chain_df["chain_key"].astype(str).isin([str(k) for k in selected_keys])
-    ].copy()
+    selected = chain_df[chain_df["chain_key"].astype(str).isin(ordered_keys)].copy()
     if selected.empty:
         return selected
 
     selected["__order"] = pd.Categorical(
         selected["chain_key"].astype(str),
-        categories=[str(k) for k in selected_keys],
+        categories=ordered_keys,
         ordered=True,
     )
     selected = selected.sort_values("__order").drop(columns="__order").reset_index(drop=True)
@@ -874,6 +941,29 @@ def _cap_chain_evidence_rows(
             return values
         return values[:max_items]
 
+    def _normalize_records(value: object) -> list[dict[str, str]]:
+        if isinstance(value, list):
+            values = value
+        elif value in (None, ""):
+            values = []
+        else:
+            values = [value]
+        records: list[dict[str, str]] = []
+        for entry in values:
+            if not isinstance(entry, dict):
+                continue
+            records.append({str(k): str(v or "").strip() for k, v in entry.items()})
+        return records
+
+    def _cap_records(values: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+        try:
+            max_items = int(limit)
+        except Exception:
+            return values
+        if max_items <= 0:
+            return values
+        return values[:max_items]
+
     out["incident_examples"] = [
         _cap(_normalize_list(v), max_incident_examples)
         for v in out.get("incident_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
@@ -881,6 +971,10 @@ def _cap_chain_evidence_rows(
     out["comment_examples"] = [
         _cap(_normalize_list(v), max_comment_examples)
         for v in out.get("comment_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
+    ]
+    out["comment_records"] = [
+        _cap_records(_normalize_records(v), max_comment_examples)
+        for v in out.get("comment_records", pd.Series([[]] * len(out), index=out.index)).tolist()
     ]
     return out
 
@@ -2499,11 +2593,14 @@ def render_sidebar(  # noqa: PLR0915
         if current_touchpoint_mode not in TOUCHPOINT_MODE_MENU_LABELS:
             current_touchpoint_mode = TOUCHPOINT_SOURCE_DOMAIN
         touchpoint_source = st.radio(
-            "Modo de lectura causal",
+            "Método causal para el análisis",
             options=list(TOUCHPOINT_MODE_OPTIONS),
             index=list(TOUCHPOINT_MODE_OPTIONS).index(current_touchpoint_mode),
             format_func=lambda key: TOUCHPOINT_MODE_MENU_LABELS.get(str(key), str(key)),
-            help="Elige si el racional se construye exclusivamente por Palanca, Subpalanca, BBVA_SourceServiceN2 o con una lectura ejecutiva de journeys.",
+            help=(
+                "Elige si el racional se construye por Palanca, Subpalanca, "
+                "Helix Source Service N2 o con una lectura ejecutiva de journeys."
+            ),
         )
         st.session_state["_touchpoint_source"] = touchpoint_source
 
@@ -3277,6 +3374,88 @@ def page_llm_cache() -> None:
                     st.code(str(item.get("llm_answer") or ""), language="json")
 
 
+def page_executive_journey_catalog(
+    *,
+    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
+) -> None:
+    st.subheader("Catálogo manual de Journeys de detracción")
+    st.caption(
+        "Este catálogo alimenta el método causal manual de Journeys de detracción. "
+        "Se guarda por contexto de cliente y negocio."
+    )
+    pills([f"{service_origin}", f"{service_origin_n1}"])
+
+    catalog = load_executive_journey_catalog(
+        settings.knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
+    editor_key = f"journey_catalog_editor__{service_origin}__{service_origin_n1}".replace(" ", "_")
+    edited_df = st.data_editor(
+        executive_journey_catalog_df(catalog),
+        key=editor_key,
+        use_container_width=True,
+        num_rows="dynamic",
+        hide_index=True,
+        column_order=EXECUTIVE_JOURNEY_EDITOR_COLUMNS,
+        column_config={
+            "id": st.column_config.TextColumn("ID", required=False),
+            "title": st.column_config.TextColumn("Journey", required=True),
+            "what_occurs": st.column_config.TextColumn("Qué ocurre"),
+            "expected_evidence": st.column_config.TextColumn("Evidencia esperada"),
+            "impact_label": st.column_config.TextColumn("Impacto"),
+            "touchpoint": st.column_config.TextColumn("Touchpoint"),
+            "palanca": st.column_config.TextColumn("Palanca"),
+            "subpalanca": st.column_config.TextColumn("Subpalanca"),
+            "route": st.column_config.TextColumn("Ruta"),
+            "cx_readout": st.column_config.TextColumn("Lectura CX"),
+            "confidence_label": st.column_config.TextColumn("Confianza"),
+            "keywords": st.column_config.TextColumn("Keywords"),
+        },
+    )
+    st.caption(
+        "Puedes editar filas, dar de alta nuevas, eliminar y guardar. "
+        "En `keywords` usa coma para separar términos."
+    )
+
+    action_save, action_reset = st.columns([1, 1])
+    with action_save:
+        save_clicked = st.button(
+            "Guardar catálogo manual",
+            type="primary",
+            use_container_width=True,
+            key=f"{editor_key}_save",
+        )
+    with action_reset:
+        reset_clicked = st.button(
+            "Restaurar catálogo por defecto",
+            use_container_width=True,
+            key=f"{editor_key}_reset",
+        )
+
+    if save_clicked:
+        saved_path = save_executive_journey_catalog(
+            settings.knowledge_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            rows=edited_df.to_dict(orient="records"),
+        )
+        st.success(f"Catálogo guardado en {saved_path.name}.")
+        st.rerun()
+
+    if reset_clicked:
+        saved_path = save_executive_journey_catalog(
+            settings.knowledge_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            rows=[],
+        )
+        st.success(f"Catálogo restaurado al default en {saved_path.name}.")
+        st.rerun()
+
+
 def _normalize_empty_n2(n2: str) -> str:
     v = str(n2 or "").strip()
     if v in {"-", "—", "–"}:
@@ -3331,12 +3510,19 @@ def page_quality(
     *,
     llm_df: Optional[pd.DataFrame] = None,
     settings: Optional[Settings] = None,
+    service_origin: str = "",
+    service_origin_n1: str = "",
     min_n: int = 200,
     cache_path: Optional[Path] = None,
 ) -> None:
     tab_labels = ["NPS"]
     if helix_df is not None:
         tab_labels.append("Helix")
+    show_journey_catalog = bool(
+        settings is not None and service_origin.strip() and service_origin_n1.strip()
+    )
+    if show_journey_catalog:
+        tab_labels.append("Journeys de detracción")
     if llm_df is not None and settings is not None:
         tab_labels.append("LLM")
     tabs = st.tabs(tab_labels)
@@ -3393,9 +3579,61 @@ def page_quality(
             st.dataframe(view_h, use_container_width=True, height=520)
         next_tab_idx += 1
 
+    if show_journey_catalog and settings is not None:
+        with tabs[next_tab_idx]:
+            page_executive_journey_catalog(
+                settings=settings,
+                service_origin=service_origin,
+                service_origin_n1=service_origin_n1,
+            )
+        next_tab_idx += 1
+
     if llm_df is not None and settings is not None:
         with tabs[next_tab_idx]:
             page_llm_cache()
+
+
+def _build_touchpoint_mode_payload(
+    *,
+    touchpoint_source: str,
+    links_df: pd.DataFrame,
+    focus_df: pd.DataFrame,
+    helix_df: pd.DataFrame,
+    by_topic_weekly: pd.DataFrame,
+    by_topic_daily: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(
+        links_df,
+        focus_df,
+        helix_df,
+    )
+    broken_journey_topic_map_df = build_broken_journey_topic_map(broken_journey_links_df)
+    links_mode_df = links_df.copy()
+    by_topic_weekly_mode = by_topic_weekly.copy()
+    by_topic_daily_mode = by_topic_daily.copy()
+
+    if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+        remapped_links = remap_links_to_journeys(links_df, broken_journey_links_df)
+        remapped_weekly = remap_topic_timeseries_to_journeys(
+            by_topic_weekly,
+            broken_journey_topic_map_df,
+        )
+        remapped_daily = remap_topic_timeseries_to_journeys(
+            by_topic_daily,
+            broken_journey_topic_map_df,
+        )
+        links_mode_df = remapped_links
+        by_topic_weekly_mode = remapped_weekly
+        by_topic_daily_mode = remapped_daily
+
+    return {
+        "broken_journeys_df": broken_journeys_df,
+        "broken_journey_links_df": broken_journey_links_df,
+        "broken_journey_topic_map_df": broken_journey_topic_map_df,
+        "links_mode_df": links_mode_df,
+        "by_topic_weekly_mode": by_topic_weekly_mode,
+        "by_topic_daily_mode": by_topic_daily_mode,
+    }
 
 
 def page_nps_helix_linking(
@@ -3416,6 +3654,11 @@ def page_nps_helix_linking(
 ) -> None:
     # Use the global app theme for any Plotly figures built directly in this page.
     theme = get_theme(theme_mode)
+    executive_journey_catalog = load_executive_journey_catalog(
+        settings.knowledge_dir,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+    )
     # IMPORTANT: context is only used to load the already-ingested population.
     # Once persisted, analysis should *not* re-filter by service origin / N1 / N2 again.
     helix_store = HelixIncidentStore(settings.data_dir / "helix")
@@ -3536,18 +3779,31 @@ def page_nps_helix_linking(
     overall_daily, by_topic_daily = daily_aggregates(
         nps_slice, helix_slice, assign_df, focus_group=focus_group
     )
+    mode_payload = _build_touchpoint_mode_payload(
+        touchpoint_source=touchpoint_source,
+        links_df=links_df,
+        focus_df=focus_df,
+        helix_df=helix_slice,
+        by_topic_weekly=by_topic_weekly,
+        by_topic_daily=by_topic_daily,
+    )
+    broken_journeys_df = mode_payload["broken_journeys_df"]
+    broken_journey_links_df = mode_payload["broken_journey_links_df"]
+    links_mode_df = mode_payload["links_mode_df"]
+    by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
+    by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
 
     # Design tokens (Plotly colors)
     dtokens = DesignTokens.default()
     pal = palette(dtokens, theme_mode)
     # Continuous scales aligned to design tokens
     risk_scale = plotly_risk_scale(dtokens, theme_mode)
-    tab_overview, tab_priorities, tab_ppt, tab_evidence = st.tabs(
+    tab_overview, tab_broken_journeys, tab_priorities, tab_ppt = st.tabs(
         [
             "Situación del periodo",
+            "Journeys rotos",
             "Análisis de escenarios causales",
             "Narrativa y presentación",
-            "Evidencia y paquete GPT",
         ]
     )
     lag_days = pd.DataFrame()
@@ -3707,20 +3963,20 @@ def page_nps_helix_linking(
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
 
-    rank = causal_rank_by_topic(by_topic_weekly)
+    rank = causal_rank_by_topic(by_topic_weekly_mode)
     # 3.1) Changepoints en detracción por tópico + lag (incidencias preceden X semanas)
     # Changepoints con estabilidad (bootstrap) para etiquetar alto/medio/bajo
     cp_by_topic = detect_detractor_changepoints_with_bootstrap(
-        by_topic_weekly,
+        by_topic_weekly_mode,
         pen=6.0,
         n_boot=200,
         block_size=2,
         tol_periods=1,
     )
-    lag_by_topic = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
-    lead_share = incidents_lead_changepoints_flag(by_topic_weekly, cp_by_topic, window_weeks=4)
+    lag_by_topic = estimate_best_lag_by_topic(by_topic_weekly_mode, max_lag_weeks=6)
+    lead_share = incidents_lead_changepoints_flag(by_topic_weekly_mode, cp_by_topic, window_weeks=4)
     lag_days = (
-        estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
+        estimate_best_lag_days_by_topic(by_topic_daily_mode, max_lag_days=21, min_points=30)
         if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45)
         else pd.DataFrame()
     )
@@ -3811,7 +4067,7 @@ def page_nps_helix_linking(
     # 3.3) Racional de negocio: incidencias -> riesgo NPS -> recuperación + plan
     rank_for_rationale = rank2 if "rank2" in locals() and not rank2.empty else rank
     rationale_df = build_incident_nps_rationale(
-        by_topic_weekly,
+        by_topic_weekly_mode,
         focus_group=focus_group,
         rank_df=rank_for_rationale,
         min_topic_responses=80,
@@ -3819,7 +4075,7 @@ def page_nps_helix_linking(
     )
     rationale_summary = summarize_incident_nps_rationale(rationale_df)
     chain_candidates_df = build_incident_attribution_chains(
-        links_df,
+        links_mode_df,
         focus_df,
         helix_slice,
         rationale_df=rationale_df,
@@ -3828,6 +4084,9 @@ def page_nps_helix_linking(
         max_comment_examples=0,
         min_links_per_topic=1,
         touchpoint_source=touchpoint_source,
+        journey_catalog_df=broken_journeys_df,
+        journey_links_df=broken_journey_links_df,
+        executive_journey_catalog=executive_journey_catalog,
     )
     chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
     selected_chain_keys = _sync_chain_selection_state(
@@ -3842,14 +4101,14 @@ def page_nps_helix_linking(
     )
     linked_topics_total = (
         int(
-            links_df.get("nps_topic", pd.Series(dtype=str))
+            links_mode_df.get("nps_topic", pd.Series(dtype=str))
             .astype(str)
             .str.strip()
             .replace("", np.nan)
             .dropna()
             .nunique()
         )
-        if links_df is not None and not links_df.empty
+        if links_mode_df is not None and not links_mode_df.empty
         else 0
     )
     assigned_incidents_total = (
@@ -3865,22 +4124,22 @@ def page_nps_helix_linking(
         else 0
     )
     linked_pairs_total = (
-        int(len(links_df[["incident_id", "nps_id"]].drop_duplicates()))
-        if links_df is not None
-        and not links_df.empty
-        and {"incident_id", "nps_id"}.issubset(set(links_df.columns))
+        int(len(links_mode_df[["incident_id", "nps_id"]].drop_duplicates()))
+        if links_mode_df is not None
+        and not links_mode_df.empty
+        and {"incident_id", "nps_id"}.issubset(set(links_mode_df.columns))
         else 0
     )
     linked_comments_total = (
         int(
-            links_df.get("nps_id", pd.Series(dtype=str))
+            links_mode_df.get("nps_id", pd.Series(dtype=str))
             .astype(str)
             .str.strip()
             .replace("", np.nan)
             .dropna()
             .nunique()
         )
-        if links_df is not None and not links_df.empty
+        if links_mode_df is not None and not links_mode_df.empty
         else 0
     )
     ppt_story_md = (
@@ -3982,7 +4241,7 @@ def page_nps_helix_linking(
             st.info("No hay suficiente señal para rankear tópicos en el periodo seleccionado.")
 
         st.markdown("### Evidence wall")
-        if focus_population.empty or links_df.empty:
+        if focus_population.empty or links_mode_df.empty:
             st.info(
                 "No hay links validados (o no hay detractores) con la política estricta activa. Amplía la ventana temporal o revisa la calidad de texto."
             )
@@ -3990,9 +4249,19 @@ def page_nps_helix_linking(
             chosen = (
                 str(show.iloc[0]["nps_topic"])
                 if "show" in locals() and not show.empty
-                else str(sorted(focus_population["Palanca"].astype(str).unique().tolist())[0])
+                else str(
+                    sorted(
+                        links_mode_df.get("nps_topic", pd.Series(dtype=str))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", np.nan)
+                        .dropna()
+                        .unique()
+                        .tolist()
+                    )[0]
+                )
             )
-            sub_links = links_df[links_df["nps_topic"] == chosen].head(50).copy()
+            sub_links = links_mode_df[links_mode_df["nps_topic"] == chosen].head(50).copy()
             if sub_links.empty:
                 st.info("No hay links validados para el tópico líder del periodo.")
             else:
@@ -4026,6 +4295,77 @@ def page_nps_helix_linking(
                     height=360,
                 )
 
+    with tab_broken_journeys:
+        section(
+            "Journeys rotos identificados",
+            "Detección automática de touchpoints rotos a partir de embeddings ligeros, keywords y clustering semántico sobre links Helix↔VoC.",
+        )
+        if broken_journeys_df.empty:
+            st.info("No he identificado journeys rotos defendibles en esta ventana.")
+        else:
+            bj1, bj2, bj3 = st.columns(3)
+            with bj1:
+                kpi("Journeys detectados", f"{len(broken_journeys_df):,}")
+            with bj2:
+                kpi(
+                    "Links validados",
+                    f"{int(pd.to_numeric(broken_journeys_df['linked_pairs'], errors='coerce').fillna(0).sum()):,}",
+                )
+            with bj3:
+                kpi(
+                    "Cohesión media",
+                    f"{pd.to_numeric(broken_journeys_df['semantic_cohesion'], errors='coerce').fillna(0.0).mean():.2f}",
+                )
+
+            fig_broken = chart_broken_journeys_bar(
+                broken_journeys_df,
+                theme=theme,
+                top_k=min(10, len(broken_journeys_df)),
+            )
+            if fig_broken is not None:
+                st.plotly_chart(fig_broken, use_container_width=True)
+
+            broken_journeys_view = broken_journeys_df.rename(
+                columns={
+                    "journey_label": "Journey roto",
+                    "touchpoint": "Touchpoint detectado",
+                    "palanca": "Palanca dominante",
+                    "subpalanca": "Subpalanca dominante",
+                    "helix_source_service_n2": "Helix Source Service N2",
+                    "journey_keywords": "Keywords",
+                    "linked_pairs": "Links validados",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "avg_similarity": "Similaridad media",
+                    "avg_nps": "NPS medio",
+                    "semantic_cohesion": "Cohesión semántica",
+                    "journey_confidence_label": "Confianza",
+                    "journey_impact_label": "Impacto",
+                }
+            )[
+                [
+                    "Journey roto",
+                    "Touchpoint detectado",
+                    "Palanca dominante",
+                    "Subpalanca dominante",
+                    "Helix Source Service N2",
+                    "Keywords",
+                    "Links validados",
+                    "Incidencias",
+                    "Comentarios VoC",
+                    "NPS medio",
+                    "Similaridad media",
+                    "Cohesión semántica",
+                    "Confianza",
+                    "Impacto",
+                ]
+            ]
+            st.dataframe(
+                style_semantic_dataframe(broken_journeys_view, theme),
+                use_container_width=True,
+                height=320,
+            )
+
     impact_cards = []
     current_card: Optional[dict[str, Any]] = None
     if not chain_candidates_df.empty:
@@ -4057,7 +4397,7 @@ def page_nps_helix_linking(
                 ),
                 metrics=[
                     (
-                        "Modo causal",
+                        "Método causal",
                         TOUCHPOINT_MODE_BANNER_LABELS.get(
                             str(touchpoint_source), str(touchpoint_source)
                         ),
@@ -4066,6 +4406,15 @@ def page_nps_helix_linking(
                     ("Comentarios enlazados", str(linked_comments_total)),
                     ("Links validados", str(linked_pairs_total)),
                 ],
+                metric_value_hints={
+                    "Método causal": (
+                        "Flujo del método causal: "
+                        + TOUCHPOINT_MODE_FLOWS.get(
+                            str(touchpoint_source),
+                            "Incidencias -> Touchpoint -> Comentario -> NPS",
+                        )
+                    )
+                },
             )
             pills(
                 [
@@ -4215,7 +4564,9 @@ def page_nps_helix_linking(
                 )
 
             def _render_heat_tab() -> None:
-                g_heat = by_topic_daily[by_topic_daily["nps_topic"] == active_topic].copy()
+                g_heat = by_topic_daily_mode[
+                    by_topic_daily_mode["nps_topic"] == active_topic
+                ].copy()
                 if g_heat.empty:
                     st.info("No hay datos suficientes para el heat map del caso activo.")
                 else:
@@ -4243,7 +4594,7 @@ def page_nps_helix_linking(
 
             def _render_cp_tab() -> None:
                 g = (
-                    by_topic_weekly[by_topic_weekly["nps_topic"] == active_topic]
+                    by_topic_weekly_mode[by_topic_weekly_mode["nps_topic"] == active_topic]
                     .sort_values("week")
                     .copy()
                 )
@@ -4322,7 +4673,7 @@ def page_nps_helix_linking(
                 else:
                     lagd = int(active_lag_days.iloc[0]["best_lag_days"])
                     gd = (
-                        by_topic_daily[by_topic_daily["nps_topic"] == active_topic]
+                        by_topic_daily_mode[by_topic_daily_mode["nps_topic"] == active_topic]
                         .sort_values("date")
                         .copy()
                     )
@@ -4410,7 +4761,7 @@ def page_nps_helix_linking(
     with tab_ppt:
         ppt_sig = (
             f"{service_origin}|{service_origin_n1}|{service_origin_n2}|{start}|{end}|"
-            f"{focus_name}|{len(overall_daily)}|{len(rationale_df)}|{'/'.join(selected_chain_keys)}"
+            f"{focus_name}|{touchpoint_source}|{len(overall_daily)}|{len(rationale_df)}|{'/'.join(selected_chain_keys)}"
         )
         template_mode = "Plantilla corporativa fija v1"
         make_ppt = st.button(
@@ -4536,8 +4887,8 @@ def page_nps_helix_linking(
                 # Safe fallback to current view payload if historical payload can't be built.
                 overall_weekly_ppt = overall_daily if not overall_daily.empty else overall_weekly
                 overall_weekly_ppt = _attach_daily_nps_mean(overall_weekly_ppt, nps_slice)
-                by_topic_daily_ppt = by_topic_daily
-                by_topic_weekly_ppt = by_topic_weekly
+                by_topic_daily_ppt = by_topic_daily_mode
+                by_topic_weekly_ppt = by_topic_weekly_mode
                 ranking_df_ppt = (
                     rank2 if "rank2" in locals() and not rank2.empty else rank_for_rationale
                 )
@@ -4573,7 +4924,7 @@ def page_nps_helix_linking(
                 hotspot_focus_note = ""
                 helix_for_hot_terms = helix_hist if not helix_hist.empty else helix_slice
                 incident_evidence_ppt = _build_incident_evidence_payload(
-                    links_df,
+                    links_mode_df,
                     focus_df,
                     helix_for_hot_terms,
                 )
@@ -4583,7 +4934,7 @@ def page_nps_helix_linking(
                     incident_evidence_ppt,
                 )
                 incident_timeline_ppt = _build_incident_timeline_payload(
-                    links_df,
+                    links_mode_df,
                     focus_df,
                     helix_for_hot_terms,
                     incident_evidence_ppt,
@@ -4621,17 +4972,34 @@ def page_nps_helix_linking(
                         nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
                     )
                     od_hist = _attach_daily_nps_mean(od_hist, nps_hist_work)
+                    hist_mode_payload = _build_touchpoint_mode_payload(
+                        touchpoint_source=touchpoint_source,
+                        links_df=links_hist,
+                        focus_df=focus_hist,
+                        helix_df=helix_hist,
+                        by_topic_weekly=btw_hist,
+                        by_topic_daily=btd_hist,
+                    )
+                    links_hist_mode = hist_mode_payload["links_mode_df"]
+                    btw_hist_mode = hist_mode_payload["by_topic_weekly_mode"]
+                    btd_hist_mode = hist_mode_payload["by_topic_daily_mode"]
+                    broken_journeys_hist = hist_mode_payload["broken_journeys_df"]
+                    broken_journey_links_hist = hist_mode_payload["broken_journey_links_df"]
 
-                    rank_hist = causal_rank_by_topic(btw_hist)
+                    rank_hist = causal_rank_by_topic(btw_hist_mode)
                     cp_hist = detect_detractor_changepoints_with_bootstrap(
-                        btw_hist,
+                        btw_hist_mode,
                         pen=6.0,
                         n_boot=200,
                         block_size=2,
                         tol_periods=1,
                     )
-                    lag_hist = estimate_best_lag_by_topic(btw_hist, max_lag_weeks=6)
-                    lead_hist = incidents_lead_changepoints_flag(btw_hist, cp_hist, window_weeks=4)
+                    lag_hist = estimate_best_lag_by_topic(btw_hist_mode, max_lag_weeks=6)
+                    lead_hist = incidents_lead_changepoints_flag(
+                        btw_hist_mode,
+                        cp_hist,
+                        window_weeks=4,
+                    )
                     rank2_hist = (
                         rank_hist.merge(cp_hist, on="nps_topic", how="left")
                         .merge(lag_hist, on="nps_topic", how="left")
@@ -4654,7 +5022,7 @@ def page_nps_helix_linking(
                     ).reset_index(drop=True)
 
                     rationale_hist = build_incident_nps_rationale(
-                        btw_hist,
+                        btw_hist_mode,
                         focus_group=focus_group,
                         rank_df=rank2_hist if not rank2_hist.empty else rank_hist,
                         min_topic_responses=80,
@@ -4664,7 +5032,7 @@ def page_nps_helix_linking(
                         rationale_summary_hist = summarize_incident_nps_rationale(rationale_hist)
                         period_label_hist = f"{ppt_start} -> {ppt_end}"
                         chain_hist_all = build_incident_attribution_chains(
-                            links_hist,
+                            links_hist_mode,
                             focus_hist,
                             helix_hist,
                             rationale_df=rationale_hist,
@@ -4673,6 +5041,9 @@ def page_nps_helix_linking(
                             max_comment_examples=2,
                             min_links_per_topic=1,
                             touchpoint_source=touchpoint_source,
+                            journey_catalog_df=broken_journeys_hist,
+                            journey_links_df=broken_journey_links_hist,
+                            executive_journey_catalog=executive_journey_catalog,
                         )
                         chain_hist_all = _annotate_chain_candidates(chain_hist_all)
                         chain_hist = _select_chain_rows(chain_hist_all, selected_chain_keys)
@@ -4702,7 +5073,7 @@ def page_nps_helix_linking(
                         )
                         lag_days_hist = (
                             estimate_best_lag_days_by_topic(
-                                btd_hist,
+                                btd_hist_mode,
                                 max_lag_days=21,
                                 min_points=30,
                             )
@@ -4712,8 +5083,8 @@ def page_nps_helix_linking(
                             else pd.DataFrame()
                         )
                         overall_weekly_ppt = od_hist if not od_hist.empty else ow_hist
-                        by_topic_daily_ppt = btd_hist
-                        by_topic_weekly_ppt = btw_hist
+                        by_topic_daily_ppt = btd_hist_mode
+                        by_topic_weekly_ppt = btw_hist_mode
                         ranking_df_ppt = rank2_hist if not rank2_hist.empty else rank_hist
                         rationale_df_ppt = rationale_hist
                         rationale_summary_ppt = rationale_summary_hist
@@ -4735,7 +5106,7 @@ def page_nps_helix_linking(
                         lag_weeks_for_ppt = lag_hist
                         changepoints_for_ppt = cp_hist
                         incident_evidence_ppt = _build_incident_evidence_payload(
-                            links_hist,
+                            links_hist_mode,
                             focus_hist,
                             helix_hist,
                         )
@@ -4745,7 +5116,7 @@ def page_nps_helix_linking(
                             incident_evidence_ppt,
                         )
                         incident_timeline_ppt = _build_incident_timeline_payload(
-                            links_hist,
+                            links_hist_mode,
                             focus_hist,
                             helix_hist,
                             incident_evidence_ppt,
@@ -4802,6 +5173,7 @@ def page_nps_helix_linking(
                     incident_timeline_df=incident_timeline_ppt,
                     hotspot_focus_note=hotspot_focus_note,
                     touchpoint_source=touchpoint_source,
+                    executive_journey_catalog=executive_journey_catalog,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
@@ -4856,227 +5228,6 @@ def page_nps_helix_linking(
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 use_container_width=True,
                 key="nh_download_generated_pptx",
-            )
-
-    with tab_evidence:
-        # 5) Deep-dive pack (Markdown + JSON)
-        st.markdown("### 📦 LLM Deep-Dive Pack (Markdown + JSON)")
-        pack = {
-            "version": "1.0",
-            "context": {
-                "service_origin": service_origin,
-                "service_origin_n1": service_origin_n1,
-                "service_origin_n2": service_origin_n2,
-                "date_start": str(start),
-                "date_end": str(end),
-                "min_similarity": float(min_sim),
-                "max_days_apart": int(max_days_apart),
-            },
-            "metrics_overall_weekly": overall_weekly.to_dict(orient="records"),
-            "metrics_overall_daily": (
-                overall_daily.to_dict(orient="records")
-                if "overall_daily" in locals() and not overall_daily.empty
-                else []
-            ),
-            "ranked_hypotheses": (
-                rank.head(20).to_dict(orient="records") if "rank" in locals() else []
-            ),
-            "changepoints_by_topic": (
-                cp_by_topic.to_dict(orient="records") if "cp_by_topic" in locals() else []
-            ),
-            "best_lag_by_topic": (
-                lag_by_topic.to_dict(orient="records") if "lag_by_topic" in locals() else []
-            ),
-            "best_lag_days_by_topic": (
-                lag_days.to_dict(orient="records")
-                if "lag_days" in locals() and not lag_days.empty
-                else []
-            ),
-            "knowledge_cache_context_entries": (
-                kc_entries[
-                    (kc_entries["service_origin"] == str(service_origin))
-                    & (kc_entries["service_origin_n1"] == str(service_origin_n1))
-                    & (kc_entries["service_origin_n2"] == str(service_origin_n2 or ""))
-                ].to_dict(orient="records")
-                if "kc_entries" in locals() and not kc_entries.empty
-                else []
-            ),
-            "business_rationale": {
-                "summary": {
-                    "topics_analyzed": int(rationale_summary.topics_analyzed),
-                    "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
-                    "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
-                    "top3_incident_share": float(rationale_summary.top3_incident_share),
-                    "confidence_mean": float(rationale_summary.confidence_mean),
-                    "peak_focus_probability": float(rationale_summary.peak_focus_probability),
-                    "expected_nps_delta": float(rationale_summary.expected_nps_delta),
-                    "total_nps_impact": float(rationale_summary.total_nps_impact),
-                    "median_lag_weeks": (
-                        None
-                        if rationale_summary.median_lag_weeks != rationale_summary.median_lag_weeks
-                        else float(rationale_summary.median_lag_weeks)
-                    ),
-                },
-                "priority_topics": (
-                    rationale_df.head(25).to_dict(orient="records")
-                    if not rationale_df.empty
-                    else []
-                ),
-                "attribution_chains": (
-                    chain_df.to_dict(orient="records")
-                    if "chain_df" in locals() and not chain_df.empty
-                    else []
-                ),
-                "ppt_story_md": ppt_story_md,
-                "ppt_8slides_md": ppt_8slides_md,
-            },
-            "evidence_links_sample": (
-                links_df.head(200).to_dict(orient="records") if not links_df.empty else []
-            ),
-            "notes": [
-                "Causalidad pragmática: se prioriza temporalidad + fuerza + consistencia + plausibilidad semántica.",
-                "Los links se validan con política fija: TF-IDF, similitud mínima, cruce semántico estricto y ventana temporal.",
-            ],
-        }
-        pack_json = json.dumps(_json_sanitize(pack), ensure_ascii=False, indent=2)
-
-        md_lines = []
-        md_lines.append(f"# Deep-Dive Pack — NPS ↔ Helix ({service_origin} · {service_origin_n1})")
-        if service_origin_n2:
-            md_lines.append(f"**Service origin N2:** {service_origin_n2}")
-        md_lines.append(f"**Ventana:** {start} → {end}")
-        md_lines.append("")
-        md_lines.append("## 1) Resumen del periodo")
-        if not rank.empty:
-            top = rank.head(3)
-            for _, r in top.iterrows():
-                md_lines.append(
-                    f"- **{r['nps_topic']}** · confidence={r['score']:.3f} · incidencias={int(r['incidents'])} · "
-                    f"Δ {focus_name}={float(r.get('delta_focus_rate', 0) or 0)*100:.2f} pp"
-                )
-        else:
-            md_lines.append("- No hay ranking disponible (insuficiente señal).")
-        md_lines.append("")
-        md_lines.append("## 2) Evidencia cuantitativa (semanal)")
-        md_lines.append(f"**Global:** % {focus_name} vs incidencias")
-        md_lines.append("")
-        md_lines.append(
-            f"| Semana | Respuestas | {focus_name.capitalize()} | % {focus_name} | Incidencias |"
-        )
-        md_lines.append("|---|---:|---:|---:|---:|")
-        for rec in overall_weekly.sort_values("week").to_dict(orient="records"):
-            md_lines.append(
-                f"| {pd.to_datetime(rec['week']).date()} | {int(rec.get('responses',0))} | {int(rec.get('focus_count',0))} | "
-                f"{(float(rec.get('focus_rate',0))*100):.2f}% | {int(rec.get('incidents',0))} |"
-            )
-        md_lines.append("")
-        if "lag_days" in locals() and (not lag_days.empty):
-            md_lines.append("## 2.1) Lag estimado (diario, si aplica)")
-            md_lines.append("| Tópico | Lag (días) | Corr@Lag | Puntos |")
-            md_lines.append("|---|---:|---:|---:|")
-            for rec in (
-                lag_days.sort_values("corr", ascending=False).head(10).to_dict(orient="records")
-            ):
-                md_lines.append(
-                    f"| {rec.get('nps_topic','')} | {int(rec.get('best_lag_days',0) or 0)} | {float(rec.get('corr',0) or 0):.3f} | {int(rec.get('points',0) or 0)} |"
-                )
-            md_lines.append("")
-        md_lines.append("## 3) Racional de negocio (riesgo -> recuperacion)")
-        md_lines.append(
-            f"- NPS en riesgo estimado: **{rationale_summary.nps_points_at_risk:.2f} pts**"
-        )
-        md_lines.append(
-            f"- NPS recuperable estimado: **{rationale_summary.nps_points_recoverable:.2f} pts**"
-        )
-        md_lines.append(
-            f"- Impacto total atribuido en NPS: **{rationale_summary.total_nps_impact:.2f} pts**"
-        )
-        md_lines.append(
-            f"- Probabilidad máxima del foco con incidencia: **{rationale_summary.peak_focus_probability*100:.0f}%**"
-        )
-        md_lines.append(
-            f"- Delta NPS esperado: **{rationale_summary.expected_nps_delta:+.1f} pts**"
-        )
-        md_lines.append(
-            f"- Concentración de incidencias en top-3: **{rationale_summary.top3_incident_share*100:.1f}%**"
-        )
-        if not rationale_df.empty:
-            md_lines.append("")
-            md_lines.append(
-                "| Tópico | Touchpoint | Prioridad | Confianza | Prob. foco | Delta NPS | Impacto total | Lane | Owner | ETA (w) |"
-            )
-            md_lines.append("|---|---|---:|---:|---:|---:|---:|---|---|---:|")
-            for rec in rationale_df.head(8).to_dict(orient="records"):
-                md_lines.append(
-                    f"| {rec.get('nps_topic','')} | {rec.get('touchpoint','')} | {float(rec.get('priority',0.0)):.3f} | {float(rec.get('confidence',0.0)):.3f} | "
-                    f"{float(rec.get('focus_probability_with_incident',0.0))*100:.1f}% | {float(rec.get('nps_delta_expected',0.0)):+.2f} | {float(rec.get('total_nps_impact',0.0)):.2f} | "
-                    f"{rec.get('action_lane','')} | {rec.get('owner_role','')} | {int(rec.get('eta_weeks',0) or 0)} |"
-                )
-        if "chain_df" in locals() and not chain_df.empty:
-            md_lines.append("")
-            md_lines.append("### Cadenas causales defendibles")
-            for rec in chain_df.to_dict(orient="records"):
-                md_lines.append(
-                    f"- **{rec.get('nps_topic','')}** | Touchpoint: **{rec.get('touchpoint','')}** | Links: **{int(rec.get('linked_pairs',0) or 0)}**"
-                )
-                for inc in list(rec.get("incident_examples", []))[:5]:
-                    md_lines.append(f"  - Helix: {inc}")
-                for com in list(rec.get("comment_examples", []))[:2]:
-                    md_lines.append(f"  - VoC: {com}")
-        if ppt_story_md:
-            md_lines.append("")
-            md_lines.append("### Narrativa sugerida para comité")
-            md_lines.append("```markdown")
-            md_lines.append(ppt_story_md.strip())
-            md_lines.append("```")
-        if ppt_8slides_md:
-            md_lines.append("")
-            md_lines.append("### Guion estándar de 8 slides")
-            md_lines.append("```markdown")
-            md_lines.append(ppt_8slides_md.strip())
-            md_lines.append("```")
-        md_lines.append("")
-        md_lines.append("## 4) Evidencia cualitativa (links)")
-        if not links_df.empty:
-            for rec in links_df.head(20).to_dict(orient="records"):
-                md_lines.append(
-                    f"- sim={rec['similarity']:.3f} · tópico={rec['nps_topic']} · nps_id={rec['nps_id']} ↔ incident_id={rec['incident_id']}"
-                )
-        else:
-            md_lines.append("- No hay links validados con la política estricta activa.")
-        md_lines.append("")
-        md_lines.append("## 5) Preguntas sugeridas al LLM")
-        md_lines.append(
-            "- ¿Hay desfase temporal consistente (incidencia → detractor) en los tópicos top?"
-        )
-        md_lines.append(
-            "- ¿Qué subtemas emergen en los verbatims y en las incidencias? ¿Coinciden?"
-        )
-        md_lines.append(
-            "- ¿Qué acciones (quick wins / fixes estructurales / instrumentación) tienen mejor ROI esperado?"
-        )
-        md_lines.append("")
-        md_lines.append("## 6) Trazabilidad técnica")
-        md_lines.append("- Fuente NPS: dataset persistido para el contexto seleccionado.")
-        md_lines.append(
-            "- Fuente Helix: Helix_Raw filtrado estrictamente por Company/N1 y (si aplica) N2 token-set exacto."
-        )
-        md_lines.append(
-            f"- Linking estricto: TF-IDF + cosine similarity (min={float(min_similarity):.2f}), "
-            f"top-k por incidencia={LINK_TOP_K_PER_INCIDENT}, ventana temporal ±{int(max_days_apart)} días."
-        )
-
-        md = "\n".join(md_lines)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.download_button(
-                "Descargar Pack (Markdown)", data=md.encode("utf-8"), file_name="deep_dive_pack.md"
-            )
-        with c2:
-            st.download_button(
-                "Descargar Pack (JSON)",
-                data=pack_json.encode("utf-8"),
-                file_name="deep_dive_pack.json",
             )
 
 
@@ -5350,6 +5501,8 @@ def main() -> None:
             helix_df=helix_df,
             llm_df=df_llm,
             settings=settings,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
             min_n=min_n,
             cache_path=cache_path,
         )

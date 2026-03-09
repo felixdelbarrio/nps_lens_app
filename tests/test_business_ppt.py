@@ -6,7 +6,11 @@ from io import BytesIO
 import pandas as pd
 from pptx import Presentation
 
-from nps_lens.analytics.incident_attribution import TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+)
+from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 
@@ -356,6 +360,59 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
     assert any("Acceso bloqueado" in t for t in texts)
 
 
+def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
+    payload = _sample_payload()
+    attribution = payload["attribution"].copy()
+    attribution.loc[:, "nps_topic"] = ["Acceso / Login"]
+    attribution.loc[:, "touchpoint"] = ["Login"]
+    attribution.loc[:, "palanca"] = ["Acceso"]
+    attribution.loc[:, "subpalanca"] = ["Login"]
+    attribution.loc[:, "journey_route"] = [
+        "Incidencia -> Login -> Acceso / Login -> comentario VoC -> NPS"
+    ]
+    attribution.loc[:, "journey_expected_evidence"] = [
+        "Keywords semánticas: Login, Otp. Helix Source Service N2 dominante: Auth."
+    ]
+    attribution.loc[:, "journey_cx_readout"] = ["5 links Helix↔VoC convergen en este journey roto."]
+    attribution.loc[:, "presentation_mode"] = [TOUCHPOINT_SOURCE_BROKEN_JOURNEYS]
+
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="Empresas Mobile",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        overall_weekly=payload["overall_daily"],
+        rationale_df=payload["rationale"],
+        nps_points_at_risk=3.9,
+        nps_points_recoverable=2.4,
+        top3_incident_share=0.74,
+        median_lag_weeks=1.2,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=attribution,
+        ranking_df=payload["rationale"],
+        by_topic_daily=payload["by_topic_daily"],
+        lag_days_by_topic=payload["lag_days"],
+        logo_path=None,
+        incident_evidence_df=payload["incident_evidence"],
+        changepoints_by_topic=payload["changepoints"],
+        touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert any("Embeddings + keywords" in t for t in texts)
+    assert any("Journey roto 1: Acceso / Login" in t for t in texts)
+
+
 def test_history_fig_daily_uses_requested_colors() -> None:
     daily = pd.DataFrame(
         {
@@ -367,7 +424,13 @@ def test_history_fig_daily_uses_requested_colors() -> None:
     )
     fig = executive_ppt._history_fig(daily, focus_name="detractores")
     assert fig is not None
-    assert fig.data[0]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["green"]
+    expected_markers = [
+        nps_score_color(DesignTokens.default(), "light", value)
+        for value in daily["nps_mean"].tolist()
+    ]
+    assert fig.data[0]["mode"] == "lines+markers"
+    assert fig.data[0]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
+    assert list(fig.data[0]["marker"]["color"]) == expected_markers
     assert fig.data[2]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["yellow"]
 
 
@@ -624,6 +687,6 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> 
     assert any(str(t) == "INC-1" for t in fig.data[4]["text"])
     assert fig.data[5]["name"] == "NPS medio"
     assert fig.data[5]["type"] == "scatter"
-    assert fig.data[5]["mode"] == "lines"
+    assert fig.data[5]["mode"] == "lines+markers"
     assert fig.data[5]["yaxis"] == "y3"
-    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["green"]
+    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]

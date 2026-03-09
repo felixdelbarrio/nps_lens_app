@@ -11,6 +11,7 @@ Important:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,160 @@ def palette(tokens: DesignTokens, mode: str) -> dict[str, str]:
 
 def primary_accent(tokens: DesignTokens, mode: str) -> str:
     return palette(tokens, mode)["color.primary.accent.value-01.default"]
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    code = str(color or "").strip().lstrip("#")
+    if len(code) == 3:
+        code = "".join(ch * 2 for ch in code)
+    if len(code) != 6:
+        return (0, 0, 0)
+    return (int(code[0:2], 16), int(code[2:4], 16), int(code[4:6], 16))
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    r, g, b = [max(0, min(255, int(v))) for v in rgb]
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def mix_hex_colors(a: str, b: str, ratio_to_b: float) -> str:
+    """Mix color ``a`` towards ``b``.
+
+    ``ratio_to_b=0`` keeps ``a`` and ``ratio_to_b=1`` returns ``b``.
+    """
+
+    t = max(0.0, min(1.0, float(ratio_to_b)))
+    ar, ag, ab = _hex_to_rgb(a)
+    br, bg, bb = _hex_to_rgb(b)
+    return _rgb_to_hex(
+        (
+            round(ar + (br - ar) * t),
+            round(ag + (bg - ag) * t),
+            round(ab + (bb - ab) * t),
+        )
+    )
+
+
+def _coerce_float(value: object) -> float | None:
+    try:
+        score = float(str(value))
+    except Exception:
+        return None
+    return score if isfinite(score) else None
+
+
+def nps_score_band(value: object) -> str:
+    """Map a raw NPS score (0-10) to its semantic band."""
+
+    score = _coerce_float(value)
+    if score is None:
+        return "unknown"
+    if score <= 6.0:
+        return "detractor"
+    if score >= 9.0:
+        return "promoter"
+    return "passive"
+
+
+def nps_group_band(group_value: object, score_value: object | None = None) -> str:
+    """Normalize explicit group labels to the same detractor/passive/promoter bands."""
+
+    txt = str(group_value or "").strip().lower()
+    if txt:
+        if any(key in txt for key in ("detrac", "detractor")):
+            return "detractor"
+        if any(key in txt for key in ("neutro", "neutral", "passive", "pasivo", "passiv")):
+            return "passive"
+        if any(key in txt for key in ("promot", "promoter")):
+            return "promoter"
+    return nps_score_band(score_value)
+
+
+def nps_semantic_palette(tokens: DesignTokens, mode: str) -> dict[str, str]:
+    """Absolute NPS semantics for the 0-10 score domain.
+
+    Critical/detractor stay in the red family, passives in warning,
+    promoters in green. Never normalize these colors to local chart ranges.
+    """
+
+    p = palette(tokens, mode)
+    return {
+        "critical": p["color.primary.bg.alert"],
+        "detractor": p["color.primary.accent.value-07.default"],
+        "passive": p["color.primary.bg.warning"],
+        "promoter": p["color.primary.bg.success"],
+        "neutral": p["color.primary.bg.bar"],
+        "line": p["color.primary.accent.value-01.default"],
+        "text": p["color.primary.text.primary"],
+        "surface": p.get("color.app.surface.default", p["color.primary.bg.alternative.default"]),
+    }
+
+
+def nps_score_color(tokens: DesignTokens, mode: str, value: object) -> str:
+    """Absolute semantic color for a raw NPS score.
+
+    0-2 uses the strongest alert red, 3-6 stays in the red family,
+    7-8 uses warning, and 9-10 uses success.
+    """
+
+    sem = nps_semantic_palette(tokens, mode)
+    score = _coerce_float(value)
+    if score is None:
+        return sem["neutral"]
+    if score <= 2.0:
+        return sem["critical"]
+    if score <= 6.0:
+        return sem["detractor"]
+    if score <= 8.0:
+        return sem["passive"]
+    return sem["promoter"]
+
+
+def nps_group_color(
+    tokens: DesignTokens, mode: str, group_value: object, score_value: object = None
+) -> str:
+    """Semantic color for a detractor/passive/promoter label."""
+
+    sem = nps_semantic_palette(tokens, mode)
+    band = nps_group_band(group_value, score_value)
+    if band == "detractor":
+        return sem["detractor"]
+    if band == "passive":
+        return sem["passive"]
+    if band == "promoter":
+        return sem["promoter"]
+    return sem["neutral"]
+
+
+def nps_semantic_surface(tokens: DesignTokens, mode: str, band: str) -> str:
+    """Soft background color for NPS-labeled UI surfaces."""
+
+    sem = nps_semantic_palette(tokens, mode)
+    base = sem.get(str(band or "").strip().lower(), sem["neutral"])
+    return mix_hex_colors(base, sem["surface"], 0.82)
+
+
+def plotly_nps_score_scale(tokens: DesignTokens, mode: str) -> list[list[object]]:
+    """Absolute Plotly colorscale for 0-10 NPS scores.
+
+    The scale encodes the business rule directly:
+    - 0..2: critical red
+    - 3..6: detractor red
+    - 7..8: warning
+    - 9..10: promoter green
+    """
+
+    sem = nps_semantic_palette(tokens, mode)
+    return [
+        [0.0, sem["critical"]],
+        [0.2, sem["critical"]],
+        [0.200001, sem["detractor"]],
+        [0.6, sem["detractor"]],
+        [0.600001, sem["passive"]],
+        [0.8, sem["passive"]],
+        [0.800001, sem["promoter"]],
+        [1.0, sem["promoter"]],
+    ]
 
 
 def plotly_discrete_sequence(tokens: DesignTokens, mode: str) -> list[str]:

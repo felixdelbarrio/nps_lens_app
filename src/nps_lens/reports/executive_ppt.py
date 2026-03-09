@@ -31,15 +31,26 @@ from nps_lens.analytics.hotspot_metrics import (
 )
 from nps_lens.analytics.incident_attribution import (
     EXECUTIVE_JOURNEY_CATALOG,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
-from nps_lens.design.tokens import DesignTokens, executive_report_palette
+from nps_lens.design.tokens import (
+    DesignTokens,
+    executive_report_palette,
+    nps_score_color,
+)
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
 
 BBVA_FONT_HEAD = "BentonSansBBVA Bold"
 BBVA_FONT_BODY = "BentonSansBBVA Book"
 BBVA_FONT_MEDIUM = "BentonSansBBVA Medium"
+
+
+def _ppt_nps_marker_colors(values: pd.Series | list[object]) -> list[str]:
+    series = values if isinstance(values, pd.Series) else pd.Series(list(values))
+    tokens = DesignTokens.default()
+    return [nps_score_color(tokens, "light", value) for value in series.tolist()]
 
 
 @dataclass(frozen=True)
@@ -558,6 +569,7 @@ def _add_impact_chain_slide(
     focus_name: str,
     period_label: str,
     presentation_mode: str = "",
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> None:
     if str(presentation_mode or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         _add_executive_journey_summary_slide(
@@ -565,35 +577,66 @@ def _add_impact_chain_slide(
             cards=cards,
             focus_name=focus_name,
             period_label=period_label,
+            executive_journey_catalog=executive_journey_catalog,
         )
         return
 
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    is_broken_journey_mode = (
+        str(presentation_mode or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+    )
     _add_header(
         slide,
         title="Marco causal",
-        subtitle=f"Cómo se atribuye el impacto: incidencia -> touchpoint -> VoC -> NPS · periodo {period_label}",
+        subtitle=(
+            "Cómo se atribuye el impacto: incidencia -> embeddings / clustering -> journey roto -> VoC -> NPS "
+            f"· periodo {period_label}"
+            if is_broken_journey_mode
+            else f"Cómo se atribuye el impacto: incidencia -> touchpoint -> VoC -> NPS · periodo {period_label}"
+        ),
     )
-    steps = [
-        ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
-        (
-            "2. Touchpoint",
-            "Se identifica el momento del journey afectado, no solo el sistema técnico.",
-        ),
-        (
-            "3. Palanca / subpalanca",
-            "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app.",
-        ),
-        (
-            "4. Comentario VoC",
-            "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
-        ),
-        (
-            "5. NPS",
-            f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
-        ),
-    ]
+    steps = (
+        [
+            ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
+            (
+                "2. Embeddings + keywords",
+                "La app agrupa señales semánticas similares sin depender de una tabla manual de journeys.",
+            ),
+            (
+                "3. Journey roto",
+                "Cada cluster se convierte en un touchpoint roto defendible con su palanca dominante.",
+            ),
+            (
+                "4. Comentario VoC",
+                "Se muestran verbatims reales enlazados con el cluster, no frases genéricas ni heurísticas aisladas.",
+            ),
+            (
+                "5. NPS",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+            ),
+        ]
+        if is_broken_journey_mode
+        else [
+            ("1. Incidencia", "Helix aporta el INC y la descripción ampliada del fallo real."),
+            (
+                "2. Touchpoint",
+                "Se identifica el momento del journey afectado, no solo el sistema técnico.",
+            ),
+            (
+                "3. Palanca / subpalanca",
+                "La fricción se traduce al lenguaje NPS con el mismo topic usado en la app.",
+            ),
+            (
+                "4. Comentario VoC",
+                "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
+            ),
+            (
+                "5. NPS",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+            ),
+        ]
+    )
     left = 0.80
     top = 1.70
     width = 11.7
@@ -646,6 +689,7 @@ def _add_executive_journey_summary_slide(
     cards: list[object],
     focus_name: str,
     period_label: str,
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> None:
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -698,7 +742,7 @@ def _add_executive_journey_summary_slide(
     table_box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
     table_box.line.color.rgb = _rgb(BBVA_COLORS["line"])
 
-    catalog_rows = list(EXECUTIVE_JOURNEY_CATALOG)
+    catalog_rows = list(executive_journey_catalog or EXECUTIVE_JOURNEY_CATALOG)
     row_y = 2.92
     cols = [0.92, 3.15, 6.45, 10.15]
     headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en NPS"]
@@ -923,7 +967,11 @@ def _add_chain_evidence_slide(
     header_title = (
         f"Journey {idx}: {topic}"
         if presentation_mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-        else f"Tema prioritario {idx}: {touchpoint}"
+        else (
+            f"Journey roto {idx}: {topic}"
+            if presentation_mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+            else f"Tema prioritario {idx}: {touchpoint}"
+        )
     )
     _add_header(
         slide,
@@ -1272,8 +1320,13 @@ def _history_fig(daily: pd.DataFrame, *, focus_name: str) -> Optional[go.Figure]
             x=d["date"],
             y=d["nps_mean"],
             name="NPS medio",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["green"], width=3.2),
+            mode="lines+markers",
+            line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
+            marker=dict(
+                size=8,
+                color=_ppt_nps_marker_colors(d["nps_mean"]),
+                line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+            ),
         )
     )
     fig.add_trace(
@@ -1610,8 +1663,13 @@ def _month_overlap_fig(
             x=d["date"],
             y=d["nps_mean"],
             name="NPS medio",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["green"], width=3.2),
+            mode="lines+markers",
+            line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
+            marker=dict(
+                size=8,
+                color=_ppt_nps_marker_colors(d["nps_mean"]),
+                line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+            ),
         )
     )
     fig.add_trace(
@@ -2373,8 +2431,13 @@ def _zoom_incident_fig(
                 y=nps_series["nps_mean"],
                 name="NPS medio",
                 yaxis="y3",
-                mode="lines",
-                line=dict(color="#" + BBVA_COLORS["green"], width=2.6),
+                mode="lines+markers",
+                line=dict(color="#" + BBVA_COLORS["blue"], width=2.6),
+                marker=dict(
+                    size=6,
+                    color=_ppt_nps_marker_colors(nps_series["nps_mean"]),
+                    line=dict(color="#" + BBVA_COLORS["bg_light"], width=1),
+                ),
             )
         )
 
@@ -2484,6 +2547,7 @@ def generate_business_review_ppt(
     incident_timeline_df: Optional[pd.DataFrame] = None,
     hotspot_focus_note: str = "",
     touchpoint_source: str = "",
+    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
 ) -> BusinessPptResult:
     """Build a business deck focused on daily NPS, matched incidents and top-3 zooms."""
     del (
@@ -2525,7 +2589,7 @@ def generate_business_review_ppt(
         figure=tfig,
         rationale_title="Racional",
         rationale_lines=[
-            "La línea verde refleja el NPS medio diario para ver tendencia real y no solo ruido puntual.",
+            "La línea azul muestra el NPS medio diario y sus marcadores conservan la semántica NPS real del score 0-10.",
             f"La línea roja sigue la evolución de opiniones de {focus_name} y permite detectar tensión en experiencia.",
             "Las columnas amarillas muestran incidencias registradas para relacionar operación y percepción cliente.",
             "Este gráfico es la base para explicar causalidad operativa en comité.",
@@ -2545,6 +2609,7 @@ def generate_business_review_ppt(
         focus_name=focus_name,
         period_label=period_label,
         presentation_mode=touchpoint_source,
+        executive_journey_catalog=executive_journey_catalog,
     )
 
     top_topics = _top_topics_for_zoom(rationale_df, ranking_df, max_topics=3)
@@ -2805,7 +2870,7 @@ def generate_business_review_ppt(
                 (
                     f"Timeline del zoom: barras rojas apiladas por intensidad "
                     f"(moderado/alto/crítico), puntos azules (etiqueta INC cuando cabe) "
-                    f"para días con incidencias del hotspot y línea verde de NPS medio diario "
+                    f"para días con incidencias del hotspot y línea azul de NPS medio diario "
                     f"({int(chart_days)} días con evidencia)."
                 ),
                 f"Lag estimado: {int(lag_days)} días ({lag_weeks_txt}) · change points detectados: {len(cp_list)}.",

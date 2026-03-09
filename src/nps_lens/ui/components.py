@@ -7,6 +7,15 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 
+from nps_lens.design.tokens import (
+    DesignTokens,
+    nps_group_band,
+    nps_score_band,
+    nps_semantic_palette,
+    nps_semantic_surface,
+)
+from nps_lens.ui.theme import Theme
+
 
 def card(title: str, body_html: str, *, flat: bool = False) -> None:
     klass = "nps-card nps-card--flat" if flat else "nps-card"
@@ -57,12 +66,82 @@ def pills(items: list[str]) -> None:
     st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
 
 
+def _pill_class_for_band(band: str) -> str:
+    normalized = str(band or "").strip().lower()
+    if normalized in {"detractor", "passive", "promoter"}:
+        return f"nps-pill nps-pill--{normalized}"
+    return "nps-pill"
+
+
+def _semantic_table_band(key: str, row: dict[str, str]) -> str:
+    normalized = str(key or "").strip().lower()
+    if normalized == "nps":
+        return nps_score_band(row.get("nps"))
+    if normalized == "group":
+        return nps_group_band(row.get("group"), row.get("nps"))
+    return "unknown"
+
+
+def _semantic_column_kind(column_name: object) -> str:
+    name = str(column_name or "").strip().lower()
+    if not name:
+        return ""
+    if name in {"grupo", "group", "nps_group", "nps group"}:
+        return "group"
+    if "nps" in name and not any(
+        token in name for token in ("clasic", "clásic", "delta", "riesgo", "%")
+    ):
+        return "nps"
+    return ""
+
+
+def _semantic_style_for_band(band: str, theme: Theme) -> str:
+    normalized = str(band or "").strip().lower()
+    if normalized not in {"detractor", "passive", "promoter"}:
+        return ""
+    tokens = DesignTokens.default()
+    semantic = nps_semantic_palette(tokens, theme.mode)
+    surface = nps_semantic_surface(tokens, theme.mode, normalized)
+    return (
+        f"background-color: {surface}; "
+        f"border: 1px solid {semantic.get(normalized, semantic['neutral'])}; "
+        "font-weight: 700;"
+    )
+
+
+def style_semantic_dataframe(df: pd.DataFrame, theme: Theme):
+    """Apply centralized NPS semantics to dataframe cells.
+
+    Raw 0-10 NPS columns and detractor/passive/promoter group columns are
+    highlighted using the same absolute rules as charts and pills.
+    """
+
+    styler = df.style
+    for column in df.columns:
+        kind = _semantic_column_kind(column)
+        if not kind:
+            continue
+        if kind == "nps":
+            styler = styler.map(
+                lambda value: _semantic_style_for_band(nps_score_band(value), theme),
+                subset=pd.IndexSlice[:, [column]],
+            )
+            continue
+        styler = styler.map(
+            lambda value: _semantic_style_for_band(nps_group_band(value), theme),
+            subset=pd.IndexSlice[:, [column]],
+        )
+    return styler
+
+
 def executive_banner(
     *,
     kicker: str,
     title: str,
     summary: str,
     metrics: list[tuple[str, str]] | None = None,
+    metric_hints: Optional[dict[str, str]] = None,
+    metric_value_hints: Optional[dict[str, str]] = None,
 ) -> None:
     metric_html = ""
     if metrics:
@@ -70,9 +149,30 @@ def executive_banner(
             [
                 (
                     "<div class='nps-hero-metric'>"
-                    f"<span>{escape(str(label))}</span>"
-                    f"<strong>{escape(str(value))}</strong>"
-                    "</div>"
+                    f"<span>{escape(str(label))}"
+                    + (
+                        (
+                            f" <span class='nps-hero-metric-help' "
+                            f"title='{escape(metric_hints.get(str(label), ''))}'>?</span>"
+                        )
+                        if metric_hints and metric_hints.get(str(label))
+                        else ""
+                    )
+                    + "</span>"
+                    + (
+                        "<div class='nps-hero-metric-value'>"
+                        f"<strong>{escape(str(value))}</strong>"
+                        + (
+                            (
+                                f" <span class='nps-hero-metric-help' "
+                                f"title='{escape(metric_value_hints.get(str(label), ''))}'>?</span>"
+                            )
+                            if metric_value_hints and metric_value_hints.get(str(label))
+                            else ""
+                        )
+                        + "</div>"
+                    )
+                    + "</div>"
                 )
                 for label, value in metrics
             ]
@@ -187,23 +287,75 @@ def impact_chain(
             )
         return fallback
 
+    def _normalize_comment_records(item: object) -> list[dict[str, str]]:
+        raw = _value(item, "comment_records", [])
+        records: list[dict[str, str]] = []
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                comment = str(entry.get("comment", "") or "").strip()
+                if not comment:
+                    continue
+                records.append(
+                    {
+                        "comment_id": str(entry.get("comment_id", "") or "").strip(),
+                        "date": str(entry.get("date", "") or "").strip(),
+                        "nps": str(entry.get("nps", "") or "").strip(),
+                        "group": str(entry.get("group", "") or "").strip(),
+                        "palanca": str(entry.get("palanca", "") or "").strip(),
+                        "subpalanca": str(entry.get("subpalanca", "") or "").strip(),
+                        "comment": comment,
+                    }
+                )
+        if records:
+            return records
+
+        fallback: list[dict[str, str]] = []
+        for idx, text in enumerate(
+            _normalize_examples(_value(item, "comment_examples", [])), start=1
+        ):
+            fallback.append(
+                {
+                    "comment_id": str(idx),
+                    "date": "",
+                    "nps": "",
+                    "group": "",
+                    "palanca": "",
+                    "subpalanca": "",
+                    "comment": text,
+                }
+            )
+        return fallback
+
     def _is_clickable_url(value: str) -> bool:
         txt = str(value or "").strip()
         return txt.startswith("http://") or txt.startswith("https://") or txt.startswith("file://")
 
-    def _render_evidence_cards(items: list[str], *, empty_label: str, badge: str) -> None:
-        if not items:
+    def _render_voc_record_cards(records: list[dict[str, str]], *, empty_label: str) -> None:
+        if not records:
             st.info(empty_label)
             return
         cards_html = "".join(
             [
                 (
                     "<article class='nps-evidence-card'>"
-                    f"<div class='nps-evidence-card-index'>{badge} {idx}</div>"
-                    f"<p>{escape(text)}</p>"
+                    "<div class='nps-pill-row'>"
+                    f"<span class='nps-pill'>ID: {escape(record.get('comment_id') or '-')}</span>"
+                    f"<span class='nps-pill'>Fecha: {escape(record.get('date') or '-')}</span>"
+                    f"<span class='{_pill_class_for_band(nps_score_band(record.get('nps')))}'>"
+                    f"NPS: {escape(record.get('nps') or '-')}"
+                    "</span>"
+                    f"<span class='{_pill_class_for_band(nps_group_band(record.get('group'), record.get('nps')))}'>"
+                    f"Grupo: {escape(record.get('group') or '-')}"
+                    "</span>"
+                    f"<span class='nps-pill'>Palanca: {escape(record.get('palanca') or '-')}</span>"
+                    f"<span class='nps-pill'>Subpalanca: {escape(record.get('subpalanca') or '-')}</span>"
+                    "</div>"
+                    f"<p>{escape(record.get('comment') or '')}</p>"
                     "</article>"
                 )
-                for idx, text in enumerate(items, start=1)
+                for record in records
             ]
         )
         st.markdown(
@@ -274,7 +426,9 @@ def impact_chain(
                     cell_html = f"<a href='{href}' target='_blank'>{escape(value)}</a>"
                 else:
                     cell_html = escape(value)
-                cells.append(f"<td>{cell_html}</td>")
+                band = _semantic_table_band(key, row)
+                cell_class = f" class='nps-band--{band}'" if band != "unknown" else ""
+                cells.append(f"<td{cell_class}>{cell_html}</td>")
             body_html += f"<tr>{''.join(cells)}</tr>"
         st.markdown(
             (
@@ -322,7 +476,7 @@ def impact_chain(
             for record in incident_records
             if str(record.get("summary", "")).strip()
         ]
-        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
+        comment_records = _normalize_comment_records(item)
         lever_label = " / ".join([v for v in [palanca, subpalanca] if v])
         st.markdown(
             f"""
@@ -376,7 +530,7 @@ def impact_chain(
                 (
                     "<div class='nps-evidence-toolbar-note'>"
                     f"<strong>{len(incident_examples)}</strong> evidencias Helix visibles · "
-                    f"<strong>{len(comment_examples)}</strong> comentarios VoC visibles"
+                    f"<strong>{len(comment_records)}</strong> comentarios VoC visibles"
                     "</div>"
                 ),
                 unsafe_allow_html=True,
@@ -399,15 +553,22 @@ def impact_chain(
         def _render_voc_tab() -> None:
             if evidence_view == "Tabla":
                 _render_evidence_html_table(
-                    [{"comment": text} for text in comment_examples],
-                    columns=[("comment", "Voz del cliente")],
+                    comment_records,
+                    columns=[
+                        ("comment_id", "ID"),
+                        ("date", "Fecha"),
+                        ("nps", "NPS"),
+                        ("group", "Grupo"),
+                        ("palanca", "Palanca"),
+                        ("subpalanca", "Subpalanca"),
+                        ("comment", "Comentario"),
+                    ],
                     empty_label="Sin evidencia VoC visible.",
                 )
             else:
-                _render_evidence_cards(
-                    comment_examples,
+                _render_voc_record_cards(
+                    comment_records,
                     empty_label="Sin evidencia VoC visible.",
-                    badge="VoC",
                 )
 
         tabs_spec.append(
@@ -418,7 +579,7 @@ def impact_chain(
         )
         tabs_spec.append(
             (
-                f"Voz del cliente ({linked_comments or len(comment_examples)})",
+                f"Voz del cliente ({linked_comments or len(comment_records)})",
                 _render_voc_tab,
             )
         )
@@ -463,9 +624,9 @@ def impact_chain(
             for record in incident_records
             if str(record.get("summary", "")).strip()
         ]
-        comment_examples = _normalize_examples(_value(item, "comment_examples", []))
+        comment_records = _normalize_comment_records(item)
         incident_sample_count = len(incident_examples)
-        comment_sample_count = len(comment_examples)
+        comment_sample_count = len(comment_records)
         linked_pairs = _safe_int(_value(item, "linked_pairs", 0), default=0)
         cards.append(
             f"""
