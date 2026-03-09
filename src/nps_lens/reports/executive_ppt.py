@@ -53,7 +53,13 @@ from nps_lens.reports.ppt_template import (
     build_presentation,
     resolve_layout,
 )
-from nps_lens.ui.charts import chart_daily_mix_business, chart_daily_volume, chart_topic_bars
+from nps_lens.ui.charts import (
+    chart_daily_mix_business,
+    chart_daily_volume,
+    chart_driver_delta,
+    chart_topic_bars,
+)
+from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.theme import get_theme
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
@@ -382,6 +388,30 @@ def _split_period_frames(
     baseline = nps_df[nps_df["date"] < start_ts].copy()
     if baseline.empty:
         baseline = nps_df[(nps_df["date"] < start_ts) | (nps_df["date"] > end_ts)].copy()
+    return current, baseline
+
+
+def _split_source_period_frames(
+    nps_df: Optional[pd.DataFrame],
+    *,
+    period_start: date,
+    period_end: date,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if nps_df is None or nps_df.empty or "Fecha" not in nps_df.columns:
+        return pd.DataFrame(), pd.DataFrame()
+
+    out = nps_df.copy()
+    out["Fecha"] = _coerce_datetime_series(out["Fecha"])
+    out = out.dropna(subset=["Fecha"]).copy()
+    if out.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    start_ts = pd.Timestamp(period_start)
+    end_ts = pd.Timestamp(period_end)
+    current = out[(out["Fecha"] >= start_ts) & (out["Fecha"] <= end_ts)].copy()
+    baseline = out[out["Fecha"] < start_ts].copy()
+    if baseline.empty:
+        baseline = out[(out["Fecha"] < start_ts) | (out["Fecha"] > end_ts)].copy()
     return current, baseline
 
 
@@ -4454,8 +4484,8 @@ def _add_change_vs_past_slide(
     period_label: str,
     current_label: str,
     baseline_label: str,
-    palanca_change: pd.DataFrame,
-    subpalanca_change: pd.DataFrame,
+    current_source_df: pd.DataFrame,
+    baseline_source_df: pd.DataFrame,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4464,26 +4494,40 @@ def _add_change_vs_past_slide(
         title="3. Qué ha cambiado respecto al pasado",
         subtitle=f"Periodo actual frente a la base histórica anterior · actual {current_label} · base {baseline_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palancas que más cambian")
+    _panel(slide, left=0.66, top=1.48, width=12.02, height=2.38, title="Palanca")
     _figure_in_panel(
         slide,
-        figure=_delta_bars_fig(palanca_change, metric="delta_nps", x_title="Cambio en NPS vs base"),
-        left=0.82,
-        top=1.86,
-        width=5.68,
-        height=4.92,
+        figure=chart_driver_delta(
+            driver_delta_table(
+                current_source_df,
+                baseline_source_df,
+                dimension="Palanca",
+                min_n=50,
+            ),
+            get_theme("light"),
+        ),
+        left=0.86,
+        top=1.80,
+        width=11.62,
+        height=1.86,
         empty_note="No hay base histórica suficiente para comparar por palanca.",
     )
-    _panel(slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalancas que más cambian")
+    _panel(slide, left=0.66, top=4.02, width=12.02, height=2.88, title="Subpalanca")
     _figure_in_panel(
         slide,
-        figure=_delta_bars_fig(
-            subpalanca_change, metric="delta_nps", x_title="Cambio en NPS vs base"
+        figure=chart_driver_delta(
+            driver_delta_table(
+                current_source_df,
+                baseline_source_df,
+                dimension="Subpalanca",
+                min_n=50,
+            ),
+            get_theme("light"),
         ),
-        left=7.06,
-        top=1.86,
-        width=5.46,
-        height=4.92,
+        left=0.86,
+        top=4.34,
+        width=11.62,
+        height=2.26,
         empty_note="No hay base histórica suficiente para comparar por subpalanca.",
     )
 
@@ -5056,6 +5100,17 @@ def generate_business_review_ppt(
         period_start=period_start,
         period_end=period_end,
     )
+    current_source_period, baseline_source_period = _split_source_period_frames(
+        comparison_nps_df if comparison_nps_df is not None else selected_nps_df,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    if current_source_period.empty and selected_nps_df is not None:
+        current_source_period, _ = _split_source_period_frames(
+            selected_nps_df,
+            period_start=period_start,
+            period_end=period_end,
+        )
     if selected_raw.empty:
         selected_raw = current_period.copy()
     if selected_raw.empty:
@@ -5128,8 +5183,8 @@ def generate_business_review_ppt(
             period_label=period_label,
             current_label=current_label,
             baseline_label=baseline_label,
-            palanca_change=palanca_change,
-            subpalanca_change=subpalanca_change,
+            current_source_df=current_source_period,
+            baseline_source_df=baseline_source_period,
         )
     _add_pain_by_group_slide(
         prs,
