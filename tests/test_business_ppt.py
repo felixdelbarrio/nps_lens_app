@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 
 import pandas as pd
+import plotly.graph_objects as go
 from pptx import Presentation
 
 from nps_lens.analytics.incident_attribution import (
@@ -519,6 +520,46 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert not palanca_change.empty
     assert "delta_nps" in palanca_change.columns
 
+
+def test_add_topic_timing_slide_reuses_app_charts_and_handles_empty_state() -> None:
+    payload = _sample_payload()
+    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
+
+    prs = Presentation()
+    executive_ppt._add_topic_timing_slide(
+        prs,
+        period_label="2026-02-01 -> 2026-02-22",
+        period_days=22,
+        selected_nps_df=payload["selected_nps"],
+    )
+    executive_ppt._add_topic_timing_slide(
+        prs,
+        period_label="2026-02-01 -> 2026-02-22",
+        period_days=22,
+        selected_nps_df=pd.DataFrame(),
+    )
+
+    assert len(prs.slides) == 2
+
+    slide_texts: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    slide_texts.append(paragraph.text or "")
+
+    assert any("2. Cuándo y cómo lo dicen" in text for text in slide_texts)
+    assert any("Cuándo lo dicen" in text for text in slide_texts)
+    assert any("Cómo lo dicen" in text for text in slide_texts)
+    assert any(
+        "No hay señal suficiente para mostrar el volumen diario del periodo." in text
+        for text in slide_texts
+    )
+    assert any(
+        "No hay señal suficiente para la distribución diaria por grupo." in text
+        for text in slide_texts
+    )
+
     group_matrix = executive_ppt._group_matrix(current, dimension="Palanca")
     assert not group_matrix.empty
     assert set(group_matrix["band"].tolist()) <= {"Detractor", "Pasivo", "Promotor"}
@@ -530,6 +571,44 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     gaps = executive_ppt._gap_vs_overall_table(current, top_k=5)
     assert len(gaps) <= 5
     assert not gaps.empty
+
+
+def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
+    payload = _sample_payload()
+    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
+    daily_mix = executive_ppt._daily_group_mix(current)
+    topic_summary = executive_ppt._topic_summary(payload["by_topic_daily"])
+
+    top_fig = executive_ppt._top_topics_fig(topic_summary, top_k=5)
+    assert top_fig is not None
+    assert len(top_fig.data) == 1
+
+    heatmap_fig = executive_ppt._topic_heatmap_fig(payload["by_topic_daily"], top_k=3)
+    assert heatmap_fig is not None
+    assert len(heatmap_fig.data) == 1
+
+    mix_fig = executive_ppt._daily_group_mix_fig(daily_mix)
+    assert mix_fig is not None
+    assert len(mix_fig.data) == 3
+
+    themed = executive_ppt._apply_ppt_figure_theme(
+        go.Figure(
+            [
+                go.Bar(name="Promotores", x=[1], y=[2]),
+                go.Bar(name="Pasivos", x=[1], y=[3]),
+                go.Bar(name="Detractores", x=[1], y=[4]),
+                go.Bar(name="Incidencias", x=[1], y=[1]),
+                go.Scatter(name="NPS clásico", x=[1], y=[2], mode="lines+markers"),
+                go.Scatter(name="Incidencias", x=[1], y=[1], mode="lines"),
+            ]
+        )
+    )
+    assert themed.layout.legend.orientation == "h"
+    assert themed.layout.font.size == 15
+    assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
+    assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
+    assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]
+    assert themed.data[3].marker.color == "#" + executive_ppt.BBVA_COLORS["sky"]
 
 
 def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:

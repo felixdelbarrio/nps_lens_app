@@ -53,7 +53,7 @@ from nps_lens.reports.ppt_template import (
     build_presentation,
     resolve_layout,
 )
-from nps_lens.ui.charts import chart_topic_bars
+from nps_lens.ui.charts import chart_daily_mix_business, chart_daily_volume, chart_topic_bars
 from nps_lens.ui.theme import get_theme
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
@@ -1427,15 +1427,15 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=14, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=15, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
             y=-0.16,
             yanchor="top",
-            font=dict(size=13, color=ink),
-            title_font=dict(size=13, color=ink),
+            font=dict(size=14, color=ink),
+            title_font=dict(size=14, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
@@ -1448,8 +1448,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=13, color=ink),
-            title_font=dict(size=14, color=ink),
+            tickfont=dict(size=14, color=ink),
+            title_font=dict(size=15, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1457,8 +1457,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=13, color=ink),
-            title_font=dict(size=14, color=ink),
+            tickfont=dict(size=14, color=ink),
+            title_font=dict(size=15, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -4406,43 +4406,44 @@ def _add_topic_timing_slide(
     prs: Presentation,
     *,
     period_label: str,
-    by_topic_daily: pd.DataFrame,
-    daily_mix: pd.DataFrame,
+    period_days: int,
+    selected_nps_df: Optional[pd.DataFrame],
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    source_df = selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame()
     _add_header(
         slide,
         title="2. Cuándo y cómo lo dicen",
-        subtitle=f"Evolución diaria de temas y reparto de promotores, pasivos y detractores · {period_label}",
-    )
-    _panel(
-        slide, left=0.66, top=1.48, width=6.1, height=5.42, title="Cuándo se intensifica cada tema"
-    )
-    _figure_in_panel(
-        slide,
-        figure=_topic_heatmap_fig(by_topic_daily, top_k=10),
-        left=0.82,
-        top=1.86,
-        width=5.78,
-        height=4.92,
-        empty_note="No hay cobertura diaria suficiente para el heatmap de tópicos.",
+        subtitle=f"Volumen diario de respuestas y reparto de promotores, pasivos y detractores · {period_label}",
     )
     _panel(
         slide,
-        left=6.98,
+        left=0.66,
         top=1.48,
-        width=5.70,
-        height=5.42,
-        title="Reparto diario de grupos NPS",
+        width=12.02,
+        height=2.38,
+        title="Cuándo lo dicen",
     )
     _figure_in_panel(
         slide,
-        figure=_daily_group_mix_fig(daily_mix),
-        left=7.14,
-        top=1.86,
-        width=5.38,
-        height=4.92,
+        figure=chart_daily_volume(source_df, get_theme("light"), days=max(int(period_days), 1)),
+        left=0.86,
+        top=1.80,
+        width=11.62,
+        height=1.86,
+        empty_note="No hay señal suficiente para mostrar el volumen diario del periodo.",
+    )
+    _panel(slide, left=0.66, top=4.02, width=12.02, height=2.88, title="Cómo lo dicen")
+    _figure_in_panel(
+        slide,
+        figure=chart_daily_mix_business(
+            source_df, get_theme("light"), days=max(int(period_days), 1)
+        ),
+        left=0.86,
+        top=4.34,
+        width=11.62,
+        height=2.26,
         empty_note="No hay señal suficiente para la distribución diaria por grupo.",
     )
 
@@ -5112,8 +5113,8 @@ def generate_business_review_ppt(
     _add_topic_timing_slide(
         prs,
         period_label=period_label,
-        by_topic_daily=by_topic_daily if by_topic_daily is not None else pd.DataFrame(),
-        daily_mix=daily_mix,
+        period_days=(pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1,
+        selected_nps_df=selected_nps_df,
     )
     if not baseline_period.empty:
         current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
