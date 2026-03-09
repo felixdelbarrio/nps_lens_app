@@ -4,12 +4,11 @@ import base64
 import contextlib
 import hashlib
 import json
-import os
 import re
 import shutil
-import subprocess
 import sys
 from dataclasses import asdict
+from html import escape
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
@@ -32,14 +31,11 @@ from nps_lens.analytics.hotspot_metrics import (
     summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_attribution import (
-    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
-    TOUCHPOINT_SOURCE_DOMAIN,
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     TOUCHPOINT_MODE_BANNER_LABELS,
-    TOUCHPOINT_MODE_CONTEXT_LABELS,
     TOUCHPOINT_MODE_MENU_LABELS,
     TOUCHPOINT_MODE_OPTIONS,
     TOUCHPOINT_MODE_SUMMARIES,
+    TOUCHPOINT_SOURCE_DOMAIN,
     build_incident_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
@@ -91,7 +87,6 @@ from nps_lens.ui.charts import (
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
-    chart_daily_score_semaforo,
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
@@ -100,7 +95,7 @@ from nps_lens.ui.charts import (
     chart_nps_trend,
     chart_topic_bars,
 )
-from nps_lens.ui.components import card, executive_banner, impact_chain, kpi, pills, section
+from nps_lens.ui.components import executive_banner, impact_chain, kpi, pills, section
 from nps_lens.ui.narratives import (
     build_executive_story,
     build_incident_ppt_story,
@@ -174,65 +169,117 @@ if "_app_service" not in st.session_state:
         perf=st.session_state["_perf"],  # type: ignore
     )
 
-LLM_SYSTEM_PROMPT = """Eres el analista oficial de Insights para BBVA Banca de Empresas. Tu trabajo es:
+LLM_SYSTEM_PROMPT = """# SISTEMA
 
-1. Leer un "LLM Deep-Dive Pack" (Markdown o JSON) generado por la plataforma de Voz del Cliente.
-2. Detectar insights no obvios y causas raíz plausibles basadas únicamente en la evidencia provista (cuantitativa y/o cualitativa), sin inventar datos ni afirmar hechos no sustentados.
-3. Devolver SOLO un JSON válido (sin texto adicional) con el esquema requerido.
+Eres el analista oficial de Insights para BBVA Banca de Empresas.
 
-REGLA CRÍTICA — SOLO JSON:
-- Tu respuesta debe ser exclusivamente un objeto JSON (sin explicaciones, sin títulos, sin Markdown, sin bloques de código).
-- Usa comillas dobles estándar " (no comillas tipográficas).
+## Objetivo
+1. Leer un LLM Deep-Dive Pack en Markdown o JSON generado por Voz del Cliente.
+2. Detectar un solo insight no obvio y sus causas raíz plausibles usando solo la evidencia del pack.
+3. Devolver exclusivamente un JSON válido con el esquema definido abajo.
+
+## Fuente de verdad
+- La única fuente de verdad es el pack.
+- No inventes datos, métricas, quotes, segmentos, rutas, fechas, causas ni conclusiones.
+- No uses contexto externo ni conocimiento general.
+- Si falta información, usa null, [] o "unknown" según corresponda y explícalo en assumptions o risks.
+- Si hay conflicto entre instrucciones, prevalece este orden:
+  1. Seguridad y privacidad
+  2. Tipos y esquema
+  3. Reglas analíticas
+  4. Ejemplo
+
+## Salida obligatoria
+- Responde con solo un objeto JSON válido.
+- Sin texto adicional, títulos, Markdown, comentarios ni bloques de código.
+- Usa solo comillas dobles estándar.
 - Sin trailing commas.
-- No incluyas comillas dobles dentro de strings. Si necesitas comillas en un texto, escápalas como ".
-- No envuelvas el JSON en Markdown (sin ```json).
-- No uses NaN/Infinity/None; usa null si aplica.
+- No uses NaN, Infinity, None; usa null si aplica.
 - No agregues campos fuera del esquema.
-- Si algún campo no puede completarse con evidencia del pack, usa null o listas vacías según corresponda y explica la carencia en "assumptions" y/o "risks" (sin inventar).
 
-PRIVACIDAD Y SEGURIDAD (OBLIGATORIO):
-- No incluyas datos personales o sensibles (PII) en ningún campo.
-- Si el pack contiene PII, no la reproduzcas: usa "[REDACTED]" o reformula.
-- No incluyas credenciales, tokens, claves API, secretos ni información confidencial interna.
-- No intentes reidentificar personas/empresas ni inferir atributos sensibles.
+## Privacidad y seguridad
+- No incluyas PII, secretos, credenciales, tokens, claves ni información confidencial.
+- Si el pack contiene PII, sustitúyela por [REDACTED] o reformula sin identificar.
+- No reidentifiques personas o empresas ni infieras atributos sensibles.
 
-CRITERIOS PARA "INSIGHTS NO OBVIOS" (OBLIGATORIO):
-- Convergencia quant + qual
-- Ruptura por segmento/ruta
-- Cambio significativo vs baseline (si el pack lo incluye)
-- Efecto en cadena
-- Contradicción aparente
-- Asimetría (pocos casos con alto impacto)
+## Insight no obvio
+Prioriza hallazgos con una o más de estas señales, siempre basadas en evidencia explícita:
+- convergencia quant + qual
+- ruptura por segmento o journey_route
+- cambio vs baseline
+- efecto en cadena
+- contradicción aparente
+- asimetría: pocos casos con alto impacto
 
-REGLAS PARA CAUSAS RAÍZ (OBLIGATORIO):
-- root_causes[].cause debe ser concreta y accionable (no genérica).
-- root_causes[].why debe explicar el mecanismo y conectar evidencia -> hipótesis.
-- Separa evidencia (evidence) de suposiciones (assumptions).
+## Causas raíz
+- Incluye 1 a 3 causas raíz; si no hay base suficiente, usa [].
+- cause debe ser concreta y accionable.
+- why debe explicar el mecanismo que conecta evidencia e hipótesis.
 - No afirmes causalidad si solo hay correlación.
-- Incluye 1-3 causas raíz (máximo 3).
+- Separa evidencia de supuestos.
 
-PUNTUACIONES Y FORMATOS (OBLIGATORIO):
-- confidence: 0.0-1.0 (0.0-0.3 insuficiente, 0.4-0.6 parcial, 0.7-0.85 sólida, 0.9-1.0 muy sólida)
-- severity: 1-5 (1 menor, 5 crítico)
-- eta: "YYYY-MM-DD" si hay fechas; si no, estimación corta ("2w", "1m") y decláralo en assumptions.
-- insight_id: slug estable tipo "bbva-be-{period}-{route_signature}-001" (minúsculas, guiones).
-- period: el periodo del pack; si no existe usa "unknown" y anótalo en assumptions.
-- journey_route: si no aparece, usa "unknown".
-- Usa [] para listas sin elementos confirmables. Usa "unknown" (no null) para tags sin evidencia.
+## Robustez ante packs incompletos
+- Si solo hay evidencia cualitativa: evidence.quant = [].
+- Si solo hay evidencia cuantitativa: evidence.qual = [].
+- Si faltan period, journey_route, tags o segmentos, usa los defaults.
+- Si el pack es contradictorio, refleja la inconsistencia en risks y baja confidence.
 
-EVIDENCIA (OBLIGATORIO):
-- evidence.quant: SOLO métricas del pack (value siempre string, con unidad si aplica).
-- evidence.qual: SOLO verbatims del pack, sin PII (máx 5 por causa). No inventes quotes.
+## Scoring
+- confidence: número entre 0.0 y 1.0
+  - 0.0-0.3 insuficiente
+  - 0.4-0.6 parcial
+  - 0.7-0.85 sólida
+  - 0.9-1.0 muy sólida
+- severity: entero 1-5
+  - 1 menor, 5 crítico
 
-PRUEBAS Y ACCIONES (OBLIGATORIO):
-- tests_or_checks: 2-5 comprobaciones concretas.
-- actions: 1-3 acciones por causa (owner por rol, no nombres).
+## Fechas y ETA
+- Usa YYYY-MM-DD solo si la fecha está explícita en el pack.
+- Si no, usa estimación corta como 2w, 1m, 6w y decláralo en assumptions.
+- No inventes fechas calendario.
 
-TAGS (OBLIGATORIO, SIN INVENTAR):
-- Completa tags solo si el pack lo contiene o se puede derivar textualmente.
-- Si no hay evidencia, usa "unknown" para geo/channel/lever/sublever/period/route_signature.
+## IDs y defaults
+- schema_version = "1.0"
+- insight_id = "bbva-be-{period}-{route_signature}-001"
+- Usa minúsculas y guiones.
+- Si faltan period o route_signature, usa "unknown".
+- period y route_signature no van en raíz; van en insight_id y tags.
 
-Devuelve SOLO un JSON con el esquema indicado y sin ningún texto adicional."""
+## Reglas por campo
+- title: corto, concreto, sin causalidad absoluta no sustentada.
+- executive_summary: 2-4 frases, basado solo en el pack, sin PII.
+- journey_route: string; si no aparece, "unknown".
+- segments_most_affected: solo segmentos explícitos o derivados textualmente; si no hay evidencia, [].
+- root_causes[].evidence.quant: solo métricas del pack; value siempre string con unidad si aplica.
+- root_causes[].evidence.qual: solo verbatims literales del pack, sin PII, máximo 5 por causa.
+- root_causes[].actions: 1-3 acciones por causa; owner debe ser un rol, no un nombre.
+- root_causes[].tests_or_checks: 2-5 comprobaciones concretas; si no aplica, [].
+- tags debe tener exactamente estas claves: geo, channel, lever, sublever, period, route_signature.
+- Si no hay evidencia para una tag, usa "unknown".
+
+## Reglas de evidencia
+- Toda evidencia debe venir solo del pack.
+- No mezcles evidencia con interpretación.
+- Las hipótesis van en why o assumptions, no en evidence.
+- No presupongas baseline si no existe.
+
+## Lógica de decisión
+- Devuelve solo un insight: el más robusto y con mayor valor ejecutivo.
+- Prioriza convergencia quant + qual, ruptura por segmento/ruta, cambio vs baseline, contradicción aparente, efecto en cadena o asimetría.
+- Si varios empatan, elige el de mayor severidad sustentada.
+- Si ninguno es robusto, devuelve un insight prudente de baja confianza y deja claras las limitaciones.
+
+## Defaults obligatorios
+- journey_route = "unknown"
+- segments_most_affected = []
+- root_causes = [] si no hay evidencia suficiente
+- assumptions = []
+- risks = []
+- next_questions = []
+- En tags, cualquier valor sin evidencia = "unknown"
+
+## Instrucción final
+Devuelve solo un objeto JSON válido que cumpla exactamente este esquema y estas reglas."""
 
 LLM_BUSINESS_QUESTIONS = [
     "Devuelve SOLO el JSON del esquema (sin texto adicional). Prioriza causas raiz con impacto demostrable en NPS y plan de accion.",
@@ -240,6 +287,47 @@ LLM_BUSINESS_QUESTIONS = [
     "Disena un playbook semanal: top 3 palancas, owner por rol, ETA y KPI leading/lagging para recuperar NPS termico.",
     "Genera guion de 8 slides: mensaje principal, señal temporal, causas, impacto, prioridades, plan 30-60-90, gobierno KPI y decisiones de comité.",
 ]
+
+LLM_RESPONSE_TEMPLATE = {
+    "schema_version": "1.0",
+    "insight_id": "bbva-be-unknown-unknown-001",
+    "title": "Titulo corto del insight",
+    "executive_summary": "Resumen ejecutivo de 2-4 frases, basado solo en la evidencia.",
+    "confidence": 0.75,
+    "severity": 3,
+    "journey_route": "unknown",
+    "segments_most_affected": [],
+    "root_causes": [
+        {
+            "cause": "Causa raiz concreta",
+            "why": "Mecanismo causal o hipotesis respaldada por evidencia.",
+            "evidence": {
+                "quant": [
+                    {
+                        "metric": "Nombre de la metrica",
+                        "value": "12.4%",
+                        "context": "Periodo analizado",
+                    }
+                ],
+                "qual": ["Verbatim literal del pack sin PII"],
+            },
+            "assumptions": [],
+            "actions": [{"action": "Accion concreta", "owner": "Rol owner", "eta": "2w"}],
+            "tests_or_checks": ["Comprobacion concreta para validar la hipotesis"],
+        }
+    ],
+    "assumptions": [],
+    "risks": [],
+    "next_questions": [],
+    "tags": {
+        "geo": "unknown",
+        "channel": "unknown",
+        "lever": "unknown",
+        "sublever": "unknown",
+        "period": "unknown",
+        "route_signature": "unknown",
+    },
+}
 
 
 DEFAULT_OPP_DIMS = ("Canal", "Palanca", "Subpalanca", "UsuarioDecisión", "Segmento")
@@ -409,7 +497,6 @@ CHART_COLUMNS = {
     "daily_mix": ("Fecha", "NPS"),
     "daily_volume": ("Fecha", "NPS"),
     "daily_kpis": ("Fecha", "NPS"),
-    "daily_semaforo": ("Fecha", "NPS"),
     "daily_llm": (
         "Fecha",
         "NPS",
@@ -727,10 +814,10 @@ def _case_export_filename(case_row: dict[str, Any]) -> str:
     return f"caso_nps_helix_{slug}.xlsx"
 
 
-def load_llm_insights_for_context(
+def load_llm_cache_entries_for_context(
     settings: Settings, service_origin: str, service_origin_n1: str
 ) -> list[dict[str, Any]]:
-    """Load persisted LLM insights for the selected context."""
+    """Load persisted LLM cache entries for the selected context."""
     from nps_lens.llm.knowledge_cache import KnowledgeCache
 
     kc = KnowledgeCache.for_context(
@@ -738,8 +825,75 @@ def load_llm_insights_for_context(
     )
     data = kc.load()
     entries = data.get("entries", [])
-    # entries are dicts; keep as-is
     return list(entries)
+
+
+def _extract_insight_from_cache_entry(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
+    direct = entry.get("insight")
+    if isinstance(direct, dict):
+        candidate = _normalize_insight_candidate(
+            direct,
+            fallback_title=str(entry.get("title") or "Insight LLM"),
+            fallback_id=str(entry.get("insight_id") or "bbva-be-unknown-unknown-001"),
+            default_tags=_tags_object(entry.get("tags")),
+        )
+        ok, _, norm = validate_insight_response(candidate)
+        if ok and norm is not None:
+            return norm
+
+    raw = str(entry.get("llm_answer", "") or "").strip()
+    if not raw:
+        return None
+
+    obj = _try_parse_json(raw)
+    if not isinstance(obj, dict):
+        return None
+    candidate = _normalize_insight_candidate(
+        obj,
+        fallback_title=str(entry.get("title") or "Insight LLM"),
+        fallback_id=str(entry.get("insight_id") or "bbva-be-unknown-unknown-001"),
+        default_tags=_tags_object(entry.get("tags")),
+    )
+    ok, _, norm = validate_insight_response(candidate)
+    if ok and norm is not None:
+        return norm
+    return None
+
+
+def load_llm_insights_for_context(
+    settings: Settings, service_origin: str, service_origin_n1: str
+) -> list[dict[str, Any]]:
+    entries = load_llm_cache_entries_for_context(
+        settings, service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
+    insights: list[dict[str, Any]] = []
+    for entry in entries:
+        insight = _extract_insight_from_cache_entry(entry)
+        if insight is not None:
+            insights.append(insight)
+    return insights
+
+
+def _refresh_llm_session_state(
+    settings: Settings, service_origin: str, service_origin_n1: str
+) -> None:
+    st.session_state["llm_cache_entries"] = load_llm_cache_entries_for_context(
+        settings, service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
+    st.session_state["llm_insights"] = load_llm_insights_for_context(
+        settings, service_origin=service_origin, service_origin_n1=service_origin_n1
+    )
+
+
+def _saved_llm_signatures() -> set[str]:
+    entries = st.session_state.get("llm_cache_entries", [])
+    if not isinstance(entries, list):
+        return set()
+    return {
+        str(entry.get("signature") or "").strip()
+        for entry in entries
+        if isinstance(entry, dict) and str(entry.get("signature") or "").strip()
+    }
 
 
 def _df_fingerprint(
@@ -1158,6 +1312,269 @@ def _validate_insight_schema(obj: dict[str, Any]) -> tuple[bool, list[str]]:
     return False, errs
 
 
+def _slugify_text(value: object, *, default: str = "unknown") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return default
+    raw = raw.replace("ñ", "n")
+    raw = re.sub(r"[^a-z0-9]+", "-", raw)
+    raw = re.sub(r"-{2,}", "-", raw).strip("-")
+    return raw or default
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        txt = value.strip()
+        return [txt] if txt else []
+    if isinstance(value, (list, tuple, set)):
+        out: list[str] = []
+        for item in value:
+            txt = str(item or "").strip()
+            if txt:
+                out.append(txt)
+        return out
+    txt = str(value).strip()
+    return [txt] if txt else []
+
+
+def _action_list(value: Any) -> list[dict[str, str]]:
+    items = value if isinstance(value, list) else [value] if value else []
+    actions: list[dict[str, str]] = []
+    for item in items:
+        if isinstance(item, dict):
+            actions.append(
+                {
+                    "action": str(item.get("action") or item.get("accion") or "").strip(),
+                    "owner": str(item.get("owner") or item.get("responsable") or "").strip(),
+                    "eta": str(item.get("eta") or item.get("plazo") or "").strip(),
+                }
+            )
+        else:
+            txt = str(item or "").strip()
+            if txt:
+                actions.append({"action": txt, "owner": "", "eta": ""})
+    return [a for a in actions if a["action"]]
+
+
+def _quant_evidence_list(value: Any) -> list[dict[str, str]]:
+    raw_items = value if isinstance(value, list) else [value] if value else []
+    items: list[dict[str, str]] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            metric = str(
+                item.get("metric") or item.get("metrica") or item.get("name") or ""
+            ).strip()
+            val = str(item.get("value") or item.get("valor") or "").strip()
+            ctx = str(item.get("context") or item.get("contexto") or "").strip()
+            if metric or val or ctx:
+                items.append({"metric": metric, "value": val, "context": ctx})
+        else:
+            txt = str(item or "").strip()
+            if txt:
+                items.append({"metric": txt, "value": "", "context": ""})
+    return items
+
+
+def _evidence_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        quant = _quant_evidence_list(value.get("quant") or value.get("quantitative"))
+        qual = _string_list(value.get("qual") or value.get("qualitative"))
+        return {"quant": quant, "qual": qual[:5]}
+
+    # Backward compatibility: if evidence came as a flat list/string, treat it as qualitative evidence.
+    qual = _string_list(value)
+    return {"quant": [], "qual": qual[:5]}
+
+
+def _root_cause_list(value: Any) -> list[dict[str, Any]]:
+    raw_items = value if isinstance(value, list) else [value] if value else []
+    items: list[dict[str, Any]] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            cause = str(
+                item.get("cause")
+                or item.get("causa")
+                or item.get("title")
+                or item.get("name")
+                or ""
+            ).strip()
+            why = str(item.get("why") or item.get("porque") or item.get("rationale") or "").strip()
+            evidence = _evidence_object(item.get("evidence") or item.get("evidencias"))
+            assumptions = _string_list(item.get("assumptions") or item.get("supuestos"))
+            actions = _action_list(item.get("actions") or item.get("acciones"))
+            tests_or_checks = _string_list(
+                item.get("tests_or_checks") or item.get("tests") or item.get("checks")
+            )
+            if cause:
+                items.append(
+                    {
+                        "cause": cause,
+                        "why": why,
+                        "evidence": evidence,
+                        "assumptions": assumptions,
+                        "actions": actions,
+                        "tests_or_checks": tests_or_checks,
+                    }
+                )
+        else:
+            txt = str(item or "").strip()
+            if txt:
+                items.append(
+                    {
+                        "cause": txt,
+                        "why": "",
+                        "evidence": {"quant": [], "qual": []},
+                        "assumptions": [],
+                        "actions": [],
+                        "tests_or_checks": [],
+                    }
+                )
+    return items[:3]
+
+
+def _tags_object(value: Any, default_tags: Optional[dict[str, str]] = None) -> dict[str, str]:
+    base = {
+        "geo": "unknown",
+        "channel": "unknown",
+        "lever": "unknown",
+        "sublever": "unknown",
+        "period": "unknown",
+        "route_signature": "unknown",
+    }
+    if isinstance(default_tags, dict):
+        for key in base:
+            txt = str(default_tags.get(key) or "").strip()
+            if txt:
+                base[key] = txt
+
+    if isinstance(value, dict):
+        aliases = {
+            "geo": ["geo", "geography", "geografia"],
+            "channel": ["channel", "canal"],
+            "lever": ["lever", "palanca"],
+            "sublever": ["sublever", "sub_palanca", "subpalanca"],
+            "period": ["period", "periodo"],
+            "route_signature": ["route_signature", "journey_route", "route"],
+        }
+        for target, names in aliases.items():
+            for name in names:
+                txt = str(value.get(name) or "").strip()
+                if txt:
+                    base[target] = txt
+                    break
+        return base
+
+    # Backward compatibility with old list tags.
+    if isinstance(value, (list, tuple, set)):
+        items = [str(v or "").strip() for v in value if str(v or "").strip()]
+        for target, txt in zip(base.keys(), items):
+            base[target] = txt
+    return base
+
+
+def _normalize_insight_candidate(
+    obj: dict[str, Any],
+    *,
+    fallback_title: str,
+    fallback_id: str,
+    default_tags: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    candidate = dict(obj or {})
+    root_causes = _root_cause_list(
+        candidate.get("root_causes")
+        or candidate.get("root_causes[]")
+        or candidate.get("rootCause")
+        or candidate.get("causes")
+        or candidate.get("causa_raiz")
+    )
+    if not root_causes:
+        root_causes = _root_cause_list(candidate.get("analysis") or candidate.get("summary"))
+
+    title = str(
+        candidate.get("title")
+        or candidate.get("titulo")
+        or candidate.get("headline")
+        or fallback_title
+    ).strip()
+    executive_summary = str(
+        candidate.get("executive_summary")
+        or candidate.get("summary")
+        or candidate.get("executiveSummary")
+        or candidate.get("resumen_ejecutivo")
+        or ""
+    ).strip()
+    if not executive_summary and root_causes:
+        executive_summary = root_causes[0]["cause"]
+
+    tags = _tags_object(candidate.get("tags"), default_tags=default_tags)
+
+    return {
+        "schema_version": "1.0",
+        "insight_id": _slugify_text(
+            candidate.get("insight_id") or fallback_id, default=fallback_id
+        ),
+        "title": title or fallback_title,
+        "executive_summary": executive_summary,
+        "confidence": candidate.get("confidence", 0.0),
+        "severity": candidate.get("severity", 1),
+        "journey_route": str(candidate.get("journey_route") or candidate.get("route") or "unknown"),
+        "segments_most_affected": _string_list(
+            candidate.get("segments_most_affected")
+            or candidate.get("segments")
+            or candidate.get("segmentos_afectados")
+        ),
+        "root_causes": root_causes,
+        "assumptions": _string_list(candidate.get("assumptions") or candidate.get("supuestos")),
+        "risks": _string_list(candidate.get("risks") or candidate.get("riesgos")),
+        "next_questions": _string_list(
+            candidate.get("next_questions")
+            or candidate.get("checks")
+            or candidate.get("tests_or_checks")
+            or candidate.get("preguntas_siguientes")
+        ),
+        "tags": tags,
+    }
+
+
+def _llm_response_template_json() -> str:
+    return json.dumps(LLM_RESPONSE_TEMPLATE, ensure_ascii=False, indent=2)
+
+
+def _llm_build_gpt_setup_instructions() -> str:
+    return (
+        "INSTRUCCIONES PARA CONFIGURAR TU GPT PERSONALIZADO\n\n"
+        "1. Crea un GPT o usa una conversación dedicada solo a NPS Lens.\n"
+        "2. Pega estas instrucciones como comportamiento/base del GPT.\n"
+        "3. Activa un modo estricto: debe devolver solo JSON, sin markdown ni texto adicional.\n"
+        "4. Cuando copies un caso desde NPS Lens, pega el prompt completo tal cual.\n\n"
+        "SISTEMA\n"
+        f"{LLM_SYSTEM_PROMPT}\n\n"
+        "PLANTILLA JSON ESPERADA\n"
+        f"{_llm_response_template_json()}"
+    )
+
+
+def _llm_render_gpt_setup_block(*, key_prefix: str) -> None:
+    setup_text = _llm_build_gpt_setup_instructions()
+    with st.expander("Configurar GPT (solo la primera vez)", expanded=False):
+        st.caption(
+            "Configura una vez tu GPT con estas instrucciones. Después, solo tendrás que copiar el caso a analizar."
+        )
+        with contextlib.suppress(Exception):
+            _clipboard_copy_widget(
+                setup_text,
+                label="Copiar instrucciones del GPT",
+            )
+        st.text_area(
+            "Instrucciones base para tu GPT",
+            value=setup_text,
+            height=260,
+            key=f"{key_prefix}_gpt_setup_text",
+        )
+
+
 def _render_llm_insights(theme: Theme) -> None:
     insights = st.session_state.get("llm_insights")
     # Avoid NumPy truthiness warnings (empty array truth value is deprecated).
@@ -1174,8 +1591,8 @@ def _render_llm_insights(theme: Theme) -> None:
 
     if is_empty:
         st.info(
-            "Aún no has añadido insights del LLM. Ve a la pestaña **✨ Insights LLM** "
-            "para pegarlos aquí."
+            "Aún no has añadido insights del LLM. Usa **Entender los días que importan** "
+            "u **Oportunidades priorizadas** para generarlos y guardarlos aquí."
         )
         return
 
@@ -1237,6 +1654,266 @@ def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
     agg["pro_pct"] = agg["pro"] * 100.0
     agg["classic_nps"] = (agg["pro"] - agg["det"]) * 100.0
     return agg[["day", "n", "det_pct", "pas_pct", "pro_pct", "classic_nps"]].copy()
+
+
+def _llm_prompt_header(title: str, *, question: str = "") -> str:
+    question_block = f"PREGUNTA DE NEGOCIO\n- {question}\n\n" if question else ""
+    return (
+        f"CASO A ANALIZAR\n{title}\n\n"
+        "SISTEMA\n"
+        f"{LLM_SYSTEM_PROMPT}\n\n"
+        f"{question_block}"
+        "REGLAS OPERATIVAS ADICIONALES\n"
+        "- Responde SOLO con un único objeto JSON válido.\n"
+        "- No uses markdown, ni fences, ni comentarios, ni texto explicativo fuera del JSON.\n"
+        "- Si dudas entre dejar vacío o inventar, deja el campo vacío/unknown y explícalo en assumptions o risks.\n"
+        "- No cambies el nombre de las claves del esquema.\n"
+        "- Usa entre 1 y 3 root_causes solo si hay base suficiente; si no, devuelve [].\n\n"
+        "PLANTILLA JSON OBLIGATORIA\n"
+        f"{_llm_response_template_json()}\n\n"
+    )
+
+
+def _render_daily_llm_assistant(
+    *,
+    df: pd.DataFrame,
+    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    metrics: pd.DataFrame,
+    key_prefix: str,
+) -> None:
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    _llm_render_gpt_setup_block(key_prefix=key_prefix)
+
+    if metrics.empty:
+        st.info("No hay suficientes datos diarios para construir esta ayuda.")
+        return
+
+    saved = _saved_llm_signatures()
+    picks: list[dict[str, Any]] = []
+    worst = metrics.sort_values(["det_pct", "n"], ascending=[False, False]).head(5)
+    best = metrics.sort_values(["classic_nps", "n"], ascending=[False, False]).head(5)
+    for mood, subset in [("Peor", worst), ("Mejor", best)]:
+        for _, row in subset.iterrows():
+            day = pd.Timestamp(row["day"])
+            title = f"Entender el día {day.strftime('%Y-%m-%d')}"
+            context = {
+                "service_origin": service_origin,
+                "service_origin_n1": service_origin_n1,
+                "service_origin_n2": service_origin_n2 or "",
+                "workflow": "daily_extreme_day",
+                "day": day.strftime("%Y-%m-%d"),
+            }
+            from nps_lens.llm.knowledge_cache import stable_signature
+
+            sig = stable_signature(context={k: str(v) for k, v in context.items()}, title=title)
+            if sig in saved:
+                continue
+            picks.append(
+                {
+                    "label": (
+                        f"{'🔻' if mood == 'Peor' else '🔺'} {mood} día {day.strftime('%Y-%m-%d')} "
+                        f"— %detr={row['det_pct']:.1f} · NPS={row['classic_nps']:.1f} · n={int(row['n'])}"
+                    ),
+                    "title": title,
+                    "context": context,
+                    "row": row,
+                    "day": day,
+                    "selection_key": day.strftime("%Y-%m-%d"),
+                }
+            )
+
+    unique_picks: list[dict[str, Any]] = []
+    seen_selection: set[str] = set()
+    for pick in picks:
+        if pick["selection_key"] in seen_selection:
+            continue
+        seen_selection.add(pick["selection_key"])
+        unique_picks.append(pick)
+
+    if not unique_picks:
+        st.success("Todos los días extremos de esta ventana ya tienen insight guardado.")
+        return
+
+    st.subheader("Entender los días que importan")
+    labels = [pick["label"] for pick in unique_picks]
+    selected_label = st.selectbox("Día a explicar", labels, key=f"{key_prefix}_day_select")
+    active = unique_picks[labels.index(selected_label)]
+
+    day_df = df.copy()
+    day_df["_day"] = pd.to_datetime(day_df["Fecha"], errors="coerce").dt.floor("D")
+    slice_df = day_df.loc[day_df["_day"] == active["day"]].copy()
+
+    comments: list[str] = []
+    if "Comment" in slice_df.columns:
+        comments = [
+            c.strip() for c in slice_df["Comment"].dropna().astype(str).head(10).tolist() if c
+        ]
+    tops: list[str] = []
+    if "Palanca" in slice_df.columns:
+        vc = slice_df["Palanca"].astype(str).value_counts().head(5)
+        tops = [f"{idx} (n={int(v)})" for idx, v in vc.items()]
+
+    rr = active["row"]
+    prompt = (
+        _llm_prompt_header(active["title"]) + "EVIDENCIA DEL CASO\n"
+        f"- service_origin: {service_origin}\n"
+        f"- service_origin_n1: {service_origin_n1}\n"
+        f"- service_origin_n2: {service_origin_n2 or '-'}\n"
+        f"- fecha: {active['selection_key']}\n"
+        f"- n: {int(rr['n'])}\n"
+        f"- % detractores: {rr['det_pct']:.1f}\n"
+        f"- % pasivos: {rr['pas_pct']:.1f}\n"
+        f"- % promotores: {rr['pro_pct']:.1f}\n"
+        f"- NPS clásico: {rr['classic_nps']:.1f}\n"
+        "PALANCAS MÁS PRESENTES\n"
+        + ("\n".join([f"- {t}" for t in tops]) if tops else "- No disponibles")
+        + "\n\nVERBATIMS (muestra)\n"
+        + ("\n".join([f"- {v}" for v in comments]) if comments else "- No disponibles")
+    )
+    _llm_render_prompt_workspace(prompt, key_prefix=key_prefix, copy_label="Copiar prompt del día")
+    answer, _ = _llm_render_paste_and_parse("", key_prefix=key_prefix)
+    if _llm_actions_row(key_prefix=key_prefix):
+        saved_ok = _llm_save_workflow_response(
+            key_prefix=key_prefix,
+            raw_answer=answer,
+            fallback_title=active["title"],
+            fallback_id=f"bbva-be-unknown-day-{active['selection_key']}-001",
+            context=active["context"],
+            settings=settings,
+            workflow="daily_extreme_day",
+            selection_key=active["selection_key"],
+            selection_label=active["label"],
+            default_tags={
+                "geo": service_origin or "unknown",
+                "channel": service_origin_n1 or "unknown",
+                "lever": "unknown",
+                "sublever": "unknown",
+                "period": "unknown",
+                "route_signature": "unknown",
+            },
+        )
+        if saved_ok:
+            st.rerun()
+
+
+def _render_opportunity_llm_assistant(
+    *,
+    df: pd.DataFrame,
+    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    min_n: int,
+    dimension_filter: str,
+    key_prefix: str,
+) -> None:
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    _llm_render_gpt_setup_block(key_prefix=key_prefix)
+    st.subheader("Entender oportunidades priorizadas")
+
+    opps = cached_rank_opportunities(df, min_n=min_n, dimensions=[dimension_filter])
+    if not opps:
+        st.info("No hay oportunidades con el umbral actual.")
+        return
+
+    saved = _saved_llm_signatures()
+    options: list[tuple[str, Any, pd.DataFrame, dict[str, Any], str]] = []
+    from nps_lens.llm.knowledge_cache import stable_signature
+
+    for opp in opps[:40]:
+        dim = str(opp.dimension)
+        val = str(opp.value)
+        if dim not in df.columns:
+            continue
+        ser = df[dim].astype(str)
+        slice_df = df.loc[ser.str.strip() == val.strip()].copy()
+        if slice_df.empty:
+            slice_df = df.loc[ser.str.strip().str.lower() == val.strip().lower()].copy()
+        context = {
+            "service_origin": service_origin,
+            "service_origin_n1": service_origin_n1,
+            "service_origin_n2": service_origin_n2 or "",
+            "workflow": "prioritized_opportunity",
+            "driver_dim": dim,
+            "driver_val": val,
+        }
+        title = f"Oportunidad priorizada: {dim}={val}"
+        sig = stable_signature(context={k: str(v) for k, v in context.items()}, title=title)
+        if sig in saved:
+            continue
+        label = (
+            f"{dim}={val} | impacto~+{opp.potential_uplift:.1f} | "
+            f"conf~{opp.confidence:.2f} | n={opp.n}"
+        )
+        options.append((label, opp, slice_df, context, title))
+
+    if not options:
+        st.success("Todas las oportunidades visibles ya tienen insight guardado.")
+        return
+
+    selected_label = st.selectbox(
+        "Oportunidad a explicar",
+        [label for label, *_ in options],
+        key=f"{key_prefix}_opp_select",
+    )
+    label, selected, slice_df, context, title = options[
+        [opt[0] for opt in options].index(selected_label)
+    ]
+    question = st.selectbox(
+        "Pregunta para el GPT",
+        options=LLM_BUSINESS_QUESTIONS,
+        index=0,
+        key=f"{key_prefix}_question",
+    )
+
+    md, _pack, _context = _llm_build_pack(
+        df,
+        service_origin,
+        service_origin_n1,
+        selected,
+        slice_df,
+    )
+    prompt = _llm_prompt_header(title, question=question) + "EVIDENCIA DEL CASO\n" + md
+    _llm_render_prompt_workspace(
+        prompt,
+        key_prefix=key_prefix,
+        copy_label="Copiar prompt de la oportunidad",
+    )
+    answer, _ = _llm_render_paste_and_parse("", key_prefix=key_prefix)
+    if _llm_actions_row(key_prefix=key_prefix):
+        saved_ok = _llm_save_workflow_response(
+            key_prefix=key_prefix,
+            raw_answer=answer,
+            fallback_title=title,
+            fallback_id=(
+                "bbva-be-unknown-"
+                f"{_slugify_text(selected.dimension)}-{_slugify_text(selected.value)}-001"
+            ),
+            context=context,
+            settings=settings,
+            workflow="prioritized_opportunity",
+            selection_key=f"{selected.dimension}={selected.value}",
+            selection_label=label,
+            default_tags={
+                "geo": service_origin or "unknown",
+                "channel": (
+                    str(selected.value)
+                    if str(selected.dimension) == "Canal"
+                    else (service_origin_n1 or "unknown")
+                ),
+                "lever": str(selected.value) if str(selected.dimension) == "Palanca" else "unknown",
+                "sublever": (
+                    str(selected.value) if str(selected.dimension) == "Subpalanca" else "unknown"
+                ),
+                "period": "unknown",
+                "route_signature": "unknown",
+            },
+        )
+        if saved_ok:
+            st.rerun()
 
 
 def render_sidebar(  # noqa: PLR0915
@@ -1693,21 +2370,18 @@ def render_sidebar(  # noqa: PLR0915
 def page_executive(
     df: pd.DataFrame,
     theme: Theme,
+    settings: Settings,
     store_dir: Path,
     service_origin: str,
     service_origin_n1: str,
     service_origin_n2: str,
     *,
+    text_df: Optional[pd.DataFrame] = None,
     history_df: Optional[pd.DataFrame] = None,
     pop_year: str = "",
     pop_month: str = "",
     min_n: int = 200,
 ) -> None:
-    section(
-        "Resumen del periodo",
-        "Qué está pasando, dónde mirar primero y por qué (lenguaje de negocio).",
-    )
-
     s = executive_summary(df)
     context_days = context_period_days(df, minimum=14)
 
@@ -1722,230 +2396,127 @@ def page_executive(
     with c4:
         kpi("Promotores (>=9)", f"{s.promoter_rate*100:.1f}%", hint="Lealtad")
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    tab_kpis, tab_w, tab_text, tab_when, tab_how = st.tabs(
+        [
+            "NPS clasico vs % evol. detractores",
+            "Media semanal",
+            "Que dicen los clientes",
+            "Cuando lo dicen",
+            "Como lo dicen",
+        ]
+    )
 
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        card("Tendencia", "<div class='nps-muted'>Evolución del NPS medio.</div>", flat=True)
-        tab_w, tab_dm, tab_adv = st.tabs(
-            ["Semanal (media)", "Diaria (mix negocio)", "Detalle (semaforo)"]
+    # Load only the requested window with predicate pushdown (partitioned parquet).
+    end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
+    end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
+    if end_day is not None:
+        start_day = end_day - pd.Timedelta(days=int(context_days) - 1)
+        df_win = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            st.session_state.get("_nps_group_choice", POP_ALL),
+            CHART_COLUMNS["daily_mix"],
+            date_start=str(start_day.date()),
+            date_end=str(end_day.date()),
         )
-        with tab_w:
-            fig = chart_nps_trend(df, theme, freq="W")
-            if fig is None:
-                st.info("No hay suficientes datos para construir una tendencia.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        df_llm_win = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            st.session_state.get("_nps_group_choice", POP_ALL),
+            CHART_COLUMNS["daily_llm"],
+            date_start=str(start_day.date()),
+            date_end=str(end_day.date()),
+        )
+    else:
+        df_win = df
+        df_llm_win = df
 
-        with tab_dm:
-            st.markdown(
-                "<div class='nps-card nps-muted'>"
-                "<b>Cómo leerlo:</b> más <b>rojo</b> (detractores) empeora NPS; "
-                "más <b>verde</b> (promotores) lo mejora. "
-                "Usa la barra de <b>volumen</b> (n) para no sobre-interpretar días con pocas respuestas."
-                "</div>",
-                unsafe_allow_html=True,
-            )
+    with tab_kpis:
+        st.caption("Lectura diaria: NPS clásico (promotores - detractores) y % detractores.")
+        fig_k = chart_daily_kpis(df_win, theme, days=int(context_days))
+        if fig_k is None:
+            st.info("No hay suficientes datos para construir la vista diaria de NPS clásico.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
 
-            # Load only the requested window with predicate pushdown (partitioned parquet).
-            end_day = pd.to_datetime(df["Fecha"], errors="coerce").max()
-            end_day = end_day.floor("D") if end_day is not None and end_day == end_day else None
-            if end_day is not None:
-                start_day = end_day - pd.Timedelta(days=int(context_days) - 1)
-                df_win = load_context_df(
-                    store_dir,
-                    service_origin,
-                    service_origin_n1,
-                    service_origin_n2,
-                    st.session_state.get("_nps_group_choice", POP_ALL),
-                    CHART_COLUMNS["daily_mix"],
-                    date_start=str(start_day.date()),
-                    date_end=str(end_day.date()),
-                )
-            else:
-                df_win = df
+        metrics = _daily_metrics(df_llm_win, days=int(context_days))
+        _render_daily_llm_assistant(
+            df=df_llm_win,
+            settings=settings,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+            metrics=metrics,
+            key_prefix="daily_llm",
+        )
 
-            fig_mix = chart_daily_mix_business(df_win, theme, days=int(context_days))
-            if fig_mix is None:
-                st.info("No hay suficientes datos para construir la vista diaria.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                fig_vol = chart_daily_volume(df_win, theme, days=int(context_days))
-                if fig_vol is not None:
-                    st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
-                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-                st.caption(
-                    "Lectura diaria: NPS clásico (promotores - detractores) y % detractores."
-                )
-                fig_k = chart_daily_kpis(df_win, theme, days=int(context_days))
-                if fig_k is not None:
-                    st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
+    with tab_w:
+        fig = chart_nps_trend(df, theme, freq="W")
+        if fig is None:
+            st.info("No hay suficientes datos para construir una tendencia.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
 
-                with st.expander("WoW: entender los días que importan (LLM)", expanded=False):
-                    st.caption(
-                        "Selecciona un día extremo (muy bueno o muy malo) y genera un prompt "
-                        "para pedirle al GPT una explicación con hipótesis y acciones."
-                    )
-
-                    df_llm_win = load_context_df(
-                        store_dir,
-                        service_origin,
-                        service_origin_n1,
-                        service_origin_n2,
-                        st.session_state.get("_nps_group_choice", POP_ALL),
-                        CHART_COLUMNS["daily_llm"],
-                        date_start=str(start_day.date()) if end_day is not None else None,
-                        date_end=str(end_day.date()) if end_day is not None else None,
-                    )
-                    metrics = _daily_metrics(df_llm_win, days=int(context_days))
-                    if metrics.empty:
-                        st.info("No hay suficientes datos diarios para construir el asistente.")
-                    else:
-                        worst = metrics.sort_values(
-                            ["det_pct", "n"], ascending=[False, False]
-                        ).head(3)
-                        best = metrics.sort_values(
-                            ["classic_nps", "n"], ascending=[False, False]
-                        ).head(3)
-                        picks = []
-                        for _, r in worst.iterrows():
-                            picks.append(
-                                (
-                                    f"🔻 Peor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
-                                    r["day"],
-                                )
-                            )
-                        for _, r in best.iterrows():
-                            picks.append(
-                                (
-                                    f"🔺 Mejor día {r['day'].strftime('%Y-%m-%d')} — %detr={r['det_pct']:.1f} · NPS={r['classic_nps']:.1f} · n={int(r['n'])}",
-                                    r["day"],
-                                )
-                            )
-                        labels = [p[0] for p in picks]
-                        label = st.selectbox("Día a explicar", labels)
-                        chosen_day = picks[labels.index(label)][1]
-
-                        day_df = df.copy()
-                        day_df["_day"] = day_df["Fecha"].dt.floor("D")
-                        slice_df = day_df.loc[day_df["_day"] == chosen_day].copy()
-
-                        # Small business facts for the chosen day
-                        row = metrics.loc[metrics["day"] == chosen_day].head(1)
-                        if row.empty:
-                            st.warning("No se pudo preparar el día seleccionado.")
-                        else:
-                            rr = row.iloc[0]
-                            # Verbative samples
-                            verb = []
-                            if "Comment" in slice_df.columns:
-                                verb = slice_df["Comment"].dropna().astype(str).head(12).tolist()
-
-                            # Top levers that day (if available)
-                            tops = []
-                            if "Palanca" in slice_df.columns:
-                                vc = slice_df["Palanca"].astype(str).value_counts().head(5)
-                                tops = [f"{idx} (n={int(v)})" for idx, v in vc.items()]
-
-                            prompt = (
-                                "Necesito que analices un día extremo de NPS térmico y me devuelvas:\n"
-                                "1) Resumen del periodo (max 10 líneas)\n"
-                                "2) JSON válido con el esquema de NPS Lens (schema_version=1.0)\n\n"
-                                f"Contexto:\n- service_origin: {service_origin}\n- service_origin_n1: {service_origin_n1}\n- service_origin_n2: {service_origin_n2 or '-'}\n- día: {chosen_day.strftime('%Y-%m-%d')}\n\n"
-                                "Hechos del día (métricas):\n"
-                                f"- n: {int(rr['n'])}\n"
-                                f"- % detractores (0-6): {rr['det_pct']:.1f}%\n"
-                                f"- % pasivos (7-8): {rr['pas_pct']:.1f}%\n"
-                                f"- % promotores (9-10): {rr['pro_pct']:.1f}%\n"
-                                f"- NPS clásico (promotores - detractores): {rr['classic_nps']:.1f} pp\n\n"
-                                "Hipótesis: explica qué pudo provocar este comportamiento (muy malo o muy bueno), "
-                                "separa fricción digital vs operativa vs pricing si aplica, y propone acciones.\n\n"
-                                "Palancas más presentes ese día (por volumen):\n"
-                                + "\n".join([f"- {t}" for t in tops])
-                                + "\n\n"
-                                "Verbatims (muestras):\n"
-                                + "\n".join([f"- {v}" for v in verb])
-                                + "\n\n"
-                                "Requisitos de respuesta:\n"
-                                "- No inventes métricas.\n"
-                                "- Si falta evidencia, dilo en riesgos y baja confidence.\n"
-                                "- Incluye 3-5 acciones concretas con owner/eta.\n"
-                            )
-
-                            _clipboard_copy_widget(prompt, label="Copiar prompt del día")
-                            st.download_button(
-                                "Descargar prompt (md)",
-                                data=prompt,
-                                file_name=f"prompt_dia_{chosen_day.strftime('%Y%m%d')}.md",
-                            )
-
-        with tab_adv:
-            st.markdown(
-                "<div class='nps-card nps-muted'>"
-                "<b>Detalle semáforo:</b> cada columna es un día. "
-                "Rojo=0-6, Amarillo=7-8, Verde=9-10. "
-                "Más intenso = más respuestas ese día en esa categoría."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-
-            # Same windowed load for the semáforo detail.
-            if end_day is not None:
-                df_sema = load_context_df(
-                    store_dir,
-                    service_origin,
-                    service_origin_n1,
-                    service_origin_n2,
-                    st.session_state.get("_nps_group_choice", POP_ALL),
-                    CHART_COLUMNS["daily_semaforo"],
-                    date_start=str(start_day.date()),
-                    date_end=str(end_day.date()),
-                )
-            else:
-                df_sema = df
-
-            fig2 = chart_daily_score_semaforo(df_sema, theme, days=int(context_days))
-            if fig2 is None:
-                st.info("No hay suficientes datos para construir la escalera.")
-            else:
-                st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
-
-    with col_b:
-        det = s.top_detractor_driver
-        pro = s.top_promoter_driver
-        card(
-            "Lectura rápida",
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        report_md = _build_business_report_md(
+            df,
+            compare_df=history_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            min_n=min_n,
+        )
+        st.markdown(
             (
-                "<ul style='margin:0; padding-left: 18px;'>"
-                f"<li><b>Zona de fricción</b>: {det}</li>"
-                f"<li><b>Zona fuerte</b>: {pro}</li>"
-                "</ul>"
-                "<div class='nps-muted' style='margin-top:10px;'>"
-                "Siguiente paso: abre <b>Dónde el NPS se separa del global</b> u <b>Oportunidades priorizadas</b> para priorizar por impacto."
+                "<div class='nps-card'>"
+                "<div class='nps-muted' "
+                "style='font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;'>"
+                "Informe de negocio"
+                "</div>"
+                "<div style='height:10px'></div>"
+                "<pre style='margin:0; white-space:pre-wrap; word-break:break-word; "
+                "font-family:var(--nps-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); "
+                "font-size:13px; line-height:1.5;'>"
+                f"{escape(report_md)}"
+                "</pre>"
                 "</div>"
             ),
+            unsafe_allow_html=True,
         )
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    section("Informe de negocio", "Copy/paste listo para comité / daily.")
+    with tab_text:
+        if text_df is None or text_df.empty:
+            st.info("No hay texto suficiente para esta vista.")
+        else:
+            page_text(text_df, theme, embedded=True)
 
-    report_md = _build_business_report_md(
-        df,
-        compare_df=history_df,
-        pop_year=pop_year,
-        pop_month=pop_month,
-        min_n=min_n,
-    )
-    st.text_area("Informe de negocio", report_md, height=260)
-    st.download_button(
-        "Descargar informe .md",
-        data=report_md.encode("utf-8"),
-        file_name="informe_negocio_nps_lens.md",
-        mime="text/markdown",
-    )
+    with tab_when:
+        fig_vol = chart_daily_volume(df_win, theme, days=int(context_days))
+        if fig_vol is None:
+            st.info("No hay suficientes datos para construir la vista de volumen diario.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
 
-    section("✨ Insights LLM integrados")
+    with tab_how:
+        st.markdown(
+            "<div class='nps-card nps-muted'>"
+            "<b>Cómo leerlo:</b> más <b>rojo</b> (detractores) empeora NPS; "
+            "más <b>verde</b> (promotores) lo mejora. "
+            "Usa la barra de <b>volumen</b> (n) para no sobre-interpretar días con pocas respuestas."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        fig_mix = chart_daily_mix_business(df_win, theme, days=int(context_days))
+        if fig_mix is None:
+            st.info("No hay suficientes datos para construir la vista diaria.")
+        else:
+            st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
+
+    section("Insights LLM integrados")
     _render_llm_insights(theme)
 
 
@@ -2070,7 +2641,15 @@ def page_driver_gaps(df: pd.DataFrame, theme: Theme) -> None:
         st.dataframe(stats_df.head(30), use_container_width=True)
 
 
-def page_prioritized_opportunities(df: pd.DataFrame, theme: Theme, min_n: int) -> None:
+def page_prioritized_opportunities(
+    df: pd.DataFrame,
+    theme: Theme,
+    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    min_n: int,
+) -> None:
     st.subheader("Oportunidades priorizadas")
     dim = st.selectbox(
         "Cortar por",
@@ -2113,18 +2692,30 @@ def page_prioritized_opportunities(df: pd.DataFrame, theme: Theme, min_n: int) -
         "La PPT de incidencias usa hotspots operativos Helix+NPS, por lo que los términos pueden diferir."
     )
 
+    _render_opportunity_llm_assistant(
+        df=df,
+        settings=settings,
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+        service_origin_n2=service_origin_n2,
+        min_n=min_n,
+        dimension_filter=dim,
+        key_prefix="opp_llm",
+    )
+
     with st.expander("Ver ranking completo"):
         st.dataframe(opp_df.head(25), use_container_width=True)
 
 
-def page_text(df: pd.DataFrame, theme: Theme) -> None:
+def page_text(df: pd.DataFrame, theme: Theme, *, embedded: bool = False) -> None:
     comment_col = "Comment" if "Comment" in df.columns else "Comentario"
     texts = df[comment_col].astype(str)
 
     topics = extract_topics(texts, n_clusters=10)
     topics_df = pd.DataFrame([t.__dict__ for t in topics])
 
-    section("Temas con más volumen", "Clusters de texto para entender fricciones.")
+    if not embedded:
+        section("Temas con más volumen", "Clusters de texto para entender fricciones.")
     fig = chart_topic_bars(topics_df, theme)
     if fig is None:
         st.info("No hay texto suficiente para extraer temas.")
@@ -2135,51 +2726,16 @@ def page_text(df: pd.DataFrame, theme: Theme) -> None:
         st.dataframe(topics_df, use_container_width=True)
 
 
-def _llm_select_opportunity(df: pd.DataFrame, min_n: int):
-    opps = cached_rank_opportunities(df, min_n=min_n)
-    if not opps:
-        st.warning("No hay oportunidades con el umbral actual.")
-        return None, None, None
-
-    labels = [
-        (
-            f"{o.dimension}={o.value} | impacto~+{o.potential_uplift:.1f} | "
-            f"conf~{o.confidence:.2f} | n={o.n}"
-        )
-        for o in opps[:40]
-    ]
-    choice = st.selectbox("Oportunidad priorizada", labels)
-    selected = opps[labels.index(choice)]
-    # Defensive slicing: labels may differ from raw df values by whitespace/casing.
-    # If we fail to slice, the LLM section looks "empty" after selecting an opportunity.
-    dim = str(selected.dimension)
-    val = str(selected.value)
-    if dim in df.columns:
-        ser = df[dim].astype(str)
-        slice_df = df.loc[ser.str.strip() == val.strip()].copy()
-        if slice_df.empty:
-            slice_df = df.loc[ser.str.strip().str.lower() == val.strip().lower()].copy()
-    else:
-        slice_df = df.iloc[0:0].copy()
-
-    if slice_df.empty:
-        st.warning(
-            "No se encontraron filas para la oportunidad seleccionada tras normalizar valores. "
-            "Se mostrará el prompt igualmente, pero el pack tendrá evidencia limitada."
-        )
-    return selected, slice_df, opps
-
-
 def _llm_build_pack(
     df: pd.DataFrame,
-    settings: Settings,
+    service_origin: str,
+    service_origin_n1: str,
     selected,
     slice_df: pd.DataFrame,
-    out_dir: Path,
 ):
-    """Build the Deep-Dive Pack + files to support manual LLM workflow."""
+    """Build the Deep-Dive Pack to support manual LLM workflow."""
     # Lazy import: LLM stack is heavy; only load when this page is opened.
-    from nps_lens.llm.pack import build_insight_pack, export_pack, render_pack_markdown
+    from nps_lens.llm.pack import build_insight_pack, render_pack_markdown
 
     # If the slice is empty (data quality / labeling mismatch), fall back to a lightweight
     # sample so the user can still copy/paste a prompt and iterate.
@@ -2194,8 +2750,8 @@ def _llm_build_pack(
     )
 
     context = {
-        "service_origin": str(settings.default_service_origin),
-        "service_origin_n1": str(settings.default_service_origin_n1),
+        "service_origin": str(service_origin),
+        "service_origin_n1": str(service_origin_n1),
         "driver_dim": str(selected.dimension),
         "driver_val": str(selected.value),
     }
@@ -2210,147 +2766,83 @@ def _llm_build_pack(
         causal=causal,
         examples=10,
     )
-    out = export_pack(pack, out_dir=out_dir)
     md = render_pack_markdown(pack)
-    return md, out, pack, context
+    return md, pack, context
 
 
-def _llm_render_copy_prompt(md: str, out: dict[str, Path]) -> None:
-    section(
-        "1) Copiar prompt para el LLM",
-        "Elige una pregunta (lenguaje de negocio) y copia el prompt. Pégalo en tu ChatGPT y vuelve para pegar la respuesta.",
+def _llm_render_prompt_workspace(prompt: str, *, key_prefix: str, copy_label: str) -> None:
+    with contextlib.suppress(Exception):
+        _clipboard_copy_widget(prompt, label=copy_label)
+
+    st.text_area(
+        "Prompt listo para ChatGPT",
+        value=prompt,
+        height=280,
+        key=f"{key_prefix}_prompt",
+        help="Copia este bloque completo y pégalo en tu GPT configurado.",
     )
 
-    question = st.selectbox(
-        "Pregunta para el LLM",
-        options=LLM_BUSINESS_QUESTIONS,
-        index=0,
-        help="El prompt copiado incluirá esta pregunta + el pack con evidencia.",
-    )
 
-    # IMPORTANT: Force JSON-only output so users can paste directly into the app.
-    prompt = (
-        "SISTEMA (instrucciones del analista)\n"
-        f"{LLM_SYSTEM_PROMPT}\n\n"
-        "INSTRUCCIONES\n"
-        f"- {question}\n\n"
-        "REGLA CRITICA\n"
-        "- RESPONDE SOLO con UN objeto JSON valido (sin texto antes o despues, sin markdown).\n"
-        '- Usa comillas dobles normales ("), sin comillas tipograficas.\n'
-        "- Sin trailing commas. No uses NaN/Infinity/None: usa null si aplica.\n\n"
-        "DEEP-DIVE PACK\n"
-        f"{md}"
-    )
+def _llm_render_paste_and_parse(
+    default_text: str, *, key_prefix: str
+) -> tuple[str, Optional[dict[str, Any]]]:
+    pending_key = f"{key_prefix}_answer_pending"
+    answer_key = f"{key_prefix}_answer"
 
-    # IMPORTANT UX:
-    # Some corporate browsers / Streamlit hosting environments may block JS clipboard APIs or
-    # even hide HTML components. Therefore we always render the prompt in a plain text widget
-    # (copyable via Ctrl/Cmd+C), and optionally also show the JS copy button.
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        with contextlib.suppress(Exception):
-            _clipboard_copy_widget(prompt, label="Copiar prompt")
-
-        st.text_area(
-            "Prompt (copia y pega en tu ChatGPT)",
-            value=prompt,
-            height=260,
-            help="Selecciona el texto y usa Ctrl/Cmd+C para copiar.",
-        )
-
-        with st.expander("Ver prompt en bloque de código", expanded=False):
-            # Streamlit's code blocks often include a built-in copy icon.
-            st.code(prompt)
-
-    with c2:
-        st.download_button(
-            "Descargar pack .md",
-            data=md.encode("utf-8"),
-            file_name=out["md"].name,
-            mime="text/markdown",
-            use_container_width=True,
-        )
-
-
-def _llm_render_paste_and_parse(default_text: str) -> tuple[str, Optional[dict[str, Any]]]:
-    st.divider()
-    st.subheader("Pegar respuesta del LLM y guardarla en Knowledge Cache")
-
-    section("2) Pega el insight del LLM para integrarlo en la narrativa")
     st.markdown(
         "<div class='nps-card nps-card--flat'>"
-        "<b>Como usarlo</b><br/>"
-        "<span class='nps-muted'>Pega aqui la respuesta del LLM (idealmente el JSON "
-        "con el esquema de Insight). Al guardarlo, aparecera en <b>Resumen</b> "
-        "y se incluira en el briefing exportable.</span>"
+        "<b>Pega la respuesta del GPT y guárdala</b><br/>"
+        "<span class='nps-muted'>La app intentará reparar el JSON, validarlo contra el esquema y "
+        "guardarlo solo si es consistente.</span>"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    # IMPORTANT: Do not pass `value=` on every rerun.
-    # If we always supply a `value`, Streamlit will overwrite user edits on each rerun
-    # (paste appears to do nothing, which feels like a disabled input).
-    # We persist the value via session_state using `key=`.
-    # If we repaired JSON on a previous run, apply it *before* the widget is instantiated.
-    # Streamlit forbids mutating a widget's session_state key after the widget exists.
-    if "llm_answer_pending" in st.session_state:
-        st.session_state["llm_answer"] = str(st.session_state.pop("llm_answer_pending") or "")
+    if pending_key in st.session_state:
+        st.session_state[answer_key] = str(st.session_state.pop(pending_key) or "")
 
-    if "llm_answer" not in st.session_state:
-        st.session_state["llm_answer"] = default_text or ""
-    elif (default_text or "") and not str(st.session_state.get("llm_answer", "")).strip():
-        # If the user hasn't typed anything yet, allow a fresh default to populate.
-        st.session_state["llm_answer"] = default_text
+    if answer_key not in st.session_state:
+        st.session_state[answer_key] = default_text or ""
+    elif (default_text or "") and not str(st.session_state.get(answer_key, "")).strip():
+        st.session_state[answer_key] = default_text
 
     st.text_area(
-        "Respuesta del LLM",
-        key="llm_answer",
-        height=240,
+        "Respuesta del GPT",
+        key=answer_key,
+        height=260,
         help=(
-            "Pega aqui la respuesta del LLM (idealmente el JSON con el esquema de Insight). "
-            "La app la analizara y podras guardarla en la Knowledge Cache."
+            "Pega aquí el JSON devuelto por tu GPT. "
+            "La app intentará corregir errores de formato antes de validar y guardar."
         ),
     )
-    answer = str(st.session_state.get("llm_answer", ""))
+    answer = str(st.session_state.get(answer_key, ""))
     parsed = _try_parse_json(answer)
 
     if parsed is not None:
-        ok, errs = _validate_insight_schema(parsed)
+        ok, errs = _validate_insight_schema(
+            _normalize_insight_candidate(
+                parsed,
+                fallback_title="Insight LLM",
+                fallback_id="bbva-be-unknown-unknown-001",
+            )
+        )
         if ok:
-            with st.expander("Vista previa del insight detectado", expanded=True):
-                st.write(
-                    {
-                        "insight_id": parsed.get("insight_id"),
-                        "title": parsed.get("title"),
-                        "confidence": parsed.get("confidence"),
-                        "severity": parsed.get("severity"),
-                        "tags": parsed.get("tags"),
-                    }
-                )
-                st.caption(str(parsed.get("executive_summary", ""))[:600])
+            st.success("JSON detectado y estructuralmente compatible.")
         else:
-            st.info("Se detectó JSON, pero aún no cumple el esquema: " + "; ".join(errs))
+            st.info("Se detectó JSON, pero aún faltan campos o formato: " + "; ".join(errs))
     elif answer.strip():
-        st.info("Pega aquí el JSON del LLM. Se validará automáticamente al guardar.")
+        st.info("Pega aquí el JSON del GPT. Se reparará y validará al guardar.")
 
     return answer, parsed
 
 
-def _llm_actions_row() -> bool:
-    """Single action: save for dashboard + knowledge cache.
-
-    This eliminates user confusion and guarantees coherence between the executive
-    dashboard narrative and the persisted knowledge cache for the current context.
-    """
-
+def _llm_actions_row(*, key_prefix: str, label: str = "Validar, reparar y guardar") -> bool:
     return st.button(
-        "Guardar (dashboard + knowledge cache)",
+        label,
         type="primary",
         use_container_width=True,
-        help=(
-            "Guarda el insight para que aparezca en Resumen y quede persistido "
-            "en la knowledge cache del contexto."
-        ),
+        key=f"{key_prefix}_save",
+        help="Repara el JSON si es posible, lo valida y lo guarda en la knowledge cache.",
     )
 
 
@@ -2374,13 +2866,17 @@ def _llm_add_to_dashboard(parsed: Optional[dict[str, Any]], *, rerun: bool = Fal
 
 
 def _llm_save_to_cache(
-    cache_path: Path,
-    context: dict[str, Any],
-    pack,
-    answer: str,
+    *,
     settings: Settings,
-    selected,
-) -> None:
+    title: str,
+    context: dict[str, Any],
+    answer: str,
+    insight: dict[str, Any],
+    workflow: str,
+    selection_key: str,
+    selection_label: str,
+    tags: Optional[dict[str, str]] = None,
+) -> str:
     from nps_lens.llm.knowledge_cache import KnowledgeCache, stable_signature
 
     service_origin = str(context.get("service_origin") or settings.default_service_origin)
@@ -2388,89 +2884,150 @@ def _llm_save_to_cache(
     kc = KnowledgeCache.for_context(
         settings.knowledge_dir, service_origin=service_origin, service_origin_n1=service_origin_n1
     )
-    sig = stable_signature(context=context, title=pack.title)
+    sig_context = {str(k): str(v) for k, v in context.items()}
+    sig = stable_signature(context=sig_context, title=title)
     record = {
         "signature": sig,
-        "insight_id": pack.insight_id,
-        "title": pack.title,
+        "insight_id": str(insight.get("insight_id") or ""),
+        "title": title,
         "context": context,
         "llm_answer": answer,
-        "created_at_utc": pack.created_at.isoformat() + "Z",
-        "tags": [
-            service_origin,
-            service_origin_n1,
-            selected.dimension,
-            selected.value,
-        ],
+        "insight": insight,
+        "workflow": workflow,
+        "selection_key": selection_key,
+        "selection_label": selection_label,
+        "created_at_utc": pd.Timestamp.utcnow().isoformat(),
+        "tags": tags or dict(insight.get("tags") or {}),
     }
     kc.upsert(sig, record)
-    st.success("Guardado. Se usara para deduplicacion y contexto futuro.")
+    _refresh_llm_session_state(settings, service_origin, service_origin_n1)
+    return sig
 
 
-def page_llm(df: pd.DataFrame, settings: Settings, min_n: int, cache_path: Path) -> None:
-    st.subheader("WoW: Deep-Dive Pack para ChatGPT (copy/paste + memoria)")
-    st.markdown(
-        "<div class='nps-card nps-muted'>"
-        "Selecciona una oportunidad, genera un pack con contexto + evidencia y llevalo a tu LLM. "
-        "Despues pega la respuesta aqui para que la app recuerde decisiones y no repita insights."
-        "</div>",
-        unsafe_allow_html=True,
+def _llm_save_workflow_response(
+    *,
+    key_prefix: str,
+    raw_answer: str,
+    fallback_title: str,
+    fallback_id: str,
+    context: dict[str, Any],
+    settings: Settings,
+    workflow: str,
+    selection_key: str,
+    selection_label: str,
+    default_tags: Optional[dict[str, str]] = None,
+) -> bool:
+    obj, repaired, err = _parse_json_with_repair(raw_answer)
+    if obj is None:
+        st.error("No pude detectar un JSON válido automáticamente.")
+        with st.expander("Detalle de validación", expanded=True):
+            st.write(err or "JSON inválido.")
+            if repaired:
+                st.caption("Texto reparado que intentó parsear la app")
+                st.code(repaired, language="json")
+        return False
+
+    normalized_candidate = _normalize_insight_candidate(
+        obj,
+        fallback_title=fallback_title,
+        fallback_id=fallback_id,
+        default_tags=default_tags,
     )
+    ok, errs, normalized = validate_insight_response(normalized_candidate)
+    if not ok or normalized is None:
+        st.error(
+            "El JSON se pudo reparar/parsear, pero aún no cumple el esquema: " + "; ".join(errs)
+        )
+        with st.expander("JSON normalizado que la app intentó validar", expanded=False):
+            st.code(
+                json.dumps(normalized_candidate, ensure_ascii=False, indent=2),
+                language="json",
+            )
+        return False
 
-    selected, slice_df, _ = _llm_select_opportunity(df, min_n=min_n)
-    if selected is None or slice_df is None:
+    canonical = json.dumps(normalized, ensure_ascii=False, indent=2)
+    pending_key = f"{key_prefix}_answer_pending"
+    if canonical.strip() != raw_answer.strip():
+        st.session_state[pending_key] = canonical
+
+    _llm_add_to_dashboard(normalized, rerun=False)
+    _llm_save_to_cache(
+        settings=settings,
+        title=fallback_title,
+        context=context,
+        answer=canonical,
+        insight=normalized,
+        workflow=workflow,
+        selection_key=selection_key,
+        selection_label=selection_label,
+        tags=default_tags,
+    )
+    st.success("Insight validado, reparado si hacía falta y guardado en conocimiento.")
+    return True
+
+
+def page_llm_cache() -> None:
+    st.subheader("LLM guardado")
+    entries = st.session_state.get("llm_cache_entries", [])
+    if not isinstance(entries, list) or not entries:
+        st.info("No hay insights LLM guardados todavía para este contexto.")
         return
 
-    md, out, pack, context = _llm_build_pack(
-        df, settings, selected, slice_df, out_dir=cache_path.parent / "packs"
-    )
-    _llm_render_copy_prompt(md, out)
+    buckets = {
+        "NPS clásico vs % detractores": [],
+        "Oportunidades": [],
+        "Otros": [],
+    }
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        workflow = str(entry.get("workflow") or "").strip()
+        if workflow == "daily_extreme_day":
+            buckets["NPS clásico vs % detractores"].append(entry)
+        elif workflow == "prioritized_opportunity":
+            buckets["Oportunidades"].append(entry)
+        else:
+            buckets["Otros"].append(entry)
 
-    answer, parsed = _llm_render_paste_and_parse("")
-    do_save = _llm_actions_row()
+    labels = [label for label, items in buckets.items() if items]
+    tabs = st.tabs(labels)
+    for label, tab in zip(labels, tabs):
+        with tab:
+            items = sorted(
+                buckets[label],
+                key=lambda item: str(item.get("created_at_utc") or ""),
+                reverse=True,
+            )
+            preview = []
+            for item in items:
+                insight = _extract_insight_from_cache_entry(item) or {}
+                preview.append(
+                    {
+                        "created_at_utc": item.get("created_at_utc"),
+                        "selection_label": item.get("selection_label") or item.get("title"),
+                        "insight_id": insight.get("insight_id") or item.get("insight_id"),
+                        "title": insight.get("title") or item.get("title"),
+                        "confidence": insight.get("confidence"),
+                        "severity": insight.get("severity"),
+                    }
+                )
+            st.dataframe(pd.DataFrame(preview), use_container_width=True, height=240)
 
-    if do_save:
-        raw = str(st.session_state.get("llm_answer", ""))
-        obj, repaired, err = _parse_json_with_repair(raw)
-
-        if obj is None:
-            st.error("No pude reparar/detectar un JSON válido automáticamente.")
-            with st.expander("Validador JSON (detalle técnico)", expanded=True):
-                st.write(err or "JSON inválido.")
-                if repaired:
-                    st.caption("Intento de reparación (lo que la app intentó parsear):")
-                    st.code(repaired, language="json")
-            return
-
-        # If we repaired anything, schedule the textbox update for the next rerun.
-        # (We cannot modify st.session_state['llm_answer'] after the widget is instantiated.)
-        if repaired and repaired.strip() and repaired.strip() != raw.strip():
-            st.session_state["llm_answer_pending"] = repaired
-
-        ok, errs = _validate_insight_schema(obj)
-        if not ok:
-            st.error("El JSON se pudo parsear, pero no cumple el esquema: " + "; ".join(errs))
-            with st.expander("JSON detectado (reparado)", expanded=False):
-                st.code(repaired or "", language="json")
-            return
-
-        # 1) Dashboard (session)
-        _llm_add_to_dashboard(obj, rerun=False)
-
-        # 2) Knowledge cache (persisted, per-context) - store the repaired canonical JSON
-        _llm_save_to_cache(
-            cache_path=cache_path,
-            context=context,
-            pack=pack,
-            answer=repaired or raw,
-            settings=settings,
-            selected=selected,
-        )
-
-        # Apply the repaired JSON back into the text area and refresh.
-        st.rerun()
-        # Refresh UI so the integrated insights section updates immediately.
-        st.rerun()
+            for idx, item in enumerate(items[:20], start=1):
+                insight = _extract_insight_from_cache_entry(item) or {}
+                title = str(insight.get("title") or item.get("title") or f"Insight {idx}")
+                with st.expander(f"{idx}. {title}", expanded=False):
+                    if insight:
+                        st.write(
+                            {
+                                "insight_id": insight.get("insight_id"),
+                                "confidence": insight.get("confidence"),
+                                "severity": insight.get("severity"),
+                                "tags": insight.get("tags"),
+                            }
+                        )
+                        st.caption(str(insight.get("executive_summary") or "")[:700])
+                    st.code(str(item.get("llm_answer") or ""), language="json")
 
 
 def _normalize_empty_n2(n2: str) -> str:
@@ -2533,7 +3090,7 @@ def page_quality(
     tab_labels = ["NPS"]
     if helix_df is not None:
         tab_labels.append("Helix")
-    if llm_df is not None and settings is not None and cache_path is not None:
+    if llm_df is not None and settings is not None:
         tab_labels.append("LLM")
     tabs = st.tabs(tab_labels)
 
@@ -2589,9 +3146,9 @@ def page_quality(
             st.dataframe(view_h, use_container_width=True, height=520)
         next_tab_idx += 1
 
-    if llm_df is not None and settings is not None and cache_path is not None:
+    if llm_df is not None and settings is not None:
         with tabs[next_tab_idx]:
-            page_llm(llm_df, settings=settings, min_n=min_n, cache_path=cache_path)
+            page_llm_cache()
 
 
 def page_nps_helix_linking(
@@ -4285,8 +4842,8 @@ def page_nps_helix_linking(
                 file_name="deep_dive_pack.json",
             )
 
-        with st.expander("Prompt WoW para GPT (copy/paste manual)", expanded=False):
-            _clipboard_copy_widget(wow_prompt, label="Copiar prompt WoW")
+        with st.expander("Prompt para GPT (copy/paste manual)", expanded=False):
+            _clipboard_copy_widget(wow_prompt, label="Copiar prompt para GPT")
             st.text_area(
                 "Prompt recomendado",
                 value=wow_prompt,
@@ -4355,7 +4912,7 @@ def main() -> None:
     ctx_key = f"{service_origin}__{service_origin_n1}__{service_origin_n2}__{pop_year}__{pop_month}__{nps_group_choice}__{touchpoint_source}"
     if st.session_state.get("_llm_ctx") != ctx_key:
         st.session_state["_llm_ctx"] = ctx_key
-        st.session_state["llm_insights"] = load_llm_insights_for_context(
+        _refresh_llm_session_state(
             settings, service_origin=service_origin, service_origin_n1=service_origin_n1
         )
 
@@ -4452,24 +5009,25 @@ def main() -> None:
             month_filter=pop_month_filter,
         )
 
-        s1, s2, s3, s4, s5, s6 = st.tabs(
+        s1, s2, s3, s4, s5 = st.tabs(
             [
                 "Sumario del Periodo",
                 "Cambios respeto al historico",
                 "Comparativas cruzadas del periodo",
                 "Dónde el NPS se separa del global",
                 "Oportunidades priorizadas",
-                "Que dicen los clientes",
             ]
         )
         with s1:
             page_executive(
                 df_resumen,
                 theme,
+                settings,
                 store_dir,
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
+                text_df=df_texto,
                 history_df=df_resumen_hist,
                 pop_year=pop_year,
                 pop_month=pop_month,
@@ -4488,9 +5046,15 @@ def main() -> None:
         with s4:
             page_driver_gaps(df_prior, theme)
         with s5:
-            page_prioritized_opportunities(df_prior, theme, min_n=min_n)
-        with s6:
-            page_text(df_texto, theme)
+            page_prioritized_opportunities(
+                df_prior,
+                theme,
+                settings,
+                service_origin,
+                service_origin_n1,
+                service_origin_n2,
+                min_n=min_n,
+            )
 
     with t_helix:
         df_resumen = load_context_df(

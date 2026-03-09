@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date, timedelta
-import calendar
 from typing import Optional
 
 import numpy as np

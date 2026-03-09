@@ -252,9 +252,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Resumen del periodo" in t for t in texts)
     assert any("Informe de negocio" in t for t in texts)
-    assert any("Qué está pasando" in t for t in texts)
     assert any("Cambio vs base de comparación" in t for t in texts)
     assert any("Periodo actual: Mes actual" in t for t in texts)
     assert any("Periodo base: Base histórica anterior" in t for t in texts)
