@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.incident_attribution import TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    summarize_attribution_chains,
+)
 from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
 
 
@@ -325,10 +328,12 @@ def build_incident_ppt_story(
     rationale_df: pd.DataFrame,
     *,
     attribution_df: Optional[pd.DataFrame] = None,
+    attribution_summary: Optional[dict[str, int]] = None,
     focus_name: str = "detractores",
     top_k: int = 5,
 ) -> str:
     """Narrative ready for PowerPoint committee sessions."""
+    scope = attribution_summary or summarize_attribution_chains(attribution_df)
     cards = (
         attribution_df.head(int(top_k)).to_dict(orient="records")
         if attribution_df is not None and not attribution_df.empty
@@ -360,6 +365,14 @@ def build_incident_ppt_story(
     lines.append(
         f"- El delta NPS esperado en los journeys afectados es de **{summary.expected_nps_delta:+.1f} puntos**."
     )
+    if int(scope.get("chains_total", 0)) > 0:
+        lines.append(
+            "- La cobertura consolidada del método causal suma "
+            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
+            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
+            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
+            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
+        )
 
     lines.append("")
     lines.append("## 2) Cadena de impacto")
@@ -452,54 +465,12 @@ def build_incident_ppt_story(
     return "\n".join(lines) + "\n"
 
 
-def build_wow_prompt(
-    *,
-    objective: str,
-    business_story_md: str,
-    top_topics_df: pd.DataFrame,
-    deep_dive_pack_json: str,
-) -> str:
-    """Prompt template for copy/paste workflows with ChatGPT (no API required)."""
-    topic_lines: list[str] = []
-    for _, r in top_topics_df.head(8).iterrows():
-        topic_lines.append(
-            (
-                f"- {str(r.get('nps_topic',''))} | risk={float(r.get('nps_points_at_risk',0.0)):.2f} "
-                f"| recoverable={float(r.get('nps_points_recoverable',0.0)):.2f} "
-                f"| priority={float(r.get('priority',0.0)):.2f} "
-                f"| lane={str(r.get('action_lane',''))}"
-            )
-        )
-    topics_block = "\n".join(topic_lines) if topic_lines else "- Sin topicos priorizados."
-
-    return (
-        "Actua como Principal Consultant de banca empresas para comite de negocio.\n"
-        "Objetivo de negocio:\n"
-        f"{objective}\n\n"
-        "Entregable obligatorio (en ESPANOL y en formato Markdown):\n"
-        "1) Mensaje principal (max 8 lineas).\n"
-        "2) Mapa de causa-efecto incidencia -> NPS (tabla con confidence y riesgos).\n"
-        "3) Plan semanal de ejecucion (owner, ETA, KPI leading/lagging, criterio de exito).\n"
-        "4) 3 experimentos de mejora continua (diseno, muestra, metrica, regla go/no-go).\n"
-        "5) Guion de 6 slides para PowerPoint (titulo + bullets por slide).\n\n"
-        "Reglas:\n"
-        "- No inventes datos. Usa solo la evidencia entregada.\n"
-        "- Si falta evidencia, dilo explicitamente y propone como medirla.\n"
-        "- Prioriza impacto economico y velocidad de recuperacion del NPS.\n\n"
-        "Narrativa base de negocio:\n"
-        f"{business_story_md}\n\n"
-        "Topicos priorizados:\n"
-        f"{topics_block}\n\n"
-        "Deep-Dive Pack JSON:\n"
-        f"{deep_dive_pack_json}\n"
-    )
-
-
 def build_ppt_8slide_script(
     summary: IncidentRationaleSummary,
     rationale_df: pd.DataFrame,
     *,
     attribution_df: Optional[pd.DataFrame] = None,
+    attribution_summary: Optional[dict[str, int]] = None,
     touchpoint_source: str = "",
     service_origin: str,
     service_origin_n1: str,
@@ -508,6 +479,7 @@ def build_ppt_8slide_script(
     top_k: int = 5,
 ) -> str:
     """Generate a business-first 8-slide script for periodic committee sessions."""
+    scope = attribution_summary or summarize_attribution_chains(attribution_df)
     top = rationale_df.head(int(top_k)).copy() if rationale_df is not None else pd.DataFrame()
     cards = (
         attribution_df.head(3).to_dict(orient="records")
@@ -542,15 +514,29 @@ def build_ppt_8slide_script(
     lines.append("- Mensaje clave: cuándo la incidencia precede el deterioro NPS.")
     lines.append("")
 
-    if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+    mode = str(touchpoint_source or "").strip()
+    if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         lines.append("## Slide 3 — Journeys que explican la detracción")
         lines.append(
             "- Objetivo: identificar rutas de degradación de experiencia que conectan incidencias con la voz del cliente para priorizar causas raíz accionables."
+        )
+    elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+        lines.append("## Slide 3 — Journeys rotos detectados")
+        lines.append(
+            "- Narrativa obligatoria: incidencia -> embeddings / keywords / clustering semántico -> touchpoint roto -> comentario -> NPS."
         )
     else:
         lines.append("## Slide 3 — Impact Chain")
         lines.append(
             "- Narrativa obligatoria: incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS."
+        )
+    if int(scope.get("chains_total", 0)) > 0:
+        lines.append(
+            "- Cobertura consolidada del método: "
+            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
+            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
+            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
+            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
         )
     if not cards:
         lines.append("- No hay evidencia suficiente para construir la cadena con rigor.")
@@ -569,12 +555,22 @@ def build_ppt_8slide_script(
             comment_examples = _evidence_list(card, "comment_examples", 2)
             incident_total = _evidence_total(card, "linked_incidents", "incident_examples", 5)
             comment_total = _evidence_total(card, "linked_comments", "comment_examples", 2)
-            if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+            if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
                 expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
                 impact_label = str(_card_value(card, "journey_impact_label", "")).strip()
                 lines.append(
                     f"- {title}: {expected_evidence or 'journey causal defendible'} | "
                     f"impacto esperado {impact_label or 'alto'} | "
+                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
+                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"impacto {impact:.2f} pts | "
+                    f"evidencia validada {incident_total}/{comment_total}."
+                )
+            elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+                expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
+                lines.append(
+                    f"- {title}: {expected_evidence or 'cluster semántico defendible'} | "
+                    f"touchpoint {touchpoint or 'detectado automáticamente'} | "
                     f"probabilidad {focus_name} {_fmt_pct(probability)} | "
                     f"Δ NPS {_fmt_delta(delta_nps)} | "
                     f"impacto {impact:.2f} pts | "

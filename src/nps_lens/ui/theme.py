@@ -21,6 +21,7 @@ class Theme:
     brand: str
     on_brand: str
     danger: str
+    danger_soft: str
     warning: str
     success: str
 
@@ -44,6 +45,7 @@ def get_theme(mode: str) -> Theme:
     brand = p["color.primary.bg.action.default"]
     on_brand = p.get("color.primary.text.main-inverse.default", text)
     danger = p["color.primary.bg.alert"]
+    danger_soft = p["color.primary.accent.value-07.default"]
     warning = p["color.primary.bg.warning"]
     success = p["color.primary.bg.success"]
     return Theme(
@@ -59,6 +61,7 @@ def get_theme(mode: str) -> Theme:
         brand=brand,
         on_brand=on_brand,
         danger=danger,
+        danger_soft=danger_soft,
         warning=warning,
         success=success,
     )
@@ -93,6 +96,7 @@ def apply_theme(t: Theme) -> None:
   --nps-accent-soft: color-mix(in srgb, var(--nps-accent) 18%, transparent);
   --nps-accent-strong: color-mix(in srgb, var(--nps-accent) 45%, transparent);
   --nps-danger: {t.danger};
+  --nps-danger-soft: {t.danger_soft};
   --nps-warning: {t.warning};
   --nps-success: {t.success};
   --nps-radius: 18px;
@@ -197,6 +201,21 @@ section[data-testid="stSidebar"] > div {{
   font-weight: 600;
 }}
 
+.nps-pill--detractor {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 18%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-danger-soft) 54%, var(--nps-surface));
+}}
+
+.nps-pill--passive {{
+  background: color-mix(in srgb, var(--nps-warning) 22%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-warning) 62%, var(--nps-surface));
+}}
+
+.nps-pill--promoter {{
+  background: color-mix(in srgb, var(--nps-success) 18%, var(--nps-surface));
+  border-color: color-mix(in srgb, var(--nps-success) 52%, var(--nps-surface));
+}}
+
 .nps-pill-row {{
   display: flex;
   flex-wrap: wrap;
@@ -292,7 +311,7 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   border: 1px solid var(--nps-border-softer);
 }}
 
-.nps-hero-metric span {{
+.nps-hero-metric > span {{
   display: block;
   font-size: 11px;
   letter-spacing: .08em;
@@ -301,9 +320,67 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   margin-bottom: 6px;
 }}
 
+.nps-hero-metric-help {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--nps-border-soft);
+  background: color-mix(in srgb, var(--nps-surface) 88%, var(--nps-accent) 12%);
+  color: var(--nps-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: help;
+  position: relative;
+  flex: 0 0 auto;
+}}
+
+.nps-hero-metric-help-tooltip {{
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(320px, 60vw);
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--nps-surface-2);
+  border: 1px solid var(--nps-border-soft);
+  box-shadow: var(--nps-shadow);
+  color: var(--nps-text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 20;
+}}
+
+.nps-hero-metric-help:hover .nps-hero-metric-help-tooltip,
+.nps-hero-metric-help:focus .nps-hero-metric-help-tooltip,
+.nps-hero-metric-help:focus-visible .nps-hero-metric-help-tooltip {{
+  opacity: 1;
+  transform: translateY(0);
+}}
+
 .nps-hero-metric strong {{
   font-size: 24px;
-  line-height: 1;
+  line-height: 1.05;
+  flex: 1 1 auto;
+  display: block;
+}}
+
+.nps-hero-metric-value {{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
 }}
 
 .nps-impact-grid {{
@@ -618,6 +695,18 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   border-bottom: 1px solid var(--nps-border-softer);
   word-break: break-word;
   white-space: normal;
+}}
+
+.nps-evidence-table tbody td.nps-band--detractor {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 14%, var(--nps-surface));
+}}
+
+.nps-evidence-table tbody td.nps-band--passive {{
+  background: color-mix(in srgb, var(--nps-warning) 16%, var(--nps-surface));
+}}
+
+.nps-evidence-table tbody td.nps-band--promoter {{
+  background: color-mix(in srgb, var(--nps-success) 14%, var(--nps-surface));
 }}
 
 .nps-evidence-table tbody tr:last-child td {{

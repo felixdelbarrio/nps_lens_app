@@ -6,7 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from nps_lens.design.tokens import DesignTokens, palette, primary_accent
+from nps_lens.design.tokens import (
+    DesignTokens,
+    nps_score_color,
+    palette,
+    plotly_nps_score_scale,
+    primary_accent,
+)
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
 
@@ -143,8 +149,13 @@ def _diverging_colors(theme: Theme, values: pd.Series) -> list[str]:
 
 
 def _colorscale_rgy(theme: Theme) -> list[list[object]]:
-    detr_c, pas_c, pro_c = _status_colors(theme)
-    return [[0.0, detr_c], [0.5, pas_c], [1.0, pro_c]]
+    tokens = DesignTokens.default()
+    return plotly_nps_score_scale(tokens, theme.mode)
+
+
+def _nps_score_colors(theme: Theme, values: pd.Series) -> list[str]:
+    tokens = DesignTokens.default()
+    return [nps_score_color(tokens, theme.mode, value) for value in values.tolist()]
 
 
 def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
@@ -177,9 +188,15 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         markers=True,
         hover_data={"n": True, "nps": ":.2f"},
     )
-    fig.update_traces(line=dict(width=3), marker=dict(size=8))
-    _, _, pro_c = _status_colors(theme)
-    fig.update_traces(line_color=pro_c, marker_color=pro_c)
+    marker_colors = _nps_score_colors(theme, agg["nps"])
+    fig.update_traces(
+        line=dict(width=3, color=th.accent),
+        marker=dict(
+            size=8,
+            color=marker_colors,
+            line=dict(color=th.paper_bg, width=1),
+        ),
+    )
     fig.update_layout(
         yaxis_title="NPS (media del score 0-10)",
         xaxis_title="Periodo",
@@ -275,109 +292,14 @@ def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> N
     step = max(1, int(len(days) / max_ticks))
     tick_days = days[::step]
     ticktext = [f"{_weekday_letter_es(d)}<br>{d.strftime('%b %d')}" for d in tick_days]
-    fig.update_xaxes(tickmode="array", tickvals=tick_days, ticktext=ticktext)
-
-
-def chart_daily_score_semaforo(
-    df: pd.DataFrame,
-    theme: Theme,
-    *,
-    days: int = 60,
-    date_col: str = "Fecha",
-    score_col: str = "NPS",
-):
-    """Daily distribution as a traffic-light heatmap (business-first).
-
-    Instead of an 11-row ladder, we aggregate scores into the standard NPS groups:
-    - Detractores (0-6)
-    - Pasivos (7-8)
-    - Promotores (9-10)
-
-    This makes it immediately clear what is "bad" vs "good" while retaining
-    intensity (count) per day.
-    """
-
-    if date_col not in df.columns or score_col not in df.columns:
-        return None
-
-    tmp = df.dropna(subset=[date_col, score_col]).copy()
-    if tmp.empty:
-        return None
-
-    day = pd.to_datetime(tmp[date_col], errors="coerce")
-    # Strip timezone to avoid window comparisons dropping all rows.
-    with contextlib.suppress(Exception):
-        day = day.dt.tz_localize(None)
-    tmp["day"] = day.dt.floor("D")
-    tmp = tmp.dropna(subset=["day"]).copy()
-    if tmp.empty:
-        return None
-
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return None
-
-    scores = pd.to_numeric(tmp[score_col], errors="coerce")
-    tmp["score"] = scores.clip(lower=0, upper=10)
-    tmp = tmp.dropna(subset=["score"]).copy()
-    if tmp.empty:
-        return None
-
-    def _grp(v: float) -> str:
-        if v <= 6:
-            return "Detractores (0-6)"
-        if v <= 8:
-            return "Pasivos (7-8)"
-        return "Promotores (9-10)"
-
-    tmp["grp"] = tmp["score"].map(_grp)
-    agg = tmp.groupby(["day", "grp"], as_index=False).agg(n=("score", "size"))
-    pivot = agg.pivot(index="grp", columns="day", values="n").fillna(0.0)
-
-    order = ["Detractores (0-6)", "Pasivos (7-8)", "Promotores (9-10)"]
-    for g in order:
-        if g not in pivot.index:
-            pivot.loc[g] = 0.0
-    pivot = pivot.loc[order]
-
-    th = chart_theme(theme)
-    detr_c, pas_c, pro_c = _status_colors(theme)
-
-    import plotly.graph_objects as go
-
-    days_list = [pd.Timestamp(d) for d in pivot.columns.to_list()]
-    zmax = float(pivot.to_numpy().max()) if pivot.to_numpy().size else 1.0
-
-    fig = go.Figure()
-    for grp, color in [
-        ("Detractores (0-6)", detr_c),
-        ("Pasivos (7-8)", pas_c),
-        ("Promotores (9-10)", pro_c),
-    ]:
-        z = [pivot.loc[grp].to_list()]
-        fig.add_trace(
-            go.Heatmap(
-                x=days_list,
-                y=[grp],
-                z=z,
-                zmin=0,
-                zmax=zmax,
-                colorscale=[
-                    [0.0, _shade(color, toward=th.paper_bg, t=0.85)],
-                    [0.35, _shade(color, toward=th.paper_bg, t=0.55)],
-                    [1.0, color],
-                ],
-                showscale=False,
-                hovertemplate=("Día=%{x|%Y-%m-%d}<br>" + grp + "=%{z}<extra></extra>"),
-            )
-        )
-
-    fig.update_layout(xaxis_title="Día", yaxis_title="", showlegend=False)
-    _layout_common(fig, th, height=220)
-    _apply_day_ticks(fig, days_list, max_ticks=28)
-    return apply_plotly_template(fig, theme)
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=tick_days,
+        ticktext=ticktext,
+        tickangle=0,
+        ticklabelposition="outside",
+        automargin=True,
+    )
 
 
 def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
@@ -466,7 +388,7 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     fig.update_yaxes(title_text="% detractores", secondary_y=True)
 
     _layout_common(fig, th, height=300)
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     return apply_plotly_template(fig, theme)
 
 
@@ -573,7 +495,7 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
         legend_title_text="Cómo leerlo",
     )
     _layout_common(fig, th, height=320)
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     fig.update_yaxes(range=[0, 100])
     return apply_plotly_template(fig, theme)
 
@@ -666,6 +588,65 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     fig.update_traces(marker_color=colors)
     fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
+    return apply_plotly_template(fig, theme)
+
+
+def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int = 10):
+    """Horizontal ranking of detected broken journeys."""
+
+    if journey_df.empty:
+        return None
+
+    tmp = journey_df.copy()
+    tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
+    tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
+    tmp["semantic_cohesion"] = pd.to_numeric(tmp.get("semantic_cohesion"), errors="coerce").fillna(
+        0.0
+    )
+    tmp = tmp.sort_values(
+        ["linked_pairs", "semantic_cohesion", "avg_nps"],
+        ascending=[False, False, True],
+    ).head(int(top_k))
+    if tmp.empty:
+        return None
+
+    th = chart_theme(theme)
+    import plotly.express as px
+
+    tmp = tmp.iloc[::-1].copy()
+    fig = px.bar(
+        tmp,
+        x="linked_pairs",
+        y="journey_label",
+        orientation="h",
+        color="avg_nps",
+        color_continuous_scale=_colorscale_rgy(theme),
+        range_color=(0.0, 10.0),
+        text="linked_pairs",
+        hover_data={
+            "touchpoint": True,
+            "palanca": True,
+            "subpalanca": True,
+            "journey_keywords": True,
+            "semantic_cohesion": ":.2f",
+            "avg_nps": ":.2f",
+        },
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        xaxis_title="Links validados Helix↔VoC",
+        yaxis_title="Journey roto",
+        coloraxis=dict(
+            cmin=0.0,
+            cmax=10.0,
+            colorbar=dict(
+                title="NPS medio",
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+            ),
+        ),
+    )
+    _layout_common(fig, th, height=max(320, 56 * len(tmp) + 80))
     return apply_plotly_template(fig, theme)
 
 
@@ -987,6 +968,12 @@ def chart_cohort_heatmap(
         zmin=0,
         zmax=10,
     )
-    fig.update_layout(coloraxis_colorbar=dict(title="NPS"))
+    fig.update_layout(
+        coloraxis=dict(
+            cmin=0.0,
+            cmax=10.0,
+            colorbar=dict(title="NPS", tickmode="array", tickvals=[0, 2, 6, 8, 10]),
+        )
+    )
     _layout_common(fig, th, height=420)
     return apply_plotly_template(fig, theme)

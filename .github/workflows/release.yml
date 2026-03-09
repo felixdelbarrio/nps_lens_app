@@ -51,6 +51,11 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    env:
+      MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,7 +74,6 @@ jobs:
       - name: Build
         env:
           MACOS_BUNDLE_ID: com.npslens.app
-          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
           MACOS_ENTITLEMENTS: packaging/macos/entitlements.plist
         run: |
           out=build/pyinstaller/macos
@@ -103,11 +107,7 @@ jobs:
           fi
           pyinstaller "${args[@]}"
       - name: Notarize macOS binary (optional)
-        if: ${{ secrets.MACOS_CODESIGN_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        if: ${{ env.MACOS_CODESIGN_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
         run: |
           zip -j nps-lens-macos.zip build/pyinstaller/macos/dist/nps-lens
           xcrun notarytool submit nps-lens-macos.zip \

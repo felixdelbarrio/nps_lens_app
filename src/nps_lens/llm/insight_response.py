@@ -2,25 +2,84 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing_extensions import Literal
 
 
+class QuantEvidenceV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metric: str = ""
+    value: str = ""
+    context: str = ""
+
+
+class EvidenceV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quant: List[QuantEvidenceV1] = Field(default_factory=list)
+    qual: List[str] = Field(default_factory=list)
+
+    @field_validator("qual")
+    @classmethod
+    def _cap_qual(cls, v: List[str]) -> List[str]:
+        return [str(item).strip() for item in v if str(item).strip()][:5]
+
+
+class TagsV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    geo: str = "unknown"
+    channel: str = "unknown"
+    lever: str = "unknown"
+    sublever: str = "unknown"
+    period: str = "unknown"
+    route_signature: str = "unknown"
+
+    @field_validator("geo", "channel", "lever", "sublever", "period", "route_signature")
+    @classmethod
+    def _default_unknown(cls, v: str) -> str:
+        txt = str(v or "").strip()
+        return txt or "unknown"
+
+
 class ActionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action: str = ""
     owner: str = ""
     eta: str = ""
 
 
 class RootCauseV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     cause: str
     why: str = ""
-    evidence: List[str] = Field(default_factory=list)
+    evidence: EvidenceV1 = Field(default_factory=EvidenceV1)
     assumptions: List[str] = Field(default_factory=list)
     actions: List[ActionV1] = Field(default_factory=list)
+    tests_or_checks: List[str] = Field(default_factory=list)
+
+    @field_validator("assumptions")
+    @classmethod
+    def _clean_assumptions(cls, v: List[str]) -> List[str]:
+        return [str(item).strip() for item in v if str(item).strip()]
+
+    @field_validator("actions")
+    @classmethod
+    def _cap_actions(cls, v: List[ActionV1]) -> List[ActionV1]:
+        return v[:3]
+
+    @field_validator("tests_or_checks")
+    @classmethod
+    def _cap_tests(cls, v: List[str]) -> List[str]:
+        return [str(item).strip() for item in v if str(item).strip()][:5]
 
 
 class InsightResponseV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     schema_version: Literal["1.0"] = "1.0"
 
     insight_id: str
@@ -38,7 +97,12 @@ class InsightResponseV1(BaseModel):
     assumptions: List[str] = Field(default_factory=list)
     risks: List[str] = Field(default_factory=list)
     next_questions: List[str] = Field(default_factory=list)
-    tags: List[str] = Field(default_factory=list)
+    tags: TagsV1 = Field(default_factory=TagsV1)
+
+    @field_validator("insight_id", "title", "executive_summary")
+    @classmethod
+    def _clean_required_text(cls, v: str) -> str:
+        return str(v or "").strip()
 
     @field_validator("confidence")
     @classmethod
@@ -57,6 +121,27 @@ class InsightResponseV1(BaseModel):
         except Exception:
             return 1
         return max(1, min(5, v))
+
+    @field_validator("segments_most_affected")
+    @classmethod
+    def _clean_segments(cls, v: List[str]) -> List[str]:
+        return [str(item).strip() for item in v if str(item).strip()]
+
+    @field_validator("journey_route")
+    @classmethod
+    def _clean_route(cls, v: str) -> str:
+        txt = str(v or "").strip()
+        return txt or "unknown"
+
+    @field_validator("root_causes")
+    @classmethod
+    def _cap_root_causes(cls, v: List[RootCauseV1]) -> List[RootCauseV1]:
+        return v[:3]
+
+    @field_validator("assumptions", "risks", "next_questions")
+    @classmethod
+    def _clean_text_lists(cls, v: List[str]) -> List[str]:
+        return [str(item).strip() for item in v if str(item).strip()]
 
 
 def validate_insight_response(

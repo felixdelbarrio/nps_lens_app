@@ -13,6 +13,7 @@ DEFAULT_UI_TOUCHPOINT_SOURCE = "domain_touchpoint"
 DEFAULT_UI_MIN_SIMILARITY = 0.25
 DEFAULT_UI_MAX_DAYS_APART = 10
 DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
+DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 
 
 UI_PREF_ENV_KEYS = {
@@ -27,6 +28,7 @@ UI_PREF_ENV_KEYS = {
     "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
     "min_n_opportunities": "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+    "min_n_cross_comparisons": "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
 }
 
 
@@ -52,6 +54,7 @@ class Settings:
     default_min_similarity: float
     default_max_days_apart: int
     default_min_n_opportunities: int
+    default_min_n_cross_comparisons: int
 
     log_level: str
 
@@ -225,9 +228,19 @@ class Settings:
             )
         except Exception:
             default_min_n_opportunities = DEFAULT_UI_MIN_N_OPPORTUNITIES
+        try:
+            default_min_n_cross_comparisons = int(
+                os.getenv(
+                    "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
+                    str(DEFAULT_UI_MIN_N_CROSS_COMPARISONS),
+                )
+            )
+        except Exception:
+            default_min_n_cross_comparisons = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
         default_min_similarity = min(max(default_min_similarity, 0.0), 1.0)
         default_max_days_apart = max(0, default_max_days_apart)
         default_min_n_opportunities = max(50, default_min_n_opportunities)
+        default_min_n_cross_comparisons = min(max(10, default_min_n_cross_comparisons), 200)
 
         # If defaults are not part of the allowed sets, make them consistent.
         if service_origin_values and default_service_origin not in service_origin_values:
@@ -250,6 +263,7 @@ class Settings:
             default_min_similarity=default_min_similarity,
             default_max_days_apart=default_max_days_apart,
             default_min_n_opportunities=default_min_n_opportunities,
+            default_min_n_cross_comparisons=default_min_n_cross_comparisons,
             log_level=os.getenv("NPS_LENS_LOG_LEVEL", "INFO"),
         )
 
