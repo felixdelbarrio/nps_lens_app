@@ -568,7 +568,7 @@ def test_add_topic_timing_slide_reuses_app_charts_and_handles_empty_state() -> N
     assert not group_matrix.empty
     assert set(group_matrix["band"].tolist()) <= {"Detractor", "Pasivo", "Promotor"}
 
-    opportunities = executive_ppt._opportunities_table(current)
+    opportunities = executive_ppt._opportunities_table(current, dimension="Palanca", min_n=20)
     assert not opportunities.empty
     assert {"dimension", "potential_uplift", "confidence"}.issubset(opportunities.columns)
 
@@ -608,7 +608,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 17
+    assert themed.layout.font.size == 18
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
     assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]
@@ -618,7 +618,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
 def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
     payload = _sample_payload()
     current = executive_ppt._coerce_nps_records(payload["selected_nps"])
-    opportunities = executive_ppt._opportunities_table(current)
+    opportunities = executive_ppt._opportunities_table(current, dimension="Palanca", min_n=20)
 
     prs = Presentation()
     executive_ppt._add_opportunity_slide(

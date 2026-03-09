@@ -742,18 +742,25 @@ def _dimension_gap_table(
     return stats[cols]
 
 
-def _opportunities_table(current_nps_df: pd.DataFrame) -> pd.DataFrame:
+def _opportunities_table(
+    current_nps_df: pd.DataFrame,
+    *,
+    dimension: str = "Palanca",
+    min_n: int = 200,
+) -> pd.DataFrame:
     cols = ["dimension", "value", "n", "current_nps", "potential_uplift", "confidence", "why"]
     if current_nps_df is None or current_nps_df.empty:
         return pd.DataFrame(columns=cols)
     work = current_nps_df.copy()
     if "nps_topic" not in work.columns or work["nps_topic"].astype(str).str.strip().eq("").all():
         work["nps_topic"] = build_nps_topic(work).astype(str).fillna("").str.strip()
-    min_n = max(20, int(len(work) * 0.04))
+    dims = [str(dimension)] if str(dimension or "").strip() in work.columns else []
+    if not dims:
+        return pd.DataFrame(columns=cols)
     rows = rank_opportunities(
         work,
-        dimensions=[dim for dim in ["Palanca", "Subpalanca", "nps_topic"] if dim in work.columns],
-        min_n=min_n,
+        dimensions=dims,
+        min_n=max(1, int(min_n)),
     )
     if not rows:
         return pd.DataFrame(columns=cols)
@@ -1489,29 +1496,29 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=17, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=18, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
             y=-0.16,
             yanchor="top",
-            font=dict(size=16, color=ink),
-            title_font=dict(size=16, color=ink),
+            font=dict(size=17, color=ink),
+            title_font=dict(size=17, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
-            l=int(current_margin.get("l", 24)),
-            r=int(current_margin.get("r", 24)),
+            l=max(int(current_margin.get("l", 24)), 68),
+            r=max(int(current_margin.get("r", 24)), 32),
             t=int(current_margin.get("t", 20)),
-            b=max(int(current_margin.get("b", 24)), 72),
+            b=max(int(current_margin.get("b", 24)), 82),
         ),
         hoverlabel=dict(font=dict(family=BBVA_FONT_BODY, size=13, color=ink)),
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=16, color=ink),
-            title_font=dict(size=17, color=ink),
+            tickfont=dict(size=17, color=ink),
+            title_font=dict(size=18, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1519,8 +1526,8 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=16, color=ink),
-            title_font=dict(size=17, color=ink),
+            tickfont=dict(size=17, color=ink),
+            title_font=dict(size=18, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1854,6 +1861,7 @@ def _add_compact_table(
     col_width_ratios: Optional[list[float]] = None,
     clip_lengths: Optional[list[int]] = None,
     font_size_pt: float = 9.6,
+    max_rows: int = 6,
 ) -> None:
     height = 0.62 + row_height * max(len(rows), 1) + 0.12
     panel = _panel(
@@ -1891,18 +1899,18 @@ def _add_compact_table(
         r = p.add_run()
         r.text = header
         r.font.name = BBVA_FONT_MEDIUM
-        r.font.size = Pt(9.5)
+        r.font.size = Pt(10.5)
         r.font.bold = True
         r.font.color.rgb = _rgb(BBVA_COLORS["blue"])
 
-    for row_idx, row in enumerate(rows[:10], start=1):
+    for row_idx, row in enumerate(rows[: max(int(max_rows), 1)], start=1):
         current_top = base_top + 0.16 + row_height * row_idx
         for col_idx, value in enumerate(row[: len(headers)]):
             tb = slide.shapes.add_textbox(
                 Inches(x_positions[col_idx] + 0.05),
                 Inches(current_top),
                 Inches(column_widths[col_idx] - 0.08),
-                Inches(0.24),
+                Inches(0.28),
             )
             tf = tb.text_frame
             _configure_text_frame(tf)
@@ -4418,7 +4426,7 @@ def _add_overview_slide(
         ),
         left=0.82,
         top=1.84,
-        width=8.68,
+        width=8.54,
         height=4.84,
         empty_note="No hay suficiente señal diaria para construir la evolución del periodo.",
     )
@@ -4461,8 +4469,8 @@ def _add_deep_dive_slide(
         figure=chart_topic_bars(text_topics_df, get_theme("light"), top_k=10),
         left=0.82,
         top=1.82,
-        width=7.18,
-        height=2.72,
+        width=6.92,
+        height=2.78,
         empty_note="No hay suficiente volumen textual para construir el top 10.",
     )
 
@@ -4486,7 +4494,8 @@ def _add_deep_dive_slide(
         row_height=0.31,
         col_width_ratios=[0.8, 0.8, 2.5, 2.3],
         clip_lengths=[8, 8, 44, 40],
-        font_size_pt=9.2,
+        font_size_pt=9.8,
+        max_rows=4,
     )
 
     bullet_lines = [
@@ -4535,7 +4544,7 @@ def _add_topic_timing_slide(
         left=0.86,
         top=1.80,
         width=11.62,
-        height=1.86,
+        height=1.94,
         empty_note="No hay señal suficiente para mostrar el volumen diario del periodo.",
     )
     _panel(slide, left=0.66, top=4.02, width=12.02, height=2.88, title="Cómo lo dicen")
@@ -4547,7 +4556,7 @@ def _add_topic_timing_slide(
         left=0.86,
         top=4.34,
         width=11.62,
-        height=2.26,
+        height=2.30,
         empty_note="No hay señal suficiente para la distribución diaria por grupo.",
     )
 
@@ -4582,8 +4591,8 @@ def _add_change_vs_past_slide(
         ),
         left=0.86,
         top=1.80,
-        width=11.62,
-        height=1.86,
+        width=11.40,
+        height=1.92,
         empty_note="No hay base histórica suficiente para comparar por palanca.",
     )
     _panel(slide, left=0.66, top=4.02, width=12.02, height=2.88, title="Subpalanca")
@@ -4600,8 +4609,8 @@ def _add_change_vs_past_slide(
         ),
         left=0.86,
         top=4.34,
-        width=11.62,
-        height=2.26,
+        width=11.40,
+        height=2.30,
         empty_note="No hay base histórica suficiente para comparar por subpalanca.",
     )
 
@@ -4674,8 +4683,8 @@ def _add_gap_slide(
         figure=chart_driver_bar(palanca_gap_df, get_theme("light"), top_k=10),
         left=0.82,
         top=1.80,
-        width=7.82,
-        height=1.86,
+        width=7.56,
+        height=1.92,
         empty_note="No hay suficiente señal para el ranking de brechas por palanca.",
     )
 
@@ -4700,8 +4709,8 @@ def _add_gap_slide(
         figure=chart_driver_bar(subpalanca_gap_df, get_theme("light"), top_k=10),
         left=0.82,
         top=4.34,
-        width=7.82,
-        height=2.26,
+        width=7.56,
+        height=2.30,
         empty_note="No hay suficiente señal para el ranking de brechas por subpalanca.",
     )
     subpalanca_lines = [
@@ -4734,10 +4743,6 @@ def _add_opportunity_slide(
         subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
     opp_chart_df = opportunities_df.copy()
-    if not opp_chart_df.empty and "dimension" in opp_chart_df.columns:
-        palanca_df = opp_chart_df[opp_chart_df["dimension"].astype(str) == "Palanca"].copy()
-        if not palanca_df.empty:
-            opp_chart_df = palanca_df
     if not opp_chart_df.empty and "label" not in opp_chart_df.columns:
         opp_chart_df["label"] = opp_chart_df.apply(
             lambda row: f"{row.get('dimension')}={row.get('value')}",
@@ -4757,7 +4762,7 @@ def _add_opportunity_slide(
         left=0.86,
         top=1.86,
         width=11.62,
-        height=3.62,
+        height=3.48,
         empty_note="No se identificaron oportunidades robustas con el umbral actual.",
     )
     lines = explain_opportunities(opp_chart_df, max_items=5)
@@ -4766,7 +4771,7 @@ def _add_opportunity_slide(
         left=0.66,
         top=5.94,
         width=12.02,
-        height=0.96,
+        height=1.10,
         title="",
         lines=lines,
         accent=BBVA_COLORS["line"],
@@ -4976,7 +4981,8 @@ def _add_journeys_summary_slide(
         row_height=0.32,
         col_width_ratios=[2.4, 0.6, 0.6, 0.7, 1.1],
         clip_lengths=[34, 6, 6, 8, 18],
-        font_size_pt=8.9,
+        font_size_pt=9.4,
+        max_rows=4,
     )
 
 
@@ -5312,7 +5318,7 @@ def generate_business_review_ppt(
     gap_df = _gap_vs_overall_table(selected_raw, top_k=10)
     palanca_gap_df = _dimension_gap_table(selected_raw, dimension="Palanca", top_k=10)
     subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
-    opportunities_df = _opportunities_table(selected_raw)
+    opportunities_df = _opportunities_table(selected_raw, dimension="Palanca", min_n=200)
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
 
     _add_cover_slide(
