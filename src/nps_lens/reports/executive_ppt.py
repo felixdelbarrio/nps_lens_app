@@ -1357,46 +1357,6 @@ def _causal_daily_timeline_fig(
     return fig
 
 
-def _journeys_overview_fig(chain_df: Optional[pd.DataFrame]) -> Optional[go.Figure]:
-    if chain_df is None or chain_df.empty:
-        return None
-    d = chain_df.copy()
-    d["impact"] = pd.to_numeric(d.get("nps_points_at_risk"), errors="coerce").fillna(0.0)
-    d.loc[d["impact"] <= 0.0, "impact"] = pd.to_numeric(
-        d.get("total_nps_impact"), errors="coerce"
-    ).fillna(0.0)
-    d["linked_pairs"] = pd.to_numeric(d.get("linked_pairs"), errors="coerce").fillna(0.0)
-    d = d.sort_values(["impact", "linked_pairs"], ascending=False).head(3).iloc[::-1]
-    if d.empty:
-        return None
-    d["axis_label"] = d["nps_topic"].astype(str).map(lambda value: _wrap_label(value, width=20))
-    fig = go.Figure(
-        go.Bar(
-            x=d["impact"],
-            y=d["axis_label"],
-            orientation="h",
-            marker=dict(
-                color=[
-                    "#" + BBVA_COLORS["orange"],
-                    "#" + BBVA_COLORS["blue"],
-                    "#" + BBVA_COLORS["red"],
-                ][-len(d) :]
-            ),
-            text=[f"{v:.2f} pts" for v in d["impact"].tolist()],
-            textposition="outside",
-            cliponaxis=False,
-        )
-    )
-    fig.update_layout(
-        template="plotly_white",
-        margin=dict(l=32, r=28, t=20, b=24),
-        xaxis_title="NPS en riesgo",
-        yaxis_title="",
-        showlegend=False,
-    )
-    return fig
-
-
 def _patch_kaleido_executable_for_space_paths() -> None:
     """Patch kaleido executable lookup when project path contains spaces."""
     try:
@@ -4244,15 +4204,6 @@ def _topic_metrics(topic: str, rationale_df: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def _touchpoint_method_label(source: str) -> str:
-    mode = str(source or "").strip()
-    if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-        return "Catálogo ejecutivo de journeys"
-    if mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-        return "Cruce semántico incidencias-comentarios"
-    return "Relación incidencia -> comentario -> NPS"
-
-
 def _set_placeholder_text(
     slide: object, idx: int, text: str, *, font_name: str, size_pt: float
 ) -> None:
@@ -4911,6 +4862,7 @@ def _add_journeys_summary_slide(
     prs: Presentation,
     *,
     period_label: str,
+    touchpoint_source: str,
     journey_df: pd.DataFrame,
 ) -> None:
     slide = _new_slide(prs)
@@ -4920,13 +4872,36 @@ def _add_journeys_summary_slide(
         title="8. Experiencias afectadas del periodo",
         subtitle=f"Resumen ejecutivo de casos donde incidencias y comentarios apuntan a la misma fricción · {period_label}",
     )
+    mode_label = ""
+    if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+        mode_label = "Catálogo ejecutivo de journeys"
+    elif str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+        mode_label = "Cruce semántico incidencias-comentarios"
+    if mode_label:
+        mode_box = slide.shapes.add_textbox(Inches(0.68), Inches(1.18), Inches(4.0), Inches(0.18))
+        mode_tf = mode_box.text_frame
+        _configure_text_frame(mode_tf)
+        mode_tf.clear()
+        mode_p = mode_tf.paragraphs[0]
+        mode_p.alignment = PP_ALIGN.LEFT
+        mode_r = mode_p.add_run()
+        mode_r.text = mode_label
+        mode_r.font.name = BBVA_FONT_BODY
+        mode_r.font.size = Pt(8.5)
+        mode_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
     journeys_df = journey_df.copy() if journey_df is not None else pd.DataFrame()
-    linked_pairs_total = int(
-        pd.to_numeric(journeys_df.get("linked_pairs"), errors="coerce").fillna(0).sum()
+    linked_pairs_series = (
+        pd.to_numeric(journeys_df["linked_pairs"], errors="coerce")
+        if "linked_pairs" in journeys_df.columns
+        else pd.Series(dtype=float)
     )
-    mean_cohesion = float(
-        pd.to_numeric(journeys_df.get("semantic_cohesion"), errors="coerce").fillna(0.0).mean()
+    cohesion_series = (
+        pd.to_numeric(journeys_df["semantic_cohesion"], errors="coerce")
+        if "semantic_cohesion" in journeys_df.columns
+        else pd.Series(dtype=float)
     )
+    linked_pairs_total = int(linked_pairs_series.fillna(0).sum())
+    mean_cohesion = float(cohesion_series.fillna(0.0).mean())
     _add_stat_card(
         slide,
         left=0.66,
@@ -5367,6 +5342,7 @@ def generate_business_review_ppt(
     _add_journeys_summary_slide(
         prs,
         period_label=period_label,
+        touchpoint_source=touchpoint_source,
         journey_df=broken_journeys,
     )
     if chains is not None and not chains.empty:

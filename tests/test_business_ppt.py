@@ -257,6 +257,36 @@ def _sample_payload() -> dict:
 
     selected_nps = pd.DataFrame(current_records)
     comparison_nps = pd.concat([pd.DataFrame(baseline_records), selected_nps], ignore_index=True)
+    broken_journeys = pd.DataFrame(
+        [
+            {
+                "journey_label": "Pagos / Transferencias / No funciona bien / falla",
+                "touchpoint": "Transferencias",
+                "palanca": "Pagos / Transferencias",
+                "subpalanca": "No funciona bien / falla",
+                "journey_keywords": "falla, transferencia, pago",
+                "linked_pairs": 46,
+                "linked_incidents": 26,
+                "linked_comments": 32,
+                "avg_similarity": 0.88,
+                "avg_nps": 4.2,
+                "semantic_cohesion": 0.87,
+            },
+            {
+                "journey_label": "Uso / Practicidad / Facilidad de uso",
+                "touchpoint": "Uso",
+                "palanca": "Uso",
+                "subpalanca": "Facilidad de uso",
+                "journey_keywords": "facil, usar, practicidad",
+                "linked_pairs": 5,
+                "linked_incidents": 3,
+                "linked_comments": 4,
+                "avg_similarity": 0.81,
+                "avg_nps": 5.0,
+                "semantic_cohesion": 0.85,
+            },
+        ]
+    )
 
     return {
         "overall_daily": overall_daily,
@@ -268,6 +298,7 @@ def _sample_payload() -> dict:
         "attribution": attribution,
         "selected_nps": selected_nps,
         "comparison_nps": comparison_nps,
+        "broken_journeys": broken_journeys,
     }
 
 
@@ -432,6 +463,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        broken_journeys_df=payload["broken_journeys"],
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -488,6 +520,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+        broken_journeys_df=payload["broken_journeys"],
     )
 
     prs = Presentation(BytesIO(out.content))

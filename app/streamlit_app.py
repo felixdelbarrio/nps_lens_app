@@ -5142,6 +5142,7 @@ def page_nps_helix_linking(
                     hotspot_focus_note=hotspot_focus_note,
                     touchpoint_source=touchpoint_source,
                     executive_journey_catalog=executive_journey_catalog,
+                    broken_journeys_df=broken_journeys_df,
                 )
                 export_dir = settings.data_dir / "exports" / "ppt"
                 export_dir.mkdir(parents=True, exist_ok=True)
