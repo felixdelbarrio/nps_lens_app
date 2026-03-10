@@ -4552,12 +4552,11 @@ def _add_pain_by_group_slide(
         if agg.empty:
             return None
 
-        if include_all_rows:
-            row_values = agg[row_dim].astype(str).drop_duplicates().tolist()
-        else:
-            row_values = (
-                agg.loc[agg["n"] >= 30, row_dim].astype(str).drop_duplicates().tolist()
-            )
+        row_values = (
+            agg[row_dim].astype(str).drop_duplicates().tolist()
+            if include_all_rows
+            else agg.loc[agg["n"] >= 30, row_dim].astype(str).drop_duplicates().tolist()
+        )
         if not row_values:
             return None
 

@@ -1010,8 +1010,6 @@ def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
 
 
 def test_chain_helpers_cover_edge_cases() -> None:
-    payload = _sample_payload()
-
     assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
     assert executive_ppt._chain_list(None) == []
     assert executive_ppt._chain_list("uno") == ["uno"]
