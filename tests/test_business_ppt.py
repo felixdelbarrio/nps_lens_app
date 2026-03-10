@@ -23,6 +23,8 @@ from nps_lens.reports.ppt_template import (
     find_corporate_template_path,
     resolve_layout,
 )
+from nps_lens.ui.charts import chart_incident_risk_recovery
+from nps_lens.ui.theme import get_theme
 
 
 def _sample_payload() -> dict:
@@ -641,11 +643,30 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 20
+    assert themed.layout.font.size == 16
+    assert themed.layout.legend.yanchor == "bottom"
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
     assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]
     assert themed.data[3].marker.color == "#" + executive_ppt.BBVA_COLORS["sky"]
+
+    heatmap_themed = executive_ppt._apply_ppt_figure_theme(
+        go.Figure(
+            [
+                go.Heatmap(
+                    z=[[0, 1]],
+                    x=["2026-02-10", "2026-02-11"],
+                    y=["Incidencias"],
+                    colorbar=dict(title="Incidencias"),
+                )
+            ]
+        )
+    )
+    assert heatmap_themed.layout.font.size == 15
+    assert heatmap_themed.layout.margin.r >= 84
+    assert heatmap_themed.data[0].xgap >= 2
+    assert heatmap_themed.data[0].ygap >= 2
+    assert heatmap_themed.data[0].colorbar.title.side == "right"
 
 
 def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
@@ -1023,6 +1044,23 @@ def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
         {"incident_id": "INC1", "summary": "hola", "url": ""}
     ]
     assert executive_ppt._chain_incident_records(["bad"]) == []
+
+
+def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
+    rationale = pd.DataFrame(
+        {
+            "nps_topic": ["Pagos / Transferencias / No funciona bien / Error intermitente"],
+            "nps_points_at_risk": [0.74],
+            "nps_points_recoverable": [0.15],
+            "priority": [0.82],
+        }
+    )
+
+    fig = chart_incident_risk_recovery(rationale, get_theme("light"), top_k=1)
+    assert fig is not None
+    assert "<br>" in str(fig.data[0]["y"][0]) or "…" in str(fig.data[0]["y"][0])
+    assert fig.data[0]["cliponaxis"] is False
+    assert fig.data[1]["cliponaxis"] is False
 
 
 def test_build_incident_timeline_daily_filters_to_matching_hot_terms() -> None:

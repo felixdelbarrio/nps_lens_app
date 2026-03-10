@@ -170,6 +170,42 @@ def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
     fig.update_yaxes(showgrid=False, zeroline=False)
 
 
+def _compact_axis_label(
+    value: object,
+    *,
+    width: int = 18,
+    max_lines: int = 2,
+    max_chars: int = 40,
+) -> str:
+    clean = " ".join(str(value or "").split())
+    if not clean:
+        return ""
+    if len(clean) > int(max_chars):
+        clean = clean[: max(int(max_chars) - 1, 1)].rstrip() + "…"
+    words = clean.split()
+    if not words:
+        return clean
+
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) <= max(int(width), 8):
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+        if len(lines) >= max(int(max_lines) - 1, 0):
+            break
+    if len(lines) < int(max_lines):
+        lines.append(current)
+    if len(lines) > int(max_lines):
+        lines = lines[: int(max_lines)]
+    if len(lines[-1]) > int(width):
+        lines[-1] = lines[-1][: max(int(width) - 1, 1)].rstrip() + "…"
+    return "<br>".join(lines[: int(max_lines)])
+
+
 def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
     """NPS trend over time (business-friendly)."""
     tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
@@ -775,8 +811,9 @@ def chart_incident_risk_recovery(
         return None
     d = d.head(top_k).copy()
 
-    d["topic"] = d["nps_topic"].astype(str).str.slice(0, 42)
-    d["topic"] = d["topic"].where(d["nps_topic"].astype(str).str.len() <= 42, d["topic"] + "…")
+    d["topic"] = d["nps_topic"].astype(str).map(
+        lambda value: _compact_axis_label(value, width=18, max_lines=2, max_chars=34)
+    )
     d["gap"] = d["nps_points_at_risk"] - d["nps_points_recoverable"]
     d = d.sort_values(["nps_points_at_risk", "gap"], ascending=[True, True]).copy()
 
@@ -804,6 +841,7 @@ def chart_incident_risk_recovery(
             marker=dict(color=detr_c, size=11),
             text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
             textposition="middle right",
+            cliponaxis=False,
             hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
         )
     )
@@ -816,6 +854,7 @@ def chart_incident_risk_recovery(
             marker=dict(color=pro_c, size=11, symbol="diamond"),
             text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
             textposition="middle left",
+            cliponaxis=False,
             hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
         )
     )
@@ -825,9 +864,11 @@ def chart_incident_risk_recovery(
         legend_title_text="Metricas",
         legend=dict(orientation="h", y=1.08, x=0),
     )
-    fig.update_yaxes(automargin=True)
+    fig.update_yaxes(automargin=True, categoryorder="array", categoryarray=d["topic"].tolist())
     xmax = float(max(d["nps_points_at_risk"].max(), d["nps_points_recoverable"].max()))
-    fig.update_xaxes(range=[0.0, xmax * 1.22 if xmax > 0 else 1.0])
+    upper = xmax * 1.18 if xmax > 0 else 1.0
+    dtick = 0.1 if upper <= 1.25 else 0.2 if upper <= 2.5 else None
+    fig.update_xaxes(range=[0.0, upper], dtick=dtick)
     _layout_common(fig, th, height=max(420, 240 + 42 * min(int(top_k), len(d))))
     return apply_plotly_template(fig, theme)
 
@@ -960,6 +1001,13 @@ def chart_cohort_heatmap(
         return None
 
     pivot = agg.pivot(index=row_dim, columns=col_dim, values="nps")
+    pivot.index = [
+        _compact_axis_label(value, width=16, max_lines=2, max_chars=30) for value in pivot.index
+    ]
+    pivot.columns = [
+        _compact_axis_label(value, width=12, max_lines=2, max_chars=22)
+        for value in pivot.columns
+    ]
     fig = px.imshow(
         pivot,
         aspect="auto",
@@ -972,8 +1020,17 @@ def chart_cohort_heatmap(
         coloraxis=dict(
             cmin=0.0,
             cmax=10.0,
-            colorbar=dict(title="NPS", tickmode="array", tickvals=[0, 2, 6, 8, 10]),
+            colorbar=dict(
+                title="NPS",
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+                len=0.78,
+                y=0.5,
+                thickness=14,
+            ),
         )
     )
+    fig.update_xaxes(tickangle=-28, side="bottom", automargin=True)
+    fig.update_yaxes(automargin=True)
     _layout_common(fig, th, height=420)
     return apply_plotly_template(fig, theme)

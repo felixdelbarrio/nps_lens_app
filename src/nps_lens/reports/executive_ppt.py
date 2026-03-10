@@ -817,7 +817,9 @@ def _chain_comment_heatmap_fig(
                 z=[incidents.tolist()],
                 zmin=0,
                 colorscale=plotly_risk_scale(DesignTokens.default(), "light"),
-                colorbar=dict(title="Incidencias"),
+                xgap=2,
+                ygap=2,
+                colorbar=dict(title=dict(text="Incidencias", side="right"), thickness=14, len=0.72),
                 hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
             )
         ]
@@ -825,9 +827,10 @@ def _chain_comment_heatmap_fig(
     fig.update_layout(
         template="plotly_white",
         height=260,
-        margin=dict(l=10, r=10, t=10, b=10),
+        margin=dict(l=10, r=18, t=12, b=18),
         yaxis=dict(showticklabels=True),
     )
+    fig.update_xaxes(tickformat="%d %b", nticks=6, tickangle=0, showgrid=False)
     return fig
 
 
@@ -1358,6 +1361,25 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     ink = "#" + BBVA_COLORS["ink"]
     grid = "#" + BBVA_COLORS["line"]
     white = "#" + BBVA_COLORS["white"]
+    trace_types = {
+        str(getattr(trace, "type", "") or "").strip().lower() for trace in fig.data if trace is not None
+    }
+    has_heatmap = "heatmap" in trace_types
+    has_legend = sum(
+        1
+        for trace in fig.data
+        if bool(getattr(trace, "showlegend", True)) and str(getattr(trace, "name", "") or "").strip()
+    ) > 1
+    has_scatter_text = any(
+        str(getattr(trace, "type", "") or "").strip().lower() == "scatter"
+        and "text" in str(getattr(trace, "mode", "") or "").lower()
+        for trace in fig.data
+    )
+    has_colorbar = any(
+        bool(getattr(trace, "showscale", False))
+        or bool(getattr(getattr(trace, "colorbar", None), "title", None))
+        for trace in fig.data
+    )
 
     for trace in fig.data:
         name = str(getattr(trace, "name", "") or "").strip().lower()
@@ -1409,33 +1431,36 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
                     trace.line.color = "#" + BBVA_COLORS["red"]
 
     current_margin = fig.layout.margin.to_plotly_json() if fig.layout.margin else {}
+    base_font_size = 15 if has_heatmap else 16
+    tick_font_size = 13 if has_heatmap else 14
+    axis_title_font_size = 15 if has_heatmap else 16
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=20, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=base_font_size, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
-            y=-0.16,
-            yanchor="top",
-            font=dict(size=19, color=ink),
-            title_font=dict(size=19, color=ink),
+            y=1.12 if has_legend else 1.04,
+            yanchor="bottom",
+            font=dict(size=13, color=ink),
+            title_font=dict(size=13, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
-            l=max(int(current_margin.get("l", 24)), 108),
-            r=max(int(current_margin.get("r", 24)), 52),
-            t=int(current_margin.get("t", 20)),
-            b=max(int(current_margin.get("b", 24)), 116),
+            l=max(int(current_margin.get("l", 24)), 64 if has_scatter_text else 52),
+            r=max(int(current_margin.get("r", 24)), 84 if has_colorbar else 34),
+            t=max(int(current_margin.get("t", 20)), 32 if has_heatmap or has_legend else 20),
+            b=max(int(current_margin.get("b", 24)), 62 if has_heatmap else 48),
         ),
         hoverlabel=dict(font=dict(family=BBVA_FONT_BODY, size=13, color=ink)),
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=19, color=ink),
-            title_font=dict(size=20, color=ink),
+            tickfont=dict(size=tick_font_size, color=ink),
+            title_font=dict(size=axis_title_font_size, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1443,13 +1468,30 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=19, color=ink),
-            title_font=dict(size=20, color=ink),
+            tickfont=dict(size=tick_font_size, color=ink),
+            title_font=dict(size=axis_title_font_size, color=ink),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
         )
     )
+    if has_heatmap:
+        for trace in fig.data:
+            if str(getattr(trace, "type", "") or "").strip().lower() != "heatmap":
+                continue
+            with contextlib.suppress(Exception):
+                trace.xgap = max(int(getattr(trace, "xgap", 0) or 0), 2)
+            with contextlib.suppress(Exception):
+                trace.ygap = max(int(getattr(trace, "ygap", 0) or 0), 2)
+            if has_colorbar:
+                with contextlib.suppress(Exception):
+                    trace.colorbar.thickness = 14
+                with contextlib.suppress(Exception):
+                    trace.colorbar.len = 0.74
+                with contextlib.suppress(Exception):
+                    trace.colorbar.y = 0.48
+                with contextlib.suppress(Exception):
+                    trace.colorbar.title.side = "right"
     return fig
 
 
