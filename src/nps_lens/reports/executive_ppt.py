@@ -4901,6 +4901,59 @@ def _add_opportunity_slide(
     period_label: str,
     opportunities_df: pd.DataFrame,
 ) -> None:
+    def _opportunity_figure(opp_df: pd.DataFrame) -> Optional[go.Figure]:
+        fig = chart_opportunities_bar(opp_df, get_theme("light"), top_k=10)
+        if fig is None or opp_df.empty:
+            return fig
+
+        plot_df = (
+            opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False])
+            .head(10)
+            .copy()
+        )
+        label_count = len(plot_df)
+        label_lengths = (
+            plot_df["label"].astype(str).str.replace("<br>", " ", regex=False).str.len()
+            if "label" in plot_df.columns
+            else pd.Series(dtype=float)
+        )
+        max_len = int(label_lengths.max() or 0)
+        y_font_size = 28 if label_count <= 5 else 26 if label_count <= 7 else 23
+        left_margin = 248 if max_len >= 26 else 220 if max_len >= 20 else 188
+
+        uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
+        text_values = [f"+{value:.1f}" if np.isfinite(value) else "" for value in uplift.tolist()]
+        with contextlib.suppress(Exception):
+            fig.data[0].text = text_values
+        with contextlib.suppress(Exception):
+            fig.data[0].textposition = "outside"
+        with contextlib.suppress(Exception):
+            fig.data[0].cliponaxis = False
+        with contextlib.suppress(Exception):
+            fig.data[0].textfont.size = 18
+
+        fig.update_yaxes(
+            title_text="",
+            tickfont=dict(size=y_font_size),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Impacto estimado",
+            tickfont=dict(size=18),
+            title_font=dict(size=19),
+            nticks=5,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=54,
+                t=18,
+                b=46,
+            ),
+            bargap=0.34,
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4909,33 +4962,49 @@ def _add_opportunity_slide(
         subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
     opp_chart_df = opportunities_df.copy()
-    if not opp_chart_df.empty and "label" not in opp_chart_df.columns:
-        opp_chart_df["label"] = opp_chart_df.apply(
-            lambda row: f"{row.get('dimension')}={row.get('value')}",
-            axis=1,
-        )
+    if not opp_chart_df.empty:
+        dimensions = [
+            str(value).strip()
+            for value in opp_chart_df.get("dimension", pd.Series(dtype=str)).dropna().tolist()
+            if str(value).strip()
+        ]
+        shared_dimension = dimensions[0] if len(set(dimensions)) == 1 else ""
+
+        def _opp_label(row: pd.Series) -> str:
+            value = str(row.get("value", "")).strip()
+            dimension = str(row.get("dimension", "")).strip()
+            base = (
+                value
+                if shared_dimension and dimension == shared_dimension
+                else f"{dimension} · {value}".strip(" ·")
+            )
+            width = 18 if len(base) >= 20 else 16
+            max_chars = 28 if shared_dimension else 32
+            return _compact_axis_label(base, width=width, max_lines=2, max_chars=max_chars)
+
+        opp_chart_df["label"] = opp_chart_df.apply(_opp_label, axis=1)
     _panel(
         slide,
         left=0.66,
         top=1.48,
         width=12.02,
-        height=4.30,
+        height=4.38,
         title="Ranking por impacto estimado x confianza",
     )
     _figure_in_panel(
         slide,
-        figure=chart_opportunities_bar(opp_chart_df, get_theme("light"), top_k=10),
+        figure=_opportunity_figure(opp_chart_df),
         left=0.86,
-        top=1.86,
+        top=1.84,
         width=11.62,
-        height=3.48,
+        height=3.60,
         empty_note="No se identificaron oportunidades robustas con el umbral actual.",
     )
     lines = explain_opportunities(opp_chart_df, max_items=5)
     _add_bullet_lines(
         slide,
         left=0.66,
-        top=5.94,
+        top=6.02,
         width=12.02,
         height=1.10,
         title="",
