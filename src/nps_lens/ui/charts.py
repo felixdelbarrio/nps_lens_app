@@ -11,6 +11,7 @@ from nps_lens.design.tokens import (
     nps_score_color,
     palette,
     plotly_nps_score_scale,
+    plotly_risk_scale,
     primary_accent,
 )
 from nps_lens.ui.plotly_theme import apply_plotly_theme
@@ -908,7 +909,7 @@ def chart_case_incident_heatmap(
                 zmin=0.0,
                 xgap=2,
                 ygap=2,
-                colorscale=_colorscale_rgy(theme),
+                colorscale=plotly_risk_scale(DesignTokens.default(), theme.mode),
                 colorbar=dict(
                     title="Incidencias",
                     thickness=14,
