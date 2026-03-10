@@ -357,10 +357,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 12
+    assert out.slide_count == 13
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 12
+    assert len(prs.slides) == 13
 
     texts = []
     for slide in prs.slides:
@@ -387,7 +387,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
     assert any("8. Experiencias afectadas del periodo" in t for t in texts)
     assert any("9.1 Análisis causal" in t for t in texts)
-    assert any("10.1 Detalle del caso" in t for t in texts)
+    assert any("10.1 Matriz visual" in t for t in texts)
+    assert any("11.1 Señal temporal" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)

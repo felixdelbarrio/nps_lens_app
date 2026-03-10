@@ -56,12 +56,15 @@ from nps_lens.reports.ppt_template import (
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
     chart_broken_journeys_bar,
+    chart_case_incident_heatmap,
+    chart_case_lag_days,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
+    chart_incident_priority_matrix,
     chart_incident_risk_recovery,
     chart_opportunities_bar,
     chart_topic_bars,
@@ -796,42 +799,12 @@ def _chain_comment_heatmap_fig(
     *,
     by_topic_daily: Optional[pd.DataFrame],
 ) -> Optional[go.Figure]:
-    if by_topic_daily is None or by_topic_daily.empty:
-        return None
     topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    if not topic_key:
-        return None
-    g_heat = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
-    if g_heat.empty:
-        return None
-    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
-    g_heat = g_heat.dropna(subset=["date"]).sort_values("date")
-    if g_heat.empty:
-        return None
-    incidents = pd.to_numeric(g_heat["incidents"], errors="coerce").fillna(0.0).astype(float)
-    fig = go.Figure(
-        data=[
-            go.Heatmap(
-                x=g_heat["date"].dt.date.tolist(),
-                y=["Incidencias"],
-                z=[incidents.tolist()],
-                zmin=0,
-                colorscale=plotly_risk_scale(DesignTokens.default(), "light"),
-                xgap=2,
-                ygap=2,
-                colorbar=dict(title=dict(text="Incidencias", side="right"), thickness=14, len=0.72),
-                hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
-            )
-        ]
+    return chart_case_incident_heatmap(
+        by_topic_daily if by_topic_daily is not None else pd.DataFrame(),
+        get_theme("light"),
+        topic=topic_key,
     )
-    fig.update_layout(
-        template="plotly_white",
-        height=260,
-        margin=dict(l=10, r=18, t=12, b=18),
-        yaxis=dict(showticklabels=True),
-    )
-    fig.update_xaxes(tickformat="%d %b", nticks=6, tickangle=0, showgrid=False)
-    return fig
 
 
 def _chain_portfolio_fig(
@@ -889,59 +862,14 @@ def _chain_temporal_fig(
     lag_weeks_by_topic: Optional[pd.DataFrame],
     changepoints_by_topic: Optional[pd.DataFrame],
 ) -> Optional[go.Figure]:
-    if by_topic_daily is None or by_topic_daily.empty:
-        return None
     topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    if not topic_key:
-        return None
-    active_lag_days = (
-        lag_days_by_topic[
-            lag_days_by_topic["nps_topic"].astype(str).str.strip() == topic_key
-        ].copy()
-        if lag_days_by_topic is not None and not lag_days_by_topic.empty
-        else pd.DataFrame()
+    return chart_case_lag_days(
+        by_topic_daily if by_topic_daily is not None else pd.DataFrame(),
+        lag_days_by_topic if lag_days_by_topic is not None else pd.DataFrame(),
+        get_theme("light"),
+        topic=topic_key,
+        focus_name=focus_name,
     )
-    if active_lag_days.empty:
-        return None
-    lagd = int(active_lag_days.iloc[0]["best_lag_days"])
-    data = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
-    if data.empty:
-        return None
-    data["date"] = _coerce_datetime_series(data["date"])
-    data = data.dropna(subset=["date"]).sort_values("date")
-    data["focus_rate"] = pd.to_numeric(data.get("focus_rate"), errors="coerce").fillna(0.0)
-    data["incidents"] = pd.to_numeric(data.get("incidents"), errors="coerce").fillna(0.0)
-    data["incidents_shifted"] = data["incidents"].shift(lagd)
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=data["date"],
-            y=data["focus_rate"],
-            name=f"% {focus_name}",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["red"], width=2),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=data["date"],
-            y=data["incidents_shifted"],
-            name=f"# incidencias (shift {lagd}d)",
-            yaxis="y2",
-            opacity=0.70,
-            marker=dict(color="#" + BBVA_COLORS["sky"]),
-        )
-    )
-    fig.update_layout(
-        template="plotly_white",
-        height=360,
-        margin=dict(l=10, r=10, t=10, b=10),
-        legend=dict(orientation="h", x=0.0, y=1.08),
-        xaxis_title="Día",
-        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
-    )
-    return fig
 
 
 def _nps_evolution_fig(daily_mix: pd.DataFrame, overall_daily: pd.DataFrame) -> Optional[go.Figure]:
@@ -5086,26 +5014,42 @@ def _add_chain_detail_slide(
     lag_weeks_by_topic: Optional[pd.DataFrame],
     changepoints_by_topic: Optional[pd.DataFrame],
 ) -> None:
+    del chain_df
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
     _add_header(
         slide,
-        title=f"10.{idx} Detalle del caso",
-        subtitle=f"{title} · posición del caso, comentarios y secuencia temporal · {period_label}",
+        title=f"10.{idx} Matriz visual",
+        subtitle=f"{title} · mismos gráficos que ve negocio en la aplicación · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Matriz visual")
+    active_case_df = pd.DataFrame([chain_row]).copy()
+    _panel(slide, left=0.66, top=1.48, width=5.86, height=3.02, title="Prioridad y confianza")
     _figure_in_panel(
         slide,
-        figure=chart_incident_risk_recovery(
-            pd.DataFrame([chain_row]).copy(),
-            get_theme("light"),
-            top_k=1,
-        ),
-        left=0.82,
+        figure=chart_incident_priority_matrix(active_case_df, get_theme("light"), top_k=1),
+        left=0.80,
         top=1.84,
-        width=3.73,
-        height=1.83,
+        width=5.58,
+        height=2.44,
+        empty_note="No hay cartera suficiente para mostrar la prioridad del caso.",
+    )
+    _panel(
+        slide,
+        left=6.82,
+        top=1.48,
+        width=5.86,
+        height=3.02,
+        title="NPS en riesgo vs recuperable",
+    )
+    _figure_in_panel(
+        slide,
+        figure=chart_incident_risk_recovery(active_case_df, get_theme("light"), top_k=1),
+        left=6.96,
+        top=1.84,
+        width=5.58,
+        height=2.44,
         empty_note="No hay cartera suficiente para posicionar el caso.",
     )
     quant_lines = [
@@ -5118,25 +5062,69 @@ def _add_chain_detail_slide(
     ]
     _add_bullet_lines(
         slide,
-        left=4.92,
-        top=1.48,
-        width=3.28,
-        height=2.35,
-        title="Resumen cuantitativo",
+        left=0.66,
+        top=4.74,
+        width=12.02,
+        height=1.12,
+        title="Lectura rápida",
         lines=quant_lines,
         accent=BBVA_COLORS["blue"],
+        body_font_size_pt=10.0,
     )
-    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Heat map")
+    _add_bullet_lines(
+        slide,
+        left=0.66,
+        top=5.98,
+        width=12.02,
+        height=0.92,
+        title="Evidencias clave",
+        lines=(
+            [
+                f"Helix: {_clean_evidence_excerpt(line, max_len=124)}"
+                for line in _chain_list(chain_row.get("incident_examples"))[:1]
+            ]
+            + [
+                f"Cliente: {_clean_evidence_excerpt(line, max_len=124)}"
+                for line in _chain_list(chain_row.get("comment_examples"))[:1]
+            ]
+        )
+        or ["Sin evidencias adicionales en el detalle."],
+        accent=BBVA_COLORS["orange"],
+        body_font_size_pt=10.0,
+    )
+
+
+def _add_chain_signal_slide(
+    prs: Presentation,
+    *,
+    chain_row: pd.Series,
+    idx: int,
+    focus_name: str,
+    period_label: str,
+    by_topic_daily: Optional[pd.DataFrame],
+    lag_days_by_topic: Optional[pd.DataFrame],
+    lag_weeks_by_topic: Optional[pd.DataFrame],
+    changepoints_by_topic: Optional[pd.DataFrame],
+) -> None:
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
+    _add_header(
+        slide,
+        title=f"11.{idx} Señal temporal",
+        subtitle=f"{title} · heat map de incidencias y lag diario compartidos con la app · {period_label}",
+    )
+    _panel(slide, left=0.66, top=1.48, width=12.02, height=1.78, title="Heat map de incidencias")
     _figure_in_panel(
         slide,
         figure=_chain_comment_heatmap_fig(chain_row, by_topic_daily=by_topic_daily),
-        left=8.56,
+        left=0.82,
         top=1.84,
-        width=3.94,
-        height=1.83,
+        width=11.70,
+        height=1.16,
         empty_note="No hay suficiente detalle temporal en los comentarios vinculados.",
     )
-    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Lag en días")
+    _panel(slide, left=0.66, top=3.48, width=12.02, height=3.42, title="Lag en días")
     _figure_in_panel(
         slide,
         figure=_chain_temporal_fig(
@@ -5148,30 +5136,10 @@ def _add_chain_detail_slide(
             changepoints_by_topic=changepoints_by_topic,
         ),
         left=0.82,
-        top=4.42,
-        width=7.90,
-        height=2.28,
+        top=3.84,
+        width=11.70,
+        height=2.86,
         empty_note="No hay cobertura suficiente para la vista temporal de la cadena.",
-    )
-    _add_bullet_lines(
-        slide,
-        left=9.10,
-        top=4.06,
-        width=3.56,
-        height=2.84,
-        title="Evidencias clave",
-        lines=(
-            [
-                f"Helix: {_clean_evidence_excerpt(line, max_len=98)}"
-                for line in _chain_list(chain_row.get("incident_examples"))[:2]
-            ]
-            + [
-                f"Cliente: {_clean_evidence_excerpt(line, max_len=98)}"
-                for line in _chain_list(chain_row.get("comment_examples"))[:2]
-            ]
-        )
-        or ["Sin evidencias adicionales en el detalle."],
-        accent=BBVA_COLORS["orange"],
     )
 
 
@@ -5367,6 +5335,17 @@ def generate_business_review_ppt(
                 focus_name=focus_name,
                 period_label=period_label,
                 chain_df=chains,
+                by_topic_daily=by_topic_daily,
+                lag_days_by_topic=lag_days_by_topic,
+                lag_weeks_by_topic=lag_weeks_by_topic,
+                changepoints_by_topic=changepoints_by_topic,
+            )
+            _add_chain_signal_slide(
+                prs,
+                chain_row=chain_row,
+                idx=idx,
+                focus_name=focus_name,
+                period_label=period_label,
                 by_topic_daily=by_topic_daily,
                 lag_days_by_topic=lag_days_by_topic,
                 lag_weeks_by_topic=lag_weeks_by_topic,
