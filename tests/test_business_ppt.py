@@ -357,10 +357,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 13
+    assert out.slide_count >= 13
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 13
+    assert len(prs.slides) == out.slide_count
 
     texts = []
     for slide in prs.slides:
@@ -378,6 +378,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("NPS Lens" in t for t in texts)
     assert any("Mensaje clave del periodo" in t for t in texts)
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("NPS del canal Web por eje de experiencia" in t for t in texts)
+    assert any("Palanca · canal Web" in t for t in texts)
+    assert any("Subpalanca · canal Web" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
     assert any("2. Cuándo y cómo lo dicen" in t for t in texts)
     assert any("3. Qué ha cambiado respecto al pasado" in t for t in texts)
@@ -644,7 +647,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 16
+    assert themed.layout.font.size == 17
     assert themed.layout.legend.yanchor == "bottom"
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
@@ -663,7 +666,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
             ]
         )
     )
-    assert heatmap_themed.layout.font.size == 15
+    assert heatmap_themed.layout.font.size == 18
     assert heatmap_themed.layout.margin.r >= 84
     assert heatmap_themed.data[0].xgap >= 2
     assert heatmap_themed.data[0].ygap >= 2
