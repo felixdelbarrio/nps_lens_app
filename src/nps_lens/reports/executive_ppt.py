@@ -4660,7 +4660,13 @@ def _add_pain_by_group_slide(
 ) -> None:
     source_df = selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame()
 
-    def _web_heatmap_figure(*, row_dim: str, show_scale: bool) -> Optional[go.Figure]:
+    def _web_heatmap_figure(
+        *,
+        row_dim: str,
+        show_scale: bool,
+        x_tick_label: str,
+        include_all_rows: bool = False,
+    ) -> Optional[go.Figure]:
         required = {row_dim, "Canal", "NPS"}
         if source_df.empty or not required.issubset(set(source_df.columns)):
             return None
@@ -4681,7 +4687,7 @@ def _add_pain_by_group_slide(
             get_theme("light"),
             row_dim=row_dim,
             col_dim="Canal",
-            min_n=30,
+            min_n=1 if include_all_rows else 30,
         )
         if fig is None:
             return None
@@ -4689,32 +4695,52 @@ def _add_pain_by_group_slide(
         agg = (
             chart_df.groupby([row_dim, "Canal"], as_index=False)
             .agg(n=("NPS", "size"))
-            .loc[lambda d: d["n"] >= 30]
             .copy()
         )
         if agg.empty:
             return None
 
-        row_values = agg[row_dim].astype(str).drop_duplicates().tolist()
-        label_count = len(row_values)
-        max_len = int(agg[row_dim].astype(str).str.len().max() or 0)
-        compact_width = 12 if max_len >= 22 else 14
-        compact_chars = 22 if max_len >= 22 else 28
-        y_font_size = (
-            24 if label_count <= 6 else 22 if label_count <= 8 else 20 if label_count <= 10 else 18
-        )
-        left_margin = 184 if max_len >= 24 else 166 if max_len >= 18 else 148
-        label_map = {
-            _compact_axis_label(value, width=16, max_lines=2, max_chars=30): _compact_axis_label(
-                value,
-                width=compact_width,
-                max_lines=2,
-                max_chars=compact_chars,
+        if include_all_rows:
+            row_values = agg[row_dim].astype(str).drop_duplicates().tolist()
+        else:
+            row_values = (
+                agg.loc[agg["n"] >= 30, row_dim].astype(str).drop_duplicates().tolist()
             )
+        if not row_values:
+            return None
+
+        label_count = len(row_values)
+        max_len = int(pd.Series(row_values).astype(str).str.len().max() or 0)
+        y_font_size = (
+            30
+            if label_count <= 5
+            else 28
+            if label_count <= 7
+            else 26
+            if label_count <= 10
+            else 24
+        )
+        left_margin = 272 if max_len >= 34 else 252 if max_len >= 28 else 236
+        label_map = {
+            _compact_axis_label(value, width=16, max_lines=2, max_chars=30): str(value)
             for value in row_values
         }
         with contextlib.suppress(Exception):
-            fig.data[0].y = [label_map.get(str(value), str(value)) for value in list(fig.data[0].y)]
+            fig.data[0].y = [
+                label_map.get(str(value), str(value).replace("<br>", " "))
+                for value in list(fig.data[0].y)
+            ]
+
+        if include_all_rows:
+            with contextlib.suppress(Exception):
+                n_by_row = (
+                    agg.groupby(row_dim, as_index=False)["n"].sum().set_index(row_dim)["n"].to_dict()
+                )
+                z_values = np.array(fig.data[0].z, dtype=float)
+                for idx, y_value in enumerate(list(fig.data[0].y)):
+                    if int(n_by_row.get(str(y_value), 0)) < 30:
+                        z_values[idx, :] = np.nan
+                fig.data[0].z = z_values
         fig.update_yaxes(
             title_text="",
             tickfont=dict(size=y_font_size),
@@ -4723,6 +4749,9 @@ def _add_pain_by_group_slide(
         fig.update_xaxes(
             title_text="",
             tickangle=0,
+            tickmode="array",
+            tickvals=["Web"],
+            ticktext=[x_tick_label],
             tickfont=dict(size=18),
             automargin=True,
         )
@@ -4765,10 +4794,15 @@ def _add_pain_by_group_slide(
     )
     _figure_in_panel(
         slide,
-        figure=_web_heatmap_figure(row_dim="Palanca", show_scale=False),
+        figure=_web_heatmap_figure(
+            row_dim="Palanca",
+            show_scale=False,
+            x_tick_label="Web: Por palanca",
+            include_all_rows=True,
+        ),
         left=0.82,
         top=1.86,
-        width=5.54,
+        width=5.18,
         height=4.92,
         empty_note="No hay señal suficiente para mostrar la matriz Palanca del canal Web.",
     )
@@ -4782,7 +4816,11 @@ def _add_pain_by_group_slide(
     )
     _figure_in_panel(
         slide,
-        figure=_web_heatmap_figure(row_dim="Subpalanca", show_scale=True),
+        figure=_web_heatmap_figure(
+            row_dim="Subpalanca",
+            show_scale=True,
+            x_tick_label="Web: Por subpalanca",
+        ),
         left=6.96,
         top=1.86,
         width=5.54,
