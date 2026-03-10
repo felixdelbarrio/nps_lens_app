@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import contextlib
 import os
 import re
@@ -55,6 +54,7 @@ from nps_lens.reports.ppt_template import (
 )
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
+    _compact_axis_label,
     chart_broken_journeys_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
@@ -62,7 +62,6 @@ from nps_lens.ui.charts import (
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
-    chart_incident_risk_recovery,
     chart_opportunities_bar,
     chart_topic_bars,
 )
@@ -213,22 +212,6 @@ def _focus_risk_label(focus_name: str) -> str:
 def _focus_probability_label(focus_name: str) -> str:
     focus_label = _focus_risk_label(focus_name)
     return f"Prob. de {focus_label}"
-
-
-def _action_lane_label(value: object) -> str:
-    lane = str(value or "").strip()
-    normalized = unicodedata.normalize("NFKD", lane).encode("ascii", "ignore").decode("ascii")
-    normalized = re.sub(r"\s+", " ", normalized).strip().lower()
-    mapping = {
-        "quick win operativo": "Corrección operativa inmediata",
-        "fix estructural": "Corrección estructural",
-        "instrumentacion + validacion": "Revisión de medición y validación",
-        "instrumentacion+validacion": "Revisión de medición y validación",
-        "voc + analitica": "Análisis y validación adicional",
-        "canal + operaciones": "Canal y operaciones",
-        "producto + tecnologia": "Producto y tecnología",
-    }
-    return mapping.get(normalized, lane or "n/d")
 
 
 def _format_opportunity_scope(dimension: object, value: object) -> str:
@@ -768,69 +751,6 @@ def _opportunities_table(
     return pd.DataFrame([row.__dict__ for row in rows])[cols]
 
 
-def _matching_topic_for_chain(
-    chain_row: pd.Series,
-    by_topic_daily: Optional[pd.DataFrame],
-) -> str:
-    if by_topic_daily is None or by_topic_daily.empty or "nps_topic" not in by_topic_daily.columns:
-        return ""
-    values = set(by_topic_daily["nps_topic"].astype(str).str.strip().tolist())
-    candidates = [
-        str(chain_row.get("nps_topic", "") or "").strip(),
-        " > ".join(
-            [
-                str(chain_row.get("palanca", "") or "").strip(),
-                str(chain_row.get("subpalanca", "") or "").strip(),
-            ]
-        ).strip(" >"),
-        str(chain_row.get("palanca", "") or "").strip(),
-    ]
-    for candidate in candidates:
-        if candidate and candidate in values:
-            return candidate
-    return ""
-
-
-def _chain_comment_heatmap_fig(
-    chain_row: pd.Series,
-    *,
-    by_topic_daily: Optional[pd.DataFrame],
-) -> Optional[go.Figure]:
-    if by_topic_daily is None or by_topic_daily.empty:
-        return None
-    topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    if not topic_key:
-        return None
-    g_heat = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
-    if g_heat.empty:
-        return None
-    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
-    g_heat = g_heat.dropna(subset=["date"]).sort_values("date")
-    if g_heat.empty:
-        return None
-    incidents = pd.to_numeric(g_heat["incidents"], errors="coerce").fillna(0.0).astype(float)
-    fig = go.Figure(
-        data=[
-            go.Heatmap(
-                x=g_heat["date"].dt.date.tolist(),
-                y=["Incidencias"],
-                z=[incidents.tolist()],
-                zmin=0,
-                colorscale=plotly_risk_scale(DesignTokens.default(), "light"),
-                colorbar=dict(title="Incidencias"),
-                hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
-            )
-        ]
-    )
-    fig.update_layout(
-        template="plotly_white",
-        height=260,
-        margin=dict(l=10, r=10, t=10, b=10),
-        yaxis=dict(showticklabels=True),
-    )
-    return fig
-
-
 def _chain_portfolio_fig(
     chain_df: Optional[pd.DataFrame],
     *,
@@ -873,70 +793,6 @@ def _chain_portfolio_fig(
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
         yaxis=dict(title="Impacto total (pts NPS)", rangemode="tozero"),
         showlegend=False,
-    )
-    return fig
-
-
-def _chain_temporal_fig(
-    chain_row: pd.Series,
-    *,
-    focus_name: str,
-    by_topic_daily: Optional[pd.DataFrame],
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> Optional[go.Figure]:
-    if by_topic_daily is None or by_topic_daily.empty:
-        return None
-    topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    if not topic_key:
-        return None
-    active_lag_days = (
-        lag_days_by_topic[
-            lag_days_by_topic["nps_topic"].astype(str).str.strip() == topic_key
-        ].copy()
-        if lag_days_by_topic is not None and not lag_days_by_topic.empty
-        else pd.DataFrame()
-    )
-    if active_lag_days.empty:
-        return None
-    lagd = int(active_lag_days.iloc[0]["best_lag_days"])
-    data = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
-    if data.empty:
-        return None
-    data["date"] = _coerce_datetime_series(data["date"])
-    data = data.dropna(subset=["date"]).sort_values("date")
-    data["focus_rate"] = pd.to_numeric(data.get("focus_rate"), errors="coerce").fillna(0.0)
-    data["incidents"] = pd.to_numeric(data.get("incidents"), errors="coerce").fillna(0.0)
-    data["incidents_shifted"] = data["incidents"].shift(lagd)
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=data["date"],
-            y=data["focus_rate"],
-            name=f"% {focus_name}",
-            mode="lines",
-            line=dict(color="#" + BBVA_COLORS["red"], width=2),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=data["date"],
-            y=data["incidents_shifted"],
-            name=f"# incidencias (shift {lagd}d)",
-            yaxis="y2",
-            opacity=0.70,
-            marker=dict(color="#" + BBVA_COLORS["sky"]),
-        )
-    )
-    fig.update_layout(
-        template="plotly_white",
-        height=360,
-        margin=dict(l=10, r=10, t=10, b=10),
-        legend=dict(orientation="h", x=0.0, y=1.08),
-        xaxis_title="Día",
-        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
     )
     return fig
 
@@ -1354,10 +1210,44 @@ def _patch_kaleido_executable_for_space_paths() -> None:
     cls._nps_lens_kaleido_patched = True
 
 
-def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
+def _apply_ppt_figure_theme(
+    fig: go.Figure,
+    *,
+    panel_width_in: float | None = None,
+    panel_height_in: float | None = None,
+) -> go.Figure:
     ink = "#" + BBVA_COLORS["ink"]
     grid = "#" + BBVA_COLORS["line"]
     white = "#" + BBVA_COLORS["white"]
+    compact_panel = bool(
+        (panel_width_in is not None and panel_width_in <= 6.0)
+        or (panel_height_in is not None and panel_height_in <= 2.5)
+    )
+    trace_types = {
+        str(getattr(trace, "type", "") or "").strip().lower()
+        for trace in fig.data
+        if trace is not None
+    }
+    has_heatmap = "heatmap" in trace_types
+    has_legend = (
+        sum(
+            1
+            for trace in fig.data
+            if bool(getattr(trace, "showlegend", True))
+            and str(getattr(trace, "name", "") or "").strip()
+        )
+        > 1
+    )
+    has_scatter_text = any(
+        str(getattr(trace, "type", "") or "").strip().lower() == "scatter"
+        and "text" in str(getattr(trace, "mode", "") or "").lower()
+        for trace in fig.data
+    )
+    has_colorbar = any(
+        bool(getattr(trace, "showscale", False))
+        or bool(getattr(getattr(trace, "colorbar", None), "title", None))
+        for trace in fig.data
+    )
 
     for trace in fig.data:
         name = str(getattr(trace, "name", "") or "").strip().lower()
@@ -1409,33 +1299,62 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
                     trace.line.color = "#" + BBVA_COLORS["red"]
 
     current_margin = fig.layout.margin.to_plotly_json() if fig.layout.margin else {}
+    base_font_size = 18 if has_heatmap or compact_panel else 17
+    tick_font_size = 16 if has_heatmap or compact_panel else 15
+    axis_title_font_size = 18 if has_heatmap or compact_panel else 17
+    legend_font_size = 15 if compact_panel else 14
+
+    def _font_size(value: object, fallback: int) -> int:
+        try:
+            size = int(float(value))
+        except Exception:
+            return int(fallback)
+        return max(size, int(fallback))
+
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor=white,
         plot_bgcolor=white,
-        font=dict(family=BBVA_FONT_BODY, size=20, color=ink),
+        font=dict(family=BBVA_FONT_BODY, size=base_font_size, color=ink),
         legend=dict(
             orientation="h",
             x=0.0,
             xanchor="left",
-            y=-0.16,
-            yanchor="top",
-            font=dict(size=19, color=ink),
-            title_font=dict(size=19, color=ink),
+            y=1.12 if has_legend else 1.04,
+            yanchor="bottom",
+            font=dict(size=legend_font_size, color=ink),
+            title_font=dict(size=legend_font_size, color=ink),
             bgcolor="rgba(0,0,0,0)",
         ),
         margin=dict(
-            l=max(int(current_margin.get("l", 24)), 108),
-            r=max(int(current_margin.get("r", 24)), 52),
-            t=int(current_margin.get("t", 20)),
-            b=max(int(current_margin.get("b", 24)), 116),
+            l=max(
+                int(current_margin.get("l", 24)),
+                78 if has_scatter_text or compact_panel else 58,
+            ),
+            r=max(int(current_margin.get("r", 24)), 92 if has_colorbar else 44),
+            t=max(int(current_margin.get("t", 20)), 40 if has_heatmap or has_legend else 28),
+            b=max(
+                int(current_margin.get("b", 24)),
+                84 if has_heatmap or compact_panel else 58,
+            ),
         ),
         hoverlabel=dict(font=dict(family=BBVA_FONT_BODY, size=13, color=ink)),
     )
     fig.for_each_xaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=19, color=ink),
-            title_font=dict(size=20, color=ink),
+            tickfont=dict(
+                size=_font_size(
+                    getattr(getattr(axis, "tickfont", None), "size", None), tick_font_size
+                ),
+                color=ink,
+            ),
+            title_font=dict(
+                size=_font_size(
+                    getattr(getattr(getattr(axis, "title", None), "font", None), "size", None),
+                    axis_title_font_size,
+                ),
+                color=ink,
+            ),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
@@ -1443,20 +1362,83 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     )
     fig.for_each_yaxis(
         lambda axis: axis.update(
-            tickfont=dict(size=19, color=ink),
-            title_font=dict(size=20, color=ink),
+            tickfont=dict(
+                size=_font_size(
+                    getattr(getattr(axis, "tickfont", None), "size", None), tick_font_size
+                ),
+                color=ink,
+            ),
+            title_font=dict(
+                size=_font_size(
+                    getattr(getattr(getattr(axis, "title", None), "font", None), "size", None),
+                    axis_title_font_size,
+                ),
+                color=ink,
+            ),
             automargin=True,
             gridcolor=grid,
             linecolor=grid,
         )
     )
+    for trace in fig.data:
+        if "text" not in str(getattr(trace, "mode", "") or "").lower():
+            continue
+        with contextlib.suppress(Exception):
+            trace.textfont.size = max(
+                int(getattr(getattr(trace, "textfont", None), "size", 0) or 0),
+                16,
+            )
+    if has_heatmap:
+        for trace in fig.data:
+            if str(getattr(trace, "type", "") or "").strip().lower() != "heatmap":
+                continue
+            with contextlib.suppress(Exception):
+                trace.xgap = max(int(getattr(trace, "xgap", 0) or 0), 2)
+            with contextlib.suppress(Exception):
+                trace.ygap = max(int(getattr(trace, "ygap", 0) or 0), 2)
+            if has_colorbar:
+                with contextlib.suppress(Exception):
+                    trace.colorbar.thickness = 14
+                with contextlib.suppress(Exception):
+                    trace.colorbar.len = 0.74
+                with contextlib.suppress(Exception):
+                    trace.colorbar.y = 0.48
+                with contextlib.suppress(Exception):
+                    trace.colorbar.title.side = "right"
+                with contextlib.suppress(Exception):
+                    trace.colorbar.tickfont.size = 15
+                with contextlib.suppress(Exception):
+                    trace.colorbar.title.font.size = 16
+    for axis_name in fig.layout:
+        if not str(axis_name).startswith(("xaxis", "yaxis")):
+            continue
+        axis = getattr(fig.layout, axis_name, None)
+        if axis is None:
+            continue
+        with contextlib.suppress(Exception):
+            if compact_panel and str(axis_name).startswith("xaxis") and axis.nticks is None:
+                axis.nticks = 5
+        with contextlib.suppress(Exception):
+            if compact_panel and str(axis_name).startswith("yaxis") and axis.nticks is None:
+                axis.nticks = 8
     return fig
 
 
-def _kaleido_png(fig: go.Figure, *, width: int = 1600, height: int = 900) -> Optional[bytes]:
+def _kaleido_png(
+    fig: go.Figure,
+    *,
+    width: int = 1600,
+    height: int = 900,
+    panel_width_in: float | None = None,
+    panel_height_in: float | None = None,
+) -> Optional[bytes]:
     try:
         _patch_kaleido_executable_for_space_paths()
-        themed = _apply_ppt_figure_theme(fig)
+        themed = _apply_ppt_figure_theme(
+            fig,
+            panel_width_in=panel_width_in,
+            panel_height_in=panel_height_in,
+        )
         return pio.to_image(themed, format="png", width=width, height=height, scale=1)
     except Exception:
         return None
@@ -1612,17 +1594,25 @@ def _figure_in_panel(
     width: float,
     height: float,
     empty_note: str,
+    target_ppi: Optional[int] = None,
 ) -> None:
     img = None
     if figure is not None:
-        base_ppi = 150
-        width_px = max(int(width * base_ppi), 1100)
-        height_px = max(int(height * base_ppi), 320)
-        scale = max(1500 / max(width_px, 1), 700 / max(height_px, 1), 1.0)
+        if target_ppi is not None and int(target_ppi) > 0:
+            width_px = max(int(width * int(target_ppi)), 640)
+            height_px = max(int(height * int(target_ppi)), 360)
+            scale = 1.0
+        else:
+            base_ppi = 150
+            width_px = max(int(width * base_ppi), 1100)
+            height_px = max(int(height * base_ppi), 320)
+            scale = max(1500 / max(width_px, 1), 700 / max(height_px, 1), 1.0)
         img = _kaleido_png(
             figure,
             width=int(width_px * scale),
             height=int(height_px * scale),
+            panel_width_in=width,
+            panel_height_in=height,
         )
     if img is not None:
         slide.shapes.add_picture(
@@ -3702,84 +3692,6 @@ def _hotspot_summary_row(
     return None
 
 
-def _parse_changepoints(value: object) -> list[pd.Timestamp]:
-    if value is None:
-        return []
-    raw = value
-    if isinstance(raw, str):
-        s = raw.strip()
-        if not s:
-            return []
-        if s.startswith("[") and s.endswith("]"):
-            with contextlib.suppress(Exception):
-                raw = ast.literal_eval(s)
-        else:
-            raw = [s]
-
-    if not isinstance(raw, (list, tuple, np.ndarray, pd.Series)):
-        raw = [raw]
-
-    out: list[pd.Timestamp] = []
-    for v in raw:
-        ts = _safe_dt(v)
-        if ts is not None:
-            out.append(ts.normalize())
-    return out
-
-
-def _changepoints_map(
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> dict[str, list[pd.Timestamp]]:
-    if changepoints_by_topic is None or changepoints_by_topic.empty:
-        return {}
-    if "nps_topic" not in changepoints_by_topic.columns:
-        return {}
-
-    out: dict[str, list[pd.Timestamp]] = {}
-    for _, r in changepoints_by_topic.iterrows():
-        topic = str(r.get("nps_topic", "")).strip()
-        if not topic:
-            continue
-        cp_col = r.get("changepoints", [])
-        parsed = _parse_changepoints(cp_col)
-        out[topic] = parsed
-    return out
-
-
-def _lag_days_for_topic(
-    topic: str,
-    *,
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    rationale_df: pd.DataFrame,
-    ranking_df: Optional[pd.DataFrame],
-) -> int:
-    topic = str(topic or "").strip()
-    if not topic:
-        return 0
-
-    def _hit(df: Optional[pd.DataFrame], col: str) -> Optional[int]:
-        if df is None or df.empty:
-            return None
-        if "nps_topic" not in df.columns or col not in df.columns:
-            return None
-        h = df[df["nps_topic"].astype(str) == topic].head(1)
-        if h.empty:
-            return None
-        return max(0, _safe_int(h.iloc[0][col], default=0))
-
-    direct = _hit(lag_days_by_topic, "best_lag_days")
-    if direct is not None:
-        return direct
-
-    for frame in [ranking_df, lag_weeks_by_topic, rationale_df]:
-        lag_w = _hit(frame, "best_lag_weeks")
-        if lag_w is not None:
-            return max(0, int(round(float(lag_w) * 7.0)))
-
-    return 0
-
-
 def _incident_related_timeline(
     *,
     incident_id: str,
@@ -4378,6 +4290,29 @@ def _add_deep_dive_slide(
     period_label: str,
     text_topics_df: pd.DataFrame,
 ) -> None:
+    topic_fig = chart_topic_bars(text_topics_df, get_theme("light"), top_k=10)
+    if topic_fig is not None:
+        topic_rows = text_topics_df.sort_values("n", ascending=False).head(10).copy()
+        topic_labels = []
+        for row in topic_rows.itertuples():
+            terms = [str(term).strip() for term in list(row.top_terms)[:2] if str(term).strip()]
+            short_label = _clip(f"#{int(row.cluster_id)} · {', '.join(terms)}", 20)
+            topic_labels.append(short_label)
+        with contextlib.suppress(Exception):
+            topic_fig.data[0].y = topic_labels
+        counts = pd.to_numeric(text_topics_df.get("n"), errors="coerce").dropna()
+        xmax = float(counts.max()) if not counts.empty else 0.0
+        dtick = 2000 if xmax >= 6000 else 1000 if xmax >= 2000 else None
+        topic_fig.update_xaxes(
+            title_text="Comentarios",
+            nticks=5 if xmax >= 5000 else 6,
+            dtick=dtick,
+            tickformat="~s",
+            tickfont=dict(size=18),
+            title_font=dict(size=19),
+        )
+        topic_fig.update_yaxes(tickfont=dict(size=26))
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4385,14 +4320,14 @@ def _add_deep_dive_slide(
         title="2. Qué han dicho los clientes",
         subtitle=f"Temas más repetidos en los comentarios del periodo · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.2, height=5.42, title="Top temas del periodo")
+    _panel(slide, left=0.66, top=1.48, width=8.55, height=5.42, title="Top temas del periodo")
     _figure_in_panel(
         slide,
-        figure=chart_topic_bars(text_topics_df, get_theme("light"), top_k=10),
+        figure=topic_fig,
         left=0.82,
         top=1.82,
-        width=6.78,
-        height=2.84,
+        width=7.46,
+        height=3.20,
         empty_note="No hay suficiente volumen textual para construir el top 10.",
     )
 
@@ -4408,8 +4343,8 @@ def _add_deep_dive_slide(
     _add_compact_table(
         slide,
         left=0.82,
-        top=4.64,
-        width=7.18,
+        top=5.02,
+        width=7.54,
         title="",
         headers=["cluster_id", "n", "top_terms", "examples"],
         rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
@@ -4426,9 +4361,9 @@ def _add_deep_dive_slide(
     ] or ["No se han detectado temas con masa crítica suficiente."]
     _add_bullet_lines(
         slide,
-        left=9.00,
+        left=9.28,
         top=1.48,
-        width=3.68,
+        width=3.40,
         height=5.42,
         title="Qué destaca",
         lines=bullet_lines,
@@ -4492,6 +4427,54 @@ def _add_change_vs_past_slide(
     current_source_df: pd.DataFrame,
     baseline_source_df: pd.DataFrame,
 ) -> None:
+    def _delta_figure(
+        *,
+        dimension: str,
+        panel_height_in: float,
+    ) -> Optional[go.Figure]:
+        delta_df = driver_delta_table(
+            current_source_df,
+            baseline_source_df,
+            dimension=dimension,
+            min_n=50,
+        )
+        fig = chart_driver_delta(delta_df, get_theme("light"))
+        if fig is None or delta_df.empty:
+            return fig
+
+        plot_df = delta_df.head(12).copy()
+        label_count = len(plot_df)
+        max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
+        wrap_width = 18 if max_len >= 18 else 14
+        left_margin = 300 if max_len >= 18 else 240
+        y_font_size = 44 if label_count <= 6 else 40 if label_count <= 8 else 34
+
+        labels = [
+            _wrap_label(value, width=wrap_width, max_lines=2, joiner="<br>")
+            for value in plot_df["value"].astype(str).tolist()
+        ]
+        with contextlib.suppress(Exception):
+            fig.data[0].y = labels
+        fig.update_yaxes(
+            tickfont=dict(size=y_font_size),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Delta NPS",
+            tickfont=dict(size=18),
+            title_font=dict(size=20),
+            nticks=5,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=40,
+                t=24,
+                b=52 if panel_height_in <= 2.0 else 48,
+            )
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4502,15 +4485,7 @@ def _add_change_vs_past_slide(
     _panel(slide, left=0.66, top=1.48, width=12.02, height=2.38, title="Palanca")
     _figure_in_panel(
         slide,
-        figure=chart_driver_delta(
-            driver_delta_table(
-                current_source_df,
-                baseline_source_df,
-                dimension="Palanca",
-                min_n=50,
-            ),
-            get_theme("light"),
-        ),
+        figure=_delta_figure(dimension="Palanca", panel_height_in=1.92),
         left=0.86,
         top=1.80,
         width=11.40,
@@ -4520,15 +4495,7 @@ def _add_change_vs_past_slide(
     _panel(slide, left=0.66, top=4.02, width=12.02, height=2.88, title="Subpalanca")
     _figure_in_panel(
         slide,
-        figure=chart_driver_delta(
-            driver_delta_table(
-                current_source_df,
-                baseline_source_df,
-                dimension="Subpalanca",
-                min_n=50,
-            ),
-            get_theme("light"),
-        ),
+        figure=_delta_figure(dimension="Subpalanca", panel_height_in=2.30),
         left=0.86,
         top=4.34,
         width=11.40,
@@ -4543,45 +4510,179 @@ def _add_pain_by_group_slide(
     period_label: str,
     selected_nps_df: Optional[pd.DataFrame],
 ) -> None:
+    source_df = selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame()
+
+    def _web_heatmap_figure(
+        *,
+        row_dim: str,
+        show_scale: bool,
+        x_tick_label: str,
+        include_all_rows: bool = False,
+    ) -> Optional[go.Figure]:
+        required = {row_dim, "Canal", "NPS"}
+        if source_df.empty or not required.issubset(set(source_df.columns)):
+            return None
+
+        chart_df = source_df.dropna(subset=[row_dim, "Canal", "NPS"]).copy()
+        if chart_df.empty:
+            return None
+        chart_df[row_dim] = chart_df[row_dim].astype(str).str.strip()
+        chart_df["Canal"] = chart_df["Canal"].astype(str).str.strip()
+        chart_df = chart_df[
+            chart_df[row_dim].ne("") & chart_df["Canal"].str.casefold().eq("web")
+        ].copy()
+        if chart_df.empty:
+            return None
+
+        fig = chart_cohort_heatmap(
+            chart_df,
+            get_theme("light"),
+            row_dim=row_dim,
+            col_dim="Canal",
+            min_n=1 if include_all_rows else 30,
+        )
+        if fig is None:
+            return None
+
+        agg = chart_df.groupby([row_dim, "Canal"], as_index=False).agg(n=("NPS", "size")).copy()
+        if agg.empty:
+            return None
+
+        row_values = (
+            agg[row_dim].astype(str).drop_duplicates().tolist()
+            if include_all_rows
+            else agg.loc[agg["n"] >= 30, row_dim].astype(str).drop_duplicates().tolist()
+        )
+        if not row_values:
+            return None
+
+        label_count = len(row_values)
+        max_len = int(pd.Series(row_values).astype(str).str.len().max() or 0)
+        y_font_size = (
+            44 if label_count <= 5 else 40 if label_count <= 7 else 36 if label_count <= 10 else 31
+        )
+        left_margin = (
+            372 if max_len >= 40 else 352 if max_len >= 34 else 334 if max_len >= 28 else 316
+        )
+        label_map = {
+            _compact_axis_label(value, width=16, max_lines=2, max_chars=30): str(value)
+            for value in row_values
+        }
+        with contextlib.suppress(Exception):
+            rendered_y_values = [
+                label_map.get(str(value), str(value).replace("<br>", " "))
+                for value in list(fig.data[0].y)
+            ]
+            fig.data[0].y = rendered_y_values
+        rendered_y_values = list(
+            dict.fromkeys([str(v) for v in list(getattr(fig.data[0], "y", []))])
+        )
+
+        if include_all_rows:
+            with contextlib.suppress(Exception):
+                n_by_row = (
+                    agg.groupby(row_dim, as_index=False)["n"]
+                    .sum()
+                    .set_index(row_dim)["n"]
+                    .to_dict()
+                )
+                z_values = np.array(fig.data[0].z, dtype=float)
+                for idx, y_value in enumerate(list(fig.data[0].y)):
+                    if int(n_by_row.get(str(y_value), 0)) < 30:
+                        z_values[idx, :] = np.nan
+                fig.data[0].z = z_values
+        fig.update_yaxes(
+            title_text="",
+            categoryorder="array",
+            categoryarray=rendered_y_values,
+            tickmode="array",
+            tickvals=rendered_y_values,
+            ticktext=rendered_y_values,
+            tickfont=dict(size=y_font_size, family=BBVA_FONT_BODY, color="#" + BBVA_COLORS["ink"]),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="",
+            tickangle=0,
+            tickmode="array",
+            tickvals=["Web"],
+            ticktext=[x_tick_label],
+            tickfont=dict(size=14),
+            automargin=True,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=88 if show_scale else 20,
+                t=14,
+                b=24,
+            )
+        )
+        fig.update_coloraxes(showscale=show_scale)
+        if show_scale:
+            fig.update_coloraxes(
+                colorbar=dict(
+                    title="NPS",
+                    tickmode="array",
+                    tickvals=[0, 2, 6, 8, 10],
+                    len=0.72,
+                    y=0.5,
+                    thickness=12,
+                )
+            )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
-    source_df = selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame()
     _add_header(
         slide,
         title="4. Dónde duele según el tipo de cliente",
-        subtitle=f"NPS por canal y eje de experiencia dentro del periodo analizado · {period_label}",
+        subtitle=f"NPS del canal Web por eje de experiencia dentro del periodo analizado · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=6.0, height=5.42, title="Palanca x Canal")
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=5.88,
+        height=5.42,
+        title="Palanca · canal Web",
+    )
     _figure_in_panel(
         slide,
-        figure=chart_cohort_heatmap(
-            source_df,
-            get_theme("light"),
+        figure=_web_heatmap_figure(
             row_dim="Palanca",
-            col_dim="Canal",
-            min_n=30,
+            show_scale=False,
+            x_tick_label="Web: Por palanca",
+            include_all_rows=True,
         ),
         left=0.82,
         top=1.86,
-        width=5.68,
+        width=5.14,
         height=4.92,
-        empty_note="No hay señal suficiente para mostrar la matriz Palanca x Canal.",
+        empty_note="No hay señal suficiente para mostrar la matriz Palanca del canal Web.",
+        target_ppi=176,
     )
-    _panel(slide, left=6.90, top=1.48, width=5.78, height=5.42, title="Subpalanca x Canal")
+    _panel(
+        slide,
+        left=6.80,
+        top=1.48,
+        width=5.88,
+        height=5.42,
+        title="Subpalanca · canal Web",
+    )
     _figure_in_panel(
         slide,
-        figure=chart_cohort_heatmap(
-            source_df,
-            get_theme("light"),
+        figure=_web_heatmap_figure(
             row_dim="Subpalanca",
-            col_dim="Canal",
-            min_n=30,
+            show_scale=True,
+            x_tick_label="Web: Por subpalanca",
         ),
-        left=7.06,
+        left=6.96,
         top=1.86,
-        width=5.46,
+        width=5.48,
         height=4.92,
-        empty_note="No hay señal suficiente para mostrar la matriz Subpalanca x Canal.",
+        empty_note="No hay señal suficiente para mostrar la matriz Subpalanca del canal Web.",
+        target_ppi=176,
     )
 
 
@@ -4592,6 +4693,48 @@ def _add_gap_slide(
     palanca_gap_df: pd.DataFrame,
     subpalanca_gap_df: pd.DataFrame,
 ) -> None:
+    def _gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Optional[go.Figure]:
+        fig = chart_driver_bar(gap_df, get_theme("light"), top_k=10)
+        if fig is None or gap_df.empty:
+            return fig
+
+        plot_df = gap_df.head(10).copy()
+        max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
+        wrap_width = 24 if max_len >= 24 else 22 if max_len >= 18 else 20
+        max_chars = 44 if max_len >= 24 else 38 if max_len >= 18 else 34
+        y_font_size = 34 if len(plot_df) <= 6 else 31 if len(plot_df) <= 8 else 28
+        left_margin = (
+            340 if max_len >= 30 else 314 if max_len >= 24 else 288 if max_len >= 18 else 262
+        )
+        label_map = {
+            value: _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
+            for value in plot_df["value"].astype(str).tolist()
+        }
+        with contextlib.suppress(Exception):
+            fig.data[0].y = [label_map.get(str(value), str(value)) for value in list(fig.data[0].y)]
+        fig.update_yaxes(
+            title_text="",
+            tickfont=dict(
+                size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]
+            ),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Gap NPS",
+            tickfont=dict(size=16),
+            title_font=dict(size=17),
+            nticks=4,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=30,
+                t=18,
+                b=42 if panel_height_in <= 2.0 else 38,
+            )
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4599,15 +4742,16 @@ def _add_gap_slide(
         title="5. Casos más alejados del promedio",
         subtitle=f"Top de casos con peor diferencia frente al NPS medio general · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.15, height=2.38, title="Palanca")
+    _panel(slide, left=0.66, top=1.48, width=8.70, height=2.38, title="Palanca")
     _figure_in_panel(
         slide,
-        figure=chart_driver_bar(palanca_gap_df, get_theme("light"), top_k=10),
+        figure=_gap_figure(palanca_gap_df, panel_height_in=2.00),
         left=0.82,
-        top=1.80,
-        width=7.56,
-        height=1.92,
+        top=1.72,
+        width=8.08,
+        height=2.10,
         empty_note="No hay suficiente señal para el ranking de brechas por palanca.",
+        target_ppi=174,
     )
 
     palanca_lines = [
@@ -4616,24 +4760,25 @@ def _add_gap_slide(
     ]
     _add_bullet_lines(
         slide,
-        left=8.98,
+        left=9.52,
         top=1.48,
-        width=3.70,
+        width=3.16,
         height=2.38,
         title="",
         lines=palanca_lines,
         body_font_size_pt=11.0,
     )
 
-    _panel(slide, left=0.66, top=4.02, width=8.15, height=2.88, title="Subpalanca")
+    _panel(slide, left=0.66, top=4.02, width=8.70, height=2.88, title="Subpalanca")
     _figure_in_panel(
         slide,
-        figure=chart_driver_bar(subpalanca_gap_df, get_theme("light"), top_k=10),
+        figure=_gap_figure(subpalanca_gap_df, panel_height_in=2.44),
         left=0.82,
-        top=4.34,
-        width=7.56,
-        height=2.30,
+        top=4.22,
+        width=8.08,
+        height=2.56,
         empty_note="No hay suficiente señal para el ranking de brechas por subpalanca.",
+        target_ppi=174,
     )
     subpalanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
@@ -4641,9 +4786,9 @@ def _add_gap_slide(
     ]
     _add_bullet_lines(
         slide,
-        left=8.98,
+        left=9.52,
         top=4.02,
-        width=3.70,
+        width=3.16,
         height=2.88,
         title="",
         lines=subpalanca_lines,
@@ -4657,6 +4802,59 @@ def _add_opportunity_slide(
     period_label: str,
     opportunities_df: pd.DataFrame,
 ) -> None:
+    def _opportunity_figure(opp_df: pd.DataFrame) -> Optional[go.Figure]:
+        fig = chart_opportunities_bar(opp_df, get_theme("light"), top_k=10)
+        if fig is None or opp_df.empty:
+            return fig
+
+        plot_df = (
+            opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False])
+            .head(10)
+            .copy()
+        )
+        label_count = len(plot_df)
+        label_lengths = (
+            plot_df["label"].astype(str).str.replace("<br>", " ", regex=False).str.len()
+            if "label" in plot_df.columns
+            else pd.Series(dtype=float)
+        )
+        max_len = int(label_lengths.max() or 0)
+        y_font_size = 28 if label_count <= 5 else 26 if label_count <= 7 else 23
+        left_margin = 248 if max_len >= 26 else 220 if max_len >= 20 else 188
+
+        uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
+        text_values = [f"+{value:.1f}" if np.isfinite(value) else "" for value in uplift.tolist()]
+        with contextlib.suppress(Exception):
+            fig.data[0].text = text_values
+        with contextlib.suppress(Exception):
+            fig.data[0].textposition = "outside"
+        with contextlib.suppress(Exception):
+            fig.data[0].cliponaxis = False
+        with contextlib.suppress(Exception):
+            fig.data[0].textfont.size = 18
+
+        fig.update_yaxes(
+            title_text="",
+            tickfont=dict(size=y_font_size),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Impacto estimado",
+            tickfont=dict(size=18),
+            title_font=dict(size=19),
+            nticks=5,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=54,
+                t=18,
+                b=46,
+            ),
+            bargap=0.34,
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4665,33 +4863,49 @@ def _add_opportunity_slide(
         subtitle=f"Ranking de oportunidades por impacto potencial y solidez de evidencia · {period_label}",
     )
     opp_chart_df = opportunities_df.copy()
-    if not opp_chart_df.empty and "label" not in opp_chart_df.columns:
-        opp_chart_df["label"] = opp_chart_df.apply(
-            lambda row: f"{row.get('dimension')}={row.get('value')}",
-            axis=1,
-        )
+    if not opp_chart_df.empty:
+        dimensions = [
+            str(value).strip()
+            for value in opp_chart_df.get("dimension", pd.Series(dtype=str)).dropna().tolist()
+            if str(value).strip()
+        ]
+        shared_dimension = dimensions[0] if len(set(dimensions)) == 1 else ""
+
+        def _opp_label(row: pd.Series) -> str:
+            value = str(row.get("value", "")).strip()
+            dimension = str(row.get("dimension", "")).strip()
+            base = (
+                value
+                if shared_dimension and dimension == shared_dimension
+                else f"{dimension} · {value}".strip(" ·")
+            )
+            width = 18 if len(base) >= 20 else 16
+            max_chars = 28 if shared_dimension else 32
+            return _compact_axis_label(base, width=width, max_lines=2, max_chars=max_chars)
+
+        opp_chart_df["label"] = opp_chart_df.apply(_opp_label, axis=1)
     _panel(
         slide,
         left=0.66,
         top=1.48,
         width=12.02,
-        height=4.30,
+        height=4.38,
         title="Ranking por impacto estimado x confianza",
     )
     _figure_in_panel(
         slide,
-        figure=chart_opportunities_bar(opp_chart_df, get_theme("light"), top_k=10),
+        figure=_opportunity_figure(opp_chart_df),
         left=0.86,
-        top=1.86,
+        top=1.84,
         width=11.62,
-        height=3.48,
+        height=3.60,
         empty_note="No se identificaron oportunidades robustas con el umbral actual.",
     )
     lines = explain_opportunities(opp_chart_df, max_items=5)
     _add_bullet_lines(
         slide,
         left=0.66,
-        top=5.94,
+        top=6.02,
         width=12.02,
         height=1.10,
         title="",
@@ -4823,6 +5037,76 @@ def _add_journeys_summary_slide(
     touchpoint_source: str,
     journey_df: pd.DataFrame,
 ) -> None:
+    def _journeys_summary_figure(journeys: pd.DataFrame) -> Optional[go.Figure]:
+        fig = chart_broken_journeys_bar(
+            journeys,
+            get_theme("light"),
+            top_k=min(10, len(journeys)) if not journeys.empty else 10,
+        )
+        if fig is None or journeys.empty:
+            return fig
+
+        y_values = [
+            str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))
+        ]
+        if not y_values:
+            return fig
+
+        max_len = max(len(value) for value in y_values)
+        label_count = len(y_values)
+        wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
+        max_chars = 92 if max_len <= 72 else 84
+        y_font_size = 30 if label_count <= 6 else 27 if label_count <= 8 else 24
+        left_margin = (
+            430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
+        )
+
+        pretty_labels = [
+            _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
+            for value in y_values
+        ]
+        with contextlib.suppress(Exception):
+            fig.data[0].y = pretty_labels
+
+        fig.update_yaxes(
+            title_text="",
+            tickmode="array",
+            tickvals=pretty_labels,
+            ticktext=pretty_labels,
+            tickfont=dict(
+                size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]
+            ),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Links validados Helix↔VoC",
+            tickfont=dict(size=17),
+            title_font=dict(size=18),
+            nticks=6,
+            automargin=True,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=104,
+                t=14,
+                b=34,
+            ),
+            bargap=0.22,
+        )
+        fig.update_coloraxes(
+            colorbar=dict(
+                title=dict(text="NPS medio", side="right", font=dict(size=15)),
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+                tickfont=dict(size=14),
+                len=0.82,
+                y=0.5,
+                thickness=16,
+            )
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -4893,16 +5177,13 @@ def _add_journeys_summary_slide(
     _panel(slide, left=0.66, top=2.88, width=12.02, height=4.02, title="")
     _figure_in_panel(
         slide,
-        figure=chart_broken_journeys_bar(
-            journeys_df,
-            get_theme("light"),
-            top_k=min(10, len(journeys_df)) if not journeys_df.empty else 10,
-        ),
+        figure=_journeys_summary_figure(journeys_df),
         left=0.84,
-        top=3.16,
+        top=3.10,
         width=11.66,
-        height=3.46,
+        height=3.56,
         empty_note="No he identificado journeys rotos defendibles en esta ventana.",
+        target_ppi=170,
     )
 
 
@@ -5031,108 +5312,6 @@ def _add_chain_scenario_slide(
     )
 
 
-def _add_chain_detail_slide(
-    prs: Presentation,
-    *,
-    chain_row: pd.Series,
-    idx: int,
-    focus_name: str,
-    period_label: str,
-    chain_df: pd.DataFrame,
-    by_topic_daily: Optional[pd.DataFrame],
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> None:
-    slide = _new_slide(prs)
-    _add_bg(slide, BBVA_COLORS["bg_light"])
-    title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
-    _add_header(
-        slide,
-        title=f"10.{idx} Detalle del caso",
-        subtitle=f"{title} · posición del caso, comentarios y secuencia temporal · {period_label}",
-    )
-    _panel(slide, left=0.66, top=1.48, width=4.05, height=2.35, title="Matriz visual")
-    _figure_in_panel(
-        slide,
-        figure=chart_incident_risk_recovery(
-            pd.DataFrame([chain_row]).copy(),
-            get_theme("light"),
-            top_k=1,
-        ),
-        left=0.82,
-        top=1.84,
-        width=3.73,
-        height=1.83,
-        empty_note="No hay cartera suficiente para posicionar el caso.",
-    )
-    quant_lines = [
-        f"Palanca: {_clip(chain_row.get('palanca', 'n/d'), 28)}",
-        f"Subpalanca: {_clip(chain_row.get('subpalanca', 'n/d'), 28)}",
-        f"Retraso estimado: {_lag_days_for_topic(_matching_topic_for_chain(chain_row, by_topic_daily), lag_days_by_topic=lag_days_by_topic, lag_weeks_by_topic=lag_weeks_by_topic, rationale_df=pd.DataFrame(), ranking_df=None)} días",
-        f"Puntos de cambio: {len(_changepoints_map(changepoints_by_topic).get(_matching_topic_for_chain(chain_row, by_topic_daily), []))}",
-        f"Tipo de acción: {_clip(_action_lane_label(chain_row.get('action_lane', 'n/d')), 34)}",
-        f"Equipo responsable: {_clip(chain_row.get('owner_role', 'n/d'), 30)}",
-    ]
-    _add_bullet_lines(
-        slide,
-        left=4.92,
-        top=1.48,
-        width=3.28,
-        height=2.35,
-        title="Resumen cuantitativo",
-        lines=quant_lines,
-        accent=BBVA_COLORS["blue"],
-    )
-    _panel(slide, left=8.40, top=1.48, width=4.26, height=2.35, title="Heat map")
-    _figure_in_panel(
-        slide,
-        figure=_chain_comment_heatmap_fig(chain_row, by_topic_daily=by_topic_daily),
-        left=8.56,
-        top=1.84,
-        width=3.94,
-        height=1.83,
-        empty_note="No hay suficiente detalle temporal en los comentarios vinculados.",
-    )
-    _panel(slide, left=0.66, top=4.06, width=8.22, height=2.84, title="Lag en días")
-    _figure_in_panel(
-        slide,
-        figure=_chain_temporal_fig(
-            chain_row,
-            focus_name=focus_name,
-            by_topic_daily=by_topic_daily,
-            lag_days_by_topic=lag_days_by_topic,
-            lag_weeks_by_topic=lag_weeks_by_topic,
-            changepoints_by_topic=changepoints_by_topic,
-        ),
-        left=0.82,
-        top=4.42,
-        width=7.90,
-        height=2.28,
-        empty_note="No hay cobertura suficiente para la vista temporal de la cadena.",
-    )
-    _add_bullet_lines(
-        slide,
-        left=9.10,
-        top=4.06,
-        width=3.56,
-        height=2.84,
-        title="Evidencias clave",
-        lines=(
-            [
-                f"Helix: {_clean_evidence_excerpt(line, max_len=98)}"
-                for line in _chain_list(chain_row.get("incident_examples"))[:2]
-            ]
-            + [
-                f"Cliente: {_clean_evidence_excerpt(line, max_len=98)}"
-                for line in _chain_list(chain_row.get("comment_examples"))[:2]
-            ]
-        )
-        or ["Sin evidencias adicionales en el detalle."],
-        accent=BBVA_COLORS["orange"],
-    )
-
-
 def generate_business_review_ppt(
     *,
     service_origin: str,
@@ -5181,7 +5360,11 @@ def generate_business_review_ppt(
         median_lag_weeks,
         rationale_df,
         ranking_df,
+        by_topic_daily,
+        lag_days_by_topic,
         by_topic_weekly,
+        lag_weeks_by_topic,
+        changepoints_by_topic,
         executive_journey_catalog,
     )
 
@@ -5317,18 +5500,6 @@ def generate_business_review_ppt(
                 idx=idx,
                 focus_name=focus_name,
                 period_label=period_label,
-            )
-            _add_chain_detail_slide(
-                prs,
-                chain_row=chain_row,
-                idx=idx,
-                focus_name=focus_name,
-                period_label=period_label,
-                chain_df=chains,
-                by_topic_daily=by_topic_daily,
-                lag_days_by_topic=lag_days_by_topic,
-                lag_weeks_by_topic=lag_weeks_by_topic,
-                changepoints_by_topic=changepoints_by_topic,
             )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")

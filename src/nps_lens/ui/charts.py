@@ -11,6 +11,7 @@ from nps_lens.design.tokens import (
     nps_score_color,
     palette,
     plotly_nps_score_scale,
+    plotly_risk_scale,
     primary_accent,
 )
 from nps_lens.ui.plotly_theme import apply_plotly_theme
@@ -168,6 +169,42 @@ def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
     )
     fig.update_xaxes(showgrid=True, gridcolor=th.grid, zeroline=False)
     fig.update_yaxes(showgrid=False, zeroline=False)
+
+
+def _compact_axis_label(
+    value: object,
+    *,
+    width: int = 18,
+    max_lines: int = 2,
+    max_chars: int = 40,
+) -> str:
+    clean = " ".join(str(value or "").split())
+    if not clean:
+        return ""
+    if len(clean) > int(max_chars):
+        clean = clean[: max(int(max_chars) - 1, 1)].rstrip() + "…"
+    words = clean.split()
+    if not words:
+        return clean
+
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) <= max(int(width), 8):
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+        if len(lines) >= max(int(max_lines) - 1, 0):
+            break
+    if len(lines) < int(max_lines):
+        lines.append(current)
+    if len(lines) > int(max_lines):
+        lines = lines[: int(max_lines)]
+    if len(lines[-1]) > int(width):
+        lines[-1] = lines[-1][: max(int(width) - 1, 1)].rstrip() + "…"
+    return "<br>".join(lines[: int(max_lines)])
 
 
 def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
@@ -671,10 +708,10 @@ def chart_incident_priority_matrix(
     if d.empty:
         return None
 
-    d["short_topic"] = d["nps_topic"].astype(str).str.slice(0, 42)
-    d["short_topic"] = d["short_topic"].where(
-        d["nps_topic"].astype(str).str.len() <= 42,
-        d["short_topic"] + "…",
+    d["short_topic"] = (
+        d["nps_topic"]
+        .astype(str)
+        .map(lambda value: _compact_axis_label(value, width=20, max_lines=2, max_chars=36))
     )
     d["confidence"] = pd.to_numeric(d["confidence"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
     d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
@@ -717,6 +754,7 @@ def chart_incident_priority_matrix(
             name="Prioridad",
             text=[f"{v:.2f}" for v in d["priority"].tolist()],
             textposition="outside",
+            cliponaxis=False,
             customdata=np.column_stack([d["confidence"], d["nps_points_at_risk"], d["incidents"]]),
             hovertemplate=(
                 "Tópico=%{y}<br>Prioridad=%{x:.2f}<br>"
@@ -743,7 +781,11 @@ def chart_incident_priority_matrix(
         legend=dict(orientation="h", y=1.08, x=0),
     )
     fig.update_xaxes(range=[0, 1], dtick=0.1, gridcolor=th.grid)
-    fig.update_yaxes(automargin=True)
+    fig.update_yaxes(
+        automargin=True,
+        categoryorder="array",
+        categoryarray=d["topic_label"].tolist(),
+    )
     _layout_common(fig, th, height=max(430, 240 + 38 * min(int(top_k), len(d))))
     return apply_plotly_template(fig, theme)
 
@@ -775,8 +817,11 @@ def chart_incident_risk_recovery(
         return None
     d = d.head(top_k).copy()
 
-    d["topic"] = d["nps_topic"].astype(str).str.slice(0, 42)
-    d["topic"] = d["topic"].where(d["nps_topic"].astype(str).str.len() <= 42, d["topic"] + "…")
+    d["topic"] = (
+        d["nps_topic"]
+        .astype(str)
+        .map(lambda value: _compact_axis_label(value, width=18, max_lines=2, max_chars=34))
+    )
     d["gap"] = d["nps_points_at_risk"] - d["nps_points_recoverable"]
     d = d.sort_values(["nps_points_at_risk", "gap"], ascending=[True, True]).copy()
 
@@ -804,6 +849,7 @@ def chart_incident_risk_recovery(
             marker=dict(color=detr_c, size=11),
             text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
             textposition="middle right",
+            cliponaxis=False,
             hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
         )
     )
@@ -816,6 +862,7 @@ def chart_incident_risk_recovery(
             marker=dict(color=pro_c, size=11, symbol="diamond"),
             text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
             textposition="middle left",
+            cliponaxis=False,
             hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
         )
     )
@@ -825,10 +872,144 @@ def chart_incident_risk_recovery(
         legend_title_text="Metricas",
         legend=dict(orientation="h", y=1.08, x=0),
     )
-    fig.update_yaxes(automargin=True)
+    fig.update_yaxes(automargin=True, categoryorder="array", categoryarray=d["topic"].tolist())
     xmax = float(max(d["nps_points_at_risk"].max(), d["nps_points_recoverable"].max()))
-    fig.update_xaxes(range=[0.0, xmax * 1.22 if xmax > 0 else 1.0])
+    upper = xmax * 1.18 if xmax > 0 else 1.0
+    dtick = 0.1 if upper <= 1.25 else 0.2 if upper <= 2.5 else None
+    fig.update_xaxes(range=[0.0, upper], dtick=dtick)
     _layout_common(fig, th, height=max(420, 240 + 42 * min(int(top_k), len(d))))
+    return apply_plotly_template(fig, theme)
+
+
+def chart_case_incident_heatmap(
+    by_topic_daily: pd.DataFrame,
+    theme: Theme,
+    *,
+    topic: str,
+):
+    """Single-topic heat strip used in app detail tabs and PPT exports."""
+    topic_key = str(topic or "").strip()
+    if by_topic_daily is None or by_topic_daily.empty or not topic_key:
+        return None
+
+    g_heat = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
+    if g_heat.empty:
+        return None
+    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
+    g_heat = g_heat.dropna(subset=["date"]).sort_values("date")
+    if g_heat.empty:
+        return None
+
+    incidents = pd.to_numeric(g_heat.get("incidents"), errors="coerce").fillna(0.0).astype(float)
+    th = chart_theme(theme)
+    import plotly.graph_objects as go
+
+    fig = go.Figure(
+        data=[
+            go.Heatmap(
+                x=g_heat["date"].tolist(),
+                y=["Incidencias"],
+                z=[incidents.tolist()],
+                zmin=0.0,
+                xgap=2,
+                ygap=2,
+                colorscale=plotly_risk_scale(DesignTokens.default(), theme.mode),
+                colorbar=dict(
+                    title="Incidencias",
+                    thickness=14,
+                    len=0.72,
+                    y=0.5,
+                ),
+                hovertemplate="Fecha=%{x|%Y-%m-%d}<br>Incidencias=%{z:.0f}<extra></extra>",
+            )
+        ]
+    )
+    fig.update_layout(
+        xaxis_title="Día",
+        yaxis_title="",
+        showlegend=False,
+    )
+    _apply_day_ticks(fig, list(g_heat["date"].dt.normalize()), max_ticks=8)
+    _layout_common(fig, th, height=280)
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False)
+    return apply_plotly_template(fig, theme)
+
+
+def chart_case_lag_days(
+    by_topic_daily: pd.DataFrame,
+    lag_days_by_topic: pd.DataFrame,
+    theme: Theme,
+    *,
+    topic: str,
+    focus_name: str,
+):
+    """Shared daily lag chart used by app tabs and PPT exports."""
+    topic_key = str(topic or "").strip()
+    if by_topic_daily is None or by_topic_daily.empty or not topic_key:
+        return None
+    if lag_days_by_topic is None or lag_days_by_topic.empty:
+        return None
+    if (
+        "nps_topic" not in lag_days_by_topic.columns
+        or "best_lag_days" not in lag_days_by_topic.columns
+    ):
+        return None
+
+    active_lag_days = lag_days_by_topic[
+        lag_days_by_topic["nps_topic"].astype(str).str.strip() == topic_key
+    ].copy()
+    if active_lag_days.empty:
+        return None
+
+    lagd_raw = pd.to_numeric(active_lag_days.iloc[0]["best_lag_days"], errors="coerce")
+    if pd.isna(lagd_raw):
+        return None
+    lagd = int(lagd_raw)
+    data = by_topic_daily[by_topic_daily["nps_topic"].astype(str).str.strip() == topic_key].copy()
+    if data.empty:
+        return None
+    data["date"] = pd.to_datetime(data["date"], errors="coerce")
+    data = data.dropna(subset=["date"]).sort_values("date")
+    if data.empty:
+        return None
+
+    data["focus_rate"] = pd.to_numeric(data.get("focus_rate"), errors="coerce").fillna(0.0)
+    data["incidents"] = pd.to_numeric(data.get("incidents"), errors="coerce").fillna(0.0)
+    data["incidents_shifted"] = data["incidents"].shift(lagd)
+
+    th = chart_theme(theme)
+    detr_c, _, _ = _status_colors(theme)
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=data["date"],
+            y=data["focus_rate"],
+            name=f"% {focus_name}",
+            mode="lines",
+            line=dict(color=detr_c, width=2),
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=data["date"],
+            y=data["incidents_shifted"],
+            name=f"# incidencias (shift {lagd}d)",
+            yaxis="y2",
+            opacity=0.70,
+            marker=dict(color=th.accent),
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Día",
+        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
+        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
+        legend=dict(orientation="h", x=0.0, y=1.08),
+    )
+    _apply_day_ticks(fig, list(data["date"].dt.normalize()), max_ticks=8)
+    _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 
 
@@ -960,6 +1141,12 @@ def chart_cohort_heatmap(
         return None
 
     pivot = agg.pivot(index=row_dim, columns=col_dim, values="nps")
+    pivot.index = [
+        _compact_axis_label(value, width=16, max_lines=2, max_chars=30) for value in pivot.index
+    ]
+    pivot.columns = [
+        _compact_axis_label(value, width=12, max_lines=2, max_chars=22) for value in pivot.columns
+    ]
     fig = px.imshow(
         pivot,
         aspect="auto",
@@ -972,8 +1159,17 @@ def chart_cohort_heatmap(
         coloraxis=dict(
             cmin=0.0,
             cmax=10.0,
-            colorbar=dict(title="NPS", tickmode="array", tickvals=[0, 2, 6, 8, 10]),
+            colorbar=dict(
+                title="NPS",
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+                len=0.78,
+                y=0.5,
+                thickness=14,
+            ),
         )
     )
+    fig.update_xaxes(tickangle=-28, side="bottom", automargin=True)
+    fig.update_yaxes(automargin=True)
     _layout_common(fig, th, height=420)
     return apply_plotly_template(fig, theme)

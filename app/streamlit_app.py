@@ -96,6 +96,8 @@ from nps_lens.ui.business import (
 )
 from nps_lens.ui.charts import (
     chart_broken_journeys_bar,
+    chart_case_incident_heatmap,
+    chart_case_lag_days,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
@@ -4542,33 +4544,15 @@ def page_nps_helix_linking(
                 )
 
             def _render_heat_tab() -> None:
-                g_heat = by_topic_daily_mode[
-                    by_topic_daily_mode["nps_topic"] == active_topic
-                ].copy()
-                if g_heat.empty:
+                heat = chart_case_incident_heatmap(
+                    by_topic_daily_mode,
+                    theme,
+                    topic=active_topic,
+                )
+                if heat is None:
                     st.info("No hay datos suficientes para el heat map del caso activo.")
                 else:
-                    g_heat["date"] = pd.to_datetime(g_heat["date"], errors="coerce")
-                    px, go = _plotly()
-                    heat = go.Figure(
-                        data=[
-                            go.Heatmap(
-                                x=g_heat["date"].dt.date.tolist(),
-                                y=["Incidencias"],
-                                z=[g_heat["incidents"].astype(float).tolist()],
-                                zmin=0,
-                                colorscale=risk_scale,
-                                colorbar=dict(title="Incidencias"),
-                                hovertemplate="Fecha=%{x}<br>Incidencias=%{z:.0f}<extra></extra>",
-                            )
-                        ]
-                    )
-                    heat.update_layout(
-                        height=260,
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        yaxis=dict(showticklabels=True),
-                    )
-                    st.plotly_chart(apply_plotly_theme(heat, theme), use_container_width=True)
+                    st.plotly_chart(heat, use_container_width=True)
 
             def _render_cp_tab() -> None:
                 g = (
@@ -4641,50 +4625,17 @@ def page_nps_helix_linking(
                     st.plotly_chart(apply_plotly_theme(fig_lag, theme), use_container_width=True)
 
             def _render_lag_tab() -> None:
-                active_lag_days = (
-                    lag_days[lag_days["nps_topic"] == active_topic].copy()
-                    if "lag_days" in locals() and not lag_days.empty
-                    else pd.DataFrame()
+                figd = chart_case_lag_days(
+                    by_topic_daily_mode,
+                    lag_days if "lag_days" in locals() else pd.DataFrame(),
+                    theme,
+                    topic=active_topic,
+                    focus_name=focus_name,
                 )
-                if active_lag_days.empty:
+                if figd is None:
                     st.info("No hay lag diario disponible para el caso activo.")
                 else:
-                    lagd = int(active_lag_days.iloc[0]["best_lag_days"])
-                    gd = (
-                        by_topic_daily_mode[by_topic_daily_mode["nps_topic"] == active_topic]
-                        .sort_values("date")
-                        .copy()
-                    )
-                    gd["incidents_shifted"] = gd["incidents"].shift(lagd)
-                    px, go = _plotly()
-                    figd = go.Figure()
-                    figd.add_trace(
-                        go.Scatter(
-                            x=gd["date"],
-                            y=gd["focus_rate"],
-                            name=f"% {focus_name}",
-                            mode="lines",
-                            line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
-                        )
-                    )
-                    figd.add_trace(
-                        go.Bar(
-                            x=gd["date"],
-                            y=gd["incidents_shifted"],
-                            name=f"# incidencias (shift {lagd}d)",
-                            yaxis="y2",
-                            opacity=0.70,
-                            marker=dict(color=pal["color.primary.accent.value-01.default"]),
-                        )
-                    )
-                    figd.update_layout(
-                        height=360,
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-                        yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
-                        legend=dict(orientation="h"),
-                    )
-                    st.plotly_chart(apply_plotly_theme(figd, theme), use_container_width=True)
+                    st.plotly_chart(figd, use_container_width=True)
 
             impact_chain(
                 [current_card],

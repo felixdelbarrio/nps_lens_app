@@ -23,6 +23,8 @@ from nps_lens.reports.ppt_template import (
     find_corporate_template_path,
     resolve_layout,
 )
+from nps_lens.ui.charts import chart_incident_risk_recovery
+from nps_lens.ui.theme import get_theme
 
 
 def _sample_payload() -> dict:
@@ -355,10 +357,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 12
+    assert out.slide_count >= 11
 
     prs = Presentation(BytesIO(out.content))
-    assert len(prs.slides) == 12
+    assert len(prs.slides) == out.slide_count
 
     texts = []
     for slide in prs.slides:
@@ -376,6 +378,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("NPS Lens" in t for t in texts)
     assert any("Mensaje clave del periodo" in t for t in texts)
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("NPS del canal Web por eje de experiencia" in t for t in texts)
+    assert any("Palanca · canal Web" in t for t in texts)
+    assert any("Subpalanca · canal Web" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
     assert any("2. Cuándo y cómo lo dicen" in t for t in texts)
     assert any("3. Qué ha cambiado respecto al pasado" in t for t in texts)
@@ -385,11 +390,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
     assert any("8. Experiencias afectadas del periodo" in t for t in texts)
     assert any("9.1 Análisis causal" in t for t in texts)
-    assert any("10.1 Detalle del caso" in t for t in texts)
+    assert not any("10.1 Matriz visual" in t for t in texts)
+    assert not any("11.1 Señal temporal" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
-    assert any("Corrección estructural" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
     assert not any("VoC" in t for t in texts)
 
@@ -641,11 +646,30 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
         )
     )
     assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 20
+    assert themed.layout.font.size == 17
+    assert themed.layout.legend.yanchor == "bottom"
     assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
     assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
     assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]
     assert themed.data[3].marker.color == "#" + executive_ppt.BBVA_COLORS["sky"]
+
+    heatmap_themed = executive_ppt._apply_ppt_figure_theme(
+        go.Figure(
+            [
+                go.Heatmap(
+                    z=[[0, 1]],
+                    x=["2026-02-10", "2026-02-11"],
+                    y=["Incidencias"],
+                    colorbar=dict(title="Incidencias"),
+                )
+            ]
+        )
+    )
+    assert heatmap_themed.layout.font.size == 18
+    assert heatmap_themed.layout.margin.r >= 84
+    assert heatmap_themed.data[0].xgap >= 2
+    assert heatmap_themed.data[0].ygap >= 2
+    assert heatmap_themed.data[0].colorbar.title.side == "right"
 
 
 def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
@@ -691,7 +715,6 @@ def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> Non
     assert executive_ppt._focus_risk_label("detractores") == "detracción"
     assert executive_ppt._focus_probability_label("promotores") == "Prob. de promoción"
     assert executive_ppt._focus_risk_label("otros") == "otros"
-    assert executive_ppt._action_lane_label("Fix estructural") == "Corrección estructural"
     assert executive_ppt._format_opportunity_scope("Palanca", "Pagos") == "Pagos (palanca)"
     assert executive_ppt._format_opportunity_scope("Subpalanca", "Login") == "Login (subpalanca)"
     assert executive_ppt._format_opportunity_scope("nps_topic", "Tema X") == "Tema X"
@@ -986,34 +1009,7 @@ def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
     assert len(opp_fig.data) == 1
 
 
-def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
-    payload = _sample_payload()
-    row = payload["attribution"].iloc[0]
-
-    assert (
-        executive_ppt._chain_temporal_fig(
-            row,
-            focus_name="detractores",
-            by_topic_daily=pd.DataFrame(),
-            lag_days_by_topic=payload["lag_days"],
-            lag_weeks_by_topic=None,
-            changepoints_by_topic=None,
-        )
-        is None
-    )
-
-    temporal_fig = executive_ppt._chain_temporal_fig(
-        row,
-        focus_name="detractores",
-        by_topic_daily=payload["by_topic_daily"],
-        lag_days_by_topic=payload["lag_days"],
-        lag_weeks_by_topic=None,
-        changepoints_by_topic=None,
-    )
-    assert temporal_fig is not None
-    assert temporal_fig.data[0]["name"] == "% detractores"
-    assert "shift 3d" in temporal_fig.data[1]["name"]
-
+def test_chain_helpers_cover_edge_cases() -> None:
     assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
     assert executive_ppt._chain_list(None) == []
     assert executive_ppt._chain_list("uno") == ["uno"]
@@ -1023,6 +1019,23 @@ def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
         {"incident_id": "INC1", "summary": "hola", "url": ""}
     ]
     assert executive_ppt._chain_incident_records(["bad"]) == []
+
+
+def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
+    rationale = pd.DataFrame(
+        {
+            "nps_topic": ["Pagos / Transferencias / No funciona bien / Error intermitente"],
+            "nps_points_at_risk": [0.74],
+            "nps_points_recoverable": [0.15],
+            "priority": [0.82],
+        }
+    )
+
+    fig = chart_incident_risk_recovery(rationale, get_theme("light"), top_k=1)
+    assert fig is not None
+    assert "<br>" in str(fig.data[0]["y"][0]) or "…" in str(fig.data[0]["y"][0])
+    assert fig.data[0]["cliponaxis"] is False
+    assert fig.data[1]["cliponaxis"] is False
 
 
 def test_build_incident_timeline_daily_filters_to_matching_hot_terms() -> None:
