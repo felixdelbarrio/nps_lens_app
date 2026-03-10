@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import contextlib
 import os
 import re
@@ -57,16 +56,12 @@ from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
     _compact_axis_label,
     chart_broken_journeys_bar,
-    chart_case_incident_heatmap,
-    chart_case_lag_days,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
-    chart_incident_priority_matrix,
-    chart_incident_risk_recovery,
     chart_opportunities_bar,
     chart_topic_bars,
 )
@@ -217,22 +212,6 @@ def _focus_risk_label(focus_name: str) -> str:
 def _focus_probability_label(focus_name: str) -> str:
     focus_label = _focus_risk_label(focus_name)
     return f"Prob. de {focus_label}"
-
-
-def _action_lane_label(value: object) -> str:
-    lane = str(value or "").strip()
-    normalized = unicodedata.normalize("NFKD", lane).encode("ascii", "ignore").decode("ascii")
-    normalized = re.sub(r"\s+", " ", normalized).strip().lower()
-    mapping = {
-        "quick win operativo": "Corrección operativa inmediata",
-        "fix estructural": "Corrección estructural",
-        "instrumentacion + validacion": "Revisión de medición y validación",
-        "instrumentacion+validacion": "Revisión de medición y validación",
-        "voc + analitica": "Análisis y validación adicional",
-        "canal + operaciones": "Canal y operaciones",
-        "producto + tecnologia": "Producto y tecnología",
-    }
-    return mapping.get(normalized, lane or "n/d")
 
 
 def _format_opportunity_scope(dimension: object, value: object) -> str:
@@ -772,42 +751,6 @@ def _opportunities_table(
     return pd.DataFrame([row.__dict__ for row in rows])[cols]
 
 
-def _matching_topic_for_chain(
-    chain_row: pd.Series,
-    by_topic_daily: Optional[pd.DataFrame],
-) -> str:
-    if by_topic_daily is None or by_topic_daily.empty or "nps_topic" not in by_topic_daily.columns:
-        return ""
-    values = set(by_topic_daily["nps_topic"].astype(str).str.strip().tolist())
-    candidates = [
-        str(chain_row.get("nps_topic", "") or "").strip(),
-        " > ".join(
-            [
-                str(chain_row.get("palanca", "") or "").strip(),
-                str(chain_row.get("subpalanca", "") or "").strip(),
-            ]
-        ).strip(" >"),
-        str(chain_row.get("palanca", "") or "").strip(),
-    ]
-    for candidate in candidates:
-        if candidate and candidate in values:
-            return candidate
-    return ""
-
-
-def _chain_comment_heatmap_fig(
-    chain_row: pd.Series,
-    *,
-    by_topic_daily: Optional[pd.DataFrame],
-) -> Optional[go.Figure]:
-    topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    return chart_case_incident_heatmap(
-        by_topic_daily if by_topic_daily is not None else pd.DataFrame(),
-        get_theme("light"),
-        topic=topic_key,
-    )
-
-
 def _chain_portfolio_fig(
     chain_df: Optional[pd.DataFrame],
     *,
@@ -852,25 +795,6 @@ def _chain_portfolio_fig(
         showlegend=False,
     )
     return fig
-
-
-def _chain_temporal_fig(
-    chain_row: pd.Series,
-    *,
-    focus_name: str,
-    by_topic_daily: Optional[pd.DataFrame],
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> Optional[go.Figure]:
-    topic_key = _matching_topic_for_chain(chain_row, by_topic_daily)
-    return chart_case_lag_days(
-        by_topic_daily if by_topic_daily is not None else pd.DataFrame(),
-        lag_days_by_topic if lag_days_by_topic is not None else pd.DataFrame(),
-        get_theme("light"),
-        topic=topic_key,
-        focus_name=focus_name,
-    )
 
 
 def _nps_evolution_fig(daily_mix: pd.DataFrame, overall_daily: pd.DataFrame) -> Optional[go.Figure]:
@@ -1670,13 +1594,19 @@ def _figure_in_panel(
     width: float,
     height: float,
     empty_note: str,
+    target_ppi: Optional[int] = None,
 ) -> None:
     img = None
     if figure is not None:
-        base_ppi = 150
-        width_px = max(int(width * base_ppi), 1100)
-        height_px = max(int(height * base_ppi), 320)
-        scale = max(1500 / max(width_px, 1), 700 / max(height_px, 1), 1.0)
+        if target_ppi is not None and int(target_ppi) > 0:
+            width_px = max(int(width * int(target_ppi)), 640)
+            height_px = max(int(height * int(target_ppi)), 360)
+            scale = 1.0
+        else:
+            base_ppi = 150
+            width_px = max(int(width * base_ppi), 1100)
+            height_px = max(int(height * base_ppi), 320)
+            scale = max(1500 / max(width_px, 1), 700 / max(height_px, 1), 1.0)
         img = _kaleido_png(
             figure,
             width=int(width_px * scale),
@@ -3762,84 +3692,6 @@ def _hotspot_summary_row(
     return None
 
 
-def _parse_changepoints(value: object) -> list[pd.Timestamp]:
-    if value is None:
-        return []
-    raw = value
-    if isinstance(raw, str):
-        s = raw.strip()
-        if not s:
-            return []
-        if s.startswith("[") and s.endswith("]"):
-            with contextlib.suppress(Exception):
-                raw = ast.literal_eval(s)
-        else:
-            raw = [s]
-
-    if not isinstance(raw, (list, tuple, np.ndarray, pd.Series)):
-        raw = [raw]
-
-    out: list[pd.Timestamp] = []
-    for v in raw:
-        ts = _safe_dt(v)
-        if ts is not None:
-            out.append(ts.normalize())
-    return out
-
-
-def _changepoints_map(
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> dict[str, list[pd.Timestamp]]:
-    if changepoints_by_topic is None or changepoints_by_topic.empty:
-        return {}
-    if "nps_topic" not in changepoints_by_topic.columns:
-        return {}
-
-    out: dict[str, list[pd.Timestamp]] = {}
-    for _, r in changepoints_by_topic.iterrows():
-        topic = str(r.get("nps_topic", "")).strip()
-        if not topic:
-            continue
-        cp_col = r.get("changepoints", [])
-        parsed = _parse_changepoints(cp_col)
-        out[topic] = parsed
-    return out
-
-
-def _lag_days_for_topic(
-    topic: str,
-    *,
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    rationale_df: pd.DataFrame,
-    ranking_df: Optional[pd.DataFrame],
-) -> int:
-    topic = str(topic or "").strip()
-    if not topic:
-        return 0
-
-    def _hit(df: Optional[pd.DataFrame], col: str) -> Optional[int]:
-        if df is None or df.empty:
-            return None
-        if "nps_topic" not in df.columns or col not in df.columns:
-            return None
-        h = df[df["nps_topic"].astype(str) == topic].head(1)
-        if h.empty:
-            return None
-        return max(0, _safe_int(h.iloc[0][col], default=0))
-
-    direct = _hit(lag_days_by_topic, "best_lag_days")
-    if direct is not None:
-        return direct
-
-    for frame in [ranking_df, lag_weeks_by_topic, rationale_df]:
-        lag_w = _hit(frame, "best_lag_weeks")
-        if lag_w is not None:
-            return max(0, int(round(float(lag_w) * 7.0)))
-
-    return 0
-
-
 def _incident_related_timeline(
     *,
     incident_id: str,
@@ -4712,24 +4564,28 @@ def _add_pain_by_group_slide(
         label_count = len(row_values)
         max_len = int(pd.Series(row_values).astype(str).str.len().max() or 0)
         y_font_size = (
-            30
+            44
             if label_count <= 5
-            else 28
+            else 40
             if label_count <= 7
-            else 26
+            else 36
             if label_count <= 10
-            else 24
+            else 31
         )
-        left_margin = 272 if max_len >= 34 else 252 if max_len >= 28 else 236
+        left_margin = (
+            372 if max_len >= 40 else 352 if max_len >= 34 else 334 if max_len >= 28 else 316
+        )
         label_map = {
             _compact_axis_label(value, width=16, max_lines=2, max_chars=30): str(value)
             for value in row_values
         }
         with contextlib.suppress(Exception):
-            fig.data[0].y = [
+            rendered_y_values = [
                 label_map.get(str(value), str(value).replace("<br>", " "))
                 for value in list(fig.data[0].y)
             ]
+            fig.data[0].y = rendered_y_values
+        rendered_y_values = list(dict.fromkeys([str(v) for v in list(getattr(fig.data[0], "y", []))]))
 
         if include_all_rows:
             with contextlib.suppress(Exception):
@@ -4743,7 +4599,12 @@ def _add_pain_by_group_slide(
                 fig.data[0].z = z_values
         fig.update_yaxes(
             title_text="",
-            tickfont=dict(size=y_font_size),
+            categoryorder="array",
+            categoryarray=rendered_y_values,
+            tickmode="array",
+            tickvals=rendered_y_values,
+            ticktext=rendered_y_values,
+            tickfont=dict(size=y_font_size, family=BBVA_FONT_BODY, color="#" + BBVA_COLORS["ink"]),
             automargin=True,
         )
         fig.update_xaxes(
@@ -4752,15 +4613,15 @@ def _add_pain_by_group_slide(
             tickmode="array",
             tickvals=["Web"],
             ticktext=[x_tick_label],
-            tickfont=dict(size=18),
+            tickfont=dict(size=14),
             automargin=True,
         )
         fig.update_layout(
             margin=dict(
                 l=left_margin,
                 r=88 if show_scale else 20,
-                t=16,
-                b=28,
+                t=14,
+                b=24,
             )
         )
         fig.update_coloraxes(showscale=show_scale)
@@ -4802,9 +4663,10 @@ def _add_pain_by_group_slide(
         ),
         left=0.82,
         top=1.86,
-        width=5.18,
+        width=5.14,
         height=4.92,
         empty_note="No hay señal suficiente para mostrar la matriz Palanca del canal Web.",
+        target_ppi=176,
     )
     _panel(
         slide,
@@ -4823,9 +4685,10 @@ def _add_pain_by_group_slide(
         ),
         left=6.96,
         top=1.86,
-        width=5.54,
+        width=5.48,
         height=4.92,
         empty_note="No hay señal suficiente para mostrar la matriz Subpalanca del canal Web.",
+        target_ppi=176,
     )
 
 
@@ -4843,10 +4706,10 @@ def _add_gap_slide(
 
         plot_df = gap_df.head(10).copy()
         max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
-        wrap_width = 18 if max_len >= 20 else 16
-        max_chars = 26 if max_len >= 20 else 24
-        y_font_size = 26 if len(plot_df) <= 6 else 24 if len(plot_df) <= 8 else 22
-        left_margin = 210 if max_len >= 22 else 186 if max_len >= 18 else 170
+        wrap_width = 24 if max_len >= 24 else 22 if max_len >= 18 else 20
+        max_chars = 44 if max_len >= 24 else 38 if max_len >= 18 else 34
+        y_font_size = 34 if len(plot_df) <= 6 else 31 if len(plot_df) <= 8 else 28
+        left_margin = 340 if max_len >= 30 else 314 if max_len >= 24 else 288 if max_len >= 18 else 262
         label_map = {
             value: _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
             for value in plot_df["value"].astype(str).tolist()
@@ -4855,13 +4718,13 @@ def _add_gap_slide(
             fig.data[0].y = [label_map.get(str(value), str(value)) for value in list(fig.data[0].y)]
         fig.update_yaxes(
             title_text="",
-            tickfont=dict(size=y_font_size),
+            tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
             automargin=True,
         )
         fig.update_xaxes(
             title_text="Gap NPS",
-            tickfont=dict(size=18),
-            title_font=dict(size=19),
+            tickfont=dict(size=16),
+            title_font=dict(size=17),
             nticks=4,
         )
         fig.update_layout(
@@ -4886,10 +4749,11 @@ def _add_gap_slide(
         slide,
         figure=_gap_figure(palanca_gap_df, panel_height_in=2.00),
         left=0.82,
-        top=1.78,
+        top=1.72,
         width=8.08,
-        height=2.00,
+        height=2.10,
         empty_note="No hay suficiente señal para el ranking de brechas por palanca.",
+        target_ppi=174,
     )
 
     palanca_lines = [
@@ -4912,10 +4776,11 @@ def _add_gap_slide(
         slide,
         figure=_gap_figure(subpalanca_gap_df, panel_height_in=2.44),
         left=0.82,
-        top=4.28,
+        top=4.22,
         width=8.08,
-        height=2.44,
+        height=2.56,
         empty_note="No hay suficiente señal para el ranking de brechas por subpalanca.",
+        target_ppi=174,
     )
     subpalanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
@@ -5174,6 +5039,70 @@ def _add_journeys_summary_slide(
     touchpoint_source: str,
     journey_df: pd.DataFrame,
 ) -> None:
+    def _journeys_summary_figure(journeys: pd.DataFrame) -> Optional[go.Figure]:
+        fig = chart_broken_journeys_bar(
+            journeys,
+            get_theme("light"),
+            top_k=min(10, len(journeys)) if not journeys.empty else 10,
+        )
+        if fig is None or journeys.empty:
+            return fig
+
+        y_values = [str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))]
+        if not y_values:
+            return fig
+
+        max_len = max(len(value) for value in y_values)
+        label_count = len(y_values)
+        wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
+        max_chars = 92 if max_len <= 72 else 84
+        y_font_size = 30 if label_count <= 6 else 27 if label_count <= 8 else 24
+        left_margin = 430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
+
+        pretty_labels = [
+            _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
+            for value in y_values
+        ]
+        with contextlib.suppress(Exception):
+            fig.data[0].y = pretty_labels
+
+        fig.update_yaxes(
+            title_text="",
+            tickmode="array",
+            tickvals=pretty_labels,
+            ticktext=pretty_labels,
+            tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text="Links validados Helix↔VoC",
+            tickfont=dict(size=17),
+            title_font=dict(size=18),
+            nticks=6,
+            automargin=True,
+        )
+        fig.update_layout(
+            margin=dict(
+                l=left_margin,
+                r=104,
+                t=14,
+                b=34,
+            ),
+            bargap=0.22,
+        )
+        fig.update_coloraxes(
+            colorbar=dict(
+                title=dict(text="NPS medio", side="right", font=dict(size=15)),
+                tickmode="array",
+                tickvals=[0, 2, 6, 8, 10],
+                tickfont=dict(size=14),
+                len=0.82,
+                y=0.5,
+                thickness=16,
+            )
+        )
+        return fig
+
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -5244,16 +5173,13 @@ def _add_journeys_summary_slide(
     _panel(slide, left=0.66, top=2.88, width=12.02, height=4.02, title="")
     _figure_in_panel(
         slide,
-        figure=chart_broken_journeys_bar(
-            journeys_df,
-            get_theme("light"),
-            top_k=min(10, len(journeys_df)) if not journeys_df.empty else 10,
-        ),
+        figure=_journeys_summary_figure(journeys_df),
         left=0.84,
-        top=3.16,
+        top=3.10,
         width=11.66,
-        height=3.46,
+        height=3.56,
         empty_note="No he identificado journeys rotos defendibles en esta ventana.",
+        target_ppi=170,
     )
 
 
@@ -5382,148 +5308,6 @@ def _add_chain_scenario_slide(
     )
 
 
-def _add_chain_detail_slide(
-    prs: Presentation,
-    *,
-    chain_row: pd.Series,
-    idx: int,
-    focus_name: str,
-    period_label: str,
-    chain_df: pd.DataFrame,
-    by_topic_daily: Optional[pd.DataFrame],
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> None:
-    del chain_df
-
-    slide = _new_slide(prs)
-    _add_bg(slide, BBVA_COLORS["bg_light"])
-    title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
-    _add_header(
-        slide,
-        title=f"10.{idx} Matriz visual",
-        subtitle=f"{title} · mismos gráficos que ve negocio en la aplicación · {period_label}",
-    )
-    active_case_df = pd.DataFrame([chain_row]).copy()
-    _panel(slide, left=0.66, top=1.48, width=5.86, height=3.02, title="Prioridad y confianza")
-    _figure_in_panel(
-        slide,
-        figure=chart_incident_priority_matrix(active_case_df, get_theme("light"), top_k=1),
-        left=0.80,
-        top=1.84,
-        width=5.58,
-        height=2.44,
-        empty_note="No hay cartera suficiente para mostrar la prioridad del caso.",
-    )
-    _panel(
-        slide,
-        left=6.82,
-        top=1.48,
-        width=5.86,
-        height=3.02,
-        title="NPS en riesgo vs recuperable",
-    )
-    _figure_in_panel(
-        slide,
-        figure=chart_incident_risk_recovery(active_case_df, get_theme("light"), top_k=1),
-        left=6.96,
-        top=1.84,
-        width=5.58,
-        height=2.44,
-        empty_note="No hay cartera suficiente para posicionar el caso.",
-    )
-    quant_lines = [
-        f"Palanca: {_clip(chain_row.get('palanca', 'n/d'), 28)}",
-        f"Subpalanca: {_clip(chain_row.get('subpalanca', 'n/d'), 28)}",
-        f"Retraso estimado: {_lag_days_for_topic(_matching_topic_for_chain(chain_row, by_topic_daily), lag_days_by_topic=lag_days_by_topic, lag_weeks_by_topic=lag_weeks_by_topic, rationale_df=pd.DataFrame(), ranking_df=None)} días",
-        f"Puntos de cambio: {len(_changepoints_map(changepoints_by_topic).get(_matching_topic_for_chain(chain_row, by_topic_daily), []))}",
-        f"Tipo de acción: {_clip(_action_lane_label(chain_row.get('action_lane', 'n/d')), 34)}",
-        f"Equipo responsable: {_clip(chain_row.get('owner_role', 'n/d'), 30)}",
-    ]
-    _add_bullet_lines(
-        slide,
-        left=0.66,
-        top=4.74,
-        width=12.02,
-        height=1.12,
-        title="Lectura rápida",
-        lines=quant_lines,
-        accent=BBVA_COLORS["blue"],
-        body_font_size_pt=10.0,
-    )
-    _add_bullet_lines(
-        slide,
-        left=0.66,
-        top=5.98,
-        width=12.02,
-        height=0.92,
-        title="Evidencias clave",
-        lines=(
-            [
-                f"Helix: {_clean_evidence_excerpt(line, max_len=124)}"
-                for line in _chain_list(chain_row.get("incident_examples"))[:1]
-            ]
-            + [
-                f"Cliente: {_clean_evidence_excerpt(line, max_len=124)}"
-                for line in _chain_list(chain_row.get("comment_examples"))[:1]
-            ]
-        )
-        or ["Sin evidencias adicionales en el detalle."],
-        accent=BBVA_COLORS["orange"],
-        body_font_size_pt=10.0,
-    )
-
-
-def _add_chain_signal_slide(
-    prs: Presentation,
-    *,
-    chain_row: pd.Series,
-    idx: int,
-    focus_name: str,
-    period_label: str,
-    by_topic_daily: Optional[pd.DataFrame],
-    lag_days_by_topic: Optional[pd.DataFrame],
-    lag_weeks_by_topic: Optional[pd.DataFrame],
-    changepoints_by_topic: Optional[pd.DataFrame],
-) -> None:
-    slide = _new_slide(prs)
-    _add_bg(slide, BBVA_COLORS["bg_light"])
-    title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 72)
-    _add_header(
-        slide,
-        title=f"11.{idx} Señal temporal",
-        subtitle=f"{title} · heat map de incidencias y lag diario compartidos con la app · {period_label}",
-    )
-    _panel(slide, left=0.66, top=1.48, width=12.02, height=1.78, title="Heat map de incidencias")
-    _figure_in_panel(
-        slide,
-        figure=_chain_comment_heatmap_fig(chain_row, by_topic_daily=by_topic_daily),
-        left=0.82,
-        top=1.84,
-        width=11.70,
-        height=1.16,
-        empty_note="No hay suficiente detalle temporal en los comentarios vinculados.",
-    )
-    _panel(slide, left=0.66, top=3.48, width=12.02, height=3.42, title="Lag en días")
-    _figure_in_panel(
-        slide,
-        figure=_chain_temporal_fig(
-            chain_row,
-            focus_name=focus_name,
-            by_topic_daily=by_topic_daily,
-            lag_days_by_topic=lag_days_by_topic,
-            lag_weeks_by_topic=lag_weeks_by_topic,
-            changepoints_by_topic=changepoints_by_topic,
-        ),
-        left=0.82,
-        top=3.84,
-        width=11.70,
-        height=2.86,
-        empty_note="No hay cobertura suficiente para la vista temporal de la cadena.",
-    )
-
-
 def generate_business_review_ppt(
     *,
     service_origin: str,
@@ -5572,7 +5356,11 @@ def generate_business_review_ppt(
         median_lag_weeks,
         rationale_df,
         ranking_df,
+        by_topic_daily,
+        lag_days_by_topic,
         by_topic_weekly,
+        lag_weeks_by_topic,
+        changepoints_by_topic,
         executive_journey_catalog,
     )
 
@@ -5708,29 +5496,6 @@ def generate_business_review_ppt(
                 idx=idx,
                 focus_name=focus_name,
                 period_label=period_label,
-            )
-            _add_chain_detail_slide(
-                prs,
-                chain_row=chain_row,
-                idx=idx,
-                focus_name=focus_name,
-                period_label=period_label,
-                chain_df=chains,
-                by_topic_daily=by_topic_daily,
-                lag_days_by_topic=lag_days_by_topic,
-                lag_weeks_by_topic=lag_weeks_by_topic,
-                changepoints_by_topic=changepoints_by_topic,
-            )
-            _add_chain_signal_slide(
-                prs,
-                chain_row=chain_row,
-                idx=idx,
-                focus_name=focus_name,
-                period_label=period_label,
-                by_topic_daily=by_topic_daily,
-                lag_days_by_topic=lag_days_by_topic,
-                lag_weeks_by_topic=lag_weeks_by_topic,
-                changepoints_by_topic=changepoints_by_topic,
             )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")

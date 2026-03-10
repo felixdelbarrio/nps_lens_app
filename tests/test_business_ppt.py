@@ -357,7 +357,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count >= 13
+    assert out.slide_count >= 11
 
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == out.slide_count
@@ -390,12 +390,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
     assert any("8. Experiencias afectadas del periodo" in t for t in texts)
     assert any("9.1 Análisis causal" in t for t in texts)
-    assert any("10.1 Matriz visual" in t for t in texts)
-    assert any("11.1 Señal temporal" in t for t in texts)
+    assert not any("10.1 Matriz visual" in t for t in texts)
+    assert not any("11.1 Señal temporal" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
-    assert any("Corrección estructural" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
     assert not any("VoC" in t for t in texts)
 
@@ -716,7 +715,6 @@ def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> Non
     assert executive_ppt._focus_risk_label("detractores") == "detracción"
     assert executive_ppt._focus_probability_label("promotores") == "Prob. de promoción"
     assert executive_ppt._focus_risk_label("otros") == "otros"
-    assert executive_ppt._action_lane_label("Fix estructural") == "Corrección estructural"
     assert executive_ppt._format_opportunity_scope("Palanca", "Pagos") == "Pagos (palanca)"
     assert executive_ppt._format_opportunity_scope("Subpalanca", "Login") == "Login (subpalanca)"
     assert executive_ppt._format_opportunity_scope("nps_topic", "Tema X") == "Tema X"
@@ -1011,33 +1009,8 @@ def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
     assert len(opp_fig.data) == 1
 
 
-def test_chain_temporal_and_chain_helpers_cover_edge_cases() -> None:
+def test_chain_helpers_cover_edge_cases() -> None:
     payload = _sample_payload()
-    row = payload["attribution"].iloc[0]
-
-    assert (
-        executive_ppt._chain_temporal_fig(
-            row,
-            focus_name="detractores",
-            by_topic_daily=pd.DataFrame(),
-            lag_days_by_topic=payload["lag_days"],
-            lag_weeks_by_topic=None,
-            changepoints_by_topic=None,
-        )
-        is None
-    )
-
-    temporal_fig = executive_ppt._chain_temporal_fig(
-        row,
-        focus_name="detractores",
-        by_topic_daily=payload["by_topic_daily"],
-        lag_days_by_topic=payload["lag_days"],
-        lag_weeks_by_topic=None,
-        changepoints_by_topic=None,
-    )
-    assert temporal_fig is not None
-    assert temporal_fig.data[0]["name"] == "% detractores"
-    assert "shift 3d" in temporal_fig.data[1]["name"]
 
     assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
     assert executive_ppt._chain_list(None) == []
