@@ -4544,11 +4544,7 @@ def _add_pain_by_group_slide(
         if fig is None:
             return None
 
-        agg = (
-            chart_df.groupby([row_dim, "Canal"], as_index=False)
-            .agg(n=("NPS", "size"))
-            .copy()
-        )
+        agg = chart_df.groupby([row_dim, "Canal"], as_index=False).agg(n=("NPS", "size")).copy()
         if agg.empty:
             return None
 
@@ -4563,13 +4559,7 @@ def _add_pain_by_group_slide(
         label_count = len(row_values)
         max_len = int(pd.Series(row_values).astype(str).str.len().max() or 0)
         y_font_size = (
-            44
-            if label_count <= 5
-            else 40
-            if label_count <= 7
-            else 36
-            if label_count <= 10
-            else 31
+            44 if label_count <= 5 else 40 if label_count <= 7 else 36 if label_count <= 10 else 31
         )
         left_margin = (
             372 if max_len >= 40 else 352 if max_len >= 34 else 334 if max_len >= 28 else 316
@@ -4584,12 +4574,17 @@ def _add_pain_by_group_slide(
                 for value in list(fig.data[0].y)
             ]
             fig.data[0].y = rendered_y_values
-        rendered_y_values = list(dict.fromkeys([str(v) for v in list(getattr(fig.data[0], "y", []))]))
+        rendered_y_values = list(
+            dict.fromkeys([str(v) for v in list(getattr(fig.data[0], "y", []))])
+        )
 
         if include_all_rows:
             with contextlib.suppress(Exception):
                 n_by_row = (
-                    agg.groupby(row_dim, as_index=False)["n"].sum().set_index(row_dim)["n"].to_dict()
+                    agg.groupby(row_dim, as_index=False)["n"]
+                    .sum()
+                    .set_index(row_dim)["n"]
+                    .to_dict()
                 )
                 z_values = np.array(fig.data[0].z, dtype=float)
                 for idx, y_value in enumerate(list(fig.data[0].y)):
@@ -4708,7 +4703,9 @@ def _add_gap_slide(
         wrap_width = 24 if max_len >= 24 else 22 if max_len >= 18 else 20
         max_chars = 44 if max_len >= 24 else 38 if max_len >= 18 else 34
         y_font_size = 34 if len(plot_df) <= 6 else 31 if len(plot_df) <= 8 else 28
-        left_margin = 340 if max_len >= 30 else 314 if max_len >= 24 else 288 if max_len >= 18 else 262
+        left_margin = (
+            340 if max_len >= 30 else 314 if max_len >= 24 else 288 if max_len >= 18 else 262
+        )
         label_map = {
             value: _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
             for value in plot_df["value"].astype(str).tolist()
@@ -4717,7 +4714,9 @@ def _add_gap_slide(
             fig.data[0].y = [label_map.get(str(value), str(value)) for value in list(fig.data[0].y)]
         fig.update_yaxes(
             title_text="",
-            tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+            tickfont=dict(
+                size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]
+            ),
             automargin=True,
         )
         fig.update_xaxes(
@@ -5047,7 +5046,9 @@ def _add_journeys_summary_slide(
         if fig is None or journeys.empty:
             return fig
 
-        y_values = [str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))]
+        y_values = [
+            str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))
+        ]
         if not y_values:
             return fig
 
@@ -5056,7 +5057,9 @@ def _add_journeys_summary_slide(
         wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
         max_chars = 92 if max_len <= 72 else 84
         y_font_size = 30 if label_count <= 6 else 27 if label_count <= 8 else 24
-        left_margin = 430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
+        left_margin = (
+            430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
+        )
 
         pretty_labels = [
             _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
@@ -5070,7 +5073,9 @@ def _add_journeys_summary_slide(
             tickmode="array",
             tickvals=pretty_labels,
             ticktext=pretty_labels,
-            tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+            tickfont=dict(
+                size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]
+            ),
             automargin=True,
         )
         fig.update_xaxes(
