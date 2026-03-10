@@ -1290,14 +1290,20 @@ def _apply_ppt_figure_theme(fig: go.Figure) -> go.Figure:
     grid = "#" + BBVA_COLORS["line"]
     white = "#" + BBVA_COLORS["white"]
     trace_types = {
-        str(getattr(trace, "type", "") or "").strip().lower() for trace in fig.data if trace is not None
+        str(getattr(trace, "type", "") or "").strip().lower()
+        for trace in fig.data
+        if trace is not None
     }
     has_heatmap = "heatmap" in trace_types
-    has_legend = sum(
-        1
-        for trace in fig.data
-        if bool(getattr(trace, "showlegend", True)) and str(getattr(trace, "name", "") or "").strip()
-    ) > 1
+    has_legend = (
+        sum(
+            1
+            for trace in fig.data
+            if bool(getattr(trace, "showlegend", True))
+            and str(getattr(trace, "name", "") or "").strip()
+        )
+        > 1
+    )
     has_scatter_text = any(
         str(getattr(trace, "type", "") or "").strip().lower() == "scatter"
         and "text" in str(getattr(trace, "mode", "") or "").lower()

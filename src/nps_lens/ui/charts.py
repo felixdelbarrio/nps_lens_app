@@ -708,8 +708,10 @@ def chart_incident_priority_matrix(
     if d.empty:
         return None
 
-    d["short_topic"] = d["nps_topic"].astype(str).map(
-        lambda value: _compact_axis_label(value, width=20, max_lines=2, max_chars=36)
+    d["short_topic"] = (
+        d["nps_topic"]
+        .astype(str)
+        .map(lambda value: _compact_axis_label(value, width=20, max_lines=2, max_chars=36))
     )
     d["confidence"] = pd.to_numeric(d["confidence"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
     d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
@@ -815,8 +817,10 @@ def chart_incident_risk_recovery(
         return None
     d = d.head(top_k).copy()
 
-    d["topic"] = d["nps_topic"].astype(str).map(
-        lambda value: _compact_axis_label(value, width=18, max_lines=2, max_chars=34)
+    d["topic"] = (
+        d["nps_topic"]
+        .astype(str)
+        .map(lambda value: _compact_axis_label(value, width=18, max_lines=2, max_chars=34))
     )
     d["gap"] = d["nps_points_at_risk"] - d["nps_points_recoverable"]
     d = d.sort_values(["nps_points_at_risk", "gap"], ascending=[True, True]).copy()
@@ -946,7 +950,10 @@ def chart_case_lag_days(
         return None
     if lag_days_by_topic is None or lag_days_by_topic.empty:
         return None
-    if "nps_topic" not in lag_days_by_topic.columns or "best_lag_days" not in lag_days_by_topic.columns:
+    if (
+        "nps_topic" not in lag_days_by_topic.columns
+        or "best_lag_days" not in lag_days_by_topic.columns
+    ):
         return None
 
     active_lag_days = lag_days_by_topic[
@@ -1138,8 +1145,7 @@ def chart_cohort_heatmap(
         _compact_axis_label(value, width=16, max_lines=2, max_chars=30) for value in pivot.index
     ]
     pivot.columns = [
-        _compact_axis_label(value, width=12, max_lines=2, max_chars=22)
-        for value in pivot.columns
+        _compact_axis_label(value, width=12, max_lines=2, max_chars=22) for value in pivot.columns
     ]
     fig = px.imshow(
         pivot,
