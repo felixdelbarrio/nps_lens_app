@@ -57,13 +57,14 @@ build:
 			--clean \
 			--noconfirm \
 			--name nps-lens \
-			--onefile \
+			--windowed \
 			--icon "$(ROOT)/$(ICON_ICNS)" \
 			--add-data="$(ROOT)/app:app" \
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
 			--collect-submodules webview \
 			--collect-all kaleido \
+			--collect-all streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
 			--workpath $$out/work \
@@ -80,7 +81,8 @@ build:
 			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
 		fi; \
 		$(VENV)/bin/pyinstaller "$$@"; \
-		echo "Built: $$out/dist/nps-lens"; \
+		echo "Built app: $$out/dist/nps-lens.app"; \
+		echo "Built folder: $$out/dist/nps-lens"; \
 	elif [ "$$uname_s" = "Linux" ]; then \
 		out=build/pyinstaller/linux; \
 		mkdir -p $$out/dist $$out/work $$out/spec; \
@@ -93,6 +95,7 @@ build:
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
 			--collect-submodules webview \
 			--collect-all kaleido \
+			--collect-all streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
 			--workpath $$out/work \
