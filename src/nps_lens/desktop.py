@@ -66,6 +66,9 @@ def _run_streamlit_server(port: int) -> None:
         raise FileNotFoundError(f"Streamlit app script not found: {app_script}")
 
     flags = {
+        # In frozen builds, Streamlit may auto-detect development mode.
+        # Force production mode so custom server.* options are accepted.
+        "global.developmentMode": False,
         "server.port": port,
         "server.address": "127.0.0.1",
         "server.headless": True,
