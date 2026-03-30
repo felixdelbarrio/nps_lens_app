@@ -291,36 +291,16 @@ button[aria-label="Close sidebar"]:focus-visible {{
   border-color: var(--nps-control-border) !important;
 }}
 
-/* Draw the chevron with pseudo-element for consistent visibility across Streamlit versions. */
-button[aria-label="Open sidebar"]::before,
-button[aria-label="Close sidebar"]::before {{
-  display: block;
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 800;
-  color: var(--nps-control-icon);
-}}
-
-button[aria-label="Open sidebar"]::before {{
-  content: "❯";
-}}
-
-button[aria-label="Close sidebar"]::before {{
-  content: "❮";
-}}
-
 [data-testid="stSidebarCollapseButton"] button svg,
 [data-testid="stSidebarCollapsedControl"] button svg,
 [data-testid="collapsedControl"] button svg,
 button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
   color: var(--nps-control-icon) !important;
+  width: 16px !important;
+  height: 16px !important;
   opacity: 1 !important;
-}}
-
-button[aria-label="Open sidebar"] svg,
-button[aria-label="Close sidebar"] svg {{
-  display: none !important;
+  display: block !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button svg path,

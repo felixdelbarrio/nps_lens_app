@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -30,19 +30,24 @@ def normalize_focus_group(focus_group: str) -> FocusGroup:
     return "detractor"
 
 
-def _score_series(df: pd.DataFrame, *, score_col: str = "NPS") -> pd.Series:
+def _score_series(df: pd.DataFrame, *, score_col: str = "NPS") -> pd.Series[Any]:
     if score_col not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype="float64")
     return pd.to_numeric(df[score_col], errors="coerce")
 
 
-def _group_series(df: pd.DataFrame, *, group_col: str = "NPS Group") -> pd.Series:
+def _group_series(df: pd.DataFrame, *, group_col: str = "NPS Group") -> pd.Series[Any]:
     if group_col not in df.columns:
         return pd.Series("", index=df.index, dtype="string")
     return df[group_col].astype(str).str.strip().str.lower()
 
 
-def _focus_mask_from_series(score: pd.Series, group: pd.Series, *, focus_group: FocusGroup) -> pd.Series:
+def _focus_mask_from_series(
+    score: pd.Series[Any],
+    group: pd.Series[Any],
+    *,
+    focus_group: FocusGroup,
+) -> pd.Series[Any]:
     if focus_group == "promoter":
         return group.str.contains("promot", na=False) | (score >= 9.0)
     if focus_group == "passive":
@@ -56,7 +61,7 @@ def focus_mask(
     focus_group: str,
     score_col: str = "NPS",
     group_col: str = "NPS Group",
-) -> pd.Series:
+) -> pd.Series[Any]:
     fg = normalize_focus_group(focus_group)
     score = _score_series(df, score_col=score_col)
     group = _group_series(df, group_col=group_col)
@@ -76,9 +81,13 @@ def filter_by_nps_group(
     if df is None or df.empty:
         return df
     if gm.startswith("prom"):
-        return df.loc[focus_mask(df, focus_group="promoter", score_col=score_col, group_col=group_col)]
+        return df.loc[
+            focus_mask(df, focus_group="promoter", score_col=score_col, group_col=group_col)
+        ]
     if gm.startswith("neu") or gm.startswith("pas"):
-        return df.loc[focus_mask(df, focus_group="passive", score_col=score_col, group_col=group_col)]
+        return df.loc[
+            focus_mask(df, focus_group="passive", score_col=score_col, group_col=group_col)
+        ]
     return df.loc[focus_mask(df, focus_group="detractor", score_col=score_col, group_col=group_col)]
 
 

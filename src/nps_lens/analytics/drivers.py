@@ -38,7 +38,9 @@ def grouped_driver_stats(
             columns=[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]
         )
 
-    work = pd.DataFrame({dimension: df[dimension], "_score": pd.to_numeric(df[score_col], errors="coerce")})
+    work = pd.DataFrame(
+        {dimension: df[dimension], "_score": pd.to_numeric(df[score_col], errors="coerce")}
+    )
     work["_valid"] = work["_score"].notna()
     work["_det"] = work["_score"] <= 6.0
     work["_pro"] = work["_score"] >= 9.0

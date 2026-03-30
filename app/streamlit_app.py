@@ -733,6 +733,7 @@ CHART_COLUMNS = {
     "topics": ("Comment",),
 }
 
+
 def _unique_string_values(values: list[object]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
@@ -1368,6 +1369,7 @@ def _build_business_report_md(
         top_opportunities=opp_bullets,
         top_topics=topic_bullets,
     )
+
 
 def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     """Render a browser-side copy button.
@@ -2847,7 +2849,9 @@ def page_executive(
             page_text(text_df, theme, embedded=True)
 
     with tab_when:
-        fig_vol = chart_daily_volume(df_win, theme, days=int(context_days), metrics=daily_metrics_df)
+        fig_vol = chart_daily_volume(
+            df_win, theme, days=int(context_days), metrics=daily_metrics_df
+        )
         if fig_vol is None:
             st.info("No hay suficientes datos para construir la vista de volumen diario.")
         else:

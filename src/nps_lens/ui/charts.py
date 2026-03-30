@@ -435,9 +435,7 @@ def chart_daily_mix_business(
             "pas_pct": "passives",
             "pro_pct": "promoters",
         }
-    )[
-        ["day", "n", "detractors", "passives", "promoters"]
-    ].copy()
+    )[["day", "n", "detractors", "passives", "promoters"]].copy()
 
     th = chart_theme(theme)
     detr_c, pas_c, pro_c = _status_colors(theme)
