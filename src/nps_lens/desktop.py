@@ -4,6 +4,7 @@ import argparse
 import importlib
 import inspect
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -17,6 +18,7 @@ from typing import Any, Optional
 DEFAULT_PORT = 8617
 STARTUP_TIMEOUT_SECONDS = 90
 HEALTH_PATH = "/_stcore/health"
+DEFAULT_STREAMLIT_EMAIL = "nps.lens@gmail.com"
 
 
 def _resource_root() -> Path:
@@ -58,7 +60,47 @@ def _set_macos_app_icon(icon_path: Optional[Path]) -> None:
         pass
 
 
+def _streamlit_credentials_path() -> Path:
+    return Path.home() / ".streamlit" / "credentials.toml"
+
+
+def _credentials_has_valid_email(contents: str) -> bool:
+    match = re.search(r'(?im)^\s*email\s*=\s*["\']?([^"\']+)', contents)
+    if not match:
+        return False
+    return "@" in match.group(1).strip()
+
+
+def _ensure_streamlit_credentials(email: str = DEFAULT_STREAMLIT_EMAIL) -> None:
+    creds_path = _streamlit_credentials_path()
+    safe_email = str(email).replace('"', "").strip()
+    if not safe_email:
+        safe_email = DEFAULT_STREAMLIT_EMAIL
+    try:
+        if creds_path.exists():
+            existing = creds_path.read_text(encoding="utf-8", errors="ignore")
+            if _credentials_has_valid_email(existing):
+                return
+        creds_path.parent.mkdir(parents=True, exist_ok=True)
+        creds_path.write_text(
+            f'[general]\nemail = "{safe_email}"\n',
+            encoding="utf-8",
+        )
+    except Exception:
+        # Best-effort only: app startup should not fail if home is not writable.
+        pass
+
+
+def _apply_streamlit_non_interactive_defaults() -> None:
+    os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
+    os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
+    os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
+
+
 def _run_streamlit_server(port: int) -> None:
+    _apply_streamlit_non_interactive_defaults()
+    _ensure_streamlit_credentials()
+
     from streamlit.web import bootstrap
 
     app_script = _app_script_path()
