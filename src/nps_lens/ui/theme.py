@@ -73,7 +73,9 @@ def get_theme(mode: str) -> Theme:
     control_border = p.get("color.app.control.border", border)
     control_text = p.get("color.app.control.text", text)
     control_placeholder = p.get("color.app.control.placeholder", muted)
-    control_icon = p.get("color.app.control.icon", p.get("color.primary.text.action.default", accent))
+    control_icon = p.get(
+        "color.app.control.icon", p.get("color.primary.text.action.default", accent)
+    )
     control_menu_bg = p.get("color.app.control.menu.bg", surface_2)
     control_menu_item_hover = p.get("color.app.control.menu.item.hover", control_bg_hover)
     control_menu_item_selected = p.get(
@@ -250,6 +252,7 @@ section[data-testid="stSidebar"] > div {{
 [data-testid="collapsedControl"] {{
   opacity: 1 !important;
   visibility: visible !important;
+  z-index: 1000 !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button,
@@ -260,16 +263,17 @@ button[aria-label="Close sidebar"] {{
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 34px !important;
-  height: 34px !important;
-  min-width: 34px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
   padding: 0 !important;
-  border-radius: 10px !important;
+  border-radius: 8px !important;
   border: 1px solid var(--nps-control-border) !important;
-  background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
+  background: var(--nps-control-bg) !important;
   color: var(--nps-control-icon) !important;
   box-shadow: none !important;
   opacity: 1 !important;
+  position: relative !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button:hover,
@@ -287,28 +291,45 @@ button[aria-label="Close sidebar"]:focus-visible {{
   border-color: var(--nps-control-border) !important;
 }}
 
+/* Draw the chevron with pseudo-element for consistent visibility across Streamlit versions. */
+button[aria-label="Open sidebar"]::before,
+button[aria-label="Close sidebar"]::before {{
+  display: block;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--nps-control-icon);
+}}
+
+button[aria-label="Open sidebar"]::before {{
+  content: "❯";
+}}
+
+button[aria-label="Close sidebar"]::before {{
+  content: "❮";
+}}
+
 [data-testid="stSidebarCollapseButton"] button svg,
 [data-testid="stSidebarCollapsedControl"] button svg,
 [data-testid="collapsedControl"] button svg,
 button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+  color: var(--nps-control-icon) !important;
   opacity: 1 !important;
+}}
+
+button[aria-label="Open sidebar"] svg,
+button[aria-label="Close sidebar"] svg {{
+  display: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button svg path,
 [data-testid="stSidebarCollapsedControl"] button svg path,
 [data-testid="collapsedControl"] button svg path,
 button[aria-label="Open sidebar"] svg path,
-button[aria-label="Close sidebar"] svg path,
-[data-testid="stSidebarCollapseButton"] button svg *,
-[data-testid="stSidebarCollapsedControl"] button svg *,
-[data-testid="collapsedControl"] button svg *,
-button[aria-label="Open sidebar"] svg *,
-button[aria-label="Close sidebar"] svg * {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+button[aria-label="Close sidebar"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
   opacity: 1 !important;
 }}
 
@@ -366,6 +387,25 @@ button[aria-label="Close sidebar"] svg * {{
   flex-wrap: wrap;
   gap: 10px;
   margin: 18px 0 26px 0;
+}}
+
+.nps-pill-row--compact {{
+  margin: 10px 0 20px 0;
+}}
+
+/* Context row: keep context pills and Reporte action aligned on the same baseline. */
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) {{
+  align-items: center;
+}}
+
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child {{
+  display: flex;
+  justify-content: flex-end;
+}}
+
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child div.stButton {{
+  width: 100%;
+  margin-top: 10px;
 }}
 
 .nps-app-hero {{
@@ -1075,56 +1115,127 @@ div[data-baseweb="select"] input::placeholder {{
 }}
 div[data-baseweb="select"] svg {{
   color: var(--nps-control-icon) !important;
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
   opacity: 1 !important;
 }}
 div[data-baseweb="select"] svg path,
-div[data-baseweb="select"] svg *,
+div[data-baseweb="select"] svg line,
+div[data-baseweb="select"] svg polyline,
+div[data-baseweb="select"] svg polygon,
+div[data-baseweb="select"] svg circle,
+div[data-baseweb="select"] svg ellipse,
 div[data-testid="stSelectbox"] svg,
-div[data-testid="stSelectbox"] svg *,
+div[data-testid="stSelectbox"] svg path,
+div[data-testid="stSelectbox"] svg line,
+div[data-testid="stSelectbox"] svg polyline,
+div[data-testid="stSelectbox"] svg polygon,
+div[data-testid="stSelectbox"] svg circle,
+div[data-testid="stSelectbox"] svg ellipse,
 div[data-testid="stMultiSelect"] svg,
-div[data-testid="stMultiSelect"] svg * {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+div[data-testid="stMultiSelect"] svg path,
+div[data-testid="stMultiSelect"] svg line,
+div[data-testid="stMultiSelect"] svg polyline,
+div[data-testid="stMultiSelect"] svg polygon,
+div[data-testid="stMultiSelect"] svg circle,
+div[data-testid="stMultiSelect"] svg ellipse {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
   opacity: 1 !important;
+}}
+div[data-baseweb="select"] svg rect,
+div[data-testid="stSelectbox"] svg rect,
+div[data-testid="stMultiSelect"] svg rect {{
+  stroke: currentColor !important;
+  fill: transparent !important;
 }}
 div[data-baseweb="select"] [aria-hidden="true"] {{
   opacity: 1 !important;
 }}
-div[data-baseweb="popover"] * {{
-  color: var(--nps-control-text) !important;
-}}
 div[data-baseweb="popover"],
 div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] > div > div,
 div[data-baseweb="menu"],
+div[data-baseweb="menu"] > div,
+div[data-baseweb="menu"] ul,
 div[role="listbox"],
 ul[role="listbox"] {{
   background: var(--nps-control-menu-bg) !important;
   border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
 }}
+div[data-baseweb="popover"] *,
+div[data-baseweb="menu"] *,
+div[role="listbox"] *,
+ul[role="listbox"] * {{
+  color: var(--nps-control-text) !important;
+}}
 div[data-baseweb="popover"] [role="option"],
 div[data-baseweb="menu"] [role="option"],
-ul[role="listbox"] [role="option"] {{
-  background: transparent !important;
+ul[role="listbox"] [role="option"],
+li[role="option"] {{
+  background: var(--nps-control-menu-bg) !important;
   color: var(--nps-control-text) !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="popover"] [role="option"] *,
+div[data-baseweb="menu"] [role="option"] *,
+ul[role="listbox"] [role="option"] *,
+li[role="option"] * {{
+  color: var(--nps-control-text) !important;
+  opacity: 1 !important;
 }}
 div[data-baseweb="popover"] [role="option"]:hover,
 div[data-baseweb="menu"] [role="option"]:hover,
-ul[role="listbox"] [role="option"]:hover {{
+ul[role="listbox"] [role="option"]:hover,
+li[role="option"]:hover {{
   background: var(--nps-control-menu-item-hover) !important;
 }}
 div[data-baseweb="popover"] [role="option"][aria-selected="true"],
 div[data-baseweb="menu"] [role="option"][aria-selected="true"],
-ul[role="listbox"] [role="option"][aria-selected="true"] {{
+ul[role="listbox"] [role="option"][aria-selected="true"],
+li[role="option"][aria-selected="true"] {{
   background: var(--nps-control-menu-item-selected) !important;
+}}
+div[data-baseweb="popover"] [aria-disabled="true"],
+div[data-baseweb="menu"] [aria-disabled="true"],
+ul[role="listbox"] [aria-disabled="true"] {{
+  color: var(--nps-control-placeholder) !important;
 }}
 div[data-baseweb="popover"] input,
 div[data-baseweb="popover"] textarea {{
   background: var(--nps-control-bg) !important;
   color: var(--nps-control-text) !important;
   border: 1px solid var(--nps-control-border) !important;
+}}
+
+/* Help/tooltip system: keep it tokenized and readable in both modes */
+[data-testid="stTooltipIcon"],
+[data-testid="stTooltipHoverTarget"] {{
+  color: var(--nps-control-icon) !important;
+}}
+[data-testid="stTooltipIcon"] svg,
+[data-testid="stTooltipHoverTarget"] svg {{
+  color: inherit !important;
+}}
+[data-testid="stTooltipIcon"] svg path,
+[data-testid="stTooltipHoverTarget"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}}
+[role="tooltip"],
+div[data-baseweb="tooltip"],
+div[data-baseweb="popover"][role="tooltip"],
+div[data-testid="stTooltipContent"] {{
+  background: var(--nps-control-menu-bg) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--nps-shadow);
+}}
+[role="tooltip"] *,
+div[data-baseweb="tooltip"] *,
+div[data-baseweb="popover"][role="tooltip"] *,
+div[data-testid="stTooltipContent"] * {{
+  color: var(--nps-control-text) !important;
 }}
 
 /* Plotly containers */
@@ -1151,11 +1262,26 @@ div[data-baseweb="popover"] textarea {{
   background: transparent !important;
 }}
 
-[data-testid="stPlotlyChart"] .modebar {{
-  top: 8px !important;
-  right: 8px !important;
+[data-testid="stPlotlyChart"] .modebar-container {{
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
   left: auto !important;
-  z-index: 12 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  margin: 0 0 10px 0 !important;
+  padding: 0 !important;
+  pointer-events: none;
+}}
+
+[data-testid="stPlotlyChart"] .modebar {{
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+  z-index: 1 !important;
   background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
   border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
@@ -1163,6 +1289,8 @@ div[data-baseweb="popover"] textarea {{
   opacity: 0.96 !important;
   transform: none !important;
   transition: background-color 120ms ease;
+  margin-left: auto !important;
+  pointer-events: auto !important;
 }}
 
 [data-testid="stPlotlyChart"]:hover .modebar,
@@ -1247,15 +1375,28 @@ div[data-testid="stTextArea"] textarea::placeholder {{
 
 /* File uploader */
 div[data-testid="stFileUploaderDropzone"] {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   border: 1px dashed var(--nps-border-stronger) !important;
   border-radius: var(--nps-radius) !important;
 }}
-div[data-testid="stFileUploaderDropzone"] * {{
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"],
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div > div {{
+  background: var(--nps-control-bg) !important;
+  border-color: var(--nps-border-stronger) !important;
+}}
+div[data-testid="stFileUploaderDropzone"] *,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] * {{
   color: var(--nps-text) !important;
 }}
 div[data-testid="stFileUploader"] small {{
   color: var(--nps-muted) !important;
+}}
+div[data-testid="stFileUploader"] button,
+div[data-testid="stFileUploader"] button[kind="secondary"] {{
+  background: var(--nps-control-bg-hover) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
 }}
 
 /* Plotly: force dark surfaces + readable text in dark mode */

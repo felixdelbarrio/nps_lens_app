@@ -59,11 +59,12 @@ def section(title: str, subtitle: str = "") -> None:
     )
 
 
-def pills(items: list[str]) -> None:
+def pills(items: list[str], *, compact: bool = False) -> None:
     if not items:
         return
+    row_class = "nps-pill-row nps-pill-row--compact" if compact else "nps-pill-row"
     html = "".join([f"<span class='nps-pill'>{i}</span> " for i in items])
-    st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='{row_class}'>{html}</div>", unsafe_allow_html=True)
 
 
 def _pill_class_for_band(band: str) -> str:
@@ -199,13 +200,17 @@ def render_tokenized_dataframe(
     """
 
     if df is None or not isinstance(df, pd.DataFrame):
-        st.dataframe(df, use_container_width=use_container_width, height=height, hide_index=hide_index)
+        st.dataframe(
+            df, use_container_width=use_container_width, height=height, hide_index=hide_index
+        )
         return
     if df.empty:
         st.info("No hay datos para mostrar.")
         return
     if len(df) > int(max_html_rows):
-        st.dataframe(df, use_container_width=use_container_width, height=height, hide_index=hide_index)
+        st.dataframe(
+            df, use_container_width=use_container_width, height=height, hide_index=hide_index
+        )
         return
 
     header_html = "".join([f"<th>{escape(str(col))}</th>" for col in df.columns])
