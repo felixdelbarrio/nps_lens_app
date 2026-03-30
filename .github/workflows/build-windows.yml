@@ -40,13 +40,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$out/spec" | Out-Null
           pyinstaller --clean --noconfirm `
             --name nps-lens `
-            --onefile `
+            --windowed `
             --icon build/icons/app.ico `
             --add-data="$PWD/app;app" `
             --add-data="$PWD/assets;assets" `
             --add-data="$PWD/.streamlit;.streamlit" `
             --collect-submodules webview `
             --collect-all kaleido `
+            --collect-all streamlit `
+            --copy-metadata streamlit `
             --collect-data pptx `
             --distpath "$out/dist" `
             --workpath "$out/work" `
@@ -57,4 +59,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nps-lens-windows
-          path: build/pyinstaller/windows/dist/nps-lens.exe
+          path: build/pyinstaller/windows/dist/nps-lens

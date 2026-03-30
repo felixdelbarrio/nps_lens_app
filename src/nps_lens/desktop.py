@@ -76,6 +76,7 @@ def _run_streamlit_server(port: int) -> None:
         "server.runOnSave": False,
         "browser.gatherUsageStats": False,
     }
+    bootstrap.load_config_options(flags)
     bootstrap.run(str(app_script), False, [], flags)
 
 
