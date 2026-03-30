@@ -4760,6 +4760,20 @@ def page_nps_helix_linking(
             )
 
     if show_report:
+        st.markdown("<div id='nps-cross-report-anchor'></div>", unsafe_allow_html=True)
+        if bool(st.session_state.get("_scroll_to_cross_report")):
+            components.html(
+                """
+                <script>
+                const anchor = window.parent.document.getElementById("nps-cross-report-anchor");
+                if (anchor) {
+                  anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+                </script>
+                """,
+                height=0,
+            )
+            st.session_state["_scroll_to_cross_report"] = False
         section(
             "Reporte",
             "Narrativa y presentación transversal para comité (NPS térmico + Incidencias ↔ NPS).",
@@ -5333,8 +5347,10 @@ def main() -> None:
 
     if "_show_cross_report" not in st.session_state:
         st.session_state["_show_cross_report"] = False
+    if "_scroll_to_cross_report" not in st.session_state:
+        st.session_state["_scroll_to_cross_report"] = False
 
-    ctx_col_left, ctx_col_right = st.columns([8.8, 1.2])
+    ctx_col_left, ctx_col_right = st.columns([8.6, 1.4])
     with ctx_col_left:
         pills(
             [
@@ -5347,18 +5363,21 @@ def main() -> None:
             compact=True,
         )
     with ctx_col_right:
-        st.markdown("<div class='nps-context-actions'>", unsafe_allow_html=True)
-        if st.button(
+        report_clicked = st.button(
             "Reporte",
             type="primary" if bool(st.session_state.get("_show_cross_report")) else "secondary",
             use_container_width=True,
             key="nps_cross_report_toggle",
-            help="Muestra/oculta la narrativa y presentación transversal.",
-        ):
-            st.session_state["_show_cross_report"] = not bool(
-                st.session_state.get("_show_cross_report")
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
+        )
+        if report_clicked:
+            next_state = not bool(st.session_state.get("_show_cross_report"))
+            st.session_state["_show_cross_report"] = next_state
+            if next_state:
+                st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
+                st.session_state["_scroll_to_cross_report"] = True
+            else:
+                st.session_state["_scroll_to_cross_report"] = False
+            st.rerun()
 
     show_cross_report = bool(st.session_state.get("_show_cross_report"))
 
@@ -5374,9 +5393,28 @@ def main() -> None:
     # Global population time window (Año/Mes) applied everywhere.
     pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
-    t_thermal, t_helix, t_datos = st.tabs(["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"])
+    main_sections = ["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"]
+    if "_main_section" not in st.session_state:
+        st.session_state["_main_section"] = main_sections[0]
+    if show_cross_report:
+        st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
+    if hasattr(st, "segmented_control"):
+        main_section = st.segmented_control(
+            "Sección principal",
+            options=main_sections,
+            key="_main_section",
+            label_visibility="collapsed",
+        )
+    else:
+        main_section = st.radio(
+            "Sección principal",
+            options=main_sections,
+            horizontal=True,
+            key="_main_section",
+            label_visibility="collapsed",
+        )
 
-    with t_thermal:
+    if main_section == "📊 NPS Térmico":
         df_resumen = load_context_df(
             store_dir,
             service_origin,
@@ -5481,7 +5519,7 @@ def main() -> None:
                 min_n=min_n,
             )
 
-    with t_helix:
+    if main_section == "🔗 Incidencias ↔ NPS":
         df_resumen = load_context_df(
             store_dir,
             service_origin,
@@ -5511,7 +5549,7 @@ def main() -> None:
             show_report=show_cross_report,
         )
 
-    with t_datos:
+    if main_section == "🧾 Datos":
         df_datos = load_context_df(
             store_dir,
             service_origin,

@@ -365,21 +365,22 @@ button[aria-label="Close sidebar"] svg path {{
 }}
 
 .nps-pill-row--compact {{
-  margin: 16px 0 20px 0;
+  margin: 10px 0 20px 0;
+}}
+
+/* Context row: keep context pills and Reporte action aligned on the same baseline. */
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) {{
   align-items: center;
 }}
 
-.nps-context-actions {{
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child {{
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  margin: 14px 0 20px 0;
 }}
 
-.nps-context-actions div.stButton > button {{
-  min-height: 34px;
-  border-radius: 999px;
-  font-weight: 700;
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child div.stButton {{
+  width: 100%;
+  margin-top: 10px;
 }}
 
 .nps-app-hero {{
