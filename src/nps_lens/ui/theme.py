@@ -1236,11 +1236,26 @@ div[data-testid="stTooltipContent"] * {{
   background: transparent !important;
 }}
 
-[data-testid="stPlotlyChart"] .modebar {{
-  top: 8px !important;
-  right: 8px !important;
+[data-testid="stPlotlyChart"] .modebar-container {{
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
   left: auto !important;
-  z-index: 12 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  margin: 0 0 10px 0 !important;
+  padding: 0 !important;
+  pointer-events: none;
+}}
+
+[data-testid="stPlotlyChart"] .modebar {{
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+  z-index: 1 !important;
   background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
   border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
@@ -1248,6 +1263,8 @@ div[data-testid="stTooltipContent"] * {{
   opacity: 0.96 !important;
   transform: none !important;
   transition: background-color 120ms ease;
+  margin-left: auto !important;
+  pointer-events: auto !important;
 }}
 
 [data-testid="stPlotlyChart"]:hover .modebar,

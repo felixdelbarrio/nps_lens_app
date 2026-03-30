@@ -5236,7 +5236,7 @@ def page_nps_helix_linking(
             except Exception as exc:
                 st.error(
                     "No se pudo generar la presentación en este entorno. "
-                    "Ejecuta `make setup` y `make verify-runtime` para validar dependencias."
+                    "Ejecuta `make setup` y `make ci` para validar dependencias."
                 )
                 with st.expander("Detalle técnico", expanded=False):
                     st.code(str(exc))
@@ -5331,15 +5331,36 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    pills(
-        [
-            f"Service origin: {service_origin}",
-            f"N1: {service_origin_n1}",
-            f"N2: {service_origin_n2 or '-'}",
-            f"Año: {pop_year}",
-            f"Mes: {month_format_es(pop_month)}",
-        ]
-    )
+    if "_show_cross_report" not in st.session_state:
+        st.session_state["_show_cross_report"] = False
+
+    ctx_col_left, ctx_col_right = st.columns([8.8, 1.2])
+    with ctx_col_left:
+        pills(
+            [
+                f"Service origin: {service_origin}",
+                f"N1: {service_origin_n1}",
+                f"N2: {service_origin_n2 or '-'}",
+                f"Año: {pop_year}",
+                f"Mes: {month_format_es(pop_month)}",
+            ],
+            compact=True,
+        )
+    with ctx_col_right:
+        st.markdown("<div class='nps-context-actions'>", unsafe_allow_html=True)
+        if st.button(
+            "Reporte",
+            type="primary" if bool(st.session_state.get("_show_cross_report")) else "secondary",
+            use_container_width=True,
+            key="nps_cross_report_toggle",
+            help="Muestra/oculta la narrativa y presentación transversal.",
+        ):
+            st.session_state["_show_cross_report"] = not bool(
+                st.session_state.get("_show_cross_report")
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    show_cross_report = bool(st.session_state.get("_show_cross_report"))
 
     if not data_ready:
         st.info(
@@ -5487,6 +5508,7 @@ def main() -> None:
             min_n=min_n,
             pop_year=pop_year,
             pop_month=pop_month,
+            show_report=show_cross_report,
         )
 
     with t_datos:
