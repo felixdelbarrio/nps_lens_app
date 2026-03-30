@@ -4,6 +4,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -5260,35 +5261,62 @@ def page_nps_helix_linking(
 
 
 def main() -> None:
-    # Streamlit doesn't automatically load .env.
-    # This is the source of truth for service_origin_buug / service_origin_n1 / service_origin_n2 options.
-    #
-    # Policy:
-    # - If .env does not exist, copy .env.example -> .env automatically (one-time bootstrap).
-    # - Never overwrite an existing .env.
-    # - Then load .env (or, if still missing, rely on runtime-injected env vars and fail-fast).
+    # Streamlit does not load .env automatically. In frozen app bundles (e.g. /Applications on macOS),
+    # Resources may be read-only, so writable user-level bootstrap is required.
     here = Path(__file__).resolve()
     repo_root = here.parents[1]  # repo_root/app/streamlit_app.py
-    env_path = repo_root / ".env"
-    env_example_path = repo_root / ".env.example"
-    if (not env_path.exists()) and env_example_path.exists():
-        try:
-            shutil.copyfile(str(env_example_path), str(env_path))
-        except Exception as exc:
-            raise RuntimeError(f"Failed to bootstrap .env from .env.example: {exc}") from exc
+    bundled_env = repo_root / ".env"
+    bundled_env_example = repo_root / ".env.example"
+    user_env = Path.home() / ".nps-lens" / ".env"
 
-    # IMPORTANT: Streamlit may execute with different working directories depending on how it's launched.
-    # We therefore resolve the .env path robustly (cwd + parent directories) and then load it.
-    dotenv_path = find_dotenv(usecwd=True)
+    # Highest precedence: explicit env file selected by user/runtime.
+    dotenv_path = ""
+    prefs_dotenv_path: Optional[Path] = None
+    explicit_env_file = str(os.getenv("NPS_LENS_ENV_FILE", "")).strip()
+    if explicit_env_file:
+        explicit = Path(explicit_env_file).expanduser()
+        if explicit.exists():
+            dotenv_path = str(explicit)
+            prefs_dotenv_path = explicit
+
+    # Fallback 1: standard .env discovery from current working directory.
     if not dotenv_path:
-        candidates = [
-            env_path,  # repo root
-            here.parents[0] / ".env",  # app/
-        ]
-        for cand in candidates:
-            if cand.exists():
-                dotenv_path = str(cand)
-                break
+        discovered = find_dotenv(usecwd=True)
+        if discovered:
+            dotenv_path = discovered
+            prefs_dotenv_path = Path(discovered)
+
+    # Fallback 2 (frozen): bootstrap a writable ~/.nps-lens/.env from bundled .env.example.
+    if not dotenv_path and getattr(sys, "frozen", False):
+        if not user_env.exists() and bundled_env_example.exists():
+            try:
+                user_env.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(str(bundled_env_example), str(user_env))
+            except Exception:
+                # Non-fatal: we'll still try bundled files as read-only config source.
+                pass
+        if user_env.exists():
+            dotenv_path = str(user_env)
+            prefs_dotenv_path = user_env
+        elif bundled_env.exists():
+            dotenv_path = str(bundled_env)
+            prefs_dotenv_path = None
+        elif bundled_env_example.exists():
+            dotenv_path = str(bundled_env_example)
+            prefs_dotenv_path = None
+
+    # Fallback 3 (non-frozen/dev): repo-local bootstrap from .env.example.
+    if not dotenv_path:
+        if (not bundled_env.exists()) and bundled_env_example.exists():
+            with contextlib.suppress(Exception):
+                shutil.copyfile(str(bundled_env_example), str(bundled_env))
+        if bundled_env.exists():
+            dotenv_path = str(bundled_env)
+            prefs_dotenv_path = bundled_env
+        elif bundled_env_example.exists():
+            dotenv_path = str(bundled_env_example)
+            prefs_dotenv_path = None
+
     if dotenv_path:
         load_dotenv(dotenv_path, override=False)
     else:
@@ -5313,7 +5341,7 @@ def main() -> None:
         sheet_name,
         data_ready,
         touchpoint_source,
-    ) = render_sidebar(settings, Path(dotenv_path) if dotenv_path else None)
+    ) = render_sidebar(settings, prefs_dotenv_path)
 
     theme = get_theme(theme_mode)
     apply_theme(theme)
