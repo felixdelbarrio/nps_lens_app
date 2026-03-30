@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional
@@ -60,8 +61,21 @@ class Settings:
 
     @staticmethod
     def from_env() -> "Settings":
-        data_dir = Path(os.getenv("NPS_LENS_DATA_DIR", "./data"))
-        knowledge_dir = Path(os.getenv("NPS_LENS_KNOWLEDGE_DIR", "./knowledge"))
+        def _resolve_runtime_dir(env_key: str, default_rel: str) -> Path:
+            raw = str(os.getenv(env_key, default_rel)).strip() or default_rel
+            p = Path(raw).expanduser()
+            if p.is_absolute():
+                return p
+            if getattr(sys, "frozen", False):
+                app_home_raw = str(os.getenv("NPS_LENS_APP_HOME", "")).strip()
+                app_home = (
+                    Path(app_home_raw).expanduser() if app_home_raw else (Path.home() / ".nps-lens")
+                )
+                return app_home / p
+            return p
+
+        data_dir = _resolve_runtime_dir("NPS_LENS_DATA_DIR", "./data")
+        knowledge_dir = _resolve_runtime_dir("NPS_LENS_KNOWLEDGE_DIR", "./knowledge")
 
         def _get_env(*names: str) -> str:
             for n in names:
