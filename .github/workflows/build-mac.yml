@@ -40,13 +40,17 @@ jobs:
             --clean
             --noconfirm
             --name nps-lens
-            --onefile
+            --windowed
             --icon build/icons/app.icns
             --add-data="$PWD/app:app"
             --add-data="$PWD/assets:assets"
             --add-data="$PWD/.streamlit:.streamlit"
             --collect-submodules webview
             --collect-all kaleido
+            --collect-all dotenv
+            --collect-all streamlit
+            --copy-metadata python-dotenv
+            --copy-metadata streamlit
             --collect-data pptx
             --distpath "$out/dist"
             --workpath "$out/work"
@@ -69,4 +73,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nps-lens-macos
-          path: build/pyinstaller/macos/dist/nps-lens
+          path: build/pyinstaller/macos/dist/nps-lens.app

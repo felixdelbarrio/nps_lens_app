@@ -32,22 +32,29 @@ jobs:
           mkdir -p "$out/dist" "$out/work" "$out/spec"
           pyinstaller --clean --noconfirm \
             --name nps-lens \
-            --onefile \
+            --windowed \
             --icon build/icons/app.png \
             --add-data="$PWD/app:app" \
             --add-data="$PWD/assets:assets" \
             --add-data="$PWD/.streamlit:.streamlit" \
             --collect-submodules webview \
             --collect-all kaleido \
+            --collect-all dotenv \
+            --collect-all streamlit \
+            --copy-metadata python-dotenv \
+            --copy-metadata streamlit \
             --collect-data pptx \
             --distpath "$out/dist" \
             --workpath "$out/work" \
             --specpath "$out/spec" \
             src/nps_lens/desktop.py
+      - name: Package Linux app directory
+        run: |
+          tar -C build/pyinstaller/linux/dist -czf nps-lens-linux.tar.gz nps-lens
       - uses: actions/upload-artifact@v4
         with:
           name: bin-linux
-          path: build/pyinstaller/linux/dist/nps-lens
+          path: nps-lens-linux.tar.gz
 
   build-macos:
     runs-on: macos-latest
@@ -82,13 +89,17 @@ jobs:
             --clean
             --noconfirm
             --name nps-lens
-            --onefile
+            --windowed
             --icon build/icons/app.icns
             --add-data="$PWD/app:app"
             --add-data="$PWD/assets:assets"
             --add-data="$PWD/.streamlit:.streamlit"
             --collect-submodules webview
             --collect-all kaleido
+            --collect-all dotenv
+            --collect-all streamlit
+            --copy-metadata python-dotenv
+            --copy-metadata streamlit
             --collect-data pptx
             --distpath "$out/dist"
             --workpath "$out/work"
@@ -106,19 +117,30 @@ jobs:
             echo "macOS signing disabled."
           fi
           pyinstaller "${args[@]}"
-      - name: Notarize macOS binary (optional)
+      - name: Package macOS app bundle
+        run: |
+          rm -f nps-lens-macos.zip
+          ditto -c -k --keepParent build/pyinstaller/macos/dist/nps-lens.app nps-lens-macos.zip
+      - name: Notarize macOS app (optional)
         if: ${{ env.MACOS_CODESIGN_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
         run: |
-          zip -j nps-lens-macos.zip build/pyinstaller/macos/dist/nps-lens
           xcrun notarytool submit nps-lens-macos.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
+      - name: Staple macOS app (optional)
+        if: ${{ env.MACOS_CODESIGN_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        run: |
+          xcrun stapler staple build/pyinstaller/macos/dist/nps-lens.app
+      - name: Refresh macOS app bundle package
+        run: |
+          rm -f nps-lens-macos.zip
+          ditto -c -k --keepParent build/pyinstaller/macos/dist/nps-lens.app nps-lens-macos.zip
       - uses: actions/upload-artifact@v4
         with:
           name: bin-macos
-          path: build/pyinstaller/macos/dist/nps-lens
+          path: nps-lens-macos.zip
 
   build-windows:
     runs-on: windows-latest
@@ -149,22 +171,31 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$out/spec" | Out-Null
           pyinstaller --clean --noconfirm `
             --name nps-lens `
-            --onefile `
+            --windowed `
             --icon build/icons/app.ico `
             --add-data="$PWD/app;app" `
             --add-data="$PWD/assets;assets" `
             --add-data="$PWD/.streamlit;.streamlit" `
             --collect-submodules webview `
             --collect-all kaleido `
+            --collect-all dotenv `
+            --collect-all streamlit `
+            --copy-metadata python-dotenv `
+            --copy-metadata streamlit `
             --collect-data pptx `
             --distpath "$out/dist" `
             --workpath "$out/work" `
             --specpath "$out/spec" `
             src/nps_lens/desktop.py
+      - name: Package Windows app directory
+        shell: pwsh
+        run: |
+          if (Test-Path "nps-lens-windows.zip") { Remove-Item "nps-lens-windows.zip" -Force }
+          Compress-Archive -Path "build/pyinstaller/windows/dist/nps-lens" -DestinationPath "nps-lens-windows.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: bin-windows
-          path: build/pyinstaller/windows/dist/nps-lens.exe
+          path: nps-lens-windows.zip
 
   publish:
     needs: [build-linux, build-macos, build-windows]
@@ -179,9 +210,9 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           mkdir -p out
-          cp release-assets/bin-linux/nps-lens "out/nps-lens-${tag}-linux"
-          cp release-assets/bin-macos/nps-lens "out/nps-lens-${tag}-macos"
-          cp release-assets/bin-windows/nps-lens.exe "out/nps-lens-${tag}-windows.exe"
+          cp release-assets/bin-linux/nps-lens-linux.tar.gz "out/nps-lens-${tag}-linux.tar.gz"
+          cp release-assets/bin-macos/nps-lens-macos.zip "out/nps-lens-${tag}-macos.zip"
+          cp release-assets/bin-windows/nps-lens-windows.zip "out/nps-lens-${tag}-windows.zip"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
