@@ -5308,11 +5308,8 @@ def main() -> None:
     # Fallback 3 (non-frozen/dev): repo-local bootstrap from .env.example.
     if not dotenv_path:
         if (not bundled_env.exists()) and bundled_env_example.exists():
-            try:
+            with contextlib.suppress(Exception):
                 shutil.copyfile(str(bundled_env_example), str(bundled_env))
-            except Exception:
-                # Keep running; Settings.from_env will fail-fast with a clear message if required vars are missing.
-                pass
         if bundled_env.exists():
             dotenv_path = str(bundled_env)
             prefs_dotenv_path = bundled_env
