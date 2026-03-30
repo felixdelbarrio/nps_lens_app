@@ -39,7 +39,9 @@ jobs:
             --add-data="$PWD/.streamlit:.streamlit" \
             --collect-submodules webview \
             --collect-all kaleido \
+            --collect-all dotenv \
             --collect-all streamlit \
+            --copy-metadata python-dotenv \
             --copy-metadata streamlit \
             --collect-data pptx \
             --distpath "$out/dist" \
@@ -94,7 +96,9 @@ jobs:
             --add-data="$PWD/.streamlit:.streamlit"
             --collect-submodules webview
             --collect-all kaleido
+            --collect-all dotenv
             --collect-all streamlit
+            --copy-metadata python-dotenv
             --copy-metadata streamlit
             --collect-data pptx
             --distpath "$out/dist"
@@ -174,7 +178,9 @@ jobs:
             --add-data="$PWD/.streamlit;.streamlit" `
             --collect-submodules webview `
             --collect-all kaleido `
+            --collect-all dotenv `
             --collect-all streamlit `
+            --copy-metadata python-dotenv `
             --copy-metadata streamlit `
             --collect-data pptx `
             --distpath "$out/dist" `

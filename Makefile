@@ -64,7 +64,9 @@ build:
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
 			--collect-submodules webview \
 			--collect-all kaleido \
+			--collect-all dotenv \
 			--collect-all streamlit \
+			--copy-metadata python-dotenv \
 			--copy-metadata streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
@@ -96,7 +98,9 @@ build:
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
 			--collect-submodules webview \
 			--collect-all kaleido \
+			--collect-all dotenv \
 			--collect-all streamlit \
+			--copy-metadata python-dotenv \
 			--copy-metadata streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
