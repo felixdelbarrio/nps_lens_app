@@ -114,8 +114,8 @@ from nps_lens.ui.components import (
     impact_chain,
     kpi,
     pills,
+    render_tokenized_dataframe,
     section,
-    style_semantic_dataframe,
 )
 from nps_lens.ui.narratives import (
     build_executive_story,
@@ -2678,7 +2678,13 @@ def render_sidebar(  # noqa: PLR0915
         rows = perf.summary() if perf is not None else []
         with st.expander("Ver timings (últimos cálculos)", expanded=False):
             if rows:
-                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                render_tokenized_dataframe(
+                    pd.DataFrame(rows),
+                    get_theme(theme_mode),
+                    use_container_width=True,
+                    height=260,
+                    hide_index=True,
+                )
             else:
                 st.caption("Aún no hay timings. Navega por el dashboard para generar cálculos.")
             cpa, cpb = st.columns(2)
@@ -2801,7 +2807,9 @@ def page_executive(
         if fig_k is None:
             st.info("No hay suficientes datos para construir la vista diaria de NPS clásico.")
         else:
-            st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(fig_k, theme), use_container_width=True, theme=None
+            )
 
         metrics = _daily_metrics(df_llm_win, days=int(context_days))
         _render_daily_llm_assistant(
@@ -2819,7 +2827,9 @@ def page_executive(
         if fig is None:
             st.info("No hay suficientes datos para construir una tendencia.")
         else:
-            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(fig, theme), use_container_width=True, theme=None
+            )
 
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
         report_md = _build_business_report_md(
@@ -2858,7 +2868,9 @@ def page_executive(
         if fig_vol is None:
             st.info("No hay suficientes datos para construir la vista de volumen diario.")
         else:
-            st.plotly_chart(apply_plotly_theme(fig_vol, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(fig_vol, theme), use_container_width=True, theme=None
+            )
 
     with tab_how:
         st.markdown(
@@ -2873,7 +2885,9 @@ def page_executive(
         if fig_mix is None:
             st.info("No hay suficientes datos para construir la vista diaria.")
         else:
-            st.plotly_chart(apply_plotly_theme(fig_mix, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(fig_mix, theme), use_container_width=True, theme=None
+            )
 
     section("Insights LLM integrados")
     _render_llm_insights(theme)
@@ -2930,9 +2944,14 @@ def page_comparisons(
         return
     fig = chart_driver_delta(delta, theme)
     if fig is not None:
-        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
     with st.expander("Ver tabla de deltas", expanded=False):
-        st.dataframe(delta.head(30), use_container_width=True)
+        render_tokenized_dataframe(
+            delta.head(30),
+            theme,
+            use_container_width=True,
+            height=360,
+        )
 
 
 def page_cohorts(df: pd.DataFrame, theme: Theme, *, min_n: int = 30) -> None:
@@ -2965,7 +2984,7 @@ def page_cohorts(df: pd.DataFrame, theme: Theme, *, min_n: int = 30) -> None:
             "(revisa columnas y el mínimo N para comparativas cruzadas)."
         )
         return
-    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+    st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
 
     st.markdown(
         "<div class='nps-card'>"
@@ -2994,10 +3013,15 @@ def page_driver_gaps(df: pd.DataFrame, theme: Theme) -> None:
     stats_df = stats_df.sort_values("gap_vs_overall", ascending=True)
     fig = chart_driver_bar(stats_df, theme)
     if fig is not None:
-        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
 
     with st.expander("Ver tabla detallada"):
-        st.dataframe(stats_df.head(30), use_container_width=True)
+        render_tokenized_dataframe(
+            stats_df.head(30),
+            theme,
+            use_container_width=True,
+            height=360,
+        )
 
 
 def page_prioritized_opportunities(
@@ -3037,7 +3061,9 @@ def page_prioritized_opportunities(
             top_k=10,
         )
         if cfig is not None:
-            st.plotly_chart(apply_plotly_theme(cfig, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(cfig, theme), use_container_width=True, theme=None
+            )
     except Exception:
         pass
 
@@ -3063,7 +3089,12 @@ def page_prioritized_opportunities(
     )
 
     with st.expander("Ver ranking completo"):
-        st.dataframe(opp_df.head(25), use_container_width=True)
+        render_tokenized_dataframe(
+            opp_df.head(25),
+            theme,
+            use_container_width=True,
+            height=360,
+        )
 
 
 def page_text(df: pd.DataFrame, theme: Theme, *, embedded: bool = False) -> None:
@@ -3079,10 +3110,15 @@ def page_text(df: pd.DataFrame, theme: Theme, *, embedded: bool = False) -> None
     if fig is None:
         st.info("No hay texto suficiente para extraer temas.")
     else:
-        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
 
     with st.expander("Ver clusters (incluye ejemplos)"):
-        st.dataframe(topics_df, use_container_width=True)
+        render_tokenized_dataframe(
+            topics_df,
+            theme,
+            use_container_width=True,
+            height=380,
+        )
 
 
 def _llm_build_pack(
@@ -3326,7 +3362,7 @@ def _llm_save_workflow_response(
     return True
 
 
-def page_llm_cache() -> None:
+def page_llm_cache(theme: Theme) -> None:
     st.subheader("LLM guardado")
     entries = st.session_state.get("llm_cache_entries", [])
     if not isinstance(entries, list) or not entries:
@@ -3371,7 +3407,14 @@ def page_llm_cache() -> None:
                         "severity": insight.get("severity"),
                     }
                 )
-            st.dataframe(pd.DataFrame(preview), use_container_width=True, height=240)
+            render_tokenized_dataframe(
+                pd.DataFrame(preview),
+                theme,
+                use_container_width=True,
+                height=240,
+                hide_index=True,
+                wrap_text=True,
+            )
 
             for idx, item in enumerate(items[:20], start=1):
                 insight = _extract_insight_from_cache_entry(item) or {}
@@ -3524,6 +3567,7 @@ def page_quality(
     df: pd.DataFrame,
     helix_df: Optional[pd.DataFrame] = None,
     *,
+    theme: Theme,
     llm_df: Optional[pd.DataFrame] = None,
     settings: Optional[Settings] = None,
     service_origin: str = "",
@@ -3531,6 +3575,8 @@ def page_quality(
     min_n: int = 200,
     cache_path: Optional[Path] = None,
 ) -> None:
+    max_styled_rows = 3000
+
     tab_labels = ["NPS"]
     if helix_df is not None:
         tab_labels.append("Helix")
@@ -3564,12 +3610,22 @@ def page_quality(
             )
 
         view_df = df if show_full else df.head(int(sample_n))
-        st.dataframe(view_df, use_container_width=True, height=520)
+        render_tokenized_dataframe(
+            view_df,
+            theme,
+            height=520,
+            use_container_width=True,
+            max_html_rows=max_styled_rows,
+        )
 
         st.caption(
             "Nota: la tabla es desplazable. Si activas el dataset completo, "
             "Streamlit renderiza una vista virtualizada: verás todas las filas al hacer scroll."
         )
+        if show_full and len(view_df) > max_styled_rows:
+            st.caption(
+                "En modo completo y alto volumen, se desactiva el styling detallado para mantener rendimiento."
+            )
 
     next_tab_idx = 1
     if helix_df is not None:
@@ -3592,7 +3648,17 @@ def page_quality(
                     key="helix_sample_n",
                 )
             view_h = helix_df if show_full_h else helix_df.head(int(sample_n_h))
-            st.dataframe(view_h, use_container_width=True, height=520)
+            render_tokenized_dataframe(
+                view_h,
+                theme,
+                height=520,
+                use_container_width=True,
+                max_html_rows=max_styled_rows,
+            )
+            if show_full_h and len(view_h) > max_styled_rows:
+                st.caption(
+                    "En modo Helix completo y alto volumen, se desactiva el styling detallado para mantener rendimiento."
+                )
         next_tab_idx += 1
 
     if show_journey_catalog and settings is not None:
@@ -3606,7 +3672,7 @@ def page_quality(
 
     if llm_df is not None and settings is not None:
         with tabs[next_tab_idx]:
-            page_llm_cache()
+            page_llm_cache(theme)
 
 
 def _build_touchpoint_mode_payload(
@@ -3973,7 +4039,7 @@ def page_nps_helix_linking(
             yaxis2=dict(title="Incidencias", overlaying="y", side="right"),
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True)
+        st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
         if use_daily_trend and "date" in trend_df.columns:
             st.caption(
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
@@ -4168,52 +4234,58 @@ def page_nps_helix_linking(
 
         if "fig2" in locals():
             st.markdown("### Tópicos trending")
-            st.plotly_chart(apply_plotly_theme(fig2, theme), use_container_width=True)
+            st.plotly_chart(
+                apply_plotly_theme(fig2, theme),
+                use_container_width=True,
+                theme=None,
+            )
 
         st.markdown("### Ranking de hipótesis")
         if "show" in locals():
-            st.dataframe(
-                show[
-                    [
-                        "nps_topic",
-                        "confidence_learned",
-                        "score",
-                        "factor",
-                        "confirmed",
-                        "rejected",
-                        "best_lag_weeks",
-                        "corr",
-                        "incidents_lead_changepoint_share",
-                        "max_cp_level",
-                        "max_cp_stability",
-                        "changepoints",
-                        "incidents",
-                        "responses",
-                        "focus_rate",
-                        "delta_focus_rate",
-                        "weeks",
-                    ]
-                ].rename(
-                    columns={
-                        "nps_topic": "Tópico NPS",
-                        "confidence_learned": "Confidence (learned)",
-                        "score": "Confidence (raw)",
-                        "factor": "Learning factor",
-                        "confirmed": "✓ Confirmed",
-                        "rejected": "✗ Rejected",
-                        "best_lag_weeks": "Lag (semanas)",
-                        "corr": "Corr@Lag",
-                        "incidents_lead_changepoint_share": "Incidencias→CP (share)",
-                        "max_cp_level": "CP Significance",
-                        "max_cp_stability": "CP Stability",
-                        "changepoints": "Changepoints",
-                        "incidents": "Incidencias (asignadas)",
-                        "responses": "Respuestas",
-                        "focus_rate": f"% {focus_name.capitalize()}",
-                        "delta_focus_rate": f"Δ % {focus_name.capitalize()} (high-inc vs low-inc)",
-                        "weeks": "Semanas",
-                    }
-                ),
+            rank_view = show[
+                [
+                    "nps_topic",
+                    "confidence_learned",
+                    "score",
+                    "factor",
+                    "confirmed",
+                    "rejected",
+                    "best_lag_weeks",
+                    "corr",
+                    "incidents_lead_changepoint_share",
+                    "max_cp_level",
+                    "max_cp_stability",
+                    "changepoints",
+                    "incidents",
+                    "responses",
+                    "focus_rate",
+                    "delta_focus_rate",
+                    "weeks",
+                ]
+            ].rename(
+                columns={
+                    "nps_topic": "Tópico NPS",
+                    "confidence_learned": "Confidence (learned)",
+                    "score": "Confidence (raw)",
+                    "factor": "Learning factor",
+                    "confirmed": "✓ Confirmed",
+                    "rejected": "✗ Rejected",
+                    "best_lag_weeks": "Lag (semanas)",
+                    "corr": "Corr@Lag",
+                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
+                    "max_cp_level": "CP Significance",
+                    "max_cp_stability": "CP Stability",
+                    "changepoints": "Changepoints",
+                    "incidents": "Incidencias (asignadas)",
+                    "responses": "Respuestas",
+                    "focus_rate": f"% {focus_name.capitalize()}",
+                    "delta_focus_rate": f"Δ % {focus_name.capitalize()} (high-inc vs low-inc)",
+                    "weeks": "Semanas",
+                }
+            )
+            render_tokenized_dataframe(
+                rank_view,
+                theme,
                 use_container_width=True,
                 height=320,
             )
@@ -4261,16 +4333,18 @@ def page_nps_helix_linking(
                     sub_links["incident_id"].map(inc_snip).fillna("").str.slice(0, 220)
                 )
                 sub_links["similarity"] = sub_links["similarity"].round(3)
-                st.dataframe(
-                    sub_links[
-                        [
-                            "similarity",
-                            "Comentario detractor",
-                            "Incidencia (descripción)",
-                            "incident_id",
-                            "nps_id",
-                        ]
-                    ],
+                evidence_view = sub_links[
+                    [
+                        "similarity",
+                        "Comentario detractor",
+                        "Incidencia (descripción)",
+                        "incident_id",
+                        "nps_id",
+                    ]
+                ]
+                render_tokenized_dataframe(
+                    evidence_view,
+                    theme,
                     use_container_width=True,
                     height=360,
                 )
@@ -4303,7 +4377,11 @@ def page_nps_helix_linking(
                 top_k=min(10, len(broken_journeys_df)),
             )
             if fig_broken is not None:
-                st.plotly_chart(fig_broken, use_container_width=True)
+                st.plotly_chart(
+                    apply_plotly_theme(fig_broken, theme),
+                    use_container_width=True,
+                    theme=None,
+                )
 
             broken_journeys_view = broken_journeys_df.rename(
                 columns={
@@ -4340,8 +4418,9 @@ def page_nps_helix_linking(
                     "Impacto",
                 ]
             ]
-            st.dataframe(
-                style_semantic_dataframe(broken_journeys_view, theme),
+            render_tokenized_dataframe(
+                broken_journeys_view,
+                theme,
                 use_container_width=True,
                 height=320,
             )
@@ -4510,35 +4589,45 @@ def page_nps_helix_linking(
                 with cmat:
                     fig_pm = chart_incident_priority_matrix(active_df, theme=theme, top_k=1)
                     if fig_pm is not None:
-                        st.plotly_chart(fig_pm, use_container_width=True)
+                        st.plotly_chart(
+                            apply_plotly_theme(fig_pm, theme),
+                            use_container_width=True,
+                            theme=None,
+                        )
                 with crisk:
                     fig_rr = chart_incident_risk_recovery(active_df, theme=theme, top_k=1)
                     if fig_rr is not None:
-                        st.plotly_chart(fig_rr, use_container_width=True)
+                        st.plotly_chart(
+                            apply_plotly_theme(fig_rr, theme),
+                            use_container_width=True,
+                            theme=None,
+                        )
 
             def _render_detail_tab() -> None:
-                st.dataframe(
-                    active_df[show_cols].rename(
-                        columns={
-                            "nps_topic": "Tópico NPS",
-                            "touchpoint": "Ahora",
-                            "priority": "Prioridad",
-                            "confidence": "Confianza",
-                            "nps_points_at_risk": "NPS en riesgo (pts)",
-                            "nps_points_recoverable": "NPS recuperable (pts)",
-                            "focus_probability_with_incident": f"Prob. {focus_name} con incidencia",
-                            "nps_delta_expected": "Delta NPS esperado",
-                            "total_nps_impact": "Impacto total NPS (pts)",
-                            "causal_score": "Causal score",
-                            "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
-                            "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
-                            "incidents": "Incidencias",
-                            "responses": "Respuestas",
-                            "action_lane": "Lane de acción",
-                            "owner_role": "Owner (rol)",
-                            "eta_weeks": "ETA (semanas)",
-                        }
-                    ),
+                detail_df = active_df[show_cols].rename(
+                    columns={
+                        "nps_topic": "Tópico NPS",
+                        "touchpoint": "Ahora",
+                        "priority": "Prioridad",
+                        "confidence": "Confianza",
+                        "nps_points_at_risk": "NPS en riesgo (pts)",
+                        "nps_points_recoverable": "NPS recuperable (pts)",
+                        "focus_probability_with_incident": f"Prob. {focus_name} con incidencia",
+                        "nps_delta_expected": "Delta NPS esperado",
+                        "total_nps_impact": "Impacto total NPS (pts)",
+                        "causal_score": "Causal score",
+                        "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
+                        "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
+                        "incidents": "Incidencias",
+                        "responses": "Respuestas",
+                        "action_lane": "Lane de acción",
+                        "owner_role": "Owner (rol)",
+                        "eta_weeks": "ETA (semanas)",
+                    }
+                )
+                render_tokenized_dataframe(
+                    detail_df,
+                    theme,
                     use_container_width=True,
                     height=230,
                 )
@@ -4552,7 +4641,11 @@ def page_nps_helix_linking(
                 if heat is None:
                     st.info("No hay datos suficientes para el heat map del caso activo.")
                 else:
-                    st.plotly_chart(heat, use_container_width=True)
+                    st.plotly_chart(
+                        apply_plotly_theme(heat, theme),
+                        use_container_width=True,
+                        theme=None,
+                    )
 
             def _render_cp_tab() -> None:
                 g = (
@@ -4622,7 +4715,9 @@ def page_nps_helix_linking(
                         yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
                         legend=dict(orientation="h"),
                     )
-                    st.plotly_chart(apply_plotly_theme(fig_lag, theme), use_container_width=True)
+                    st.plotly_chart(
+                        apply_plotly_theme(fig_lag, theme), use_container_width=True, theme=None
+                    )
 
             def _render_lag_tab() -> None:
                 figd = chart_case_lag_days(
@@ -4635,10 +4730,15 @@ def page_nps_helix_linking(
                 if figd is None:
                     st.info("No hay lag diario disponible para el caso activo.")
                 else:
-                    st.plotly_chart(figd, use_container_width=True)
+                    st.plotly_chart(
+                        apply_plotly_theme(figd, theme),
+                        use_container_width=True,
+                        theme=None,
+                    )
 
             impact_chain(
                 [current_card],
+                theme=theme,
                 extra_tabs=[
                     ("Matriz visual", _render_matrix_tab),
                     ("Ficha cuantitativa", _render_detail_tab),
@@ -5425,6 +5525,7 @@ def main() -> None:
         page_quality(
             df_datos,
             helix_df=helix_df,
+            theme=theme,
             llm_df=df_llm,
             settings=settings,
             service_origin=service_origin,
