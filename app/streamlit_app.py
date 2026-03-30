@@ -5337,11 +5337,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    if "_show_cross_report" not in st.session_state:
-        st.session_state["_show_cross_report"] = False
-    if "_scroll_to_cross_report" not in st.session_state:
-        st.session_state["_scroll_to_cross_report"] = False
-
     ctx_col_left, ctx_col_right = st.columns([8.6, 1.4])
     with ctx_col_left:
         pills(
@@ -5357,21 +5352,10 @@ def main() -> None:
     with ctx_col_right:
         report_clicked = st.button(
             "Reporte",
-            type="primary" if bool(st.session_state.get("_show_cross_report")) else "secondary",
+            type="secondary",
             use_container_width=True,
             key="nps_cross_report_toggle",
         )
-        if report_clicked:
-            next_state = not bool(st.session_state.get("_show_cross_report"))
-            st.session_state["_show_cross_report"] = next_state
-            if next_state:
-                st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
-                st.session_state["_scroll_to_cross_report"] = True
-            else:
-                st.session_state["_scroll_to_cross_report"] = False
-            st.rerun()
-
-    show_cross_report = bool(st.session_state.get("_show_cross_report"))
 
     if not data_ready:
         st.info(
@@ -5385,11 +5369,73 @@ def main() -> None:
     # Global population time window (Año/Mes) applied everywhere.
     pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
+    def _render_report_only_view() -> None:
+        df_resumen_modal = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["resumen"] or tuple(),
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
+        page_nps_helix_linking(
+            nps_df=df_resumen_modal,
+            store_dir=store_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+            nps_group_choice=nps_group_choice,
+            settings=settings,
+            theme_mode=theme_mode,
+            touchpoint_source=touchpoint_source,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            min_n=min_n,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            show_report=True,
+            report_only=True,
+        )
+
+    if hasattr(st, "dialog"):
+
+        @st.dialog("Reporte Ejecutivo", width="large")
+        def _open_report_modal() -> None:
+            _render_report_only_view()
+
+        if report_clicked:
+            _open_report_modal()
+    else:
+        # Compatibility fallback for very old Streamlit builds without dialogs.
+        if "_show_cross_report" not in st.session_state:
+            st.session_state["_show_cross_report"] = False
+        if report_clicked:
+            st.session_state["_show_cross_report"] = not bool(
+                st.session_state.get("_show_cross_report")
+            )
+            st.rerun()
+        if not bool(st.session_state.get("_show_cross_report")):
+            pass
+        else:
+            close_col_left, close_col_right = st.columns([8.8, 1.2])
+            with close_col_left:
+                st.markdown(
+                    "<div class='nps-card nps-card--flat'><b>Reporte abierto</b></div>",
+                    unsafe_allow_html=True,
+                )
+            with close_col_right:
+                if st.button("✕ Cerrar", key="nps_report_fallback_close", use_container_width=True):
+                    st.session_state["_show_cross_report"] = False
+                    st.rerun()
+            _render_report_only_view()
+            st.stop()
+
     main_sections = ["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"]
     if "_main_section" not in st.session_state:
         st.session_state["_main_section"] = main_sections[0]
-    if show_cross_report:
-        st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
     if hasattr(st, "segmented_control"):
         main_section = st.segmented_control(
             "Sección principal",
@@ -5538,8 +5584,8 @@ def main() -> None:
             min_n=min_n,
             pop_year=pop_year,
             pop_month=pop_month,
-            show_report=show_cross_report,
-            report_only=show_cross_report,
+            show_report=False,
+            report_only=False,
         )
 
     if main_section == "🧾 Datos":

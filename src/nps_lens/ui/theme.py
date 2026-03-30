@@ -1293,6 +1293,42 @@ div[data-testid="stTooltipContent"] * {{
   color: var(--nps-control-text) !important;
 }}
 
+/* Dialogs: keep report modal aligned with app theme and use native close icon only. */
+div[data-testid="stDialog"] > div[role="dialog"],
+div[data-testid="stDialog"] [data-baseweb="modal"] {{
+  background: var(--nps-surface) !important;
+  color: var(--nps-text) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--nps-shadow) !important;
+}}
+
+div[data-testid="stDialog"] [data-testid="stDialogContent"] {{
+  background: transparent !important;
+}}
+
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"],
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"] *,
+div[data-testid="stDialog"] h1,
+div[data-testid="stDialog"] h2,
+div[data-testid="stDialog"] h3,
+div[data-testid="stDialog"] p,
+div[data-testid="stDialog"] label,
+div[data-testid="stDialog"] span {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-testid="stDialog"] button[aria-label="Close"] {{
+  color: var(--nps-text) !important;
+  background: color-mix(in srgb, var(--nps-surface-2) 92%, transparent) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 12px !important;
+}}
+
+div[data-testid="stDialog"] button[aria-label="Close"]:hover {{
+  background: var(--nps-control-bg-hover) !important;
+}}
+
 /* Plotly containers */
 [data-testid="stPlotlyChart"] {{
   border-radius: 22px;
