@@ -6,13 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
     DesignTokens,
     nps_score_color,
     palette,
     plotly_nps_score_scale,
     plotly_risk_scale,
-    primary_accent,
 )
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
@@ -43,14 +43,12 @@ class ChartTheme:
 def chart_theme(theme: Theme) -> ChartTheme:
     """Derive minimal layout colors from design tokens."""
 
-    tokens = DesignTokens.default()
-    p = palette(tokens, theme.mode)
     return ChartTheme(
-        paper_bg=p["color.app.surface.default"],
-        plot_bg=p["color.app.surface.raised"],
-        text=p["color.primary.text.primary"],
-        grid=p["color.primary.bg.bar"],
-        accent=primary_accent(tokens, theme.mode),
+        paper_bg=theme.chart_paper,
+        plot_bg=theme.chart_plot,
+        text=theme.text,
+        grid=theme.chart_grid,
+        accent=theme.accent,
     )
 
 
@@ -162,7 +160,8 @@ def _nps_score_colors(theme: Theme, values: pd.Series) -> list[str]:
 def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
     fig.update_layout(
         height=height,
-        margin=dict(l=10, r=10, t=10, b=10),
+        # Reserve a top lane so Plotly's modebar never overlaps chart data.
+        margin=dict(l=10, r=10, t=62, b=10),
         font=dict(color=th.text),
         paper_bgcolor=th.paper_bg,
         plot_bgcolor=th.plot_bg,
@@ -339,46 +338,28 @@ def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> N
     )
 
 
-def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
+def chart_daily_kpis(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    days: int = 60,
+    metrics: pd.DataFrame | None = None,
+):
     """Daily time-series for detractor rate and classic NPS.
 
     Complements the ladder heatmap: the heatmap shows distribution, this chart shows
     % detractors and classic NPS (promoters - detractors) per day.
     """
-    if "Fecha" not in df.columns or "NPS" not in df.columns:
-        return None
-
-    tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
-    if tmp.empty:
-        return None
-
-    tmp["day"] = tmp["Fecha"].dt.floor("D")
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return None
-
-    scores = pd.to_numeric(tmp["NPS"], errors="coerce")
-    tmp["score"] = scores.clip(lower=0, upper=10)
-    tmp = tmp.dropna(subset=["score"]).copy()
-    if tmp.empty:
-        return None
-
-    tmp["is_prom"] = tmp["score"] >= 9
-    tmp["is_det"] = tmp["score"] <= 6
-
-    agg = (
-        tmp.groupby("day", as_index=False)
-        .agg(
-            n=("score", "size"),
-            prom=("is_prom", "mean"),
-            det=("is_det", "mean"),
-        )
-        .sort_values("day")
-    )
-    agg["classic_nps"] = (agg["prom"] - agg["det"]) * 100.0
-    agg["det_pct"] = agg["det"] * 100.0
+    if metrics is not None and not metrics.empty:
+        required = {"day", "n", "classic_nps", "det_pct"}
+        if not required.issubset(set(metrics.columns)):
+            return None
+        agg = metrics[["day", "n", "classic_nps", "det_pct"]].copy()
+        agg = agg.sort_values("day")
+    else:
+        agg = shared_daily_metrics(df, days=int(days))
+        if agg.empty:
+            return None
 
     th = chart_theme(theme)
     import plotly.graph_objects as go  # lazy import
@@ -429,7 +410,13 @@ def chart_daily_kpis(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     return apply_plotly_template(fig, theme)
 
 
-def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
+def chart_daily_mix_business(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    days: int = 60,
+    metrics: pd.DataFrame | None = None,
+):
     """Business-friendly daily view: promoters/passives/detractors mix.
 
     This is intentionally easier to interpret than the heatmap ladder:
@@ -440,43 +427,16 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     Output: 100% stacked bars by day.
     """
 
-    if "Fecha" not in df.columns or "NPS" not in df.columns:
+    agg = metrics.copy() if metrics is not None else shared_daily_metrics(df, days=int(days))
+    if agg.empty:
         return None
-
-    tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
-    if tmp.empty:
-        return None
-
-    tmp["day"] = tmp["Fecha"].dt.floor("D")
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return None
-
-    scores = pd.to_numeric(tmp["NPS"], errors="coerce")
-    tmp["score"] = scores.clip(lower=0, upper=10)
-    tmp = tmp.dropna(subset=["score"]).copy()
-    if tmp.empty:
-        return None
-
-    tmp["promoters"] = tmp["score"] >= 9
-    tmp["passives"] = (tmp["score"] >= 7) & (tmp["score"] <= 8)
-    tmp["detractors"] = tmp["score"] <= 6
-
-    agg = (
-        tmp.groupby("day", as_index=False)
-        .agg(
-            n=("score", "size"),
-            promoters=("promoters", "mean"),
-            passives=("passives", "mean"),
-            detractors=("detractors", "mean"),
-        )
-        .sort_values("day")
-    )
-    # Convert to percentages.
-    for col in ("promoters", "passives", "detractors"):
-        agg[col] = agg[col] * 100.0
+    agg = agg.rename(
+        columns={
+            "det_pct": "detractors",
+            "pas_pct": "passives",
+            "pro_pct": "promoters",
+        }
+    )[["day", "n", "detractors", "passives", "promoters"]].copy()
 
     th = chart_theme(theme)
     detr_c, pas_c, pro_c = _status_colors(theme)
@@ -537,20 +497,18 @@ def chart_daily_mix_business(df: pd.DataFrame, theme: Theme, *, days: int = 60):
     return apply_plotly_template(fig, theme)
 
 
-def chart_daily_volume(df: pd.DataFrame, theme: Theme, *, days: int = 60):
+def chart_daily_volume(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    days: int = 60,
+    metrics: pd.DataFrame | None = None,
+):
     """Daily response volume (n). Useful to avoid over-reading low-N days."""
-    if "Fecha" not in df.columns or "NPS" not in df.columns:
+    source = metrics if metrics is not None else shared_daily_metrics(df, days=int(days))
+    if source.empty:
         return None
-    tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
-    if tmp.empty:
-        return None
-    tmp["day"] = tmp["Fecha"].dt.floor("D")
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return None
-    agg = tmp.groupby("day", as_index=False).agg(n=("NPS", "size")).sort_values("day")
+    agg = source[["day", "n"]].copy()
 
     th = chart_theme(theme)
     import plotly.express as px  # lazy import

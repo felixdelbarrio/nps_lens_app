@@ -16,6 +16,25 @@ class Theme:
     text: str
     muted: str
     border: str
+    chart_paper: str
+    chart_plot: str
+    chart_grid: str
+    chart_zero_line: str
+    table_bg: str
+    table_bg_alt: str
+    table_bg_hover: str
+    table_header_bg: str
+    table_header_text: str
+    table_border: str
+    control_bg: str
+    control_bg_hover: str
+    control_border: str
+    control_text: str
+    control_placeholder: str
+    control_icon: str
+    control_menu_bg: str
+    control_menu_item_hover: str
+    control_menu_item_selected: str
     accent: str
     on_accent: str
     brand: str
@@ -38,7 +57,30 @@ def get_theme(mode: str) -> Theme:
     text = p["color.primary.text.primary"]
     muted = p["color.primary.text.disabled"]
     border = p["color.primary.bg.bar"]
+    chart_paper = p.get("color.app.chart.paper", surface)
+    chart_plot = p.get("color.app.chart.plot", surface_2)
+    chart_grid = p.get("color.app.chart.grid", border)
+    chart_zero_line = p.get("color.app.chart.zero-line", chart_grid)
+    table_bg = p.get("color.app.table.bg", surface)
+    table_bg_alt = p.get("color.app.table.bg.alt", surface_2)
+    table_bg_hover = p.get("color.app.table.bg.hover", table_bg_alt)
+    table_header_bg = p.get("color.app.table.header.bg", surface_2)
+    table_header_text = p.get("color.app.table.header.text", muted)
+    table_border = p.get("color.app.table.border", border)
     accent = p["color.primary.accent.value-01.default"]
+    control_bg = p.get("color.app.control.bg", surface_2)
+    control_bg_hover = p.get("color.app.control.bg.hover", control_bg)
+    control_border = p.get("color.app.control.border", border)
+    control_text = p.get("color.app.control.text", text)
+    control_placeholder = p.get("color.app.control.placeholder", muted)
+    control_icon = p.get(
+        "color.app.control.icon", p.get("color.primary.text.action.default", accent)
+    )
+    control_menu_bg = p.get("color.app.control.menu.bg", surface_2)
+    control_menu_item_hover = p.get("color.app.control.menu.item.hover", control_bg_hover)
+    control_menu_item_selected = p.get(
+        "color.app.control.menu.item.selected", control_menu_item_hover
+    )
     on_accent = p.get(
         "color.app.text.on-accent", p.get("color.primary.text.main-inverse.default", text)
     )
@@ -56,6 +98,25 @@ def get_theme(mode: str) -> Theme:
         text=text,
         muted=muted,
         border=border,
+        chart_paper=chart_paper,
+        chart_plot=chart_plot,
+        chart_grid=chart_grid,
+        chart_zero_line=chart_zero_line,
+        table_bg=table_bg,
+        table_bg_alt=table_bg_alt,
+        table_bg_hover=table_bg_hover,
+        table_header_bg=table_header_bg,
+        table_header_text=table_header_text,
+        table_border=table_border,
+        control_bg=control_bg,
+        control_bg_hover=control_bg_hover,
+        control_border=control_border,
+        control_text=control_text,
+        control_placeholder=control_placeholder,
+        control_icon=control_icon,
+        control_menu_bg=control_menu_bg,
+        control_menu_item_hover=control_menu_item_hover,
+        control_menu_item_selected=control_menu_item_selected,
         accent=accent,
         on_accent=on_accent,
         brand=brand,
@@ -86,6 +147,25 @@ def apply_theme(t: Theme) -> None:
   --nps-text: {t.text};
   --nps-muted: {t.muted};
   --nps-border: {t.border};
+  --nps-chart-paper: {t.chart_paper};
+  --nps-chart-plot: {t.chart_plot};
+  --nps-chart-grid: {t.chart_grid};
+  --nps-chart-zero: {t.chart_zero_line};
+  --nps-table-bg: {t.table_bg};
+  --nps-table-bg-alt: {t.table_bg_alt};
+  --nps-table-bg-hover: {t.table_bg_hover};
+  --nps-table-header-bg: {t.table_header_bg};
+  --nps-table-header-text: {t.table_header_text};
+  --nps-table-border: {t.table_border};
+  --nps-control-bg: {t.control_bg};
+  --nps-control-bg-hover: {t.control_bg_hover};
+  --nps-control-border: {t.control_border};
+  --nps-control-text: {t.control_text};
+  --nps-control-placeholder: {t.control_placeholder};
+  --nps-control-icon: {t.control_icon};
+  --nps-control-menu-bg: {t.control_menu_bg};
+  --nps-control-menu-item-hover: {t.control_menu_item_hover};
+  --nps-control-menu-item-selected: {t.control_menu_item_selected};
   --nps-accent: {t.accent};
   --nps-on-accent: {t.on_accent};
   --nps-shadow-color: color-mix(in srgb, #000 10%, transparent);
@@ -149,7 +229,6 @@ header[data-testid="stHeader"] {{
 #MainMenu,
 [data-testid="stStatusWidget"],
 .stAppDeployButton,
-button[kind="header"],
 button[title="Deploy"],
 button[aria-label="Deploy"] {{
   display: none !important;
@@ -167,6 +246,128 @@ section[data-testid="stSidebar"] > div {{
   padding-top: 0.5rem !important;
 }}
 
+/* Sidebar collapse/expand control: keep always visible and readable */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+  z-index: 1000 !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:hover [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapsedControl"],
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+}}
+
+/* Fallback for Streamlit variants where test ids are wrapped in generic containers. */
+div:has(> button[aria-label="Open sidebar"]),
+div:has(> button[aria-label="Close sidebar"]) {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+}}
+
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapsedControl"] button,
+[data-testid="collapsedControl"] button,
+button[aria-label="Open sidebar"],
+button[aria-label="Close sidebar"] {{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--nps-control-border) !important;
+  background: var(--nps-control-bg) !important;
+  color: var(--nps-control-icon) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  transform: none !important;
+  transition: none !important;
+}}
+
+[data-testid="stSidebarCollapseButton"] button:hover,
+[data-testid="stSidebarCollapsedControl"] button:hover,
+[data-testid="collapsedControl"] button:hover,
+button[aria-label="Open sidebar"]:hover,
+button[aria-label="Close sidebar"]:hover,
+[data-testid="stSidebarCollapseButton"] button:focus-visible,
+[data-testid="stSidebarCollapsedControl"] button:focus-visible,
+[data-testid="collapsedControl"] button:focus-visible,
+button[aria-label="Open sidebar"]:focus-visible,
+button[aria-label="Close sidebar"]:focus-visible {{
+  background: var(--nps-control-bg-hover) !important;
+  color: var(--nps-control-text) !important;
+  border-color: var(--nps-control-border) !important;
+}}
+
+[data-testid="stSidebarCollapseButton"] button svg,
+[data-testid="stSidebarCollapsedControl"] button svg,
+[data-testid="collapsedControl"] button svg,
+button[aria-label="Open sidebar"] svg,
+button[aria-label="Close sidebar"] svg {{
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+}}
+
+/* Force deterministic ASCII arrows for sidebar toggle in every Streamlit state. */
+[data-testid="stSidebarCollapseButton"] button::before,
+button[aria-label="Close sidebar"]::before {{
+  content: "<";
+  display: block;
+  color: var(--nps-control-icon) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}}
+
+[data-testid="stSidebarCollapsedControl"] button::before,
+[data-testid="collapsedControl"] button::before,
+button[aria-label="Open sidebar"]::before {{
+  content: ">";
+  display: block;
+  color: var(--nps-control-icon) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}}
+
+[data-testid="stSidebarCollapseButton"] button svg path,
+[data-testid="stSidebarCollapsedControl"] button svg path,
+[data-testid="collapsedControl"] button svg path,
+button[aria-label="Open sidebar"] svg path,
+button[aria-label="Close sidebar"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}}
+
 /* Cards */
 .nps-card {{
   background: var(--nps-surface);
@@ -174,6 +375,17 @@ section[data-testid="stSidebar"] > div {{
   border-radius: var(--nps-radius);
   padding: 16px 18px;
   box-shadow: var(--nps-shadow);
+}}
+
+.nps-card__kicker {{
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}}
+
+.nps-card__spacer {{
+  height: 10px;
 }}
 
 .nps-card--flat {{
@@ -188,6 +400,19 @@ section[data-testid="stSidebar"] > div {{
   font-size: 34px;
   font-weight: 800;
   line-height: 1.05;
+}}
+
+.nps-section {{
+  margin: 10px 0 12px 0;
+}}
+
+.nps-section__title {{
+  font-size: 22px;
+  font-weight: 800;
+}}
+
+.nps-section__subtitle {{
+  margin-top: 4px;
 }}
 
 .nps-pill {{
@@ -221,6 +446,53 @@ section[data-testid="stSidebar"] > div {{
   flex-wrap: wrap;
   gap: 10px;
   margin: 18px 0 26px 0;
+}}
+
+.nps-pill-row--compact {{
+  margin: 10px 0 20px 0;
+}}
+
+.nps-copy-widget {{
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}}
+
+.nps-copy-widget__btn {{
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 650;
+  background: var(--nps-accent);
+  color: var(--nps-on-accent);
+}}
+
+.nps-copy-widget__btn:hover,
+.nps-copy-widget__btn:focus-visible {{
+  background: color-mix(in srgb, var(--nps-accent) 84%, black 16%);
+  outline: none;
+}}
+
+.nps-copy-widget__msg {{
+  font-size: 12px;
+  color: var(--nps-muted);
+}}
+
+/* Context row: keep context pills and Reporte action aligned on the same baseline. */
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) {{
+  align-items: center;
+}}
+
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child {{
+  display: flex;
+  justify-content: flex-end;
+}}
+
+div[data-testid="stHorizontalBlock"]:has(.nps-pill-row--compact) > div:last-child div.stButton {{
+  width: 100%;
+  margin-top: 10px;
 }}
 
 .nps-app-hero {{
@@ -723,6 +995,79 @@ div[data-testid="stMarkdownContainer"] .nps-app-hero .nps-app-hero__subtitle {{
   text-decoration: underline;
 }}
 
+.nps-data-table-wrap {{
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  margin-top: 8px;
+  border: 1px solid var(--nps-table-border-local, var(--nps-table-border)) !important;
+  border-radius: 14px;
+  background: var(--nps-table-bg-local, var(--nps-table-bg)) !important;
+}}
+
+.nps-data-table {{
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--nps-table-bg-local, var(--nps-table-bg)) !important;
+  color: var(--nps-table-text-local, var(--nps-text)) !important;
+  font-size: 13px;
+}}
+
+.nps-data-table thead th {{
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--nps-table-header-bg-local, var(--nps-table-header-bg)) !important;
+  color: var(--nps-table-header-text-local, var(--nps-table-header-text)) !important;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--nps-table-border-local, var(--nps-table-border)) !important;
+  border-right: 1px solid var(--nps-table-border-local, var(--nps-table-border)) !important;
+  font-weight: 700;
+  white-space: nowrap;
+}}
+
+.nps-data-table thead th:last-child {{
+  border-right: none;
+}}
+
+.nps-data-table tbody td {{
+  background: var(--nps-table-bg-local, var(--nps-table-bg)) !important;
+  color: var(--nps-table-text-local, var(--nps-text)) !important;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--nps-table-border-local, var(--nps-table-border)) !important;
+  border-right: 1px solid var(--nps-table-border-local, var(--nps-table-border)) !important;
+  white-space: nowrap;
+}}
+
+.nps-data-table tbody td:last-child {{
+  border-right: none;
+}}
+
+.nps-data-table tbody tr:nth-child(even) td {{
+  background: var(--nps-table-bg-alt-local, var(--nps-table-bg-alt)) !important;
+}}
+
+.nps-data-table tbody tr:hover td {{
+  background: var(--nps-table-bg-hover-local, var(--nps-table-bg-hover)) !important;
+}}
+
+.nps-data-table th.nps-data-table__index,
+.nps-data-table td.nps-data-table__index {{
+  width: 56px;
+  min-width: 56px;
+  text-align: right;
+  color: var(--nps-table-muted-local, var(--nps-muted)) !important;
+  font-variant-numeric: tabular-nums;
+}}
+
+.nps-data-table--wrap tbody td {{
+  white-space: normal !important;
+  word-break: break-word;
+}}
+
 /* Buttons */
 div.stButton > button {{
   border-radius: 12px;
@@ -747,22 +1092,26 @@ button[kind="secondary"] {{
 [data-testid="stDataFrame"] {{
   border-radius: var(--nps-radius);
   overflow: hidden;
-  border: 1px solid var(--nps-border-soft);
-  background: var(--nps-surface) !important;
+  border: 1px solid var(--nps-table-border);
+  background: var(--nps-table-bg) !important;
   box-shadow: var(--nps-shadow);
-  --gdg-bg-cell: var(--nps-surface);
-  --gdg-bg-header: var(--nps-surface-2);
-  --gdg-bg-header-hovered: var(--nps-surface-2);
-  --gdg-bg-header-has-focus: var(--nps-surface-2);
-  --gdg-bg-search-result: color-mix(in srgb, var(--nps-accent) 14%, var(--nps-surface));
-  --gdg-bg-search-result-hover: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-surface));
-  --gdg-border-color: var(--nps-border-soft);
+  --gdg-bg-cell: var(--nps-table-bg);
+  --gdg-bg-cell-medium: var(--nps-table-bg-alt);
+  --gdg-bg-header: var(--nps-table-header-bg);
+  --gdg-bg-header-hovered: var(--nps-table-header-bg);
+  --gdg-bg-header-has-focus: var(--nps-table-header-bg);
+  --gdg-bg-search-result: color-mix(in srgb, var(--nps-accent) 14%, var(--nps-table-bg));
+  --gdg-bg-search-result-hover: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-table-bg));
+  --gdg-border-color: var(--nps-table-border);
+  --gdg-horizontal-border-color: var(--nps-table-border);
   --gdg-text-dark: var(--nps-text);
   --gdg-text-medium: var(--nps-muted);
   --gdg-text-light: var(--nps-muted);
+  --gdg-text-header: var(--nps-table-header-text);
+  --gdg-text-group-header: var(--nps-table-header-text);
   --gdg-accent-color: var(--nps-accent);
   --gdg-accent-fg: var(--nps-on-accent);
-  --gdg-bg-bubble: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-surface-2));
+  --gdg-bg-bubble: color-mix(in srgb, var(--nps-accent) 20%, var(--nps-table-bg-alt));
   --gdg-font-family: inherit;
 }}
 
@@ -779,31 +1128,31 @@ div[data-testid="stDataFrame"] > div,
 div[data-testid="stDataFrame"] canvas,
 div[data-testid="stTable"] > div,
 div[data-testid="stTable"] table {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-table-bg) !important;
 }}
 div[data-testid="stDataFrame"] .ag-header,
 div[data-testid="stDataFrame"] .ag-header-row,
 div[data-testid="stDataFrame"] .ag-header-cell,
 div[data-testid="stDataFrame"] [role="columnheader"] {{
-  background: var(--nps-surface-2) !important;
-  color: var(--nps-text) !important;
-  border-color: var(--nps-border-soft) !important;
+  background: var(--nps-table-header-bg) !important;
+  color: var(--nps-table-header-text) !important;
+  border-color: var(--nps-table-border) !important;
 }}
 div[data-testid="stDataFrame"] .ag-row {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-table-bg) !important;
   color: var(--nps-text) !important;
 }}
 div[data-testid="stDataFrame"] .ag-row:hover {{
-  background: var(--nps-accent-soft) !important;
+  background: var(--nps-table-bg-hover) !important;
 }}
 div[data-testid="stDataFrame"] .ag-cell {{
   color: var(--nps-text) !important;
-  border-color: var(--nps-border-softer) !important;
+  border-color: var(--nps-table-border) !important;
 }}
 div[data-testid="stDataFrame"] [data-testid="StyledDataFrameCell"],
 div[data-testid="stDataFrame"] [data-testid="StyledDataFrameCell"] * {{
   color: var(--nps-text) !important;
-  background: transparent !important;
+  background: var(--nps-table-bg) !important;
 }}
 div[data-testid="stDataFrame"] [role="grid"],
 div[data-testid="stDataFrame"] [role="row"],
@@ -813,37 +1162,300 @@ div[data-testid="stDataFrame"] .gdg-wmyidgi,
 div[data-testid="stDataFrame"] .gdg-s1dgczr6,
 div[data-testid="stDataFrame"] .gdg-seveqep,
 div[data-testid="stDataFrame"] .gdg-d19meir1 {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-table-bg) !important;
   color: var(--nps-text) !important;
 }}
 div[data-testid="stDataFrame"] [role="gridcell"] {{
-  border-color: var(--nps-border-softer) !important;
+  border-color: var(--nps-table-border) !important;
 }}
 div[data-testid="stTable"] table th,
 div[data-testid="stTable"] table td {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-table-bg) !important;
   color: var(--nps-text) !important;
-  border-color: var(--nps-border-softer) !important;
+  border-color: var(--nps-table-border) !important;
 }}
 div[data-testid="stTable"] table thead th {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-table-header-bg) !important;
+  color: var(--nps-table-header-text) !important;
 }}
 
 /* Controls (BaseWeb) — keep contrast in dark mode */
 div[data-baseweb="select"] > div {{
-  background: var(--nps-surface-2) !important;
-  color: var(--nps-text) !important;
-  border-color: var(--nps-border) !important;
+  background: var(--nps-control-bg) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 10px !important;
   box-shadow: none !important;
 }}
-div[data-baseweb="select"] span, div[data-baseweb="select"] input {{
-  color: var(--nps-text) !important;
+div[data-baseweb="select"] > div:hover {{
+  background: var(--nps-control-bg-hover) !important;
+}}
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] input,
+div[data-baseweb="select"] div[role="combobox"],
+div[data-testid="stSelectbox"] span,
+div[data-testid="stMultiSelect"] span {{
+  color: var(--nps-control-text) !important;
 }}
 div[data-baseweb="select"] input::placeholder {{
-  color: var(--nps-muted) !important;
+  color: var(--nps-control-placeholder) !important;
 }}
-div[data-baseweb="popover"] * {{
+div[data-baseweb="select"] svg {{
+  color: var(--nps-control-icon) !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="select"] svg path,
+div[data-baseweb="select"] svg line,
+div[data-baseweb="select"] svg polyline,
+div[data-baseweb="select"] svg polygon,
+div[data-baseweb="select"] svg circle,
+div[data-baseweb="select"] svg ellipse,
+div[data-testid="stSelectbox"] svg,
+div[data-testid="stSelectbox"] svg path,
+div[data-testid="stSelectbox"] svg line,
+div[data-testid="stSelectbox"] svg polyline,
+div[data-testid="stSelectbox"] svg polygon,
+div[data-testid="stSelectbox"] svg circle,
+div[data-testid="stSelectbox"] svg ellipse,
+div[data-testid="stMultiSelect"] svg,
+div[data-testid="stMultiSelect"] svg path,
+div[data-testid="stMultiSelect"] svg line,
+div[data-testid="stMultiSelect"] svg polyline,
+div[data-testid="stMultiSelect"] svg polygon,
+div[data-testid="stMultiSelect"] svg circle,
+div[data-testid="stMultiSelect"] svg ellipse {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="select"] svg rect,
+div[data-testid="stSelectbox"] svg rect,
+div[data-testid="stMultiSelect"] svg rect {{
+  stroke: currentColor !important;
+  fill: transparent !important;
+}}
+div[data-baseweb="select"] [aria-hidden="true"] {{
+  opacity: 1 !important;
+}}
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] > div > div,
+div[data-baseweb="menu"],
+div[data-baseweb="menu"] > div,
+div[data-baseweb="menu"] ul,
+div[role="listbox"],
+ul[role="listbox"] {{
+  background: var(--nps-control-menu-bg) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 12px !important;
+}}
+div[data-baseweb="popover"] *,
+div[data-baseweb="menu"] *,
+div[role="listbox"] *,
+ul[role="listbox"] * {{
+  color: var(--nps-control-text) !important;
+}}
+div[data-baseweb="popover"] [role="option"],
+div[data-baseweb="menu"] [role="option"],
+ul[role="listbox"] [role="option"],
+li[role="option"] {{
+  background: var(--nps-control-menu-bg) !important;
+  color: var(--nps-control-text) !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="popover"] [role="option"] *,
+div[data-baseweb="menu"] [role="option"] *,
+ul[role="listbox"] [role="option"] *,
+li[role="option"] * {{
+  color: var(--nps-control-text) !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="popover"] [role="option"]:hover,
+div[data-baseweb="menu"] [role="option"]:hover,
+ul[role="listbox"] [role="option"]:hover,
+li[role="option"]:hover {{
+  background: var(--nps-control-menu-item-hover) !important;
+}}
+div[data-baseweb="popover"] [role="option"][aria-selected="true"],
+div[data-baseweb="menu"] [role="option"][aria-selected="true"],
+ul[role="listbox"] [role="option"][aria-selected="true"],
+li[role="option"][aria-selected="true"] {{
+  background: var(--nps-control-menu-item-selected) !important;
+}}
+div[data-baseweb="popover"] [aria-disabled="true"],
+div[data-baseweb="menu"] [aria-disabled="true"],
+ul[role="listbox"] [aria-disabled="true"] {{
+  color: var(--nps-control-placeholder) !important;
+}}
+div[data-baseweb="popover"] input,
+div[data-baseweb="popover"] textarea {{
+  background: var(--nps-control-bg) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+}}
+
+/* Help/tooltip system: keep it tokenized and readable in both modes */
+[data-testid="stTooltipIcon"],
+[data-testid="stTooltipHoverTarget"] {{
+  color: var(--nps-control-icon) !important;
+}}
+[data-testid="stTooltipIcon"] svg,
+[data-testid="stTooltipHoverTarget"] svg {{
+  color: inherit !important;
+}}
+[data-testid="stTooltipIcon"] svg path,
+[data-testid="stTooltipHoverTarget"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}}
+[role="tooltip"],
+div[data-baseweb="tooltip"],
+div[data-baseweb="popover"][role="tooltip"],
+div[data-testid="stTooltipContent"] {{
+  background: var(--nps-control-menu-bg) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--nps-shadow);
+}}
+[role="tooltip"] *,
+div[data-baseweb="tooltip"] *,
+div[data-baseweb="popover"][role="tooltip"] *,
+div[data-testid="stTooltipContent"] * {{
+  color: var(--nps-control-text) !important;
+}}
+
+/* Dialogs: enforce tokenized dark shell/content and readable status blocks. */
+div[data-baseweb="modal"] {{
+  z-index: 1300 !important;
+}}
+
+div[data-baseweb="modal"] > div {{
+  background: color-mix(in srgb, var(--nps-bg) 70%, black 30%) !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"],
+div[data-baseweb="modal"] > div > div,
+div[data-testid="stDialog"] > div[role="dialog"] {{
+  background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface)) 0%,
+      var(--nps-surface) 68%
+    ) !important;
   color: var(--nps-text) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--nps-shadow) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stDialogContent"],
+div[data-testid="stDialog"] [data-testid="stDialogContent"] {{
+  background: transparent !important;
+}}
+
+/* Native Streamlit dialog header can use internal classes/testids across versions.
+   Style it via both semantic and structural selectors. */
+div[data-baseweb="modal"] [data-testid="stDialogHeader"],
+div[data-baseweb="modal"] [data-testid="stDialogTitle"],
+div[data-baseweb="modal"] [role="dialog"] > div:first-child,
+div[data-baseweb="modal"] [role="dialog"] > div:first-child *,
+div[data-baseweb="modal"] [role="heading"],
+div[data-testid="stDialog"] [data-testid="stDialogHeader"],
+div[data-testid="stDialog"] [data-testid="stDialogTitle"],
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child *,
+div[data-testid="stDialog"] [role="heading"] {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
+  opacity: 1 !important;
+  font-weight: 800 !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"] > div:first-child a,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child a {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"],
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"] *,
+div[data-baseweb="modal"] h1,
+div[data-baseweb="modal"] h2,
+div[data-baseweb="modal"] h3,
+div[data-baseweb="modal"] p,
+div[data-baseweb="modal"] label,
+div[data-baseweb="modal"] span,
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"],
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"] *,
+div[data-testid="stDialog"] h1,
+div[data-testid="stDialog"] h2,
+div[data-testid="stDialog"] h3,
+div[data-testid="stDialog"] p,
+div[data-testid="stDialog"] label,
+div[data-testid="stDialog"] span {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] button[aria-label="Close"],
+div[data-testid="stDialog"] button[aria-label="Close"] {{
+  color: var(--nps-text) !important;
+  background: color-mix(in srgb, var(--nps-surface-2) 92%, transparent) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 12px !important;
+}}
+
+div[data-baseweb="modal"] button[aria-label="Close"]:hover,
+div[data-testid="stDialog"] button[aria-label="Close"]:hover {{
+  background: var(--nps-control-bg-hover) !important;
+}}
+
+/* Notifications inside modal (warning/success/info/error) keep dark contrast. */
+div[data-baseweb="modal"] [data-testid="stAlert"],
+div[data-baseweb="modal"] [data-baseweb="notification"],
+div[data-testid="stDialog"] [data-testid="stAlert"],
+div[data-testid="stDialog"] [data-baseweb="notification"] {{
+  background: color-mix(in srgb, var(--nps-surface-2) 90%, var(--nps-accent) 10%) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 14px !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"] *,
+div[data-baseweb="modal"] [data-baseweb="notification"] *,
+div[data-testid="stDialog"] [data-testid="stAlert"] *,
+div[data-testid="stDialog"] [data-baseweb="notification"] * {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="warning"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="warning"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="warning"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="warning"] {{
+  background: color-mix(in srgb, var(--nps-warning) 26%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-warning) 60%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="success"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="success"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="success"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="success"] {{
+  background: color-mix(in srgb, var(--nps-success) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-success) 54%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="error"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="error"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="error"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="error"] {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 28%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-danger) 58%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="info"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="info"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="info"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
+  background: color-mix(in srgb, var(--nps-accent) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-accent) 56%, var(--nps-surface)) !important;
 }}
 
 /* Plotly containers */
@@ -852,8 +1464,8 @@ div[data-baseweb="popover"] * {{
   border: 1px solid var(--nps-border-soft);
   background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--nps-accent) 4%, var(--nps-surface)) 0%,
-      var(--nps-surface) 100%
+      color-mix(in srgb, var(--nps-accent) 4%, var(--nps-chart-paper)) 0%,
+      var(--nps-chart-paper) 100%
     ) !important;
   padding: 14px 14px 6px 14px;
   box-shadow: var(--nps-shadow);
@@ -870,65 +1482,79 @@ div[data-baseweb="popover"] * {{
   background: transparent !important;
 }}
 
+[data-testid="stPlotlyChart"] .modebar-container {{
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  margin: 0 0 10px 0 !important;
+  padding: 0 !important;
+  pointer-events: none;
+}}
+
 [data-testid="stPlotlyChart"] .modebar {{
-  background: color-mix(in srgb, var(--nps-surface-2) 88%, transparent) !important;
-  border: 1px solid var(--nps-border-softer);
-  border-radius: 999px;
-  padding: 2px 4px;
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+  z-index: 1 !important;
+  background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 12px !important;
+  padding: 3px 5px !important;
+  opacity: 0.96 !important;
+  transform: none !important;
+  transition: background-color 120ms ease;
+  margin-left: auto !important;
+  pointer-events: auto !important;
+}}
+
+[data-testid="stPlotlyChart"]:hover .modebar,
+[data-testid="stPlotlyChart"] .modebar:hover,
+[data-testid="stPlotlyChart"] .modebar:focus-within {{
+  opacity: 1 !important;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-group {{
+  padding: 0 1px;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-btn {{
+  width: 26px !important;
+  height: 24px !important;
+  border-radius: 8px !important;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-btn:hover {{
+  background: var(--nps-control-menu-item-hover) !important;
+}}
+
+[data-testid="stPlotlyChart"] .modebar-btn.active {{
+  background: var(--nps-control-menu-item-selected) !important;
 }}
 
 [data-testid="stPlotlyChart"] .modebar-btn svg {{
-  fill: var(--nps-muted) !important;
+  fill: var(--nps-control-icon) !important;
+  stroke: var(--nps-control-icon) !important;
+}}
+[data-testid="stPlotlyChart"] .modebar-btn svg path,
+[data-testid="stPlotlyChart"] .modebar-btn svg * {{
+  fill: var(--nps-control-icon) !important;
+  stroke: var(--nps-control-icon) !important;
 }}
 
 [data-testid="stPlotlyChart"] .modebar-btn:hover svg {{
-  fill: var(--nps-text) !important;
+  fill: var(--nps-control-text) !important;
+  stroke: var(--nps-control-text) !important;
 }}
-/* BaseWeb popover container (Streamlit renders menus in a portal) */
-div[data-baseweb="popover"] {{
-  background: var(--nps-surface-2) !important;
-}}
-/* Ensure all nested popover layers inherit the dark surface */
-div[data-baseweb="popover"] div {{
-  background: var(--nps-surface-2) !important;
-}}
-div[data-baseweb="popover"] > div {{
-  background: var(--nps-surface-2) !important;
-  border: 1px solid var(--nps-border-soft) !important;
-  border-radius: 14px !important;
-}}
-div[data-baseweb="popover"] ul {{
-  background: var(--nps-surface-2) !important;
-}}
-div[data-baseweb="popover"] [role="option"]:hover {{
-  background: var(--nps-accent-soft) !important;
-}}
-ul[role="listbox"] {{
-  background: var(--nps-surface-2) !important;
-  border-radius: 14px;
-  border: 1px solid var(--nps-border-soft) !important;
-}}
-div[data-baseweb="menu"], div[role="listbox"] {{
-  background: var(--nps-surface-2) !important;
-  border: 1px solid var(--nps-border-soft) !important;
-}}
-div[data-baseweb="menu"] *, div[role="listbox"] * {{
-  color: var(--nps-text) !important;
-}}
-div[data-baseweb="menu"] [role="option"],
-div[role="listbox"] [role="option"],
-ul[role="listbox"] [role="option"] {{
-  color: var(--nps-text) !important;
-}}
-
-ul[role="listbox"] li {{
-  background: transparent !important;
-}}
-ul[role="listbox"] li:hover {{
-  background: var(--nps-accent-soft) !important;
-}}
-ul[role="listbox"] li[aria-selected="true"] {{
-  background: var(--nps-accent-soft) !important;
+[data-testid="stPlotlyChart"] .modebar-btn:hover svg path,
+[data-testid="stPlotlyChart"] .modebar-btn:hover svg * {{
+  fill: var(--nps-control-text) !important;
+  stroke: var(--nps-control-text) !important;
 }}
 div[data-testid="stRadio"] label, div[data-testid="stCheckbox"] label {{
   color: var(--nps-text) !important;
@@ -940,57 +1566,76 @@ div[data-testid="stMarkdownContainer"] a {{
 /* Inputs */
 input, textarea {{
   color: var(--nps-text) !important;
-  background: var(--nps-surface-2) !important;
-  border: 1px solid var(--nps-border-strong) !important;
+  background: var(--nps-control-bg) !important;
+  border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
 }}
 
 /* Some Streamlit widgets set inline styles; override aggressively */
 textarea[style], input[style] {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   color: var(--nps-text) !important;
 }}
 
 /* Text areas in Streamlit (executive report, prompts, etc.) */
 div[data-testid="stTextArea"] textarea {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   color: var(--nps-text) !important;
 }}
 
 div[data-testid="stTextArea"] > div > textarea {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   color: var(--nps-text) !important;
 }}
 
 div[data-testid="stTextArea"] textarea::placeholder {{
-  color: var(--nps-muted) !important;
+  color: var(--nps-control-placeholder) !important;
 }}
 
 
 /* File uploader */
 div[data-testid="stFileUploaderDropzone"] {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   border: 1px dashed var(--nps-border-stronger) !important;
   border-radius: var(--nps-radius) !important;
 }}
-div[data-testid="stFileUploaderDropzone"] * {{
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"],
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div > div {{
+  background: var(--nps-control-bg) !important;
+  border-color: var(--nps-border-stronger) !important;
+}}
+div[data-testid="stFileUploaderDropzone"] *,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] * {{
   color: var(--nps-text) !important;
 }}
 div[data-testid="stFileUploader"] small {{
   color: var(--nps-muted) !important;
 }}
+div[data-testid="stFileUploader"] button,
+div[data-testid="stFileUploader"] button[kind="secondary"] {{
+  background: var(--nps-control-bg-hover) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+}}
 
 /* Plotly: force dark surfaces + readable text in dark mode */
 div[data-testid="stPlotlyChart"] {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-chart-paper) !important;
   border-radius: var(--nps-radius);
   border: 1px solid var(--nps-border-soft);
 }}
 div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly .main-svg .bg {{
-  fill: var(--nps-bg) !important;
+  fill: var(--nps-chart-plot) !important;
 }}
 div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly text {{
   fill: var(--nps-text) !important;
+}}
+div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly .gridlayer path {{
+  stroke: var(--nps-chart-grid) !important;
+}}
+div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly .zerolinelayer path {{
+  stroke: var(--nps-chart-zero) !important;
 }}
 
 
@@ -1008,7 +1653,7 @@ div[data-testid="stPlotlyChart"] .js-plotly-plot .plotly text {{
 
 /* Plotly container background (extra safety for embedded mode) */
 .js-plotly-plot .plotly {{
-  background: var(--nps-surface) !important;
+  background: var(--nps-chart-paper) !important;
 }}
 
 </style>

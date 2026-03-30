@@ -47,12 +47,12 @@ def build_plotly_theme(theme: Theme) -> PlotlyTheme:
         promoter=pro,
         text=theme.text,
         muted=theme.muted,
-        grid=theme.border,
-        zero_line=theme.border,
-        # Keep charts on raised surfaces, not on the page background.
-        paper_bg=theme.surface,
-        plot_bg=theme.surface_2,
-        surface=theme.surface,
+        grid=theme.chart_grid,
+        zero_line=theme.chart_zero_line,
+        # Keep charts on tokenized chart surfaces (light/dark aware).
+        paper_bg=theme.chart_paper,
+        plot_bg=theme.chart_plot,
+        surface=theme.chart_paper,
     )
 
 
@@ -69,7 +69,8 @@ def build_plotly_template(theme: Theme) -> Dict[str, Any]:
                 "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
             },
             "title": {"font": {"color": pt.text}},
-            "margin": {"l": 16, "r": 16, "t": 20, "b": 16},
+            # Keep an explicit top gutter for the modebar (camera/zoom/etc.).
+            "margin": {"l": 16, "r": 16, "t": 62, "b": 16},
             "colorway": [pt.accent, pt.detractor, pt.passive, pt.promoter],
             "legend": {
                 "bgcolor": "rgba(0,0,0,0)",
@@ -111,11 +112,23 @@ def apply_plotly_theme(fig: Any, theme: Theme, *, template_name: str = "nps_lens
         # Register named template so other modules can reference it.
         pio.templates[template_name] = tpl  # type: ignore[index]
 
-        fig.update_layout(template=tpl)  # type: ignore[attr-defined]
+        fig.update_layout(
+            template=tpl,
+            paper_bgcolor=pt.paper_bg,
+            plot_bgcolor=pt.plot_bg,
+            font=dict(color=pt.text),
+            legend=dict(
+                bgcolor="rgba(0,0,0,0)",
+                bordercolor=pt.grid,
+                font=dict(color=pt.text),
+                title=dict(font=dict(color=pt.text)),
+            ),
+            hoverlabel=dict(bgcolor=pt.paper_bg, font=dict(color=pt.text)),
+        )  # type: ignore[attr-defined]
         fig.update_xaxes(
             showgrid=True,
             gridcolor=pt.grid,
-            zerolinecolor=pt.grid,
+            zerolinecolor=pt.zero_line,
             showline=True,
             linecolor=pt.grid,
             tickfont=dict(color=pt.text),
@@ -124,7 +137,7 @@ def apply_plotly_theme(fig: Any, theme: Theme, *, template_name: str = "nps_lens
         fig.update_yaxes(
             showgrid=True,
             gridcolor=pt.grid,
-            zerolinecolor=pt.grid,
+            zerolinecolor=pt.zero_line,
             showline=True,
             linecolor=pt.grid,
             tickfont=dict(color=pt.text),
@@ -150,4 +163,10 @@ def themed_plotly_chart(
     """
 
     fig2 = apply_plotly_theme(fig, theme)
-    st_mod.plotly_chart(fig2, use_container_width=use_container_width, config=config, **kwargs)
+    st_mod.plotly_chart(
+        fig2,
+        use_container_width=use_container_width,
+        config=config,
+        theme=None,
+        **kwargs,
+    )

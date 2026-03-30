@@ -6,6 +6,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from nps_lens.core.nps_math import normalize_focus_group
+
 
 @dataclass(frozen=True)
 class IncidentRationaleSummary:
@@ -83,12 +85,7 @@ def _safe_num(value: Any, default: float = 0.0) -> float:
 
 
 def _focus_group_norm(focus_group: str) -> str:
-    g = str(focus_group or "detractor").strip().lower()
-    if g == "promoter":
-        return "promoter"
-    if g == "passive":
-        return "passive"
-    return "detractor"
+    return normalize_focus_group(focus_group)
 
 
 def _risk_delta(delta_focus_rate: float, focus_group: str) -> float:

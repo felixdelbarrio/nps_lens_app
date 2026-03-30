@@ -32,6 +32,13 @@ def _app_script_path() -> Path:
 
 
 def _logo_path() -> Optional[Path]:
+    env_icon = str(os.environ.get("NPS_LENS_ICON", "")).strip()
+    if env_icon:
+        env_candidate = Path(env_icon).expanduser()
+        if not env_candidate.is_absolute():
+            env_candidate = (Path.cwd() / env_candidate).resolve()
+        if env_candidate.exists():
+            return env_candidate
     candidate = _resource_root() / "assets" / "logo.png"
     return candidate if candidate.exists() else None
 

@@ -22,12 +22,10 @@ def card(title: str, body_html: str, *, flat: bool = False) -> None:
     st.markdown(
         f"""
 <div class="{klass}">
-  <div class="nps-muted"
-       style="font-size:12px; font-weight:700; text-transform:uppercase;
-              letter-spacing:.08em;">
+  <div class="nps-card__kicker nps-muted">
     {title}
   </div>
-  <div style="height:10px"></div>
+  <div class="nps-card__spacer"></div>
   {body_html}
 </div>
 """,
@@ -50,20 +48,21 @@ def kpi(label: str, value_html: str, *, hint: str = "") -> None:
 def section(title: str, subtitle: str = "") -> None:
     st.markdown(
         f"""
-<div style="margin: 10px 0 12px 0;">
-  <div style="font-size: 22px; font-weight: 800;">{title}</div>
-  <div class="nps-muted" style="margin-top:4px;">{subtitle}</div>
+<div class="nps-section">
+  <div class="nps-section__title">{title}</div>
+  <div class="nps-section__subtitle nps-muted">{subtitle}</div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
 
-def pills(items: list[str]) -> None:
+def pills(items: list[str], *, compact: bool = False) -> None:
     if not items:
         return
+    row_class = "nps-pill-row nps-pill-row--compact" if compact else "nps-pill-row"
     html = "".join([f"<span class='nps-pill'>{i}</span> " for i in items])
-    st.markdown(f"<div class='nps-pill-row'>{html}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='{row_class}'>{html}</div>", unsafe_allow_html=True)
 
 
 def _pill_class_for_band(band: str) -> str:
@@ -109,6 +108,145 @@ def _semantic_style_for_band(band: str, theme: Theme) -> str:
     )
 
 
+def _base_dataframe_styler(styler, theme: Theme):
+    table_styles = [
+        {
+            "selector": "table",
+            "props": [
+                ("background-color", theme.table_bg),
+                ("color", theme.text),
+                ("border-collapse", "collapse"),
+            ],
+        },
+        {
+            "selector": "thead th",
+            "props": [
+                ("background-color", theme.table_header_bg),
+                ("color", theme.table_header_text),
+                ("border", f"1px solid {theme.table_border}"),
+                ("font-weight", "700"),
+            ],
+        },
+        {
+            "selector": "tbody td",
+            "props": [
+                ("background-color", theme.table_bg),
+                ("color", theme.text),
+                ("border", f"1px solid {theme.table_border}"),
+            ],
+        },
+        {
+            "selector": "tbody tr:nth-child(even) td",
+            "props": [("background-color", theme.table_bg_alt)],
+        },
+        {
+            "selector": "tbody tr:hover td",
+            "props": [("background-color", theme.table_bg_hover)],
+        },
+    ]
+    return (
+        styler.set_table_styles(table_styles, overwrite=False)
+        .set_properties(
+            **{
+                "background-color": theme.table_bg,
+                "color": theme.text,
+                "border": f"1px solid {theme.table_border}",
+            }
+        )
+        .set_properties(
+            subset=pd.IndexSlice[:, :],
+            **{
+                "background-color": theme.table_bg,
+                "color": theme.text,
+                "border": f"1px solid {theme.table_border}",
+            },
+        )
+    )
+
+
+def style_dataframe(df: pd.DataFrame, theme: Theme):
+    """Apply the centralized table look (header, rows, borders) from theme tokens."""
+
+    return _base_dataframe_styler(df.style, theme)
+
+
+def _fmt_table_cell(value: object) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value)
+
+
+def render_tokenized_dataframe(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    height: int = 520,
+    use_container_width: bool = True,
+    max_html_rows: int = 10000,
+    hide_index: bool = False,
+    wrap_text: bool = False,
+) -> None:
+    """Render a dataframe with centralized dark/light tokens.
+
+    For medium-size tables, render as tokenized HTML so visuals are stable across
+    Streamlit versions. For very large tables, fallback to virtualized dataframe.
+    """
+
+    if df is None or not isinstance(df, pd.DataFrame):
+        st.dataframe(
+            df, use_container_width=use_container_width, height=height, hide_index=hide_index
+        )
+        return
+    if df.empty:
+        st.info("No hay datos para mostrar.")
+        return
+    if len(df) > int(max_html_rows):
+        st.dataframe(
+            df, use_container_width=use_container_width, height=height, hide_index=hide_index
+        )
+        return
+
+    header_html = "".join([f"<th>{escape(str(col))}</th>" for col in df.columns])
+    rows_html: list[str] = []
+    for idx, row in df.iterrows():
+        cell_html = "".join([f"<td>{escape(_fmt_table_cell(row[col]))}</td>" for col in df.columns])
+        idx_cell = (
+            ""
+            if hide_index
+            else f"<td class='nps-data-table__index'>{escape(_fmt_table_cell(idx))}</td>"
+        )
+        rows_html.append(f"<tr>{idx_cell}{cell_html}</tr>")
+
+    max_h = max(160, int(height))
+    table_classes = "nps-data-table nps-data-table--wrap" if wrap_text else "nps-data-table"
+    index_head = "" if hide_index else "<th class='nps-data-table__index'></th>"
+    st.markdown(
+        (
+            "<div class='nps-data-table-wrap' "
+            f"style='max-height:{max_h}px;"
+            f"--nps-table-bg-local:{theme.table_bg};"
+            f"--nps-table-bg-alt-local:{theme.table_bg_alt};"
+            f"--nps-table-bg-hover-local:{theme.table_bg_hover};"
+            f"--nps-table-header-bg-local:{theme.table_header_bg};"
+            f"--nps-table-header-text-local:{theme.table_header_text};"
+            f"--nps-table-border-local:{theme.table_border};"
+            f"--nps-table-text-local:{theme.text};"
+            f"--nps-table-muted-local:{theme.muted};'>"
+            f"<table class='{table_classes}'>"
+            f"<thead><tr>{index_head}"
+            f"{header_html}</tr></thead>"
+            f"<tbody>{''.join(rows_html)}</tbody>"
+            "</table></div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def style_semantic_dataframe(df: pd.DataFrame, theme: Theme):
     """Apply centralized NPS semantics to dataframe cells.
 
@@ -116,7 +254,7 @@ def style_semantic_dataframe(df: pd.DataFrame, theme: Theme):
     highlighted using the same absolute rules as charts and pills.
     """
 
-    styler = df.style
+    styler = _base_dataframe_styler(df.style, theme)
     for column in df.columns:
         kind = _semantic_column_kind(column)
         if not kind:
@@ -198,6 +336,7 @@ def executive_banner(
 def impact_chain(
     items: list[object],
     *,
+    theme: Theme,
     extra_tabs: Optional[list[tuple[str, Callable[[], None]]]] = None,
 ) -> None:
     if not items:
@@ -400,11 +539,13 @@ def impact_chain(
                 column_label: items,
             }
         )
-        st.dataframe(
+        render_tokenized_dataframe(
             table_df,
+            theme,
             use_container_width=True,
-            hide_index=True,
             height=min(420, 72 + len(items) * 42),
+            hide_index=True,
+            wrap_text=True,
         )
 
     def _render_evidence_html_table(
@@ -681,11 +822,13 @@ def impact_chain(
         label_visibility="collapsed",
     )
     if summary_view == "Tabla":
-        st.dataframe(
+        render_tokenized_dataframe(
             pd.DataFrame(summary_rows),
+            theme,
             use_container_width=True,
-            hide_index=True,
             height=min(420, 72 + len(summary_rows) * 42),
+            hide_index=True,
+            wrap_text=True,
         )
     else:
         st.markdown(

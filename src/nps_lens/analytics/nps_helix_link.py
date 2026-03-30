@@ -13,6 +13,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
 )
+from nps_lens.core.nps_math import focus_mask, normalize_focus_group
 
 
 def _safe_corr(xx: np.ndarray, yy: np.ndarray) -> float:
@@ -705,18 +706,8 @@ def weekly_aggregates(
     nps["week"] = nps[date_col_nps].dt.to_period("W").dt.start_time
     helix["week"] = helix[date_col_helix].dt.to_period("W").dt.start_time
 
-    group = str(focus_group or "detractor").strip().lower()
-    score = pd.to_numeric(
-        nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce"
-    )
-    grp = nps.get("NPS Group", "").astype(str).str.upper()
-
-    if group == "promoter":
-        nps["is_focus"] = (grp == "PROMOTER") | (score >= 9)
-    elif group == "passive":
-        nps["is_focus"] = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
-    else:
-        nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
+    group = normalize_focus_group(focus_group)
+    nps["is_focus"] = focus_mask(nps, focus_group=group)
 
     count_col = "ID" if "ID" in nps.columns else date_col_nps
     overall_nps = (
@@ -799,18 +790,8 @@ def daily_aggregates(
     nps["date"] = nps[date_col_nps].dt.normalize()
     helix["date"] = helix[date_col_helix].dt.normalize()
 
-    group = str(focus_group or "detractor").strip().lower()
-    score = pd.to_numeric(
-        nps.get("NPS", pd.Series([np.nan] * len(nps), index=nps.index)), errors="coerce"
-    )
-    grp = nps.get("NPS Group", "").astype(str).str.upper()
-
-    if group == "promoter":
-        nps["is_focus"] = (grp == "PROMOTER") | (score >= 9)
-    elif group == "passive":
-        nps["is_focus"] = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
-    else:
-        nps["is_focus"] = (grp == "DETRACTOR") | (score <= 6)
+    group = normalize_focus_group(focus_group)
+    nps["is_focus"] = focus_mask(nps, focus_group=group)
 
     count_col = "ID" if "ID" in nps.columns else date_col_nps
     overall_nps = (
