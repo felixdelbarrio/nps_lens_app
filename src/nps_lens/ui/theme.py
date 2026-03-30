@@ -73,7 +73,9 @@ def get_theme(mode: str) -> Theme:
     control_border = p.get("color.app.control.border", border)
     control_text = p.get("color.app.control.text", text)
     control_placeholder = p.get("color.app.control.placeholder", muted)
-    control_icon = p.get("color.app.control.icon", p.get("color.primary.text.action.default", accent))
+    control_icon = p.get(
+        "color.app.control.icon", p.get("color.primary.text.action.default", accent)
+    )
     control_menu_bg = p.get("color.app.control.menu.bg", surface_2)
     control_menu_item_hover = p.get("color.app.control.menu.item.hover", control_bg_hover)
     control_menu_item_selected = p.get(
@@ -292,8 +294,7 @@ button[aria-label="Close sidebar"]:focus-visible {{
 [data-testid="collapsedControl"] button svg,
 button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+  color: var(--nps-control-icon) !important;
   opacity: 1 !important;
 }}
 
@@ -301,14 +302,9 @@ button[aria-label="Close sidebar"] svg {{
 [data-testid="stSidebarCollapsedControl"] button svg path,
 [data-testid="collapsedControl"] button svg path,
 button[aria-label="Open sidebar"] svg path,
-button[aria-label="Close sidebar"] svg path,
-[data-testid="stSidebarCollapseButton"] button svg *,
-[data-testid="stSidebarCollapsedControl"] button svg *,
-[data-testid="collapsedControl"] button svg *,
-button[aria-label="Open sidebar"] svg *,
-button[aria-label="Close sidebar"] svg * {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+button[aria-label="Close sidebar"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
   opacity: 1 !important;
 }}
 
@@ -366,6 +362,24 @@ button[aria-label="Close sidebar"] svg * {{
   flex-wrap: wrap;
   gap: 10px;
   margin: 18px 0 26px 0;
+}}
+
+.nps-pill-row--compact {{
+  margin: 16px 0 20px 0;
+  align-items: center;
+}}
+
+.nps-context-actions {{
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 14px 0 20px 0;
+}}
+
+.nps-context-actions div.stButton > button {{
+  min-height: 34px;
+  border-radius: 999px;
+  font-weight: 700;
 }}
 
 .nps-app-hero {{
@@ -1075,56 +1089,127 @@ div[data-baseweb="select"] input::placeholder {{
 }}
 div[data-baseweb="select"] svg {{
   color: var(--nps-control-icon) !important;
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
   opacity: 1 !important;
 }}
 div[data-baseweb="select"] svg path,
-div[data-baseweb="select"] svg *,
+div[data-baseweb="select"] svg line,
+div[data-baseweb="select"] svg polyline,
+div[data-baseweb="select"] svg polygon,
+div[data-baseweb="select"] svg circle,
+div[data-baseweb="select"] svg ellipse,
 div[data-testid="stSelectbox"] svg,
-div[data-testid="stSelectbox"] svg *,
+div[data-testid="stSelectbox"] svg path,
+div[data-testid="stSelectbox"] svg line,
+div[data-testid="stSelectbox"] svg polyline,
+div[data-testid="stSelectbox"] svg polygon,
+div[data-testid="stSelectbox"] svg circle,
+div[data-testid="stSelectbox"] svg ellipse,
 div[data-testid="stMultiSelect"] svg,
-div[data-testid="stMultiSelect"] svg * {{
-  fill: var(--nps-control-icon) !important;
-  stroke: var(--nps-control-icon) !important;
+div[data-testid="stMultiSelect"] svg path,
+div[data-testid="stMultiSelect"] svg line,
+div[data-testid="stMultiSelect"] svg polyline,
+div[data-testid="stMultiSelect"] svg polygon,
+div[data-testid="stMultiSelect"] svg circle,
+div[data-testid="stMultiSelect"] svg ellipse {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
   opacity: 1 !important;
+}}
+div[data-baseweb="select"] svg rect,
+div[data-testid="stSelectbox"] svg rect,
+div[data-testid="stMultiSelect"] svg rect {{
+  stroke: currentColor !important;
+  fill: transparent !important;
 }}
 div[data-baseweb="select"] [aria-hidden="true"] {{
   opacity: 1 !important;
 }}
-div[data-baseweb="popover"] * {{
-  color: var(--nps-control-text) !important;
-}}
 div[data-baseweb="popover"],
 div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] > div > div,
 div[data-baseweb="menu"],
+div[data-baseweb="menu"] > div,
+div[data-baseweb="menu"] ul,
 div[role="listbox"],
 ul[role="listbox"] {{
   background: var(--nps-control-menu-bg) !important;
   border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
 }}
+div[data-baseweb="popover"] *,
+div[data-baseweb="menu"] *,
+div[role="listbox"] *,
+ul[role="listbox"] * {{
+  color: var(--nps-control-text) !important;
+}}
 div[data-baseweb="popover"] [role="option"],
 div[data-baseweb="menu"] [role="option"],
-ul[role="listbox"] [role="option"] {{
-  background: transparent !important;
+ul[role="listbox"] [role="option"],
+li[role="option"] {{
+  background: var(--nps-control-menu-bg) !important;
   color: var(--nps-control-text) !important;
+  opacity: 1 !important;
+}}
+div[data-baseweb="popover"] [role="option"] *,
+div[data-baseweb="menu"] [role="option"] *,
+ul[role="listbox"] [role="option"] *,
+li[role="option"] * {{
+  color: var(--nps-control-text) !important;
+  opacity: 1 !important;
 }}
 div[data-baseweb="popover"] [role="option"]:hover,
 div[data-baseweb="menu"] [role="option"]:hover,
-ul[role="listbox"] [role="option"]:hover {{
+ul[role="listbox"] [role="option"]:hover,
+li[role="option"]:hover {{
   background: var(--nps-control-menu-item-hover) !important;
 }}
 div[data-baseweb="popover"] [role="option"][aria-selected="true"],
 div[data-baseweb="menu"] [role="option"][aria-selected="true"],
-ul[role="listbox"] [role="option"][aria-selected="true"] {{
+ul[role="listbox"] [role="option"][aria-selected="true"],
+li[role="option"][aria-selected="true"] {{
   background: var(--nps-control-menu-item-selected) !important;
+}}
+div[data-baseweb="popover"] [aria-disabled="true"],
+div[data-baseweb="menu"] [aria-disabled="true"],
+ul[role="listbox"] [aria-disabled="true"] {{
+  color: var(--nps-control-placeholder) !important;
 }}
 div[data-baseweb="popover"] input,
 div[data-baseweb="popover"] textarea {{
   background: var(--nps-control-bg) !important;
   color: var(--nps-control-text) !important;
   border: 1px solid var(--nps-control-border) !important;
+}}
+
+/* Help/tooltip system: keep it tokenized and readable in both modes */
+[data-testid="stTooltipIcon"],
+[data-testid="stTooltipHoverTarget"] {{
+  color: var(--nps-control-icon) !important;
+}}
+[data-testid="stTooltipIcon"] svg,
+[data-testid="stTooltipHoverTarget"] svg {{
+  color: inherit !important;
+}}
+[data-testid="stTooltipIcon"] svg path,
+[data-testid="stTooltipHoverTarget"] svg path {{
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}}
+[role="tooltip"],
+div[data-baseweb="tooltip"],
+div[data-baseweb="popover"][role="tooltip"],
+div[data-testid="stTooltipContent"] {{
+  background: var(--nps-control-menu-bg) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--nps-shadow);
+}}
+[role="tooltip"] *,
+div[data-baseweb="tooltip"] *,
+div[data-baseweb="popover"][role="tooltip"] *,
+div[data-testid="stTooltipContent"] * {{
+  color: var(--nps-control-text) !important;
 }}
 
 /* Plotly containers */
@@ -1247,15 +1332,28 @@ div[data-testid="stTextArea"] textarea::placeholder {{
 
 /* File uploader */
 div[data-testid="stFileUploaderDropzone"] {{
-  background: var(--nps-surface-2) !important;
+  background: var(--nps-control-bg) !important;
   border: 1px dashed var(--nps-border-stronger) !important;
   border-radius: var(--nps-radius) !important;
 }}
-div[data-testid="stFileUploaderDropzone"] * {{
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"],
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] > div > div {{
+  background: var(--nps-control-bg) !important;
+  border-color: var(--nps-border-stronger) !important;
+}}
+div[data-testid="stFileUploaderDropzone"] *,
+div[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] * {{
   color: var(--nps-text) !important;
 }}
 div[data-testid="stFileUploader"] small {{
   color: var(--nps-muted) !important;
+}}
+div[data-testid="stFileUploader"] button,
+div[data-testid="stFileUploader"] button[kind="secondary"] {{
+  background: var(--nps-control-bg-hover) !important;
+  color: var(--nps-control-text) !important;
+  border: 1px solid var(--nps-control-border) !important;
 }}
 
 /* Plotly: force dark surfaces + readable text in dark mode */

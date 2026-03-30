@@ -2807,9 +2807,7 @@ def page_executive(
         if fig_k is None:
             st.info("No hay suficientes datos para construir la vista diaria de NPS clásico.")
         else:
-            st.plotly_chart(
-                apply_plotly_theme(fig_k, theme), use_container_width=True, theme=None
-            )
+            st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True, theme=None)
 
         metrics = _daily_metrics(df_llm_win, days=int(context_days))
         _render_daily_llm_assistant(
@@ -2827,9 +2825,7 @@ def page_executive(
         if fig is None:
             st.info("No hay suficientes datos para construir una tendencia.")
         else:
-            st.plotly_chart(
-                apply_plotly_theme(fig, theme), use_container_width=True, theme=None
-            )
+            st.plotly_chart(apply_plotly_theme(fig, theme), use_container_width=True, theme=None)
 
         st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
         report_md = _build_business_report_md(
@@ -3061,9 +3057,7 @@ def page_prioritized_opportunities(
             top_k=10,
         )
         if cfig is not None:
-            st.plotly_chart(
-                apply_plotly_theme(cfig, theme), use_container_width=True, theme=None
-            )
+            st.plotly_chart(apply_plotly_theme(cfig, theme), use_container_width=True, theme=None)
     except Exception:
         pass
 
@@ -3733,6 +3727,7 @@ def page_nps_helix_linking(
     min_n: int,
     pop_year: str,
     pop_month: str,
+    show_report: bool = False,
 ) -> None:
     # Use the global app theme for any Plotly figures built directly in this page.
     theme = get_theme(theme_mode)
@@ -3880,12 +3875,11 @@ def page_nps_helix_linking(
     pal = palette(dtokens, theme_mode)
     # Continuous scales aligned to design tokens
     risk_scale = plotly_risk_scale(dtokens, theme_mode)
-    tab_overview, tab_broken_journeys, tab_priorities, tab_ppt = st.tabs(
+    tab_overview, tab_broken_journeys, tab_priorities = st.tabs(
         [
             "Situación del periodo",
             "Journeys rotos",
             "Análisis de escenarios causales",
-            "Narrativa y presentación",
         ]
     )
     lag_days = pd.DataFrame()
@@ -4765,7 +4759,11 @@ def page_nps_helix_linking(
                 "No hay señal suficiente para construir el racional de negocio (prueba ampliando ventana o bajando umbral)."
             )
 
-    with tab_ppt:
+    if show_report:
+        section(
+            "Reporte",
+            "Narrativa y presentación transversal para comité (NPS térmico + Incidencias ↔ NPS).",
+        )
         default_selected_chain_keys = list(selected_chain_keys)
         label_map = {
             str(rec.get("chain_key", "")): str(rec.get("selection_label", rec.get("nps_topic", "")))
@@ -4787,7 +4785,7 @@ def page_nps_helix_linking(
             max_comment_examples=2,
         )
 
-    with tab_ppt:
+    if show_report:
         ppt_sig = (
             f"{service_origin}|{service_origin_n1}|{service_origin_n2}|{start}|{end}|"
             f"{focus_name}|{touchpoint_source}|{len(overall_daily)}|{len(rationale_df)}|{'/'.join(selected_chain_keys)}"

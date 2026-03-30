@@ -9,11 +9,7 @@ from PIL import Image
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 OUTPUT_SIZE = 1024
 CONTENT_SCALE = 0.92
-
-try:
-    RESAMPLE = Image.Resampling.LANCZOS
-except AttributeError:  # Pillow < 10
-    RESAMPLE = Image.LANCZOS
+RESAMPLE = Image.Resampling.LANCZOS
 
 
 def _parse_args() -> argparse.Namespace:
