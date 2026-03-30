@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
+
 
 @dataclass(frozen=True)
 class NpsSummary:
@@ -40,60 +42,25 @@ def summarize(df: pd.DataFrame, score_col: str = "NPS") -> NpsSummary:
 
 def daily_mix(df: pd.DataFrame, date_col: str = "Fecha", score_col: str = "NPS") -> pd.DataFrame:
     """Daily detractor/passive/promoter shares + n."""
-    if df.empty or date_col not in df.columns or score_col not in df.columns:
+    metrics = shared_daily_metrics(df, days=None, date_col=date_col, score_col=score_col)
+    if metrics.empty:
         return pd.DataFrame()
-
-    d = df[[date_col, score_col]].copy()
-    d[date_col] = pd.to_datetime(d[date_col], errors="coerce").dt.date
-    d[score_col] = pd.to_numeric(d[score_col], errors="coerce")
-    d = d.dropna(subset=[date_col, score_col])
-    if d.empty:
-        return pd.DataFrame()
-
-    def bucket(x: float) -> str:
-        if x <= 6:
-            return "detractor"
-        if x <= 8:
-            return "passive"
-        return "promoter"
-
-    d["bucket"] = d[score_col].map(bucket)
-    pivot = (
-        d.pivot_table(
-            index=date_col, columns="bucket", values=score_col, aggfunc="size", fill_value=0
-        )
-        .sort_index()
-        .rename_axis(None, axis=0)
-        .reset_index()
-        .rename(columns={date_col: "day"})
-    )
-    pivot["n"] = pivot[["detractor", "passive", "promoter"]].sum(axis=1)
-    for c in ["detractor", "passive", "promoter"]:
-        pivot[c] = (pivot[c] / pivot["n"]).astype(float)
-    return pivot
+    out = metrics.rename(
+        columns={
+            "detractor_rate": "detractor",
+            "passive_rate": "passive",
+            "promoter_rate": "promoter",
+        }
+    )[["day", "n", "detractor", "passive", "promoter"]]
+    return out.copy()
 
 
 def daily_kpis(df: pd.DataFrame, date_col: str = "Fecha", score_col: str = "NPS") -> pd.DataFrame:
     """Daily N, %detractors and classic NPS (pp)."""
-    if df.empty or date_col not in df.columns or score_col not in df.columns:
+    metrics = shared_daily_metrics(df, days=None, date_col=date_col, score_col=score_col)
+    if metrics.empty:
         return pd.DataFrame()
-
-    d = df[[date_col, score_col]].copy()
-    d[date_col] = pd.to_datetime(d[date_col], errors="coerce").dt.date
-    d[score_col] = pd.to_numeric(d[score_col], errors="coerce")
-    d = d.dropna(subset=[date_col, score_col])
-    if d.empty:
-        return pd.DataFrame()
-
-    g = d.groupby(date_col, dropna=False)
-    out = pd.DataFrame(
-        {
-            "day": g.size().index.astype(object),
-            "n": g.size().values.astype(int),
-            "nps_avg": g[score_col].mean().values.astype(float),
-            "detractor_rate": g[score_col].apply(lambda x: (x <= 6).mean()).values.astype(float),
-            "promoter_rate": g[score_col].apply(lambda x: (x >= 9).mean()).values.astype(float),
-        }
-    )
-    out["nps_classic_pp"] = (out["promoter_rate"] - out["detractor_rate"]) * 100.0
-    return out.sort_values("day")
+    out = metrics.rename(columns={"classic_nps": "nps_classic_pp"})[
+        ["day", "n", "nps_avg", "detractor_rate", "promoter_rate", "nps_classic_pp"]
+    ]
+    return out.copy()

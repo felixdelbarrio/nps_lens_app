@@ -252,7 +252,35 @@ section[data-testid="stSidebar"] > div {{
 [data-testid="collapsedControl"] {{
   opacity: 1 !important;
   visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
   z-index: 1000 !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:hover [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapsedControl"],
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+}}
+
+/* Fallback for Streamlit variants where test ids are wrapped in generic containers. */
+div:has(> button[aria-label="Open sidebar"]),
+div:has(> button[aria-label="Close sidebar"]) {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button,
@@ -273,7 +301,11 @@ button[aria-label="Close sidebar"] {{
   color: var(--nps-control-icon) !important;
   box-shadow: none !important;
   opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
   position: relative !important;
+  transform: none !important;
+  transition: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button:hover,
@@ -291,36 +323,39 @@ button[aria-label="Close sidebar"]:focus-visible {{
   border-color: var(--nps-control-border) !important;
 }}
 
-/* Draw the chevron with pseudo-element for consistent visibility across Streamlit versions. */
-button[aria-label="Open sidebar"]::before,
-button[aria-label="Close sidebar"]::before {{
-  display: block;
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 800;
-  color: var(--nps-control-icon);
-}}
-
-button[aria-label="Open sidebar"]::before {{
-  content: "❯";
-}}
-
-button[aria-label="Close sidebar"]::before {{
-  content: "❮";
-}}
-
 [data-testid="stSidebarCollapseButton"] button svg,
 [data-testid="stSidebarCollapsedControl"] button svg,
 [data-testid="collapsedControl"] button svg,
 button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
-  color: var(--nps-control-icon) !important;
-  opacity: 1 !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
 }}
 
-button[aria-label="Open sidebar"] svg,
-button[aria-label="Close sidebar"] svg {{
-  display: none !important;
+/* Force deterministic ASCII arrows for sidebar toggle in every Streamlit state. */
+[data-testid="stSidebarCollapseButton"] button::before,
+button[aria-label="Close sidebar"]::before {{
+  content: "<";
+  display: block;
+  color: var(--nps-control-icon) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}}
+
+[data-testid="stSidebarCollapsedControl"] button::before,
+[data-testid="collapsedControl"] button::before,
+button[aria-label="Open sidebar"]::before {{
+  content: ">";
+  display: block;
+  color: var(--nps-control-icon) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
 }}
 
 [data-testid="stSidebarCollapseButton"] button svg path,
@@ -342,6 +377,17 @@ button[aria-label="Close sidebar"] svg path {{
   box-shadow: var(--nps-shadow);
 }}
 
+.nps-card__kicker {{
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}}
+
+.nps-card__spacer {{
+  height: 10px;
+}}
+
 .nps-card--flat {{
   box-shadow: none;
 }}
@@ -354,6 +400,19 @@ button[aria-label="Close sidebar"] svg path {{
   font-size: 34px;
   font-weight: 800;
   line-height: 1.05;
+}}
+
+.nps-section {{
+  margin: 10px 0 12px 0;
+}}
+
+.nps-section__title {{
+  font-size: 22px;
+  font-weight: 800;
+}}
+
+.nps-section__subtitle {{
+  margin-top: 4px;
 }}
 
 .nps-pill {{
@@ -391,6 +450,34 @@ button[aria-label="Close sidebar"] svg path {{
 
 .nps-pill-row--compact {{
   margin: 10px 0 20px 0;
+}}
+
+.nps-copy-widget {{
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}}
+
+.nps-copy-widget__btn {{
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 650;
+  background: var(--nps-accent);
+  color: var(--nps-on-accent);
+}}
+
+.nps-copy-widget__btn:hover,
+.nps-copy-widget__btn:focus-visible {{
+  background: color-mix(in srgb, var(--nps-accent) 84%, black 16%);
+  outline: none;
+}}
+
+.nps-copy-widget__msg {{
+  font-size: 12px;
+  color: var(--nps-muted);
 }}
 
 /* Context row: keep context pills and Reporte action aligned on the same baseline. */
@@ -1236,6 +1323,139 @@ div[data-baseweb="tooltip"] *,
 div[data-baseweb="popover"][role="tooltip"] *,
 div[data-testid="stTooltipContent"] * {{
   color: var(--nps-control-text) !important;
+}}
+
+/* Dialogs: enforce tokenized dark shell/content and readable status blocks. */
+div[data-baseweb="modal"] {{
+  z-index: 1300 !important;
+}}
+
+div[data-baseweb="modal"] > div {{
+  background: color-mix(in srgb, var(--nps-bg) 70%, black 30%) !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"],
+div[data-baseweb="modal"] > div > div,
+div[data-testid="stDialog"] > div[role="dialog"] {{
+  background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface)) 0%,
+      var(--nps-surface) 68%
+    ) !important;
+  color: var(--nps-text) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--nps-shadow) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stDialogContent"],
+div[data-testid="stDialog"] [data-testid="stDialogContent"] {{
+  background: transparent !important;
+}}
+
+/* Native Streamlit dialog header can use internal classes/testids across versions.
+   Style it via both semantic and structural selectors. */
+div[data-baseweb="modal"] [data-testid="stDialogHeader"],
+div[data-baseweb="modal"] [data-testid="stDialogTitle"],
+div[data-baseweb="modal"] [role="dialog"] > div:first-child,
+div[data-baseweb="modal"] [role="dialog"] > div:first-child *,
+div[data-baseweb="modal"] [role="heading"],
+div[data-testid="stDialog"] [data-testid="stDialogHeader"],
+div[data-testid="stDialog"] [data-testid="stDialogTitle"],
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child *,
+div[data-testid="stDialog"] [role="heading"] {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
+  opacity: 1 !important;
+  font-weight: 800 !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"] > div:first-child a,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child a {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"],
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"] *,
+div[data-baseweb="modal"] h1,
+div[data-baseweb="modal"] h2,
+div[data-baseweb="modal"] h3,
+div[data-baseweb="modal"] p,
+div[data-baseweb="modal"] label,
+div[data-baseweb="modal"] span,
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"],
+div[data-testid="stDialog"] [data-testid="stMarkdownContainer"] *,
+div[data-testid="stDialog"] h1,
+div[data-testid="stDialog"] h2,
+div[data-testid="stDialog"] h3,
+div[data-testid="stDialog"] p,
+div[data-testid="stDialog"] label,
+div[data-testid="stDialog"] span {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] button[aria-label="Close"],
+div[data-testid="stDialog"] button[aria-label="Close"] {{
+  color: var(--nps-text) !important;
+  background: color-mix(in srgb, var(--nps-surface-2) 92%, transparent) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 12px !important;
+}}
+
+div[data-baseweb="modal"] button[aria-label="Close"]:hover,
+div[data-testid="stDialog"] button[aria-label="Close"]:hover {{
+  background: var(--nps-control-bg-hover) !important;
+}}
+
+/* Notifications inside modal (warning/success/info/error) keep dark contrast. */
+div[data-baseweb="modal"] [data-testid="stAlert"],
+div[data-baseweb="modal"] [data-baseweb="notification"],
+div[data-testid="stDialog"] [data-testid="stAlert"],
+div[data-testid="stDialog"] [data-baseweb="notification"] {{
+  background: color-mix(in srgb, var(--nps-surface-2) 90%, var(--nps-accent) 10%) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 14px !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"] *,
+div[data-baseweb="modal"] [data-baseweb="notification"] *,
+div[data-testid="stDialog"] [data-testid="stAlert"] *,
+div[data-testid="stDialog"] [data-baseweb="notification"] * {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="warning"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="warning"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="warning"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="warning"] {{
+  background: color-mix(in srgb, var(--nps-warning) 26%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-warning) 60%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="success"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="success"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="success"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="success"] {{
+  background: color-mix(in srgb, var(--nps-success) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-success) 54%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="error"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="error"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="error"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="error"] {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 28%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-danger) 58%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="info"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="info"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="info"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
+  background: color-mix(in srgb, var(--nps-accent) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-accent) 56%, var(--nps-surface)) !important;
 }}
 
 /* Plotly containers */

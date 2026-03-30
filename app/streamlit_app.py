@@ -76,6 +76,15 @@ from nps_lens.config import Settings, persist_ui_prefs, ui_pref
 from nps_lens.core.disk_cache import DiskCache
 from nps_lens.core.knowledge_cache import load_entries as kc_load_entries
 from nps_lens.core.knowledge_cache import score_adjustments as kc_score_adjustments
+from nps_lens.core.nps_math import (
+    daily_metrics as shared_daily_metrics,
+)
+from nps_lens.core.nps_math import (
+    filter_by_nps_group,
+    focus_mask,
+    grouped_focus_rates,
+    normalize_focus_group,
+)
 from nps_lens.core.perf import PerfTracker
 from nps_lens.core.store import DatasetContext, DatasetStore, HelixIncidentStore
 from nps_lens.design.tokens import (
@@ -690,34 +699,7 @@ def filter_nps_by_group(df: pd.DataFrame, group_mode: str) -> pd.DataFrame:
 
     group_mode values: Todos | Detractores | Promotores | Neutros
     """
-    gm = (group_mode or "Todos").strip().lower()
-    if gm in ("todos", "all"):
-        return df
-
-    if df is None or df.empty:
-        return df
-
-    # Normalize group labels if present
-    if "NPS Group" in df.columns:
-        g = df["NPS Group"].astype(str).str.strip().str.lower()
-        if gm.startswith("detr"):
-            return df.loc[g.str.contains("detr", na=False)].copy()
-        if gm.startswith("prom"):
-            return df.loc[g.str.contains("prom", na=False)].copy()
-        if gm.startswith("neu") or gm.startswith("pas"):
-            return df.loc[g.str.contains("pas", na=False) | g.str.contains("neut", na=False)].copy()
-
-    # Fallback to score if group label missing
-    if "NPS" in df.columns:
-        s = pd.to_numeric(df["NPS"], errors="coerce")
-        if gm.startswith("detr"):
-            return df.loc[s <= 6].copy()
-        if gm.startswith("prom"):
-            return df.loc[s >= 9].copy()
-        if gm.startswith("neu") or gm.startswith("pas"):
-            return df.loc[(s >= 7) & (s <= 8)].copy()
-
-    return df
+    return filter_by_nps_group(df, group_mode)
 
 
 # Column sets per chart (granular manifest). Each chart requests only what it needs.
@@ -750,26 +732,6 @@ CHART_COLUMNS = {
     "cohort_heatmap": ("NPS", "Palanca", "Subpalanca", "Canal", "UsuarioDecisión", "Segmento"),
     "topics": ("Comment",),
 }
-
-
-def optimize_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Reduce memory footprint and speed up groupbys (categoricals + downcast)."""
-    out = df.copy()
-
-    # Categoricals for low-cardinality strings (faster groupby, much less RAM)
-    for c in out.select_dtypes(include=["object"]).columns:
-        if c.lower() in {"comment", "comentario", "verbatim", "texto"}:
-            continue
-        nunique = out[c].nunique(dropna=False)
-        if nunique > 0 and nunique / max(len(out), 1) < 0.35:
-            out[c] = out[c].astype("category")
-
-    for c in out.select_dtypes(include=["int64", "int32"]).columns:
-        out[c] = pd.to_numeric(out[c], downcast="integer")
-    for c in out.select_dtypes(include=["float64", "float32"]).columns:
-        out[c] = pd.to_numeric(out[c], downcast="float")
-
-    return out
 
 
 def _unique_string_values(values: list[object]) -> list[str]:
@@ -1281,6 +1243,96 @@ def cached_rank_opportunities(
     return out
 
 
+def cached_cross_link_bundle(
+    nps_df: pd.DataFrame,
+    helix_df: pd.DataFrame,
+    *,
+    focus_group: str,
+    min_similarity: float,
+    max_days_apart: int,
+) -> dict[str, pd.DataFrame]:
+    """Cache heavy NPS↔Helix computations with deterministic disk keys."""
+    perf: PerfTracker = st.session_state.get("_perf")  # type: ignore
+    cache: DiskCache = st.session_state.get("_disk_cache")  # type: ignore
+
+    nps_sig = _df_fingerprint(
+        nps_df,
+        cols=["Fecha", "NPS", "NPS Group", "Palanca", "Subpalanca", "Comment", "ID"],
+        sample_rows=2500,
+    )
+    helix_sig = _df_fingerprint(
+        helix_df,
+        cols=[
+            "Fecha",
+            "Incident Number",
+            "Detailed Description",
+            "Detailed Decription",
+            "Short Description",
+            "Resolution",
+        ],
+        sample_rows=2500,
+    )
+    fg = normalize_focus_group(focus_group)
+    key = cache.make_key(
+        namespace="cross_linking_v3",
+        dataset_sig=f"nps={nps_sig}|helix={helix_sig}",
+        params={
+            "focus_group": fg,
+            "min_similarity": round(float(min_similarity), 4),
+            "max_days_apart": int(max_days_apart),
+            "top_k_per_incident": int(LINK_TOP_K_PER_INCIDENT),
+        },
+    )
+    hit = cache.get(key)
+    if isinstance(hit, dict) and {
+        "assign_df",
+        "links_df",
+        "overall_weekly",
+        "by_topic_weekly",
+        "overall_daily",
+        "by_topic_daily",
+    }.issubset(set(hit.keys())):
+        return hit
+
+    with perf.track("cross_linking"):
+        focus_df = nps_df.loc[focus_mask(nps_df, focus_group=fg)].copy()
+        assign_df, links_df = link_incidents_to_nps_topics(
+            focus_df,
+            helix_df,
+            min_similarity=float(min_similarity),
+            top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+            max_days_apart=int(max_days_apart),
+        )
+        overall_weekly, by_topic_weekly = weekly_aggregates(
+            nps_df, helix_df, assign_df, focus_group=fg
+        )
+        overall_daily, by_topic_daily = daily_aggregates(
+            nps_df, helix_df, assign_df, focus_group=fg
+        )
+
+    out: dict[str, pd.DataFrame] = {
+        "assign_df": assign_df,
+        "links_df": links_df,
+        "overall_weekly": overall_weekly,
+        "by_topic_weekly": by_topic_weekly,
+        "overall_daily": overall_daily,
+        "by_topic_daily": by_topic_daily,
+    }
+    cache.set(
+        key,
+        out,
+        meta={
+            "namespace": "cross_linking_v3",
+            "focus_group": fg,
+            "min_similarity": float(min_similarity),
+            "max_days_apart": int(max_days_apart),
+            "nps_rows": int(len(nps_df)),
+            "helix_rows": int(len(helix_df)),
+        },
+    )
+    return out
+
+
 def _build_business_report_md(
     current_df: pd.DataFrame,
     *,
@@ -1319,18 +1371,6 @@ def _build_business_report_md(
     )
 
 
-def _copy_to_clipboard(payload: str, *, toast: str = "Copiado") -> None:
-    """Copy text to clipboard via a tiny JS snippet (Streamlit has no native clipboard API)."""
-    # Use JSON encoding to safely escape quotes/newlines.
-    js = "<script>" f"navigator.clipboard.writeText({json.dumps(payload)});" "</script>"
-    components.html(js, height=0)
-    # `st.toast` exists on newer Streamlit; fallback to success if not.
-    if hasattr(st, "toast"):
-        st.toast(toast)
-    else:
-        st.success(toast)
-
-
 def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     """Render a browser-side copy button.
 
@@ -1347,22 +1387,13 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     uid = hashlib.sha1(payload_b64.encode("ascii")).hexdigest()[:10]
 
     html = f"""
-    <div style="display:flex; gap:12px; align-items:center;">
+    <div class="nps-copy-widget">
       <button
         id="nps_copy_{uid}"
-        style="
-          width: 100%;
-          padding: 10px 14px;
-          border-radius: 12px;
-          border: 0;
-          cursor: pointer;
-          font-weight: 650;
-          background: var(--nps-accent, #1f77ff);
-          color: white;
-        "
+        class="nps-copy-widget__btn"
         title="Copiar al portapapeles"
       >{label}</button>
-      <span id="nps_copy_msg_{uid}" style="font-size:12px; color: var(--nps-muted, #6b7280);"></span>
+      <span id="nps_copy_msg_{uid}" class="nps-copy-widget__msg"></span>
     </div>
     <script>
       (function() {{
@@ -1941,51 +1972,8 @@ def _render_llm_insights(theme: Theme) -> None:
 
 @st.cache_data(show_spinner=False)
 def _daily_metrics(df: pd.DataFrame, *, days: int) -> pd.DataFrame:
-    """Compute daily metrics used by charts and the LLM helper.
-
-    Returns a dataframe with:
-    day, n, det_pct, pas_pct, pro_pct, classic_nps
-    """
-
-    if "Fecha" not in df.columns or "NPS" not in df.columns:
-        return pd.DataFrame()
-
-    tmp = df.dropna(subset=["Fecha", "NPS"]).copy()
-    if tmp.empty:
-        return pd.DataFrame()
-
-    tmp["day"] = tmp["Fecha"].dt.floor("D")
-    end = tmp["day"].max()
-    start = end - pd.Timedelta(days=int(days) - 1)
-    tmp = tmp.loc[tmp["day"] >= start].copy()
-    if tmp.empty:
-        return pd.DataFrame()
-
-    scores = pd.to_numeric(tmp["NPS"], errors="coerce")
-    tmp["score"] = scores.clip(lower=0, upper=10)
-    tmp = tmp.dropna(subset=["score"]).copy()
-    if tmp.empty:
-        return pd.DataFrame()
-
-    tmp["is_det"] = tmp["score"] <= 6
-    tmp["is_pas"] = (tmp["score"] >= 7) & (tmp["score"] <= 8)
-    tmp["is_pro"] = tmp["score"] >= 9
-
-    agg = (
-        tmp.groupby("day", as_index=False)
-        .agg(
-            n=("score", "size"),
-            det=("is_det", "mean"),
-            pas=("is_pas", "mean"),
-            pro=("is_pro", "mean"),
-        )
-        .sort_values("day")
-    )
-    agg["det_pct"] = agg["det"] * 100.0
-    agg["pas_pct"] = agg["pas"] * 100.0
-    agg["pro_pct"] = agg["pro"] * 100.0
-    agg["classic_nps"] = (agg["pro"] - agg["det"]) * 100.0
-    return agg[["day", "n", "det_pct", "pas_pct", "pro_pct", "classic_nps"]].copy()
+    """Compute shared daily NPS metrics for charts + LLM helper."""
+    return shared_daily_metrics(df, days=int(days))
 
 
 def _llm_prompt_header(title: str, *, workflow: str, question: str = "") -> str:
@@ -2801,23 +2789,23 @@ def page_executive(
     else:
         df_win = df
         df_llm_win = df
+    daily_metrics_df = _daily_metrics(df_llm_win, days=int(context_days))
 
     with tab_kpis:
         st.caption("Lectura diaria: NPS clásico (promotores - detractores) y % detractores.")
-        fig_k = chart_daily_kpis(df_win, theme, days=int(context_days))
+        fig_k = chart_daily_kpis(df_win, theme, days=int(context_days), metrics=daily_metrics_df)
         if fig_k is None:
             st.info("No hay suficientes datos para construir la vista diaria de NPS clásico.")
         else:
             st.plotly_chart(apply_plotly_theme(fig_k, theme), use_container_width=True, theme=None)
 
-        metrics = _daily_metrics(df_llm_win, days=int(context_days))
         _render_daily_llm_assistant(
             df=df_llm_win,
             settings=settings,
             service_origin=service_origin,
             service_origin_n1=service_origin_n1,
             service_origin_n2=service_origin_n2,
-            metrics=metrics,
+            metrics=daily_metrics_df,
             key_prefix="daily_llm",
         )
 
@@ -2861,7 +2849,9 @@ def page_executive(
             page_text(text_df, theme, embedded=True)
 
     with tab_when:
-        fig_vol = chart_daily_volume(df_win, theme, days=int(context_days))
+        fig_vol = chart_daily_volume(
+            df_win, theme, days=int(context_days), metrics=daily_metrics_df
+        )
         if fig_vol is None:
             st.info("No hay suficientes datos para construir la vista de volumen diario.")
         else:
@@ -2878,7 +2868,12 @@ def page_executive(
             "</div>",
             unsafe_allow_html=True,
         )
-        fig_mix = chart_daily_mix_business(df_win, theme, days=int(context_days))
+        fig_mix = chart_daily_mix_business(
+            df_win,
+            theme,
+            days=int(context_days),
+            metrics=daily_metrics_df,
+        )
         if fig_mix is None:
             st.info("No hay suficientes datos para construir la vista diaria.")
         else:
@@ -3771,11 +3766,13 @@ def page_nps_helix_linking(
     choice_norm = (nps_group_choice or "Todos").strip().lower()
     show_all_groups = choice_norm == "todos"
 
-    focus_group = {
-        "detractores": "detractor",
-        "neutros": "passive",
-        "promotores": "promoter",
-    }.get(choice_norm, "detractor")
+    focus_group = normalize_focus_group(
+        {
+            "detractores": "detractor",
+            "neutros": "passive",
+            "promotores": "promoter",
+        }.get(choice_norm, "detractor")
+    )
 
     nps_slice = nps_df[(nps_df["Fecha"].dt.date >= start) & (nps_df["Fecha"].dt.date <= end)].copy()
 
@@ -3824,40 +3821,32 @@ def page_nps_helix_linking(
         st.warning("No hay incidencias Helix en el rango seleccionado.")
         return
 
-    # Grupo foco para el linking semántico (por defecto: detractores)
-    nps_slice["NPS Group"] = nps_slice.get("NPS Group", "").astype(str)
-    score = pd.to_numeric(nps_slice.get("NPS", np.nan), errors="coerce")
-    grp = nps_slice["NPS Group"].str.upper()
-    if focus_group == "promoter":
-        mask_focus = (grp == "PROMOTER") | (score >= 9)
-        focus_name = "promotores"
-    elif focus_group == "passive":
-        mask_focus = (grp == "PASSIVE") | ((score >= 7) & (score <= 8))
-        focus_name = "pasivos"
-    else:
-        mask_focus = (grp == "DETRACTOR") | (score <= 6)
-        focus_name = "detractores"
-
-    focus_df = nps_slice[mask_focus].copy()
+    # Grupo foco para el linking semántico (por defecto: detractores).
+    focus_name = {
+        "promoter": "promotores",
+        "passive": "pasivos",
+        "detractor": "detractores",
+    }.get(focus_group, "detractores")
+    focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
     if focus_df.empty:
         st.info(
             f"No hay {focus_name} en el rango seleccionado. El linking semántico se activa cuando existan registros de ese grupo."
         )
 
-    # 1) Linking + asignación de incidencias a tópico NPS
-    assign_df, links_df = link_incidents_to_nps_topics(
-        focus_df,
+    # 1) Linking + asignación de incidencias a tópico NPS (cache determinista en disco).
+    cross_bundle = cached_cross_link_bundle(
+        nps_slice,
         helix_slice,
-        min_similarity=float(min_sim),
-        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+        focus_group=focus_group,
+        min_similarity=min_sim,
         max_days_apart=int(max_days_apart),
     )
-    overall_weekly, by_topic_weekly = weekly_aggregates(
-        nps_slice, helix_slice, assign_df, focus_group=focus_group
-    )
-    overall_daily, by_topic_daily = daily_aggregates(
-        nps_slice, helix_slice, assign_df, focus_group=focus_group
-    )
+    assign_df = cross_bundle["assign_df"]
+    links_df = cross_bundle["links_df"]
+    overall_weekly = cross_bundle["overall_weekly"]
+    by_topic_weekly = cross_bundle["by_topic_weekly"]
+    overall_daily = cross_bundle["overall_daily"]
+    by_topic_daily = cross_bundle["by_topic_daily"]
     mode_payload = _build_touchpoint_mode_payload(
         touchpoint_source=touchpoint_source,
         links_df=links_df,
@@ -3915,34 +3904,17 @@ def page_nps_helix_linking(
             px, go = _plotly()
             fig = go.Figure()
             if show_all_groups:
-                # Show the 3 group rates on the same plot (comparison mode).
-                empty_assign = pd.DataFrame(columns=["incident_id", "nps_topic"])
+                # Compare detractor/passive/promoter rates without recalculating full Helix joins.
                 if use_daily_trend and not overall_daily.empty:
-                    ow_det, _ = daily_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="detractor"
-                    )
-                    ow_pas, _ = daily_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="passive"
-                    )
-                    ow_pro, _ = daily_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="promoter"
-                    )
                     x_col = "date"
+                    group_rates = grouped_focus_rates(nps_slice, frequency="D")
                 else:
-                    ow_det, _ = weekly_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="detractor"
-                    )
-                    ow_pas, _ = weekly_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="passive"
-                    )
-                    ow_pro, _ = weekly_aggregates(
-                        nps_slice, helix_slice, empty_assign, focus_group="promoter"
-                    )
                     x_col = "week"
+                    group_rates = grouped_focus_rates(nps_slice, frequency="W")
                 fig.add_trace(
                     go.Scatter(
-                        x=ow_det[x_col],
-                        y=ow_det["focus_rate"],
+                        x=group_rates[x_col],
+                        y=group_rates["detractor_rate"],
                         name="% detractores",
                         mode="lines+markers",
                         line=dict(color=pal["color.primary.bg.alert"], width=2),
@@ -3951,8 +3923,8 @@ def page_nps_helix_linking(
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=ow_pas[x_col],
-                        y=ow_pas["focus_rate"],
+                        x=group_rates[x_col],
+                        y=group_rates["passive_rate"],
                         name="% pasivos",
                         mode="lines+markers",
                         line=dict(color=pal["color.primary.bg.warning"], width=2),
@@ -3961,8 +3933,8 @@ def page_nps_helix_linking(
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=ow_pro[x_col],
-                        y=ow_pro["focus_rate"],
+                        x=group_rates[x_col],
+                        y=group_rates["promoter_rate"],
                         name="% promotores",
                         mode="lines+markers",
                         line=dict(color=pal["color.primary.bg.success"], width=2),
@@ -4032,7 +4004,7 @@ def page_nps_helix_linking(
             )
             fig.update_layout(
                 height=380,
-                margin=dict(l=10, r=10, t=10, b=10),
+                margin=dict(l=10, r=10, t=62, b=10),
                 yaxis=dict(
                     title=("Tasa por grupo" if show_all_groups else f"% {focus_name}"),
                     tickformat=".0%",
@@ -4142,7 +4114,7 @@ def page_nps_helix_linking(
         )
         fig2.update_layout(
             height=440,
-            margin=dict(l=10, r=10, t=10, b=10),
+            margin=dict(l=10, r=10, t=62, b=10),
             xaxis=dict(range=[0, 1], title="confidence learned"),
             yaxis=dict(title="Tópicos trending"),
         )
@@ -4728,7 +4700,7 @@ def page_nps_helix_linking(
                                 )
                         fig_lag.update_layout(
                             height=380,
-                            margin=dict(l=10, r=10, t=10, b=10),
+                            margin=dict(l=10, r=10, t=62, b=10),
                             yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
                             yaxis2=dict(
                                 title="Incidencias (shifted)", overlaying="y", side="right"
@@ -5015,32 +4987,22 @@ def page_nps_helix_linking(
 
                 if not nps_hist.empty and not helix_hist.empty:
                     nps_hist_work = nps_hist.copy()
-                    nps_hist_work["NPS Group"] = nps_hist_work.get("NPS Group", "").astype(str)
-                    score_hist = pd.to_numeric(nps_hist_work.get("NPS", np.nan), errors="coerce")
-                    grp_hist = nps_hist_work["NPS Group"].str.upper()
-                    if focus_group == "promoter":
-                        mask_focus_hist = (grp_hist == "PROMOTER") | (score_hist >= 9)
-                    elif focus_group == "passive":
-                        mask_focus_hist = (grp_hist == "PASSIVE") | (
-                            (score_hist >= 7) & (score_hist <= 8)
-                        )
-                    else:
-                        mask_focus_hist = (grp_hist == "DETRACTOR") | (score_hist <= 6)
-
-                    focus_hist = nps_hist_work[mask_focus_hist].copy()
-                    assign_hist, links_hist = link_incidents_to_nps_topics(
-                        focus_hist,
+                    focus_hist = nps_hist_work.loc[
+                        focus_mask(nps_hist_work, focus_group=focus_group)
+                    ].copy()
+                    hist_bundle = cached_cross_link_bundle(
+                        nps_hist_work,
                         helix_hist,
-                        min_similarity=float(min_sim),
-                        top_k_per_incident=int(LINK_TOP_K_PER_INCIDENT),
+                        focus_group=focus_group,
+                        min_similarity=min_sim,
                         max_days_apart=int(max_days_apart),
                     )
-                    ow_hist, btw_hist = weekly_aggregates(
-                        nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
-                    )
-                    od_hist, btd_hist = daily_aggregates(
-                        nps_hist_work, helix_hist, assign_hist, focus_group=focus_group
-                    )
+                    assign_hist = hist_bundle["assign_df"]
+                    links_hist = hist_bundle["links_df"]
+                    ow_hist = hist_bundle["overall_weekly"]
+                    btw_hist = hist_bundle["by_topic_weekly"]
+                    od_hist = hist_bundle["overall_daily"]
+                    btd_hist = hist_bundle["by_topic_daily"]
                     od_hist = _attach_daily_nps_mean(od_hist, nps_hist_work)
                     hist_mode_payload = _build_touchpoint_mode_payload(
                         touchpoint_source=touchpoint_source,
@@ -5366,19 +5328,14 @@ def main() -> None:
     st.markdown(
         """
 <section class="nps-app-hero">
-  <h1 class="nps-app-hero__title" style="color:#ffffff !important;">NPS Lens</h1>
-  <div class="nps-app-hero__subtitle" style="color:rgba(255,255,255,.94) !important;">
+  <h1 class="nps-app-hero__title">NPS Lens</h1>
+  <div class="nps-app-hero__subtitle">
     Analisis del NPS Térmico y causalidad con incidencias de clientes.
   </div>
 </section>
 """,
         unsafe_allow_html=True,
     )
-
-    if "_show_cross_report" not in st.session_state:
-        st.session_state["_show_cross_report"] = False
-    if "_scroll_to_cross_report" not in st.session_state:
-        st.session_state["_scroll_to_cross_report"] = False
 
     ctx_col_left, ctx_col_right = st.columns([8.6, 1.4])
     with ctx_col_left:
@@ -5395,21 +5352,10 @@ def main() -> None:
     with ctx_col_right:
         report_clicked = st.button(
             "Reporte",
-            type="primary" if bool(st.session_state.get("_show_cross_report")) else "secondary",
+            type="secondary",
             use_container_width=True,
             key="nps_cross_report_toggle",
         )
-        if report_clicked:
-            next_state = not bool(st.session_state.get("_show_cross_report"))
-            st.session_state["_show_cross_report"] = next_state
-            if next_state:
-                st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
-                st.session_state["_scroll_to_cross_report"] = True
-            else:
-                st.session_state["_scroll_to_cross_report"] = False
-            st.rerun()
-
-    show_cross_report = bool(st.session_state.get("_show_cross_report"))
 
     if not data_ready:
         st.info(
@@ -5423,11 +5369,73 @@ def main() -> None:
     # Global population time window (Año/Mes) applied everywhere.
     pop_date_start, pop_date_end, pop_month_filter = population_date_window(pop_year, pop_month)
 
+    def _render_report_only_view() -> None:
+        df_resumen_modal = load_context_df(
+            store_dir,
+            service_origin,
+            service_origin_n1,
+            service_origin_n2,
+            nps_group_choice,
+            VIEW_COLUMNS["resumen"] or tuple(),
+            date_start=pop_date_start,
+            date_end=pop_date_end,
+            month_filter=pop_month_filter,
+        )
+        page_nps_helix_linking(
+            nps_df=df_resumen_modal,
+            store_dir=store_dir,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+            nps_group_choice=nps_group_choice,
+            settings=settings,
+            theme_mode=theme_mode,
+            touchpoint_source=touchpoint_source,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            min_n=min_n,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            show_report=True,
+            report_only=True,
+        )
+
+    if hasattr(st, "dialog"):
+
+        @st.dialog("Reporte Ejecutivo", width="large")
+        def _open_report_modal() -> None:
+            _render_report_only_view()
+
+        if report_clicked:
+            _open_report_modal()
+    else:
+        # Compatibility fallback for very old Streamlit builds without dialogs.
+        if "_show_cross_report" not in st.session_state:
+            st.session_state["_show_cross_report"] = False
+        if report_clicked:
+            st.session_state["_show_cross_report"] = not bool(
+                st.session_state.get("_show_cross_report")
+            )
+            st.rerun()
+        if not bool(st.session_state.get("_show_cross_report")):
+            pass
+        else:
+            close_col_left, close_col_right = st.columns([8.8, 1.2])
+            with close_col_left:
+                st.markdown(
+                    "<div class='nps-card nps-card--flat'><b>Reporte abierto</b></div>",
+                    unsafe_allow_html=True,
+                )
+            with close_col_right:
+                if st.button("✕ Cerrar", key="nps_report_fallback_close", use_container_width=True):
+                    st.session_state["_show_cross_report"] = False
+                    st.rerun()
+            _render_report_only_view()
+            st.stop()
+
     main_sections = ["📊 NPS Térmico", "🔗 Incidencias ↔ NPS", "🧾 Datos"]
     if "_main_section" not in st.session_state:
         st.session_state["_main_section"] = main_sections[0]
-    if show_cross_report:
-        st.session_state["_main_section"] = "🔗 Incidencias ↔ NPS"
     if hasattr(st, "segmented_control"):
         main_section = st.segmented_control(
             "Sección principal",
@@ -5576,8 +5584,8 @@ def main() -> None:
             min_n=min_n,
             pop_year=pop_year,
             pop_month=pop_month,
-            show_report=show_cross_report,
-            report_only=show_cross_report,
+            show_report=False,
+            report_only=False,
         )
 
     if main_section == "🧾 Datos":

@@ -69,7 +69,8 @@ def build_plotly_template(theme: Theme) -> Dict[str, Any]:
                 "family": "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial",
             },
             "title": {"font": {"color": pt.text}},
-            "margin": {"l": 16, "r": 16, "t": 20, "b": 16},
+            # Keep an explicit top gutter for the modebar (camera/zoom/etc.).
+            "margin": {"l": 16, "r": 16, "t": 62, "b": 16},
             "colorway": [pt.accent, pt.detractor, pt.passive, pt.promoter],
             "legend": {
                 "bgcolor": "rgba(0,0,0,0)",

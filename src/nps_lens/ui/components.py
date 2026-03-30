@@ -22,12 +22,10 @@ def card(title: str, body_html: str, *, flat: bool = False) -> None:
     st.markdown(
         f"""
 <div class="{klass}">
-  <div class="nps-muted"
-       style="font-size:12px; font-weight:700; text-transform:uppercase;
-              letter-spacing:.08em;">
+  <div class="nps-card__kicker nps-muted">
     {title}
   </div>
-  <div style="height:10px"></div>
+  <div class="nps-card__spacer"></div>
   {body_html}
 </div>
 """,
@@ -50,9 +48,9 @@ def kpi(label: str, value_html: str, *, hint: str = "") -> None:
 def section(title: str, subtitle: str = "") -> None:
     st.markdown(
         f"""
-<div style="margin: 10px 0 12px 0;">
-  <div style="font-size: 22px; font-weight: 800;">{title}</div>
-  <div class="nps-muted" style="margin-top:4px;">{subtitle}</div>
+<div class="nps-section">
+  <div class="nps-section__title">{title}</div>
+  <div class="nps-section__subtitle nps-muted">{subtitle}</div>
 </div>
 """,
         unsafe_allow_html=True,

@@ -6,7 +6,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.drivers import compute_nps_from_scores
+from nps_lens.analytics.drivers import compute_nps_from_scores, grouped_driver_stats
 
 
 @dataclass(frozen=True)
@@ -31,12 +31,13 @@ def rank_opportunities(
     for dim in dimensions:
         if dim not in df.columns:
             continue
-        # Pandas groupby observed default is changing; be explicit and keep output small.
-        for val, g in df.groupby(dim, dropna=False, observed=True):
-            n = int(len(g))
-            if n < min_n:
-                continue
-            nps = compute_nps_from_scores(g[score_col])
+        grouped = grouped_driver_stats(df, dim, score_col=score_col)
+        grouped = grouped.loc[grouped["n"] >= int(min_n)].copy()
+        if grouped.empty:
+            continue
+        for _, row in grouped.iterrows():
+            n = int(row["n"])
+            nps = float(row["nps"]) if pd.notna(row["nps"]) else float("nan")
             delta = overall - nps  # how far below overall
             if np.isnan(delta) or delta <= 0:
                 continue
@@ -44,15 +45,16 @@ def rank_opportunities(
             uplift = float(delta * 0.6)
             # confidence proxy: more data -> higher confidence (cap at 1)
             conf = float(min(1.0, np.log10(max(n, 10)) / 5.0))
+            value = str(row[dim])
             out.append(
                 Opportunity(
                     dimension=dim,
-                    value=str(val),
+                    value=value,
                     n=n,
                     current_nps=float(nps),
                     potential_uplift=uplift,
                     confidence=conf,
-                    why=f"'{dim}={val}' está {delta:.1f} pts por debajo del NPS global",
+                    why=f"'{dim}={value}' está {delta:.1f} pts por debajo del NPS global",
                 )
             )
     out.sort(key=lambda o: (o.potential_uplift * o.confidence, o.n), reverse=True)
