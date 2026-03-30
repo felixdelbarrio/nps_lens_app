@@ -37,6 +37,7 @@ jobs:
             --add-data="$PWD/app:app" \
             --add-data="$PWD/assets:assets" \
             --add-data="$PWD/.streamlit:.streamlit" \
+            --collect-submodules nps_lens \
             --collect-submodules webview \
             --collect-all kaleido \
             --collect-all dotenv \
@@ -94,6 +95,7 @@ jobs:
             --add-data="$PWD/app:app"
             --add-data="$PWD/assets:assets"
             --add-data="$PWD/.streamlit:.streamlit"
+            --collect-submodules nps_lens
             --collect-submodules webview
             --collect-all kaleido
             --collect-all dotenv
@@ -176,6 +178,7 @@ jobs:
             --add-data="$PWD/app;app" `
             --add-data="$PWD/assets;assets" `
             --add-data="$PWD/.streamlit;.streamlit" `
+            --collect-submodules nps_lens `
             --collect-submodules webview `
             --collect-all kaleido `
             --collect-all dotenv `
