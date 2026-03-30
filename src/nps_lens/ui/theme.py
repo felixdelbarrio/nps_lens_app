@@ -342,6 +342,17 @@ button[aria-label="Close sidebar"] svg path {{
   box-shadow: var(--nps-shadow);
 }}
 
+.nps-card__kicker {{
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}}
+
+.nps-card__spacer {{
+  height: 10px;
+}}
+
 .nps-card--flat {{
   box-shadow: none;
 }}
@@ -354,6 +365,19 @@ button[aria-label="Close sidebar"] svg path {{
   font-size: 34px;
   font-weight: 800;
   line-height: 1.05;
+}}
+
+.nps-section {{
+  margin: 10px 0 12px 0;
+}}
+
+.nps-section__title {{
+  font-size: 22px;
+  font-weight: 800;
+}}
+
+.nps-section__subtitle {{
+  margin-top: 4px;
 }}
 
 .nps-pill {{
@@ -391,6 +415,34 @@ button[aria-label="Close sidebar"] svg path {{
 
 .nps-pill-row--compact {{
   margin: 10px 0 20px 0;
+}}
+
+.nps-copy-widget {{
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}}
+
+.nps-copy-widget__btn {{
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 650;
+  background: var(--nps-accent);
+  color: var(--nps-on-accent);
+}}
+
+.nps-copy-widget__btn:hover,
+.nps-copy-widget__btn:focus-visible {{
+  background: color-mix(in srgb, var(--nps-accent) 84%, black 16%);
+  outline: none;
+}}
+
+.nps-copy-widget__msg {{
+  font-size: 12px;
+  color: var(--nps-muted);
 }}
 
 /* Context row: keep context pills and Reporte action aligned on the same baseline. */

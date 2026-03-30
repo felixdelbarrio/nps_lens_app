@@ -26,22 +26,56 @@ def compute_nps_from_scores(scores: pd.Series) -> float:
     return float((promoters - detractors) * 100.0)
 
 
+def grouped_driver_stats(
+    df: pd.DataFrame,
+    dimension: str,
+    *,
+    score_col: str = "NPS",
+) -> pd.DataFrame:
+    """Vectorized grouped NPS stats used by driver and opportunities ranking."""
+    if dimension not in df.columns:
+        return pd.DataFrame(
+            columns=[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]
+        )
+
+    work = pd.DataFrame({dimension: df[dimension], "_score": pd.to_numeric(df[score_col], errors="coerce")})
+    work["_valid"] = work["_score"].notna()
+    work["_det"] = work["_score"] <= 6.0
+    work["_pro"] = work["_score"] >= 9.0
+
+    grouped = (
+        work.groupby(dimension, dropna=False, observed=True)
+        .agg(
+            n=("_score", "size"),
+            valid_n=("_valid", "sum"),
+            det_count=("_det", "sum"),
+            pro_count=("_pro", "sum"),
+        )
+        .reset_index()
+    )
+    valid = grouped["valid_n"].replace({0: np.nan}).astype(float)
+    grouped["detractor_rate"] = grouped["det_count"].astype(float) / valid
+    grouped["promoter_rate"] = grouped["pro_count"].astype(float) / valid
+    grouped["nps"] = (grouped["promoter_rate"] - grouped["detractor_rate"]) * 100.0
+    grouped.loc[grouped["valid_n"] <= 0, ["nps", "detractor_rate", "promoter_rate"]] = np.nan
+    return grouped[[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]]
+
+
 def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> list[DriverStat]:
     if dimension not in df.columns:
         return []
     overall = compute_nps_from_scores(df[score_col])
+    grouped = grouped_driver_stats(df, dimension, score_col=score_col)
     out: list[DriverStat] = []
-    # Pandas groupby observed default is changing; be explicit and keep output small.
-    for value, g in df.groupby(dimension, dropna=False, observed=True):
-        n = int(len(g))
-        nps = compute_nps_from_scores(g[score_col])
-        s = pd.to_numeric(g[score_col], errors="coerce").dropna()
-        detr = float((s <= 6).mean()) if not s.empty else float("nan")
-        prom = float((s >= 9).mean()) if not s.empty else float("nan")
+    for _, row in grouped.iterrows():
+        n = int(row["n"])
+        nps = float(row["nps"]) if pd.notna(row["nps"]) else float("nan")
+        detr = float(row["detractor_rate"]) if pd.notna(row["detractor_rate"]) else float("nan")
+        prom = float(row["promoter_rate"]) if pd.notna(row["promoter_rate"]) else float("nan")
         out.append(
             DriverStat(
                 dimension=dimension,
-                value=str(value),
+                value=str(row[dimension]),
                 n=n,
                 nps=nps,
                 detractor_rate=detr,
