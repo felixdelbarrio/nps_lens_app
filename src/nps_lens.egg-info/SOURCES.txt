@@ -16,6 +16,7 @@ src/nps_lens/analytics/causal.py
 src/nps_lens/analytics/changepoints.py
 src/nps_lens/analytics/drivers.py
 src/nps_lens/analytics/hotspot_metrics.py
+src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/journey.py
 src/nps_lens/analytics/linking_policy.py
@@ -59,6 +60,7 @@ src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
 src/nps_lens/reports/__init__.py
 src/nps_lens/reports/executive_ppt.py
+src/nps_lens/reports/ppt_template.py
 src/nps_lens/ui/__init__.py
 src/nps_lens/ui/business.py
 src/nps_lens/ui/charts.py
@@ -69,10 +71,12 @@ src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_config_env.py
+tests/test_design_tokens.py
 tests/test_desktop_port_reclaim.py
 tests/test_drivers.py
 tests/test_helix_ingest_filtering.py
 tests/test_hotspot_metrics.py
+tests/test_incident_attribution.py
 tests/test_incident_rationale.py
 tests/test_ingest_contracts.py
 tests/test_ingest_features.py
@@ -81,6 +85,10 @@ tests/test_llm_insight_response.py
 tests/test_nps_helix_linking.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py
+tests/test_plotly_theme.py
 tests/test_ppt_script.py
+tests/test_store_parquet_resilience.py
+tests/test_streamlit_chain_selection.py
 tests/test_text_mining.py
+tests/test_ui_business_periods.py
 tests/test_ui_population.py
