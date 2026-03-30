@@ -62,6 +62,8 @@ build:
 			--add-data="$(ROOT)/app:app" \
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
+			--add-data="$(ROOT)/.env.example:." \
+			--collect-submodules nps_lens \
 			--collect-submodules webview \
 			--collect-all kaleido \
 			--collect-all dotenv \
@@ -96,6 +98,8 @@ build:
 			--add-data="$(ROOT)/app:app" \
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/.streamlit:.streamlit" \
+			--add-data="$(ROOT)/.env.example:." \
+			--collect-submodules nps_lens \
 			--collect-submodules webview \
 			--collect-all kaleido \
 			--collect-all dotenv \
