@@ -65,6 +65,7 @@ build:
 			--collect-submodules webview \
 			--collect-all kaleido \
 			--collect-all streamlit \
+			--copy-metadata streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
 			--workpath $$out/work \
@@ -96,6 +97,7 @@ build:
 			--collect-submodules webview \
 			--collect-all kaleido \
 			--collect-all streamlit \
+			--copy-metadata streamlit \
 			--collect-data pptx \
 			--distpath $$out/dist \
 			--workpath $$out/work \
