@@ -4004,7 +4004,7 @@ def page_nps_helix_linking(
             )
             fig.update_layout(
                 height=380,
-                margin=dict(l=10, r=10, t=10, b=10),
+                margin=dict(l=10, r=10, t=62, b=10),
                 yaxis=dict(
                     title=("Tasa por grupo" if show_all_groups else f"% {focus_name}"),
                     tickformat=".0%",
@@ -4114,7 +4114,7 @@ def page_nps_helix_linking(
         )
         fig2.update_layout(
             height=440,
-            margin=dict(l=10, r=10, t=10, b=10),
+            margin=dict(l=10, r=10, t=62, b=10),
             xaxis=dict(range=[0, 1], title="confidence learned"),
             yaxis=dict(title="Tópicos trending"),
         )
@@ -4700,7 +4700,7 @@ def page_nps_helix_linking(
                                 )
                         fig_lag.update_layout(
                             height=380,
-                            margin=dict(l=10, r=10, t=10, b=10),
+                            margin=dict(l=10, r=10, t=62, b=10),
                             yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
                             yaxis2=dict(
                                 title="Incidencias (shifted)", overlaying="y", side="right"

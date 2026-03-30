@@ -160,7 +160,8 @@ def _nps_score_colors(theme: Theme, values: pd.Series) -> list[str]:
 def _layout_common(fig, th: ChartTheme, *, height: int) -> None:
     fig.update_layout(
         height=height,
-        margin=dict(l=10, r=10, t=10, b=10),
+        # Reserve a top lane so Plotly's modebar never overlaps chart data.
+        margin=dict(l=10, r=10, t=62, b=10),
         font=dict(color=th.text),
         paper_bgcolor=th.paper_bg,
         plot_bgcolor=th.plot_bg,

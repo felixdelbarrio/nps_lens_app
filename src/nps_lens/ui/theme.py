@@ -296,11 +296,34 @@ button[aria-label="Close sidebar"]:focus-visible {{
 [data-testid="collapsedControl"] button svg,
 button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  opacity: 0 !important;
+}}
+
+/* Force deterministic ASCII arrows for sidebar toggle in every Streamlit state. */
+[data-testid="stSidebarCollapseButton"] button::before,
+button[aria-label="Close sidebar"]::before {{
+  content: "<";
+  display: block;
   color: var(--nps-control-icon) !important;
-  width: 16px !important;
-  height: 16px !important;
-  opacity: 1 !important;
-  display: block !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}}
+
+[data-testid="stSidebarCollapsedControl"] button::before,
+[data-testid="collapsedControl"] button::before,
+button[aria-label="Open sidebar"]::before {{
+  content: ">";
+  display: block;
+  color: var(--nps-control-icon) !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
 }}
 
 [data-testid="stSidebarCollapseButton"] button svg path,
