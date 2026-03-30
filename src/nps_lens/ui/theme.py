@@ -1293,20 +1293,42 @@ div[data-testid="stTooltipContent"] * {{
   color: var(--nps-control-text) !important;
 }}
 
-/* Dialogs: keep report modal aligned with app theme and use native close icon only. */
-div[data-testid="stDialog"] > div[role="dialog"],
-div[data-testid="stDialog"] [data-baseweb="modal"] {{
-  background: var(--nps-surface) !important;
+/* Dialogs: enforce tokenized dark shell/content and readable status blocks. */
+div[data-baseweb="modal"] {{
+  z-index: 1300 !important;
+}}
+
+div[data-baseweb="modal"] > div {{
+  background: color-mix(in srgb, var(--nps-bg) 70%, black 30%) !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"],
+div[data-baseweb="modal"] > div > div,
+div[data-testid="stDialog"] > div[role="dialog"] {{
+  background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--nps-accent) 10%, var(--nps-surface)) 0%,
+      var(--nps-surface) 68%
+    ) !important;
   color: var(--nps-text) !important;
   border: 1px solid var(--nps-border-soft) !important;
   border-radius: 20px !important;
   box-shadow: var(--nps-shadow) !important;
 }}
 
+div[data-baseweb="modal"] [data-testid="stDialogContent"],
 div[data-testid="stDialog"] [data-testid="stDialogContent"] {{
   background: transparent !important;
 }}
 
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"],
+div[data-baseweb="modal"] [data-testid="stMarkdownContainer"] *,
+div[data-baseweb="modal"] h1,
+div[data-baseweb="modal"] h2,
+div[data-baseweb="modal"] h3,
+div[data-baseweb="modal"] p,
+div[data-baseweb="modal"] label,
+div[data-baseweb="modal"] span,
 div[data-testid="stDialog"] [data-testid="stMarkdownContainer"],
 div[data-testid="stDialog"] [data-testid="stMarkdownContainer"] *,
 div[data-testid="stDialog"] h1,
@@ -1318,6 +1340,7 @@ div[data-testid="stDialog"] span {{
   color: var(--nps-text) !important;
 }}
 
+div[data-baseweb="modal"] button[aria-label="Close"],
 div[data-testid="stDialog"] button[aria-label="Close"] {{
   color: var(--nps-text) !important;
   background: color-mix(in srgb, var(--nps-surface-2) 92%, transparent) !important;
@@ -1325,8 +1348,58 @@ div[data-testid="stDialog"] button[aria-label="Close"] {{
   border-radius: 12px !important;
 }}
 
+div[data-baseweb="modal"] button[aria-label="Close"]:hover,
 div[data-testid="stDialog"] button[aria-label="Close"]:hover {{
   background: var(--nps-control-bg-hover) !important;
+}}
+
+/* Notifications inside modal (warning/success/info/error) keep dark contrast. */
+div[data-baseweb="modal"] [data-testid="stAlert"],
+div[data-baseweb="modal"] [data-baseweb="notification"],
+div[data-testid="stDialog"] [data-testid="stAlert"],
+div[data-testid="stDialog"] [data-baseweb="notification"] {{
+  background: color-mix(in srgb, var(--nps-surface-2) 90%, var(--nps-accent) 10%) !important;
+  border: 1px solid var(--nps-border-soft) !important;
+  border-radius: 14px !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"] *,
+div[data-baseweb="modal"] [data-baseweb="notification"] *,
+div[data-testid="stDialog"] [data-testid="stAlert"] *,
+div[data-testid="stDialog"] [data-baseweb="notification"] * {{
+  color: var(--nps-text) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="warning"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="warning"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="warning"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="warning"] {{
+  background: color-mix(in srgb, var(--nps-warning) 26%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-warning) 60%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="success"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="success"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="success"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="success"] {{
+  background: color-mix(in srgb, var(--nps-success) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-success) 54%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="error"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="error"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="error"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="error"] {{
+  background: color-mix(in srgb, var(--nps-danger-soft) 28%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-danger) 58%, var(--nps-surface)) !important;
+}}
+
+div[data-baseweb="modal"] [data-testid="stAlert"][kind="info"],
+div[data-baseweb="modal"] [data-baseweb="notification"][kind="info"],
+div[data-testid="stDialog"] [data-testid="stAlert"][kind="info"],
+div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
+  background: color-mix(in srgb, var(--nps-accent) 24%, var(--nps-surface)) !important;
+  border-color: color-mix(in srgb, var(--nps-accent) 56%, var(--nps-surface)) !important;
 }}
 
 /* Plotly containers */
