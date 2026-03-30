@@ -252,7 +252,35 @@ section[data-testid="stSidebar"] > div {{
 [data-testid="collapsedControl"] {{
   opacity: 1 !important;
   visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
   z-index: 1000 !important;
+}}
+
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:hover [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"]:not(:hover) [data-testid="stSidebarCollapseButton"],
+section[data-testid="stSidebar"] [data-testid="stSidebarCollapsedControl"],
+section[data-testid="stSidebar"] [data-testid="collapsedControl"] {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+}}
+
+/* Fallback for Streamlit variants where test ids are wrapped in generic containers. */
+div:has(> button[aria-label="Open sidebar"]),
+div:has(> button[aria-label="Close sidebar"]) {{
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button,
@@ -273,7 +301,11 @@ button[aria-label="Close sidebar"] {{
   color: var(--nps-control-icon) !important;
   box-shadow: none !important;
   opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
   position: relative !important;
+  transform: none !important;
+  transition: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button:hover,
@@ -1319,6 +1351,30 @@ div[data-testid="stDialog"] > div[role="dialog"] {{
 div[data-baseweb="modal"] [data-testid="stDialogContent"],
 div[data-testid="stDialog"] [data-testid="stDialogContent"] {{
   background: transparent !important;
+}}
+
+/* Native Streamlit dialog header can use internal classes/testids across versions.
+   Style it via both semantic and structural selectors. */
+div[data-baseweb="modal"] [data-testid="stDialogHeader"],
+div[data-baseweb="modal"] [data-testid="stDialogTitle"],
+div[data-baseweb="modal"] [role="dialog"] > div:first-child,
+div[data-baseweb="modal"] [role="dialog"] > div:first-child *,
+div[data-baseweb="modal"] [role="heading"],
+div[data-testid="stDialog"] [data-testid="stDialogHeader"],
+div[data-testid="stDialog"] [data-testid="stDialogTitle"],
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child *,
+div[data-testid="stDialog"] [role="heading"] {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
+  opacity: 1 !important;
+  font-weight: 800 !important;
+}}
+
+div[data-baseweb="modal"] [role="dialog"] > div:first-child a,
+div[data-testid="stDialog"] > div[role="dialog"] > div:first-child a {{
+  color: var(--nps-text) !important;
+  -webkit-text-fill-color: var(--nps-text) !important;
 }}
 
 div[data-baseweb="modal"] [data-testid="stMarkdownContainer"],
