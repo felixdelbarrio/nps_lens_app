@@ -172,6 +172,7 @@ st.set_page_config(
     page_title="NPS Lens — Senda MX",
     page_icon=str(_logo_path) if _logo_path else "📈",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # Session-wide performance tracker (timings)

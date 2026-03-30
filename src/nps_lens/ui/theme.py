@@ -252,6 +252,7 @@ section[data-testid="stSidebar"] > div {{
 [data-testid="collapsedControl"] {{
   opacity: 1 !important;
   visibility: visible !important;
+  z-index: 1000 !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button,
@@ -262,16 +263,17 @@ button[aria-label="Close sidebar"] {{
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 34px !important;
-  height: 34px !important;
-  min-width: 34px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
   padding: 0 !important;
-  border-radius: 10px !important;
+  border-radius: 8px !important;
   border: 1px solid var(--nps-control-border) !important;
-  background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
+  background: var(--nps-control-bg) !important;
   color: var(--nps-control-icon) !important;
   box-shadow: none !important;
   opacity: 1 !important;
+  position: relative !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button:hover,
@@ -289,6 +291,24 @@ button[aria-label="Close sidebar"]:focus-visible {{
   border-color: var(--nps-control-border) !important;
 }}
 
+/* Draw the chevron with pseudo-element for consistent visibility across Streamlit versions. */
+button[aria-label="Open sidebar"]::before,
+button[aria-label="Close sidebar"]::before {{
+  display: block;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--nps-control-icon);
+}}
+
+button[aria-label="Open sidebar"]::before {{
+  content: "❯";
+}}
+
+button[aria-label="Close sidebar"]::before {{
+  content: "❮";
+}}
+
 [data-testid="stSidebarCollapseButton"] button svg,
 [data-testid="stSidebarCollapsedControl"] button svg,
 [data-testid="collapsedControl"] button svg,
@@ -296,6 +316,11 @@ button[aria-label="Open sidebar"] svg,
 button[aria-label="Close sidebar"] svg {{
   color: var(--nps-control-icon) !important;
   opacity: 1 !important;
+}}
+
+button[aria-label="Open sidebar"] svg,
+button[aria-label="Close sidebar"] svg {{
+  display: none !important;
 }}
 
 [data-testid="stSidebarCollapseButton"] button svg path,
