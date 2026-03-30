@@ -12,7 +12,6 @@ from nps_lens.design.tokens import (
     palette,
     plotly_nps_score_scale,
     plotly_risk_scale,
-    primary_accent,
 )
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
@@ -43,14 +42,12 @@ class ChartTheme:
 def chart_theme(theme: Theme) -> ChartTheme:
     """Derive minimal layout colors from design tokens."""
 
-    tokens = DesignTokens.default()
-    p = palette(tokens, theme.mode)
     return ChartTheme(
-        paper_bg=p["color.app.surface.default"],
-        plot_bg=p["color.app.surface.raised"],
-        text=p["color.primary.text.primary"],
-        grid=p["color.primary.bg.bar"],
-        accent=primary_accent(tokens, theme.mode),
+        paper_bg=theme.chart_paper,
+        plot_bg=theme.chart_plot,
+        text=theme.text,
+        grid=theme.chart_grid,
+        accent=theme.accent,
     )
 
 
