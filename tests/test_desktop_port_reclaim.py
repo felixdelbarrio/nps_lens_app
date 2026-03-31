@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nps_lens import desktop
@@ -50,3 +52,35 @@ def test_reclaim_port_raises_when_owner_is_not_nps_instance(
 
     with pytest.raises(RuntimeError, match="already in use"):
         desktop._reclaim_port_from_previous_instance(8617)
+
+
+def test_normalize_working_directory_for_frozen_uses_app_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "runtime-home"
+    monkeypatch.setenv("NPS_LENS_APP_HOME", str(target))
+    monkeypatch.delenv("NPS_LENS_KEEP_CWD", raising=False)
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+
+    chdir_calls: list[str] = []
+    monkeypatch.setattr(desktop.os, "chdir", lambda p: chdir_calls.append(str(p)))
+
+    desktop._normalize_working_directory_for_frozen()
+
+    assert target.exists()
+    assert chdir_calls == [str(target)]
+
+
+def test_normalize_working_directory_for_frozen_can_be_skipped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("NPS_LENS_APP_HOME", str(tmp_path / "runtime-home"))
+    monkeypatch.setenv("NPS_LENS_KEEP_CWD", "1")
+    monkeypatch.setattr(desktop.sys, "frozen", True, raising=False)
+
+    called = {"chdir": False}
+    monkeypatch.setattr(desktop.os, "chdir", lambda _p: called.__setitem__("chdir", True))
+
+    desktop._normalize_working_directory_for_frozen()
+
+    assert called["chdir"] is False

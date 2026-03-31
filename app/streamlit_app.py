@@ -163,8 +163,23 @@ def _plotly():
     return px, go
 
 
+def _runtime_app_home() -> Path:
+    app_home_raw = str(os.getenv("NPS_LENS_APP_HOME", "")).strip()
+    if app_home_raw:
+        return Path(app_home_raw).expanduser()
+    return Path.home() / ".nps-lens"
+
+
+def _runtime_cache_results_dir(repo_root: Path) -> Path:
+    # Frozen bundles run from an application directory that may be read-only.
+    # Keep compute cache in a user-writable location by default.
+    if getattr(sys, "frozen", False):
+        return _runtime_app_home() / "data" / "cache" / "results"
+    return repo_root / "data" / "cache" / "results"
+
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CACHE_RESULTS_DIR = REPO_ROOT / "data" / "cache" / "results"
+CACHE_RESULTS_DIR = _runtime_cache_results_dir(REPO_ROOT)
 
 
 def _resolve_logo_path() -> Optional[Path]:
@@ -1423,6 +1438,17 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     components.html(html, height=52)
 
 
+def _render_import_issues_expander(label: str, issues: list[dict[str, Any]]) -> None:
+    if not issues:
+        return
+    with st.expander(label, expanded=False):
+        st.caption(f"{len(issues)} registro(s)")
+        st.code(
+            json.dumps(issues, ensure_ascii=False, indent=2, default=str),
+            language="json",
+        )
+
+
 def _repair_json_text(text: str) -> str:
     """Best-effort repair for common 'almost JSON' LLM outputs.
 
@@ -2507,9 +2533,7 @@ def render_sidebar(  # noqa: PLR0915
                 st.rerun()
 
         issues = st.session_state.get("_last_import_issues") or []
-        if issues:
-            with st.expander("Avisos / errores del último import", expanded=False):
-                st.json(issues)
+        _render_import_issues_expander("Avisos / errores del último import", issues)
 
         # --------------------
         # Helix (Incidencias)
@@ -2571,9 +2595,10 @@ def render_sidebar(  # noqa: PLR0915
                     st.rerun()
 
         helix_issues = st.session_state.get("_last_helix_import_issues") or []
-        if helix_issues:
-            with st.expander("Avisos / errores del último import Helix", expanded=False):
-                st.json(helix_issues)
+        _render_import_issues_expander(
+            "Avisos / errores del último import Helix",
+            helix_issues,
+        )
 
         st.divider()
         st.header("Experiencia")
@@ -5260,68 +5285,59 @@ def page_nps_helix_linking(
             )
 
 
-def main() -> None:
-    # Streamlit does not load .env automatically. In frozen app bundles (e.g. /Applications on macOS),
-    # Resources may be read-only, so writable user-level bootstrap is required.
-    here = Path(__file__).resolve()
+def _resolve_runtime_dotenv_paths(*, here: Path) -> tuple[Optional[Path], Optional[Path]]:
+    """Resolve dotenv source and writable dotenv target for UI preference persistence.
+
+    In frozen bundles we intentionally avoid cwd discovery (`find_dotenv`) to prevent
+    invasive folder scans/permission prompts at startup.
+    """
     repo_root = here.parents[1]  # repo_root/app/streamlit_app.py
     bundled_env = repo_root / ".env"
     bundled_env_example = repo_root / ".env.example"
     user_env = Path.home() / ".nps-lens" / ".env"
 
-    # Highest precedence: explicit env file selected by user/runtime.
-    dotenv_path = ""
-    prefs_dotenv_path: Optional[Path] = None
     explicit_env_file = str(os.getenv("NPS_LENS_ENV_FILE", "")).strip()
     if explicit_env_file:
         explicit = Path(explicit_env_file).expanduser()
+        if getattr(sys, "frozen", False) and (not explicit.is_absolute()):
+            explicit = (_runtime_app_home() / explicit).resolve()
         if explicit.exists():
-            dotenv_path = str(explicit)
-            prefs_dotenv_path = explicit
+            return explicit, explicit
 
-    # Fallback 1: standard .env discovery from current working directory.
-    if not dotenv_path:
-        discovered = find_dotenv(usecwd=True)
-        if discovered:
-            dotenv_path = discovered
-            prefs_dotenv_path = Path(discovered)
-
-    # Fallback 2 (frozen): bootstrap a writable ~/.nps-lens/.env from bundled .env.example.
-    if not dotenv_path and getattr(sys, "frozen", False):
-        if not user_env.exists() and bundled_env_example.exists():
-            try:
+    if getattr(sys, "frozen", False):
+        if (not user_env.exists()) and bundled_env_example.exists():
+            with contextlib.suppress(Exception):
                 user_env.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(str(bundled_env_example), str(user_env))
-            except Exception:
-                # Non-fatal: we'll still try bundled files as read-only config source.
-                pass
         if user_env.exists():
-            dotenv_path = str(user_env)
-            prefs_dotenv_path = user_env
-        elif bundled_env.exists():
-            dotenv_path = str(bundled_env)
-            prefs_dotenv_path = None
-        elif bundled_env_example.exists():
-            dotenv_path = str(bundled_env_example)
-            prefs_dotenv_path = None
-
-    # Fallback 3 (non-frozen/dev): repo-local bootstrap from .env.example.
-    if not dotenv_path:
-        if (not bundled_env.exists()) and bundled_env_example.exists():
-            with contextlib.suppress(Exception):
-                shutil.copyfile(str(bundled_env_example), str(bundled_env))
+            return user_env, user_env
         if bundled_env.exists():
-            dotenv_path = str(bundled_env)
-            prefs_dotenv_path = bundled_env
-        elif bundled_env_example.exists():
-            dotenv_path = str(bundled_env_example)
-            prefs_dotenv_path = None
+            return bundled_env, None
+        if bundled_env_example.exists():
+            return bundled_env_example, None
+        return None, None
 
-    if dotenv_path:
-        load_dotenv(dotenv_path, override=False)
-    else:
-        # Still allow env vars injected by the runtime; Settings.from_env will fail-fast if missing.
-        load_dotenv(override=False)
+    discovered = find_dotenv(usecwd=True)
+    if discovered:
+        discovered_path = Path(discovered)
+        return discovered_path, discovered_path
+
+    if (not bundled_env.exists()) and bundled_env_example.exists():
+        with contextlib.suppress(Exception):
+            shutil.copyfile(str(bundled_env_example), str(bundled_env))
+    if bundled_env.exists():
+        return bundled_env, bundled_env
+    if bundled_env_example.exists():
+        return bundled_env_example, None
+    return None, None
+
+
+def main() -> None:
+    here = Path(__file__).resolve()
+    dotenv_path, prefs_dotenv_path = _resolve_runtime_dotenv_paths(here=here)
+
+    if dotenv_path is not None:
+        load_dotenv(str(dotenv_path), override=False)
     settings = Settings.from_env()
 
     (

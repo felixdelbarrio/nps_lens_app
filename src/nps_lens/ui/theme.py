@@ -1462,6 +1462,7 @@ div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
 [data-testid="stPlotlyChart"] {{
   border-radius: 22px;
   border: 1px solid var(--nps-border-soft);
+  position: relative;
   background: linear-gradient(
       180deg,
       color-mix(in srgb, var(--nps-accent) 4%, var(--nps-chart-paper)) 0%,
@@ -1483,25 +1484,26 @@ div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
 }}
 
 [data-testid="stPlotlyChart"] .modebar-container {{
-  position: static !important;
-  top: auto !important;
-  right: auto !important;
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
   left: auto !important;
-  width: 100% !important;
+  width: auto !important;
   display: flex !important;
   justify-content: flex-end !important;
   align-items: center !important;
-  margin: 0 0 10px 0 !important;
+  margin: 0 !important;
   padding: 0 !important;
+  z-index: 6 !important;
   pointer-events: none;
 }}
 
 [data-testid="stPlotlyChart"] .modebar {{
-  position: static !important;
-  top: auto !important;
-  right: auto !important;
+  position: relative !important;
+  top: 0 !important;
+  right: 0 !important;
   left: auto !important;
-  z-index: 1 !important;
+  z-index: 7 !important;
   background: color-mix(in srgb, var(--nps-control-bg) 92%, transparent) !important;
   border: 1px solid var(--nps-control-border) !important;
   border-radius: 12px !important;
@@ -1509,7 +1511,7 @@ div[data-testid="stDialog"] [data-baseweb="notification"][kind="info"] {{
   opacity: 0.96 !important;
   transform: none !important;
   transition: background-color 120ms ease;
-  margin-left: auto !important;
+  margin: 0 !important;
   pointer-events: auto !important;
 }}
 

@@ -91,6 +91,7 @@ tests/test_plotly_theme.py
 tests/test_ppt_script.py
 tests/test_store_parquet_resilience.py
 tests/test_streamlit_chain_selection.py
+tests/test_streamlit_env_bootstrap.py
 tests/test_text_mining.py
 tests/test_ui_business_periods.py
 tests/test_ui_population.py
