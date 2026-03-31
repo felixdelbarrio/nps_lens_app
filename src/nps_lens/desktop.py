@@ -141,6 +141,26 @@ def _wait_for_server(port: int, timeout_seconds: int = STARTUP_TIMEOUT_SECONDS) 
     raise TimeoutError(f"Timed out waiting for Streamlit server at {url}")
 
 
+def _wait_for_server_with_process(
+    proc: subprocess.Popen[bytes], port: int, timeout_seconds: int = STARTUP_TIMEOUT_SECONDS
+) -> None:
+    deadline = time.time() + timeout_seconds
+    url = f"http://127.0.0.1:{port}{HEALTH_PATH}"
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                "Embedded Streamlit server exited before startup completed. "
+                f"Exit code: {proc.returncode}."
+            )
+        try:
+            with urllib.request.urlopen(url, timeout=1.0) as response:
+                if response.status == 200:
+                    return
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            time.sleep(0.2)
+    raise TimeoutError(f"Timed out waiting for Streamlit server at {url}")
+
+
 def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is not None:
         return
@@ -256,7 +276,7 @@ def _run_desktop(port: int) -> None:
     _reclaim_port_from_previous_instance(port)
     proc = subprocess.Popen(_server_cmd(port))
     try:
-        _wait_for_server(port)
+        _wait_for_server_with_process(proc, port)
         icon_path = _logo_path()
         _set_macos_app_icon(icon_path)
         window_kwargs: dict[str, Any] = {

@@ -36,6 +36,13 @@ def test_resolve_runtime_dotenv_paths_bootstraps_user_env_for_frozen(monkeypatch
     fake_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.delenv("NPS_LENS_ENV_FILE", raising=False)
+    monkeypatch.setattr(
+        streamlit_app,
+        "find_dotenv",
+        lambda usecwd=True: (_ for _ in ()).throw(
+            AssertionError("find_dotenv should not run in frozen mode")
+        ),
+    )
     monkeypatch.setattr(streamlit_app.sys, "frozen", True, raising=False)
 
     dotenv_path, prefs_path = streamlit_app._resolve_runtime_dotenv_paths(here=here)

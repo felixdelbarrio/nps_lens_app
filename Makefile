@@ -46,7 +46,8 @@ setup:
 build:
 	@test -x "$(PY)" || $(MAKE) setup
 	$(PIP) install -e ".[build]"
-	rm -rf build/pyinstaller dist
+	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
+	rm -rf build/pyinstaller dist || true
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 	@uname_s=$$(uname -s); \
