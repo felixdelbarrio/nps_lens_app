@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import nps_lens.config as config_module
 from nps_lens.config import Settings, persist_ui_prefs, ui_pref
 
 
@@ -114,3 +115,21 @@ def test_settings_parsers_ignore_invalid_and_blank_mapping_entries(monkeypatch):
     s = Settings.from_env()
     assert s.service_origin_n1_map == {"MX": ["Senda", "Helix"]}
     assert s.service_origin_n2_values == ['{"unexpected": "object"}']
+
+
+def test_settings_uses_user_writable_dirs_for_relative_paths_in_frozen_mode(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "MX")
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"MX": ["Senda"]}')
+    monkeypatch.setenv("NPS_LENS_DATA_DIR", "./data")
+    monkeypatch.setenv("NPS_LENS_KNOWLEDGE_DIR", "./knowledge")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("NPS_LENS_APP_HOME", raising=False)
+    monkeypatch.setattr(config_module.sys, "frozen", True, raising=False)
+
+    s = Settings.from_env()
+    assert s.data_dir == fake_home / ".nps-lens" / "data"
+    assert s.knowledge_dir == fake_home / ".nps-lens" / "knowledge"
