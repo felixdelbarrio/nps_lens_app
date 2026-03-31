@@ -11,6 +11,7 @@ ICON_ICNS ?= $(ICON_DIR)/app.icns
 MACOS_BUNDLE_ID ?= com.npslens.app
 MACOS_CODESIGN_IDENTITY ?=
 MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
+MACOS_INSTALL_TO_APPLICATIONS ?= 1
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
 
@@ -46,7 +47,8 @@ setup:
 build:
 	@test -x "$(PY)" || $(MAKE) setup
 	$(PIP) install -e ".[build]"
-	rm -rf build/pyinstaller dist
+	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
+	rm -rf build/pyinstaller dist || true
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 	@uname_s=$$(uname -s); \
@@ -85,10 +87,19 @@ build:
 		else \
 			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
 		fi; \
-		$(VENV)/bin/pyinstaller "$$@"; \
-		echo "Built app: $$out/dist/nps-lens.app"; \
-		echo "Built folder: $$out/dist/nps-lens"; \
-	elif [ "$$uname_s" = "Linux" ]; then \
+			$(VENV)/bin/pyinstaller "$$@"; \
+			echo "Built app: $$out/dist/nps-lens.app"; \
+			echo "Built folder: $$out/dist/nps-lens"; \
+			if [ "$(MACOS_INSTALL_TO_APPLICATIONS)" = "1" ]; then \
+				app_dst="/Applications/nps-lens.app"; \
+				rm -rf "$$app_dst" 2>/dev/null || true; \
+				if cp -R "$$out/dist/nps-lens.app" "$$app_dst" 2>/dev/null; then \
+					echo "Installed app: $$app_dst"; \
+				else \
+					echo "Could not copy app to /Applications (run with MACOS_INSTALL_TO_APPLICATIONS=0 to skip this step)."; \
+				fi; \
+			fi; \
+		elif [ "$$uname_s" = "Linux" ]; then \
 		out=build/pyinstaller/linux; \
 		mkdir -p $$out/dist $$out/work $$out/spec; \
 		$(VENV)/bin/pyinstaller --clean --noconfirm \

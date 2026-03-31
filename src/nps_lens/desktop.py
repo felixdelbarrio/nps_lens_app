@@ -21,6 +21,28 @@ HEALTH_PATH = "/_stcore/health"
 DEFAULT_STREAMLIT_EMAIL = "nps.lens@gmail.com"
 
 
+def _runtime_app_home() -> Path:
+    app_home_raw = str(os.environ.get("NPS_LENS_APP_HOME", "")).strip()
+    if app_home_raw:
+        return Path(app_home_raw).expanduser()
+    return Path.home() / ".nps-lens"
+
+
+def _normalize_working_directory_for_frozen() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    keep_cwd = str(os.environ.get("NPS_LENS_KEEP_CWD", "")).strip().lower()
+    if keep_cwd in {"1", "true", "yes"}:
+        return
+    app_home = _runtime_app_home()
+    try:
+        app_home.mkdir(parents=True, exist_ok=True)
+        os.chdir(str(app_home))
+    except Exception:
+        # Best-effort only: startup should continue even if cwd cannot be changed.
+        pass
+
+
 def _resource_root() -> Path:
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
@@ -38,7 +60,8 @@ def _logo_path() -> Optional[Path]:
     if env_icon:
         env_candidate = Path(env_icon).expanduser()
         if not env_candidate.is_absolute():
-            env_candidate = (Path.cwd() / env_candidate).resolve()
+            base = _resource_root() if getattr(sys, "frozen", False) else Path.cwd()
+            env_candidate = (base / env_candidate).resolve()
         if env_candidate.exists():
             return env_candidate
     candidate = _resource_root() / "assets" / "logo.png"
@@ -132,6 +155,26 @@ def _wait_for_server(port: int, timeout_seconds: int = STARTUP_TIMEOUT_SECONDS) 
     deadline = time.time() + timeout_seconds
     url = f"http://127.0.0.1:{port}{HEALTH_PATH}"
     while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.0) as response:
+                if response.status == 200:
+                    return
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            time.sleep(0.2)
+    raise TimeoutError(f"Timed out waiting for Streamlit server at {url}")
+
+
+def _wait_for_server_with_process(
+    proc: subprocess.Popen[bytes], port: int, timeout_seconds: int = STARTUP_TIMEOUT_SECONDS
+) -> None:
+    deadline = time.time() + timeout_seconds
+    url = f"http://127.0.0.1:{port}{HEALTH_PATH}"
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                "Embedded Streamlit server exited before startup completed. "
+                f"Exit code: {proc.returncode}."
+            )
         try:
             with urllib.request.urlopen(url, timeout=1.0) as response:
                 if response.status == 200:
@@ -256,7 +299,7 @@ def _run_desktop(port: int) -> None:
     _reclaim_port_from_previous_instance(port)
     proc = subprocess.Popen(_server_cmd(port))
     try:
-        _wait_for_server(port)
+        _wait_for_server_with_process(proc, port)
         icon_path = _logo_path()
         _set_macos_app_icon(icon_path)
         window_kwargs: dict[str, Any] = {
@@ -288,6 +331,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _normalize_working_directory_for_frozen()
     args = _parse_args()
 
     if args.internal_server:
