@@ -163,8 +163,23 @@ def _plotly():
     return px, go
 
 
+def _runtime_app_home() -> Path:
+    app_home_raw = str(os.getenv("NPS_LENS_APP_HOME", "")).strip()
+    if app_home_raw:
+        return Path(app_home_raw).expanduser()
+    return Path.home() / ".nps-lens"
+
+
+def _runtime_cache_results_dir(repo_root: Path) -> Path:
+    # Frozen bundles run from an application directory that may be read-only.
+    # Keep compute cache in a user-writable location by default.
+    if getattr(sys, "frozen", False):
+        return _runtime_app_home() / "data" / "cache" / "results"
+    return repo_root / "data" / "cache" / "results"
+
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CACHE_RESULTS_DIR = REPO_ROOT / "data" / "cache" / "results"
+CACHE_RESULTS_DIR = _runtime_cache_results_dir(REPO_ROOT)
 
 
 def _resolve_logo_path() -> Optional[Path]:
@@ -5274,6 +5289,8 @@ def _resolve_runtime_dotenv_paths(*, here: Path) -> tuple[Optional[Path], Option
     explicit_env_file = str(os.getenv("NPS_LENS_ENV_FILE", "")).strip()
     if explicit_env_file:
         explicit = Path(explicit_env_file).expanduser()
+        if getattr(sys, "frozen", False) and (not explicit.is_absolute()):
+            explicit = (_runtime_app_home() / explicit).resolve()
         if explicit.exists():
             return explicit, explicit
 
@@ -5311,9 +5328,6 @@ def main() -> None:
 
     if dotenv_path is not None:
         load_dotenv(str(dotenv_path), override=False)
-    else:
-        # Still allow env vars injected by the runtime; Settings.from_env will fail-fast if missing.
-        load_dotenv(override=False)
     settings = Settings.from_env()
 
     (
