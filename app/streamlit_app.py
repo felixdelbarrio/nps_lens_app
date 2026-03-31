@@ -1438,6 +1438,17 @@ def _clipboard_copy_widget(text: str, *, label: str = "Copiar prompt") -> None:
     components.html(html, height=52)
 
 
+def _render_import_issues_expander(label: str, issues: list[dict[str, Any]]) -> None:
+    if not issues:
+        return
+    with st.expander(label, expanded=False):
+        st.caption(f"{len(issues)} registro(s)")
+        st.code(
+            json.dumps(issues, ensure_ascii=False, indent=2, default=str),
+            language="json",
+        )
+
+
 def _repair_json_text(text: str) -> str:
     """Best-effort repair for common 'almost JSON' LLM outputs.
 
@@ -2522,9 +2533,7 @@ def render_sidebar(  # noqa: PLR0915
                 st.rerun()
 
         issues = st.session_state.get("_last_import_issues") or []
-        if issues:
-            with st.expander("Avisos / errores del último import", expanded=False):
-                st.json(issues)
+        _render_import_issues_expander("Avisos / errores del último import", issues)
 
         # --------------------
         # Helix (Incidencias)
@@ -2586,9 +2595,10 @@ def render_sidebar(  # noqa: PLR0915
                     st.rerun()
 
         helix_issues = st.session_state.get("_last_helix_import_issues") or []
-        if helix_issues:
-            with st.expander("Avisos / errores del último import Helix", expanded=False):
-                st.json(helix_issues)
+        _render_import_issues_expander(
+            "Avisos / errores del último import Helix",
+            helix_issues,
+        )
 
         st.divider()
         st.header("Experiencia")
