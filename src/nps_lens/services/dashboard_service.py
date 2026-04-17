@@ -10,6 +10,7 @@ from typing import Optional, cast
 
 import pandas as pd
 
+from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
@@ -24,7 +25,6 @@ from nps_lens.analytics.nps_helix_link import (
     link_incidents_to_nps_topics,
     weekly_aggregates,
 )
-from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.core.nps_math import filter_by_nps_group, focus_mask
