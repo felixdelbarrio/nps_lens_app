@@ -2,16 +2,15 @@ name: ci
 
 on:
   push:
-    branches: [ "**" ]
-    tags-ignore: [ "v*" ]
+    branches: ["**"]
+    tags-ignore: ["v*"]
   pull_request:
-    branches: [ "**" ]
+    branches: ["**"]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 jobs:
   ci:
-    name: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,23 +20,21 @@ jobs:
         with:
           python-version: "3.9.13"
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Runtime smoke-check (PPT/export)
+      - name: Install frontend dependencies
         run: |
-          python scripts/verify_runtime.py
+          npm --prefix frontend install
+          npx --prefix frontend playwright install --with-deps chromium
 
-      - name: Ruff (lint)
+      - name: Run full CI
         run: |
-          ruff check .
-
-      - name: Black (check)
-        run: |
-          black --check .
-
-      - name: Pytest
-        run: |
-          pytest
+          make ci

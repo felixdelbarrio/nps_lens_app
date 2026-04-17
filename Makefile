@@ -2,18 +2,9 @@
 
 PYTHON ?= python3.9
 VENV ?= .venv
-DESKTOP_SCRIPT ?= src/nps_lens/desktop.py
-ICON_SOURCE ?= assets/logo.png
-ICON_DIR ?= build/icons
-ICON_PNG ?= $(ICON_DIR)/app.png
-ICON_ICO ?= $(ICON_DIR)/app.ico
-ICON_ICNS ?= $(ICON_DIR)/app.icns
-MACOS_BUNDLE_ID ?= com.npslens.app
-MACOS_CODESIGN_IDENTITY ?=
-MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
-MACOS_INSTALL_TO_APPLICATIONS ?= 1
+FRONTEND_DIR ?= frontend
 ROOT := $(CURDIR)
-APP_PORT ?= 8617
+APP_PORT ?= 8000
 
 PIP = $(VENV)/bin/pip
 PY = $(VENV)/bin/python
@@ -21,118 +12,54 @@ RUFF = $(VENV)/bin/ruff
 BLACK = $(VENV)/bin/black
 MYPY = $(VENV)/bin/mypy
 PYTEST = $(VENV)/bin/pytest
+NPM = npm --prefix $(FRONTEND_DIR)
+PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright
 
-.PHONY: default setup clean build run ci test
+.PHONY: default setup frontend-install frontend-build frontend-test frontend-e2e run test ci clean
 
 default:
 	@echo ""
 	@echo "Comandos disponibles:"
-	@printf "  %-10s %s\n" "setup" "Recrea .venv e instala dependencias (dev+build)"
-	@printf "  %-10s %s\n" "build" "Limpia builds previas, detecta OS y compila ejecutable nuevo"
-	@printf "  %-10s %s\n" "run"   "Ejecuta la ultima version de codigo (sin build)"
-	@printf "  %-10s %s\n" "test"  "Ejecuta pytest con coverage (umbral >= 80%)"
-	@printf "  %-10s %s\n" "ci"    "Ejecuta ruff + black --check + mypy + test"
-	@printf "  %-10s %s\n" "clean" "Limpia caches y artefactos de build"
+	@printf "  %-18s %s\n" "setup" "Recrea .venv, instala backend y dependencias frontend"
+	@printf "  %-18s %s\n" "run" "Construye React y levanta la API sirviendo el frontend"
+	@printf "  %-18s %s\n" "test" "Ejecuta pytest backend con cobertura"
+	@printf "  %-18s %s\n" "ci" "Ejecuta backend + frontend + E2E"
+	@printf "  %-18s %s\n" "clean" "Limpia caches, builds y node_modules"
 	@echo ""
-	@echo "Uso: make <comando>"
 
 setup:
 	$(MAKE) clean
 	rm -rf $(VENV)
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install -U pip
-	$(PIP) install -e ".[dev,build]"
-	$(MAKE) clean
+	$(PIP) install -e ".[dev]"
+	$(MAKE) frontend-install
 
-build:
-	@test -x "$(PY)" || $(MAKE) setup
-	$(PIP) install -e ".[build]"
-	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
-	rm -rf build/pyinstaller dist || true
-	rm -rf $(ICON_DIR)
-	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
-	@uname_s=$$(uname -s); \
-	if [ "$$uname_s" = "Darwin" ]; then \
-		out=build/pyinstaller/macos; \
-		mkdir -p $$out/dist $$out/work $$out/spec; \
-		set -- \
-			--clean \
-			--noconfirm \
-			--name nps-lens \
-			--windowed \
-			--icon "$(ROOT)/$(ICON_ICNS)" \
-			--add-data="$(ROOT)/app:app" \
-			--add-data="$(ROOT)/assets:assets" \
-			--add-data="$(ROOT)/.streamlit:.streamlit" \
-			--add-data="$(ROOT)/.env.example:." \
-			--collect-submodules nps_lens \
-			--collect-submodules webview \
-			--collect-all kaleido \
-			--collect-all dotenv \
-			--collect-all streamlit \
-			--copy-metadata python-dotenv \
-			--copy-metadata streamlit \
-			--collect-data pptx \
-			--distpath $$out/dist \
-			--workpath $$out/work \
-			--specpath $$out/spec \
-			--osx-bundle-identifier "$(MACOS_BUNDLE_ID)" \
-			"$(DESKTOP_SCRIPT)"; \
-		if [ -n "$(MACOS_CODESIGN_IDENTITY)" ]; then \
-			set -- "$$@" --codesign-identity "$(MACOS_CODESIGN_IDENTITY)"; \
-			if [ -f "$(MACOS_ENTITLEMENTS)" ]; then \
-				set -- "$$@" --osx-entitlements-file "$(MACOS_ENTITLEMENTS)"; \
-			fi; \
-			echo "macOS signing enabled for identity: $(MACOS_CODESIGN_IDENTITY)"; \
-		else \
-			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
-		fi; \
-			$(VENV)/bin/pyinstaller "$$@"; \
-			echo "Built app: $$out/dist/nps-lens.app"; \
-			echo "Built folder: $$out/dist/nps-lens"; \
-			if [ "$(MACOS_INSTALL_TO_APPLICATIONS)" = "1" ]; then \
-				app_dst="/Applications/nps-lens.app"; \
-				rm -rf "$$app_dst" 2>/dev/null || true; \
-				if cp -R "$$out/dist/nps-lens.app" "$$app_dst" 2>/dev/null; then \
-					echo "Installed app: $$app_dst"; \
-				else \
-					echo "Could not copy app to /Applications (run with MACOS_INSTALL_TO_APPLICATIONS=0 to skip this step)."; \
-				fi; \
-			fi; \
-		elif [ "$$uname_s" = "Linux" ]; then \
-		out=build/pyinstaller/linux; \
-		mkdir -p $$out/dist $$out/work $$out/spec; \
-		$(VENV)/bin/pyinstaller --clean --noconfirm \
-			--name nps-lens \
-			--onefile \
-			--icon "$(ROOT)/$(ICON_PNG)" \
-			--add-data="$(ROOT)/app:app" \
-			--add-data="$(ROOT)/assets:assets" \
-			--add-data="$(ROOT)/.streamlit:.streamlit" \
-			--add-data="$(ROOT)/.env.example:." \
-			--collect-submodules nps_lens \
-			--collect-submodules webview \
-			--collect-all kaleido \
-			--collect-all dotenv \
-			--collect-all streamlit \
-			--copy-metadata python-dotenv \
-			--copy-metadata streamlit \
-			--collect-data pptx \
-			--distpath $$out/dist \
-			--workpath $$out/work \
-			--specpath $$out/spec \
-			"$(DESKTOP_SCRIPT)"; \
-		echo "Built: $$out/dist/nps-lens"; \
-	else \
-		echo "Unsupported OS for local build: $$uname_s"; \
-		exit 1; \
-	fi
+frontend-install:
+	$(NPM) install
+
+frontend-build:
+	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
+	$(NPM) run build
+
+frontend-test:
+	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
+	$(NPM) run test
+
+frontend-e2e:
+	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
+	@test -x "$(PLAYWRIGHT)" || $(MAKE) frontend-install
+	cd $(FRONTEND_DIR) && npx playwright install chromium
+	$(NPM) run e2e
 
 run:
 	@test -x "$(PY)" || $(MAKE) setup
-	$(PIP) install -e ".[build]"
-	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
-	NPS_LENS_PORT=$(APP_PORT) NPS_LENS_ICON="$(ROOT)/$(ICON_PNG)" $(PY) -m nps_lens.desktop
+	$(MAKE) frontend-build
+	@SELECTED_PORT=`APP_PORT="$(APP_PORT)" $(PY) scripts/select_port.py`; \
+	if [ "$$SELECTED_PORT" != "$(APP_PORT)" ]; then \
+		echo "Puerto $(APP_PORT) ocupado; usando $$SELECTED_PORT"; \
+	fi; \
+	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" $(PY) -m nps_lens.cli serve --host 127.0.0.1 --port $$SELECTED_PORT
 
 test:
 	@test -x "$(PYTEST)" || $(MAKE) setup
@@ -144,6 +71,10 @@ ci:
 	$(BLACK) --check .
 	$(MYPY) .
 	$(MAKE) test
+	$(MAKE) frontend-test
+	$(MAKE) frontend-build
+	$(MAKE) frontend-e2e
 
 clean:
-	rm -rf .pytest_cache .mypy_cache .ruff_cache dist build .coverage htmlcov
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist
+	rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/playwright-report $(FRONTEND_DIR)/test-results

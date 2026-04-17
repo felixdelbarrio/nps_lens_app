@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from hashlib import sha1, sha256
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import pandas as pd
 
@@ -34,6 +34,11 @@ NPS_THERMAL_OPTIONAL = [
     "service_origin_n1",
     "service_origin_n2",
 ]
+
+SCHEMA_DRIFT_COLUMNS = {
+    "Browser",
+    "Operating System",
+}
 
 _HEADER_TOKEN_RE = re.compile(r"[^a-z0-9]+")
 _WS_RE = re.compile(r"\s+")
@@ -158,9 +163,11 @@ def _business_key(row: pd.Series) -> str:
 
     payload = {
         "Fecha": row.get("Fecha").isoformat() if isinstance(row.get("Fecha"), pd.Timestamp) else "",
-        "NPS": None
-        if pd.isna(row.get("NPS"))
-        else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0]),
+        "NPS": (
+            None
+            if pd.isna(row.get("NPS"))
+            else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0])
+        ),
         "Comment": _normalize_comment(row.get("Comment")),
         "UsuarioDecisión": _coerce_string(row.get("UsuarioDecisión")),
         "Canal": _coerce_string(row.get("Canal")),
@@ -180,9 +187,11 @@ def _record_fingerprint(row: pd.Series, extra_columns: list[str]) -> str:
     payload = {
         "ID": _coerce_string(row.get("ID")),
         "Fecha": row.get("Fecha").isoformat() if isinstance(row.get("Fecha"), pd.Timestamp) else "",
-        "NPS": None
-        if pd.isna(row.get("NPS"))
-        else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0]),
+        "NPS": (
+            None
+            if pd.isna(row.get("NPS"))
+            else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0])
+        ),
         "NPS Group": _coerce_string(row.get("NPS Group")),
         "Comment": _normalize_comment(row.get("Comment")),
         "UsuarioDecisión": _coerce_string(row.get("UsuarioDecisión")),
@@ -200,14 +209,18 @@ def _record_fingerprint(row: pd.Series, extra_columns: list[str]) -> str:
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _infer_context(df: pd.DataFrame, column: str, current: Optional[str]) -> tuple[Optional[str], list[ValidationIssue]]:
+def _infer_context(
+    df: pd.DataFrame, column: str, current: Optional[str]
+) -> tuple[Optional[str], list[ValidationIssue]]:
     issues: list[ValidationIssue] = []
     if current is not None:
         return current, issues
     if column not in df.columns:
         return current, issues
 
-    values = sorted({_coerce_string(value) for value in df[column].tolist() if _coerce_string(value)})
+    values = sorted(
+        {_coerce_string(value) for value in df[column].tolist() if _coerce_string(value)}
+    )
     if len(values) == 1:
         return values[0], issues
     if len(values) > 1:
@@ -271,7 +284,13 @@ def read_nps_thermal_excel(
     raw_rows = int(len(df))
 
     known_columns = set(NPS_THERMAL_REQUIRED + NPS_THERMAL_OPTIONAL)
-    extra_columns = sorted([column for column in df.columns if column not in known_columns])
+    extra_columns = sorted(
+        [
+            column
+            for column in df.columns
+            if column not in known_columns or column in SCHEMA_DRIFT_COLUMNS
+        ]
+    )
     if extra_columns:
         issues.append(
             ValidationIssue(
@@ -284,7 +303,9 @@ def read_nps_thermal_excel(
 
     issues.extend(require_columns(df, NPS_THERMAL_REQUIRED))
 
-    missing_optional_columns = [column for column in NPS_THERMAL_OPTIONAL if column not in df.columns]
+    missing_optional_columns = [
+        column for column in NPS_THERMAL_OPTIONAL if column not in df.columns
+    ]
     for column in missing_optional_columns:
         if column == "NPS Group":
             issues.append(
@@ -355,13 +376,12 @@ def read_nps_thermal_excel(
         )
 
     work = df.copy()
-    work["service_origin"] = work.get("service_origin", "")
-    work["service_origin_n1"] = work.get("service_origin_n1", "")
-    work["service_origin_n2"] = work.get("service_origin_n2", "")
     work = _filter_context(work, "service_origin", str(service_origin), issues)
     work = _filter_context(work, "service_origin_n1", str(service_origin_n1), issues)
     work["service_origin"] = str(service_origin)
     work["service_origin_n1"] = str(service_origin_n1)
+    if "service_origin_n2" not in work.columns:
+        work["service_origin_n2"] = ""
     work["service_origin_n2"] = work["service_origin_n2"].apply(
         lambda value: ", ".join(_split_csvish(value))
     )
@@ -392,7 +412,9 @@ def read_nps_thermal_excel(
         "service_origin_n1",
         "service_origin_n2",
     ]:
-        work[column] = work[column].apply(_normalize_comment if column == "Comment" else _coerce_string)
+        work[column] = work[column].apply(
+            _normalize_comment if column == "Comment" else _coerce_string
+        )
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")

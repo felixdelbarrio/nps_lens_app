@@ -93,7 +93,7 @@ describe("App", () => {
     );
 
     expect(screen.getByText("Histórico de cargas")).toBeInTheDocument();
-    expect(screen.getByText("NPS Térmico Senda - 03Marzo.xlsx")).toBeInTheDocument();
+    expect(screen.getAllByText("NPS Térmico Senda - 03Marzo.xlsx")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Ver issues" }));
 
@@ -101,6 +101,6 @@ describe("App", () => {
       "NPS Térmico Senda - 03Marzo.xlsx"
     );
     expect(screen.getByTestId("issues-list")).toHaveTextContent("extra_columns_detected");
-    expect(screen.getByText("26.618")).toBeInTheDocument();
+    expect(screen.getAllByText("26.618")).not.toHaveLength(0);
   });
 });

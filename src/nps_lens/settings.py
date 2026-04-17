@@ -84,15 +84,21 @@ class Settings:
         if not origin_n1_map:
             origin_n1_map = {"BBVA México": ["Senda"]}
 
-        default_service_origin = os.getenv(
-            "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
-            allowed_service_origins[0],
-        ).strip() or allowed_service_origins[0]
+        default_service_origin = (
+            os.getenv(
+                "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
+                allowed_service_origins[0],
+            ).strip()
+            or allowed_service_origins[0]
+        )
         default_origin_n1_candidates = origin_n1_map.get(default_service_origin) or ["Senda"]
-        default_service_origin_n1 = os.getenv(
-            "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
-            default_origin_n1_candidates[0],
-        ).strip() or default_origin_n1_candidates[0]
+        default_service_origin_n1 = (
+            os.getenv(
+                "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
+                default_origin_n1_candidates[0],
+            ).strip()
+            or default_origin_n1_candidates[0]
+        )
 
         return Settings(
             data_dir=data_dir,

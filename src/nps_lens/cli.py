@@ -9,11 +9,11 @@ import uvicorn
 from dotenv import load_dotenv
 from rich import print as rprint
 
+from nps_lens.domain.models import UploadContext
 from nps_lens.logging import setup_logging
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
 from nps_lens.settings import Settings
-from nps_lens.domain.models import UploadContext
 
 app = typer.Typer(add_completion=False)
 

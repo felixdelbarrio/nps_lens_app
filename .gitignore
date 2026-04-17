@@ -99,3 +99,8 @@ packs/*
 logs/
 tmp/
 temp/
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+frontend/*.tsbuildinfo

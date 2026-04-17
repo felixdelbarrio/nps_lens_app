@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class IssueResponse(BaseModel):
     level: str
     message: str
-    column: str | None = None
+    column: Optional[str] = None
     code: str = ""
     details: dict[str, Any] = Field(default_factory=dict)
 
@@ -36,10 +36,10 @@ class UploadResponse(BaseModel):
 
 class SummaryResponse(BaseModel):
     total_records: int
-    date_range: dict[str, str | None]
-    overall_nps: float | None = None
-    promoter_rate: float | None = None
-    detractor_rate: float | None = None
+    date_range: dict[str, Optional[str]]
+    overall_nps: Optional[float] = None
+    promoter_rate: Optional[float] = None
+    detractor_rate: Optional[float] = None
     uploads: int
     duplicates_prevented: int
     top_drivers: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +19,7 @@ def _optional_context(
     service_origin: Optional[str],
     service_origin_n1: Optional[str],
     service_origin_n2: Optional[str],
-) -> UploadContext | None:
+) -> Optional[UploadContext]:
     if not service_origin or not service_origin_n1:
         return None
     return UploadContext(
@@ -29,7 +29,7 @@ def _optional_context(
     )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app_settings = settings or Settings.from_env()
     repository = SqliteNpsRepository(app_settings.database_path)
     service = NpsService(repository=repository, settings=app_settings)
@@ -48,7 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def get_service(request: Request) -> NpsService:
-        return request.app.state.service
+        return cast(NpsService, request.app.state.service)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

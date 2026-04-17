@@ -40,7 +40,11 @@ def test_api_uploads_and_returns_accumulative_summary(tmp_path: Path) -> None:
                 "service_origin_n2": "",
             },
             files={
-                "file": (march.name, handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                "file": (
+                    march.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
             },
         )
 
@@ -76,7 +80,11 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
                 "service_origin_n2": "",
             },
             files={
-                "file": (invalid.name, handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                "file": (
+                    invalid.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
             },
         )
 

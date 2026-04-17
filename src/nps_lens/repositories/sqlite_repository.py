@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 from nps_lens.domain.models import SummarySnapshot, UploadAttempt, UploadContext
-from nps_lens.ingest.base import ValidationIssue
 
 CORE_COLUMNS = {
     "ID",
@@ -252,7 +251,7 @@ class SqliteNpsRepository:
                 """,
                 business_keys,
             ).fetchall()
-            existing = {
+            existing: dict[str, dict[str, Any]] = {
                 str(row["business_key"]): {
                     "record_fingerprint": str(row["record_fingerprint"]),
                     "times_seen": int(row["times_seen"]),
@@ -265,11 +264,7 @@ class SqliteNpsRepository:
                 business_key = str(row["_business_key"])
                 record_fingerprint = str(row["_record_fingerprint"])
                 row_number = int(row["_source_row_number"])
-                extra_payload = {
-                    key: row.get(key, "")
-                    for key in row.keys()
-                    if key not in CORE_COLUMNS
-                }
+                extra_payload = {key: row.get(key, "") for key in row if key not in CORE_COLUMNS}
                 payload = (
                     business_key,
                     str(row.get("ID", "")),
@@ -348,10 +343,18 @@ class SqliteNpsRepository:
                         """,
                         (upload_id, uploaded_at, business_key),
                     )
-                    existing[business_key]["times_seen"] += 1
+                    existing[business_key]["times_seen"] = (
+                        int(existing[business_key]["times_seen"]) + 1
+                    )
                     duplicate_historical += 1
                     upload_events.append(
-                        (upload_id, business_key, row_number, "duplicate_historical", record_fingerprint)
+                        (
+                            upload_id,
+                            business_key,
+                            row_number,
+                            "duplicate_historical",
+                            record_fingerprint,
+                        )
                     )
                     continue
 
@@ -404,7 +407,7 @@ class SqliteNpsRepository:
                     ),
                 )
                 existing[business_key]["record_fingerprint"] = record_fingerprint
-                existing[business_key]["times_seen"] += 1
+                existing[business_key]["times_seen"] = int(existing[business_key]["times_seen"]) + 1
                 updated += 1
                 upload_events.append(
                     (upload_id, business_key, row_number, "updated", record_fingerprint)
@@ -425,17 +428,37 @@ class SqliteNpsRepository:
 
         return inserted, updated, duplicate_historical
 
-    def list_uploads(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_uploads(
+        self,
+        limit: int = 50,
+        context: Optional[UploadContext] = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT *
+            FROM uploads
+        """
+        params: list[Any] = []
+        if context is not None:
+            query += """
+                WHERE service_origin = ?
+                  AND service_origin_n1 = ?
+                  AND service_origin_n2 = ?
+            """
+            params.extend(
+                [
+                    context.service_origin,
+                    context.service_origin_n1,
+                    context.service_origin_n2,
+                ]
+            )
+        query += """
+            ORDER BY uploaded_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
         with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT *
-                FROM uploads
-                ORDER BY uploaded_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            rows = connection.execute(query, params).fetchall()
         return [self._serialize_upload_row(row) for row in rows]
 
     def get_upload_issues(self, upload_id: str) -> list[dict[str, Any]]:
@@ -507,16 +530,31 @@ class SqliteNpsRepository:
 
     def build_summary(self, context: Optional[UploadContext] = None) -> SummarySnapshot:
         records = self.load_records_df(context)
-        uploads = self.list_uploads(limit=10)
+        uploads = self.list_uploads(limit=10, context=context)
         with self._connect() as connection:
-            duplicates_prevented_row = connection.execute(
-                """
+            query = """
                 SELECT
                     COALESCE(SUM(duplicate_in_file_rows + duplicate_historical_rows), 0) AS duplicates
                 FROM uploads
+            """
+            params: list[Any] = []
+            if context is not None:
+                query += """
+                    WHERE service_origin = ?
+                      AND service_origin_n1 = ?
+                      AND service_origin_n2 = ?
                 """
-            ).fetchone()
-        duplicates_prevented = int(duplicates_prevented_row["duplicates"]) if duplicates_prevented_row else 0
+                params.extend(
+                    [
+                        context.service_origin,
+                        context.service_origin_n1,
+                        context.service_origin_n2,
+                    ]
+                )
+            duplicates_prevented_row = connection.execute(query, params).fetchone()
+        duplicates_prevented = (
+            int(duplicates_prevented_row["duplicates"]) if duplicates_prevented_row else 0
+        )
 
         if records.empty:
             return SummarySnapshot(
@@ -543,15 +581,18 @@ class SqliteNpsRepository:
         top_drivers: dict[str, list[dict[str, Any]]] = {}
         for dimension in ["Palanca", "Subpalanca", "Canal"]:
             top_drivers[dimension] = [
-                stat.__dict__
-                for stat in driver_table(records, dimension=dimension)[:5]
+                stat.__dict__ for stat in driver_table(records, dimension=dimension)[:5]
             ]
 
         return SummarySnapshot(
             total_records=int(len(records)),
             date_range={
-                "min": records["Fecha"].min().isoformat() if records["Fecha"].notna().any() else None,
-                "max": records["Fecha"].max().isoformat() if records["Fecha"].notna().any() else None,
+                "min": (
+                    records["Fecha"].min().isoformat() if records["Fecha"].notna().any() else None
+                ),
+                "max": (
+                    records["Fecha"].max().isoformat() if records["Fecha"].notna().any() else None
+                ),
             },
             overall_nps=overall_nps,
             promoter_rate=promoter_rate,

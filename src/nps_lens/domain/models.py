@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from nps_lens.ingest.base import ValidationIssue
 
@@ -44,10 +44,10 @@ class UploadAttempt:
 @dataclass(frozen=True)
 class SummarySnapshot:
     total_records: int
-    date_range: dict[str, str | None]
-    overall_nps: float | None
-    promoter_rate: float | None
-    detractor_rate: float | None
+    date_range: dict[str, Optional[str]]
+    overall_nps: Optional[float]
+    promoter_rate: Optional[float]
+    detractor_rate: Optional[float]
     uploads: int
     duplicates_prevented: int
     top_drivers: dict[str, list[dict[str, Any]]]

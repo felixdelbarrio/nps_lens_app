@@ -8,7 +8,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "sh -lc 'rm -rf .playwright-data && mkdir -p .playwright-data && NPS_LENS_DATA_DIR=.playwright-data NPS_LENS_DATABASE_PATH=.playwright-data/e2e.sqlite3 NPS_LENS_FRONTEND_DIST_DIR=frontend/dist .venv/bin/python -m nps_lens.cli serve --host 127.0.0.1 --port 4100'",
+      "sh -lc 'rm -rf .playwright-data && mkdir -p .playwright-data && NPS_LENS_DATA_DIR=.playwright-data NPS_LENS_DATABASE_PATH=.playwright-data/e2e.sqlite3 NPS_LENS_FRONTEND_DIST_DIR=dist ../.venv/bin/python -m nps_lens.cli serve --host 127.0.0.1 --port 4100'",
     port: 4100,
     reuseExistingServer: false,
     timeout: 120000

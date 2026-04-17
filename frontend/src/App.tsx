@@ -167,8 +167,12 @@ export function App() {
       ) : null}
 
       <div className="layout-grid">
-        <UploadForm config={config} uploading={isBusy} onSubmit={handleUpload} />
-        <SummaryBoard summary={summary} processing={isBusy} onRefresh={handleReprocess} />
+        <UploadForm config={config ?? null} uploading={isBusy} onSubmit={handleUpload} />
+        <SummaryBoard
+          summary={summary ?? null}
+          processing={isBusy}
+          onRefresh={handleReprocess}
+        />
         <UploadsTable
           uploads={uploads}
           filter={filter}

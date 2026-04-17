@@ -55,7 +55,10 @@ def test_sequential_uploads_are_accumulative_and_duplicate_safe(tmp_path: Path) 
     assert first["status"] == "completed"
     assert second["status"] == "completed"
     assert duplicate_attempt["status"] == "duplicate_upload"
-    assert summary["total_records"] == first["inserted_rows"] + second["inserted_rows"] + second["updated_rows"]
+    assert (
+        summary["total_records"]
+        == first["inserted_rows"] + second["inserted_rows"] + second["updated_rows"]
+    )
     assert summary["uploads"] == 3
     assert summary["duplicates_prevented"] >= duplicate_attempt["duplicate_historical_rows"]
     assert service.list_uploads()[0]["status"] == "duplicate_upload"

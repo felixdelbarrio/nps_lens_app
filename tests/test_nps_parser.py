@@ -56,7 +56,9 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
     )
 
     assert any(issue.level == "ERROR" for issue in result.issues)
-    missing_columns = {issue.column for issue in result.issues if issue.code == "missing_required_column"}
+    missing_columns = {
+        issue.column for issue in result.issues if issue.code == "missing_required_column"
+    }
     assert {"Palanca", "Subpalanca"}.issubset(missing_columns)
 
 

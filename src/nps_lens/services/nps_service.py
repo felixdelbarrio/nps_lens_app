@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from uuid import uuid4
 
 from nps_lens.domain.models import UploadAttempt, UploadContext
@@ -32,7 +33,9 @@ class NpsService:
         upload_id = uuid4().hex
         uploaded_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         file_hash = hashlib.sha256(payload).hexdigest()
-        stored_path = self._persist_upload_file(upload_id=upload_id, filename=filename, payload=payload)
+        stored_path = self._persist_upload_file(
+            upload_id=upload_id, filename=filename, payload=payload
+        )
 
         if self.repository.has_completed_file_hash(file_hash, context):
             issue = ValidationIssue(
@@ -66,11 +69,11 @@ class NpsService:
             service_origin_n1=context.service_origin_n1,
             service_origin_n2=context.service_origin_n2,
         )
-        raw_rows = int(result.meta.get("raw_rows", len(result.df)))
-        normalized_rows = int(result.meta.get("normalized_rows", len(result.df)))
-        duplicate_in_file_rows = int(result.meta.get("duplicate_rows_in_file", 0))
-        extra_columns = list(result.meta.get("extra_columns", []))
-        missing_optional_columns = list(result.meta.get("missing_optional_columns", []))
+        raw_rows = self._meta_int(result.meta, "raw_rows", len(result.df))
+        normalized_rows = self._meta_int(result.meta, "normalized_rows", len(result.df))
+        duplicate_in_file_rows = self._meta_int(result.meta, "duplicate_rows_in_file", 0)
+        extra_columns = self._meta_str_list(result.meta, "extra_columns")
+        missing_optional_columns = self._meta_str_list(result.meta, "missing_optional_columns")
 
         if any(issue.level == "ERROR" for issue in result.issues):
             attempt = UploadAttempt(
@@ -96,11 +99,31 @@ class NpsService:
                 "Upload failed during parsing",
                 extra={
                     "upload_id": upload_id,
-                    "filename": filename,
+                    "upload_filename": filename,
                     "file_hash": file_hash,
                 },
             )
             return self._serialize_attempt(attempt)
+
+        processing_attempt = UploadAttempt(
+            upload_id=upload_id,
+            filename=Path(filename).name,
+            file_hash=file_hash,
+            uploaded_at=uploaded_at,
+            parser_version=PARSER_VERSION,
+            context=context,
+            status="processing",
+            total_rows=raw_rows,
+            normalized_rows=normalized_rows,
+            inserted_rows=0,
+            updated_rows=0,
+            duplicate_in_file_rows=duplicate_in_file_rows,
+            duplicate_historical_rows=0,
+            extra_columns=extra_columns,
+            missing_optional_columns=missing_optional_columns,
+            issues=result.issues,
+        )
+        self.repository.persist_upload_attempt(processing_attempt)
 
         inserted_rows, updated_rows, duplicate_historical_rows = self.repository.upsert_records(
             upload_id=upload_id,
@@ -141,7 +164,7 @@ class NpsService:
             "Upload processed",
             extra={
                 "upload_id": upload_id,
-                "filename": filename,
+                "upload_filename": filename,
                 "file_hash": file_hash,
                 "inserted_rows": inserted_rows,
                 "updated_rows": updated_rows,
@@ -154,7 +177,7 @@ class NpsService:
     def list_uploads(self) -> list[dict[str, object]]:
         return self.repository.list_uploads()
 
-    def summary(self, context: UploadContext | None = None) -> dict[str, object]:
+    def summary(self, context: Optional[UploadContext] = None) -> dict[str, object]:
         snapshot = self.repository.build_summary(context)
         return {
             "total_records": snapshot.total_records,
@@ -205,3 +228,19 @@ class NpsService:
             "missing_optional_columns": attempt.missing_optional_columns,
             "issues": [issue.to_dict() for issue in attempt.issues],
         }
+
+    @staticmethod
+    def _meta_int(meta: dict[str, object], key: str, default: int) -> int:
+        value = meta.get(key, default)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float, str)):
+            return int(value)
+        return default
+
+    @staticmethod
+    def _meta_str_list(meta: dict[str, object], key: str) -> list[str]:
+        value = meta.get(key, [])
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value]
