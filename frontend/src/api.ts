@@ -27,88 +27,211 @@ export type UploadResult = {
   issues: Issue[];
 };
 
-export type Summary = {
-  total_records: number;
-  date_range: {
-    min: string | null;
-    max: string | null;
-  };
-  overall_nps: number | null;
-  promoter_rate: number | null;
-  detractor_rate: number | null;
-  uploads: number;
-  duplicates_prevented: number;
-  top_drivers: Record<string, Array<Record<string, unknown>>>;
-  latest_uploads: UploadResult[];
+export type DatasetStatus = {
+  available: boolean;
+  rows: number;
+  columns: number;
+  updated_at: string | null;
+  status: string;
+  source?: string | null;
 };
 
-export type Config = {
+export type DashboardConfig = {
   default_service_origin: string;
   default_service_origin_n1: string;
   service_origins: string[];
   service_origin_n1_map: Record<string, string[]>;
+  available_years: string[];
+  available_months_by_year: Record<string, string[]>;
+  nps_groups: string[];
+  nps_dataset: DatasetStatus;
+  helix_dataset: DatasetStatus;
 };
+
+export type PlotlyFigureSpec = {
+  data?: unknown[];
+  layout?: Record<string, unknown>;
+  frames?: unknown[];
+  config?: Record<string, unknown>;
+};
+
+export type DashboardPayload = {
+  context_label: string;
+  context_pills: string[];
+  kpis: {
+    samples: number;
+    nps_average: number | null;
+    detractor_rate: number | null;
+    promoter_rate: number | null;
+  };
+  overview: {
+    daily_kpis_figure?: PlotlyFigureSpec | null;
+    weekly_trend_figure?: PlotlyFigureSpec | null;
+    topics_figure?: PlotlyFigureSpec | null;
+    topics_table?: Array<Record<string, unknown>>;
+    daily_volume_figure?: PlotlyFigureSpec | null;
+    daily_mix_figure?: PlotlyFigureSpec | null;
+    insight_bullets?: string[];
+  };
+  comparison: {
+    summary?: {
+      label_current: string;
+      label_baseline: string;
+      delta_nps: number;
+      delta_detr_pp: number;
+      n_current: number;
+      n_baseline: number;
+    };
+    dimension?: string;
+    figure?: PlotlyFigureSpec | null;
+    table?: Array<Record<string, unknown>>;
+    has_data?: boolean;
+  };
+  cohorts: {
+    row_dimension?: string;
+    column_dimension?: string;
+    figure?: PlotlyFigureSpec | null;
+  };
+  gaps: {
+    dimension?: string;
+    figure?: PlotlyFigureSpec | null;
+    table?: Array<Record<string, unknown>>;
+    has_data?: boolean;
+  };
+  opportunities: {
+    dimension?: string;
+    figure?: PlotlyFigureSpec | null;
+    table?: Array<Record<string, unknown>>;
+    bullets?: string[];
+    has_data?: boolean;
+  };
+  controls: {
+    dimensions: string[];
+    cohort_rows: string[];
+    cohort_columns: string[];
+    min_n: number;
+    min_n_cross: number;
+  };
+  report_markdown: string;
+  empty_state: string;
+};
+
+export type DatasetTable = {
+  dataset_kind: string;
+  total_rows: number;
+  offset: number;
+  limit: number;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  has_more: boolean;
+};
+
+export type HelixUploadResult = {
+  upload_id: string;
+  filename: string;
+  uploaded_at: string;
+  status: string;
+  row_count: number;
+  column_count: number;
+  sheet_name: string;
+  issues: Issue[];
+  dataset: DatasetStatus;
+};
+
+export type DashboardQuery = {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+  pop_year: string;
+  pop_month: string;
+  nps_group: string;
+  comparison_dimension: string;
+  gap_dimension: string;
+  opportunity_dimension: string;
+  cohort_row: string;
+  cohort_col: string;
+  min_n: number;
+  min_n_cross: number;
+};
+
+export type ReprocessSummary = {
+  total_records: number;
+  uploads: number;
+  duplicates_prevented: number;
+};
+
+function buildUrl(pathname: string, params?: Record<string, string | number | undefined>) {
+  const url = new URL(pathname, window.location.origin);
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === "") {
+      return;
+    }
+    url.searchParams.set(key, String(value));
+  });
+  return url;
+}
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+    const text = await response.text();
+    try {
+      const payload = JSON.parse(text) as { detail?: string };
+      throw new Error(payload.detail || `Request failed with ${response.status}`);
+    } catch {
+      throw new Error(text || `Request failed with ${response.status}`);
+    }
   }
   return (await response.json()) as T;
 }
 
-export async function fetchConfig(): Promise<Config> {
-  return parseResponse<Config>(await fetch("/api/config"));
-}
-
-export async function fetchUploads(): Promise<UploadResult[]> {
-  return parseResponse<UploadResult[]>(await fetch("/api/uploads"));
-}
-
-export async function fetchSummary(params?: {
+export async function fetchConfig(params: {
   service_origin?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
-}): Promise<Summary> {
-  const url = new URL("/api/summary", window.location.origin);
-  if (params?.service_origin) {
-    url.searchParams.set("service_origin", params.service_origin);
-  }
-  if (params?.service_origin_n1) {
-    url.searchParams.set("service_origin_n1", params.service_origin_n1);
-  }
-  if (params?.service_origin_n2) {
-    url.searchParams.set("service_origin_n2", params.service_origin_n2);
-  }
-  return parseResponse<Summary>(await fetch(url));
+}): Promise<DashboardConfig> {
+  return parseResponse<DashboardConfig>(await fetch(buildUrl("/api/dashboard/context", params)));
 }
 
-export async function reprocessSummary(params?: {
+export async function fetchUploads(params: {
   service_origin?: string;
   service_origin_n1?: string;
   service_origin_n2?: string;
-}): Promise<Summary> {
-  const url = new URL("/api/reprocess", window.location.origin);
-  if (params?.service_origin) {
-    url.searchParams.set("service_origin", params.service_origin);
-  }
-  if (params?.service_origin_n1) {
-    url.searchParams.set("service_origin_n1", params.service_origin_n1);
-  }
-  if (params?.service_origin_n2) {
-    url.searchParams.set("service_origin_n2", params.service_origin_n2);
-  }
-  return parseResponse<Summary>(await fetch(url, { method: "POST" }));
+}): Promise<UploadResult[]> {
+  return parseResponse<UploadResult[]>(await fetch(buildUrl("/api/uploads", params)));
 }
 
-export async function uploadFile(payload: {
+export async function fetchDashboard(params: DashboardQuery): Promise<DashboardPayload> {
+  return parseResponse<DashboardPayload>(await fetch(buildUrl("/api/dashboard/nps", params)));
+}
+
+export async function fetchDatasetTable(
+  datasetKind: "nps" | "helix",
+  params: {
+    service_origin: string;
+    service_origin_n1: string;
+    service_origin_n2: string;
+    pop_year: string;
+    pop_month: string;
+    nps_group: string;
+    offset: number;
+    limit: number;
+  }
+): Promise<DatasetTable> {
+  return parseResponse<DatasetTable>(
+    await fetch(buildUrl(`/api/dashboard/data/${datasetKind}`, params))
+  );
+}
+
+export async function uploadNpsFile(payload: {
   file: File;
+  sheetName: string;
   serviceOrigin: string;
   serviceOriginN1: string;
   serviceOriginN2: string;
 }): Promise<UploadResult> {
   const formData = new FormData();
   formData.set("file", payload.file);
+  formData.set("sheet_name", payload.sheetName);
   formData.set("service_origin", payload.serviceOrigin);
   formData.set("service_origin_n1", payload.serviceOriginN1);
   formData.set("service_origin_n2", payload.serviceOriginN2);
@@ -116,6 +239,39 @@ export async function uploadFile(payload: {
     await fetch("/api/uploads/nps", {
       method: "POST",
       body: formData
+    })
+  );
+}
+
+export async function uploadHelixFile(payload: {
+  file: File;
+  sheetName: string;
+  serviceOrigin: string;
+  serviceOriginN1: string;
+  serviceOriginN2: string;
+}): Promise<HelixUploadResult> {
+  const formData = new FormData();
+  formData.set("file", payload.file);
+  formData.set("sheet_name", payload.sheetName);
+  formData.set("service_origin", payload.serviceOrigin);
+  formData.set("service_origin_n1", payload.serviceOriginN1);
+  formData.set("service_origin_n2", payload.serviceOriginN2);
+  return parseResponse<HelixUploadResult>(
+    await fetch("/api/uploads/helix", {
+      method: "POST",
+      body: formData
+    })
+  );
+}
+
+export async function reprocessSummary(params: {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+}): Promise<ReprocessSummary> {
+  return parseResponse<ReprocessSummary>(
+    await fetch(buildUrl("/api/reprocess", params), {
+      method: "POST"
     })
   );
 }

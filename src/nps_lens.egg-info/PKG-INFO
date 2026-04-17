@@ -36,6 +36,9 @@ Requires-Dist: ruff<0.7,>=0.3; extra == "dev"
 Requires-Dist: black<25.0,>=24.2; extra == "dev"
 Requires-Dist: pre-commit<4.0,>=3.6; extra == "dev"
 Provides-Extra: build
+Requires-Dist: pywebview<6.0,>=5.1; extra == "build"
+Requires-Dist: pyinstaller<7.0,>=6.0; extra == "build"
+Requires-Dist: Pillow<12.0,>=10.0; extra == "build"
 
 # NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
 

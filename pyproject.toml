@@ -49,7 +49,11 @@ dev = [
   "pre-commit>=3.6,<4.0",
 ]
 
-build = []
+build = [
+  "pywebview>=5.1,<6.0",
+  "pyinstaller>=6.0,<7.0",
+  "Pillow>=10.0,<12.0",
+]
 
 [project.scripts]
 nps-lens = "nps_lens.cli:app"

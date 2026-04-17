@@ -51,3 +51,44 @@ class ContextOptionsResponse(BaseModel):
     default_service_origin_n1: str
     service_origins: list[str]
     service_origin_n1_map: dict[str, list[str]]
+    available_years: list[str] = Field(default_factory=list)
+    available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
+    nps_groups: list[str] = Field(default_factory=list)
+    nps_dataset: dict[str, Any] = Field(default_factory=dict)
+    helix_dataset: dict[str, Any] = Field(default_factory=dict)
+
+
+class HelixUploadResponse(BaseModel):
+    upload_id: str
+    filename: str
+    uploaded_at: str
+    status: str
+    row_count: int
+    column_count: int
+    sheet_name: str = ""
+    issues: list[IssueResponse] = Field(default_factory=list)
+    dataset: dict[str, Any] = Field(default_factory=dict)
+
+
+class DatasetTableResponse(BaseModel):
+    dataset_kind: str
+    total_rows: int
+    offset: int
+    limit: int
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    has_more: bool = False
+
+
+class DashboardResponse(BaseModel):
+    context_label: str = ""
+    context_pills: list[str] = Field(default_factory=list)
+    kpis: dict[str, Any] = Field(default_factory=dict)
+    overview: dict[str, Any] = Field(default_factory=dict)
+    comparison: dict[str, Any] = Field(default_factory=dict)
+    cohorts: dict[str, Any] = Field(default_factory=dict)
+    gaps: dict[str, Any] = Field(default_factory=dict)
+    opportunities: dict[str, Any] = Field(default_factory=dict)
+    controls: dict[str, Any] = Field(default_factory=dict)
+    report_markdown: str = ""
+    empty_state: str = ""

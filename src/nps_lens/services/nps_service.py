@@ -29,6 +29,7 @@ class NpsService:
         filename: str,
         payload: bytes,
         context: UploadContext,
+        sheet_name: Optional[str] = None,
     ) -> dict[str, object]:
         upload_id = uuid4().hex
         uploaded_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -68,6 +69,7 @@ class NpsService:
             service_origin=context.service_origin,
             service_origin_n1=context.service_origin_n1,
             service_origin_n2=context.service_origin_n2,
+            sheet_name=sheet_name or None,
         )
         raw_rows = self._meta_int(result.meta, "raw_rows", len(result.df))
         normalized_rows = self._meta_int(result.meta, "normalized_rows", len(result.df))

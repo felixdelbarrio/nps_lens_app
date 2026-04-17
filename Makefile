@@ -3,8 +3,18 @@
 PYTHON ?= python3.9
 VENV ?= .venv
 FRONTEND_DIR ?= frontend
+DESKTOP_SCRIPT ?= src/nps_lens/desktop.py
+ICON_SOURCE ?= assets/logo.png
+ICON_DIR ?= build/icons
+ICON_PNG ?= $(ICON_DIR)/app.png
+ICON_ICO ?= $(ICON_DIR)/app.ico
+ICON_ICNS ?= $(ICON_DIR)/app.icns
+MACOS_BUNDLE_ID ?= com.npslens.app
+MACOS_CODESIGN_IDENTITY ?=
+MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
+MACOS_INSTALL_TO_APPLICATIONS ?= 0
 ROOT := $(CURDIR)
-APP_PORT ?= 8000
+APP_PORT ?= 8617
 
 PIP = $(VENV)/bin/pip
 PY = $(VENV)/bin/python
@@ -15,13 +25,14 @@ PYTEST = $(VENV)/bin/pytest
 NPM = npm --prefix $(FRONTEND_DIR)
 PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright
 
-.PHONY: default setup frontend-install frontend-build frontend-test frontend-e2e run test ci clean
+.PHONY: default setup frontend-install frontend-build frontend-test frontend-e2e build run test ci clean
 
 default:
 	@echo ""
 	@echo "Comandos disponibles:"
-	@printf "  %-18s %s\n" "setup" "Recrea .venv, instala backend y dependencias frontend"
-	@printf "  %-18s %s\n" "run" "Construye React y levanta la API sirviendo el frontend"
+	@printf "  %-18s %s\n" "setup" "Recrea .venv e instala dependencias backend/frontend/build"
+	@printf "  %-18s %s\n" "build" "Compila el frontend y empaqueta la app de escritorio"
+	@printf "  %-18s %s\n" "run" "Construye React y arranca la app de escritorio nativa"
 	@printf "  %-18s %s\n" "test" "Ejecuta pytest backend con cobertura"
 	@printf "  %-18s %s\n" "ci" "Ejecuta backend + frontend + E2E"
 	@printf "  %-18s %s\n" "clean" "Limpia caches, builds y node_modules"
@@ -32,7 +43,7 @@ setup:
 	rm -rf $(VENV)
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install -U pip
-	$(PIP) install -e ".[dev]"
+	$(PIP) install -e ".[dev,build]"
 	$(MAKE) frontend-install
 
 frontend-install:
@@ -52,14 +63,96 @@ frontend-e2e:
 	cd $(FRONTEND_DIR) && npx playwright install chromium
 	$(NPM) run e2e
 
+build:
+	@test -x "$(PY)" || $(MAKE) setup
+	$(PIP) install -e ".[build]"
+	$(MAKE) frontend-build
+	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
+	rm -rf build/pyinstaller dist || true
+	rm -rf $(ICON_DIR)
+	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
+	@uname_s=$$(uname -s); \
+	if [ "$$uname_s" = "Darwin" ]; then \
+		out=build/pyinstaller/macos; \
+		mkdir -p $$out/dist $$out/work $$out/spec; \
+		set -- \
+			--clean \
+			--noconfirm \
+			--name nps-lens \
+			--windowed \
+			--icon "$(ROOT)/$(ICON_ICNS)" \
+			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
+			--add-data="$(ROOT)/assets:assets" \
+			--add-data="$(ROOT)/.env.example:." \
+			--collect-submodules nps_lens \
+			--collect-submodules webview \
+			--copy-metadata python-dotenv \
+			--copy-metadata pywebview \
+			--copy-metadata fastapi \
+			--copy-metadata uvicorn \
+			--collect-data pptx \
+			--distpath $$out/dist \
+			--workpath $$out/work \
+			--specpath $$out/spec \
+			--osx-bundle-identifier "$(MACOS_BUNDLE_ID)" \
+			"$(DESKTOP_SCRIPT)"; \
+		if [ -n "$(MACOS_CODESIGN_IDENTITY)" ]; then \
+			set -- "$$@" --codesign-identity "$(MACOS_CODESIGN_IDENTITY)"; \
+			if [ -f "$(MACOS_ENTITLEMENTS)" ]; then \
+				set -- "$$@" --osx-entitlements-file "$(MACOS_ENTITLEMENTS)"; \
+			fi; \
+			echo "macOS signing enabled for identity: $(MACOS_CODESIGN_IDENTITY)"; \
+		else \
+			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
+		fi; \
+		$(VENV)/bin/pyinstaller "$$@"; \
+		echo "Built app: $$out/dist/nps-lens.app"; \
+		if [ "$(MACOS_INSTALL_TO_APPLICATIONS)" = "1" ]; then \
+			app_dst="/Applications/nps-lens.app"; \
+			rm -rf "$$app_dst" 2>/dev/null || true; \
+			if cp -R "$$out/dist/nps-lens.app" "$$app_dst" 2>/dev/null; then \
+				echo "Installed app: $$app_dst"; \
+			else \
+				echo "Could not copy app to /Applications."; \
+			fi; \
+		fi; \
+	elif [ "$$uname_s" = "Linux" ]; then \
+		out=build/pyinstaller/linux; \
+		mkdir -p $$out/dist $$out/work $$out/spec; \
+		$(VENV)/bin/pyinstaller --clean --noconfirm \
+			--name nps-lens \
+			--onefile \
+			--icon "$(ROOT)/$(ICON_PNG)" \
+			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
+			--add-data="$(ROOT)/assets:assets" \
+			--add-data="$(ROOT)/.env.example:." \
+			--collect-submodules nps_lens \
+			--collect-submodules webview \
+			--copy-metadata python-dotenv \
+			--copy-metadata pywebview \
+			--copy-metadata fastapi \
+			--copy-metadata uvicorn \
+			--collect-data pptx \
+			--distpath $$out/dist \
+			--workpath $$out/work \
+			--specpath $$out/spec \
+			"$(DESKTOP_SCRIPT)"; \
+		echo "Built binary: $$out/dist/nps-lens"; \
+	else \
+		echo "Unsupported OS for local build: $$uname_s"; \
+		exit 1; \
+	fi
+
 run:
 	@test -x "$(PY)" || $(MAKE) setup
+	$(PIP) install -e ".[build]"
 	$(MAKE) frontend-build
-	@SELECTED_PORT=`APP_PORT="$(APP_PORT)" $(PY) scripts/select_port.py`; \
-	if [ "$$SELECTED_PORT" != "$(APP_PORT)" ]; then \
-		echo "Puerto $(APP_PORT) ocupado; usando $$SELECTED_PORT"; \
-	fi; \
-	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" $(PY) -m nps_lens.cli serve --host 127.0.0.1 --port $$SELECTED_PORT
+	rm -rf $(ICON_DIR)
+	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
+	NPS_LENS_PORT="$(APP_PORT)" \
+	NPS_LENS_ICON="$(ROOT)/$(ICON_PNG)" \
+	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" \
+	$(PY) -m nps_lens.desktop
 
 test:
 	@test -x "$(PYTEST)" || $(MAKE) setup
@@ -77,4 +170,4 @@ ci:
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist
-	rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/playwright-report $(FRONTEND_DIR)/test-results
+	rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/playwright-report $(FRONTEND_DIR)/test-results $(FRONTEND_DIR)/.playwright-data

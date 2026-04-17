@@ -3,6 +3,7 @@ pyproject.toml
 src/nps_lens/__init__.py
 src/nps_lens/cli.py
 src/nps_lens/config.py
+src/nps_lens/desktop.py
 src/nps_lens/logging.py
 src/nps_lens/settings.py
 src/nps_lens.egg-info/PKG-INFO
@@ -70,6 +71,7 @@ src/nps_lens/reports/ppt_template.py
 src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py
+src/nps_lens/services/dashboard_service.py
 src/nps_lens/services/nps_service.py
 src/nps_lens/ui/__init__.py
 src/nps_lens/ui/business.py

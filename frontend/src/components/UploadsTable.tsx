@@ -30,23 +30,23 @@ export function UploadsTable({
   });
 
   return (
-    <section className="panel uploads-panel">
-      <div className="panel-heading">
+    <section className="panel">
+      <div className="panel-heading panel-heading-inline">
         <div>
           <p className="eyebrow">Trazabilidad</p>
           <h2>Histórico de cargas</h2>
         </div>
         <input
-          data-testid="history-filter-input"
           className="history-filter"
+          data-testid="history-filter-input"
+          onChange={(event) => onFilterChange(event.target.value)}
           placeholder="Filtrar histórico"
           value={filter}
-          onChange={(event) => onFilterChange(event.target.value)}
         />
       </div>
 
       <div className="table-shell">
-        <table data-testid="uploads-table">
+        <table className="data-table" data-testid="uploads-table">
           <thead>
             <tr>
               <th>Fichero</th>
@@ -78,7 +78,7 @@ export function UploadsTable({
                   <td>{new Date(upload.uploaded_at).toLocaleString("es-ES")}</td>
                   <td>
                     <button
-                      className="ghost-button"
+                      className="secondary-button"
                       data-testid={`show-issues-${upload.upload_id}`}
                       onClick={() => onSelectUpload(upload.upload_id)}
                       type="button"
