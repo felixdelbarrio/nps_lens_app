@@ -95,7 +95,9 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
         normalized_key = key.strip()
         if not normalized_key:
             continue
-        output[normalized_key] = _dedupe([item.strip() for item in payload.split("|") if item.strip()])
+        output[normalized_key] = _dedupe(
+            [item.strip() for item in payload.split("|") if item.strip()]
+        )
     return output
 
 
@@ -278,9 +280,9 @@ class Settings:
             "NPS_LENS_SERVICE_ORIGIN_BUUG",
             os.getenv("NPS_LENS_SERVICE_ORIGIN", "BBVA México"),
         )
-        allowed_service_origins = _parse_json_list(origins_raw) or _dedupe(_split_csv(origins_raw)) or [
-            "BBVA México"
-        ]
+        allowed_service_origins = (
+            _parse_json_list(origins_raw) or _dedupe(_split_csv(origins_raw)) or ["BBVA México"]
+        )
 
         origin_n1_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", "")
         origin_n1_map = _parse_origin_map(origin_n1_raw)
@@ -289,11 +291,7 @@ class Settings:
             missing_env.append("NPS_LENS_SERVICE_ORIGIN_BUUG")
         if not origin_n1_raw.strip() or not origin_n1_map:
             missing_env.append("NPS_LENS_SERVICE_ORIGIN_N1")
-        incomplete = [
-            origin
-            for origin in allowed_service_origins
-            if not origin_n1_map.get(origin)
-        ]
+        incomplete = [origin for origin in allowed_service_origins if not origin_n1_map.get(origin)]
         if missing_env or incomplete:
             lines = ["Invalid .env configuration for context dimensions:"]
             if missing_env:
@@ -306,9 +304,9 @@ class Settings:
                 )
             raise RuntimeError("\n".join(lines))
 
-        service_origin_n2_values = _parse_json_list(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")) or _dedupe(
-            _split_csv(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", ""))
-        )
+        service_origin_n2_values = _parse_json_list(
+            os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")
+        ) or _dedupe(_split_csv(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")))
         service_origin_n2_map = _parse_origin_n2_map(os.getenv(SERVICE_ORIGIN_N2_MAP_ENV_KEY, ""))
 
         default_service_origin = (
@@ -422,7 +420,9 @@ class Settings:
         if default_service_origin_n1 not in available_n1:
             default_service_origin_n1 = available_n1[0]
 
-        theme_mode = ui_pref("theme_mode", self.default_theme_mode).lower() or self.default_theme_mode
+        theme_mode = (
+            ui_pref("theme_mode", self.default_theme_mode).lower() or self.default_theme_mode
+        )
         if theme_mode not in {"light", "dark"}:
             theme_mode = self.default_theme_mode
 

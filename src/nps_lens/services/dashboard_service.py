@@ -109,7 +109,9 @@ class DashboardService:
         service_origin_n2: Optional[str] = None,
     ) -> UploadContext:
         preferences = self.settings.ui_defaults()
-        origin = str(service_origin or preferences["service_origin"] or self.settings.default_service_origin)
+        origin = str(
+            service_origin or preferences["service_origin"] or self.settings.default_service_origin
+        )
         origin_n1 = str(
             service_origin_n1
             or preferences["service_origin_n1"]
@@ -326,9 +328,7 @@ class DashboardService:
                 "promoter_rate": summary.promoter_rate,
             },
             "overview": {
-                "daily_kpis_figure": self._serialize_figure(
-                    chart_daily_kpis(current_df, theme)
-                ),
+                "daily_kpis_figure": self._serialize_figure(chart_daily_kpis(current_df, theme)),
                 "weekly_trend_figure": self._serialize_figure(
                     chart_nps_trend(current_df, theme, freq="W")
                 ),
@@ -364,9 +364,7 @@ class DashboardService:
             },
             "opportunities": {
                 "dimension": opportunity_dimension,
-                "figure": self._serialize_figure(
-                    chart_opportunities_bar(opportunities_df, theme)
-                ),
+                "figure": self._serialize_figure(chart_opportunities_bar(opportunities_df, theme)),
                 "table": self._serialize_rows(opportunities_df.head(25)),
                 "bullets": opportunity_bullets,
                 "has_data": not opportunities_df.empty,
@@ -632,7 +630,9 @@ class DashboardService:
             )
 
         active_touchpoint_source = str(
-            touchpoint_source or self.settings.ui_defaults()["touchpoint_source"] or TOUCHPOINT_SOURCE_DOMAIN
+            touchpoint_source
+            or self.settings.ui_defaults()["touchpoint_source"]
+            or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
 
         assignments_df, links_df = link_incidents_to_nps_topics(
@@ -805,7 +805,10 @@ class DashboardService:
         topics_df = self._topics_df(current_df)
         topics_bullets = explain_topics(topics_df, max_items=5)
         opportunities_df = pd.DataFrame(
-            [item.__dict__ for item in rank_opportunities(current_df, dimensions=["Palanca"], min_n=min_n)]
+            [
+                item.__dict__
+                for item in rank_opportunities(current_df, dimensions=["Palanca"], min_n=min_n)
+            ]
         )
         opportunity_bullets = explain_opportunities(opportunities_df, max_items=5)
         comparison_story = None
@@ -893,9 +896,7 @@ class DashboardService:
         )
         ratios = axis_info.get("axis_ratios", {})
         palanca_ratio = float(ratios.get("Palanca", 0.0)) if isinstance(ratios, dict) else 0.0
-        subpalanca_ratio = (
-            float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
-        )
+        subpalanca_ratio = float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
         note = (
             f"Eje seleccionado para el racional: {axis} "
             f"(cobertura Helix en rojos: Palanca {palanca_ratio*100:.1f}% · "

@@ -93,8 +93,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request.app.state.settings = reloaded
         request.app.state.service.settings = reloaded
         request.app.state.dashboard_service.settings = reloaded
-        request.app.state.dashboard_service.helix_store = request.app.state.dashboard_service.helix_store.__class__(
-            reloaded.data_dir / "helix"
+        request.app.state.dashboard_service.helix_store = (
+            request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
         )
         return reloaded
 
@@ -263,7 +263,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             service_origin_n1_map[origin] = list(dict.fromkeys(n1_values))
             origin_n2_map = payload.service_origin_n2_map.get(origin, {})
             service_origin_n2_map[origin] = {
-                n1: list(dict.fromkeys([value.strip() for value in origin_n2_map.get(n1, []) if value.strip()]))
+                n1: list(
+                    dict.fromkeys(
+                        [value.strip() for value in origin_n2_map.get(n1, []) if value.strip()]
+                    )
+                )
                 for n1 in service_origin_n1_map[origin]
             }
 
@@ -396,7 +400,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         headers = {
             "Content-Disposition": (
-                f"attachment; filename=\"{report.file_name}\"; "
+                f'attachment; filename="{report.file_name}"; '
                 f"filename*=UTF-8''{quote(report.file_name)}"
             )
         }
