@@ -21,6 +21,16 @@ ICON_DIR ?= build/icons
 ICON_PNG ?= $(ICON_DIR)/app.png
 ICON_ICO ?= $(ICON_DIR)/app.ico
 ICON_ICNS ?= $(ICON_DIR)/app.icns
+ifeq ($(OS),Windows_NT)
+ICON_RUNTIME ?= $(ICON_ICO)
+else
+UNAME_S := $(shell uname -s 2>/dev/null)
+ifeq ($(UNAME_S),Darwin)
+ICON_RUNTIME ?= $(ICON_ICNS)
+else
+ICON_RUNTIME ?= $(ICON_PNG)
+endif
+endif
 MACOS_BUNDLE_ID ?= com.npslens.app
 MACOS_CODESIGN_IDENTITY ?=
 MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
@@ -94,6 +104,7 @@ build:
 			--icon "$(ROOT)/$(ICON_ICNS)" \
 			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
 			--add-data="$(ROOT)/assets:assets" \
+			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
@@ -136,6 +147,7 @@ build:
 			--icon "$(ROOT)/$(ICON_PNG)" \
 			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
 			--add-data="$(ROOT)/assets:assets" \
+			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
@@ -158,6 +170,7 @@ build:
 			--icon "$(ROOT)/$(ICON_ICO)" \
 			--add-data="$(ROOT)/frontend/dist;frontend/dist" \
 			--add-data="$(ROOT)/assets;assets" \
+			--add-data="$(ROOT)/$(ICON_DIR);build/icons" \
 			--add-data="$(ROOT)/.env.example;." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
@@ -183,7 +196,7 @@ run:
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 	NPS_LENS_PORT="$(APP_PORT)" \
-	NPS_LENS_ICON="$(ROOT)/$(ICON_PNG)" \
+	NPS_LENS_ICON="$(ROOT)/$(ICON_RUNTIME)" \
 	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" \
 	$(PY) -m nps_lens.desktop
 
