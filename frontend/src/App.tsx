@@ -1,13 +1,16 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
 import {
+  downloadExecutiveReport,
   fetchConfig,
   fetchDashboard,
   fetchDatasetTable,
   fetchLinkingDashboard,
   fetchUploads,
+  persistPreferences,
   reprocessSummary,
+  updateServiceOrigins,
   uploadHelixFile,
   uploadNpsFile
 } from "./api";
@@ -16,6 +19,8 @@ import type {
   DatasetStatus,
   HelixUploadResult,
   LinkingPayload,
+  PreferencesPayload,
+  ServiceOriginHierarchyPayload,
   UploadResult
 } from "./api";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
@@ -25,6 +30,13 @@ import { PlotFigure } from "./components/PlotFigure";
 import { PrimaryNav } from "./components/PrimaryNav";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
+import {
+  applyDocumentTheme,
+  normalizeThemeMode,
+  persistThemeMode,
+  readStoredThemeMode,
+  type ThemeMode
+} from "./theme";
 
 const MAIN_AREAS = [
   {
@@ -101,35 +113,23 @@ function formatNumber(value: number | null | undefined, digits = 1) {
   return value.toFixed(digits);
 }
 
-function ReportModal({
-  open,
-  report,
-  onClose
-}: {
-  open: boolean;
-  report: string;
-  onClose: () => void;
-}) {
-  if (!open) {
-    return null;
-  }
+function parseServiceOriginN2(value: string) {
+  return Array.from(new Set(value.split(",").map((token) => token.trim()).filter(Boolean)));
+}
 
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div aria-modal="true" className="modal-card" onClick={(event) => event.stopPropagation()} role="dialog">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Reporte</p>
-            <h2>Reporte ejecutivo</h2>
-          </div>
-          <button className="secondary-button" onClick={onClose} type="button">
-            Cerrar
-          </button>
-        </div>
-        <pre className="report-markdown">{report || "No hay reporte disponible para este contexto."}</pre>
-      </div>
-    </div>
-  );
+function serializeServiceOriginN2(values: string[]) {
+  return parseServiceOriginN2(values.join(", ")).join(", ");
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
 export function App() {
@@ -139,6 +139,8 @@ export function App() {
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
   const [npsGroup, setNpsGroup] = useState("Todos");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
+  const [touchpointSource, setTouchpointSource] = useState("domain_touchpoint");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [opportunityDimension, setOpportunityDimension] = useState("Palanca");
@@ -146,6 +148,8 @@ export function App() {
   const [cohortCol, setCohortCol] = useState("Canal");
   const [minN, setMinN] = useState(200);
   const [minNCross, setMinNCross] = useState(30);
+  const [minSimilarity, setMinSimilarity] = useState(0.25);
+  const [maxDaysApart, setMaxDaysApart] = useState(10);
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
@@ -154,17 +158,21 @@ export function App() {
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"preferences" | "appearance" | "advanced">("preferences");
+  const [settingsTab, setSettingsTab] = useState<"appearance" | "advanced" | "maintenance">(
+    "appearance"
+  );
   const [historyFilter, setHistoryFilter] = useState("");
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
-  const [reportOpen, setReportOpen] = useState(false);
   const [tableLimit, setTableLimit] = useState(200);
   const [tableOffset, setTableOffset] = useState(0);
   const [statusCopy, setStatusCopy] = useState("Cargando contexto del producto...");
   const [error, setError] = useState<string | null>(null);
   const [isMutating, setIsMutating] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isSavingHierarchy, setIsSavingHierarchy] = useState(false);
   const [latestNpsUpload, setLatestNpsUpload] = useState<UploadResult | null>(null);
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
+  const didHydrate = useRef(false);
 
   const configKey = serviceOrigin || serviceOriginN1 || serviceOriginN2
     ? ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2]
@@ -180,15 +188,23 @@ export function App() {
     );
 
   useEffect(() => {
-    if (!config) {
+    if (!config || didHydrate.current) {
       return;
     }
-    setServiceOrigin((current) => current || config.default_service_origin);
-    setServiceOriginN1((current) => current || config.default_service_origin_n1);
-    if (!config.available_years.includes(popYear)) {
-      setPopYear(config.available_years[0] || "Todos");
-    }
-  }, [config, popYear]);
+    didHydrate.current = true;
+    setServiceOrigin(config.default_service_origin);
+    setServiceOriginN1(config.default_service_origin_n1);
+    setServiceOriginN2(config.default_service_origin_n2 || "");
+    setPopYear(config.preferences.pop_year || "Todos");
+    setPopMonth(config.preferences.pop_month || "Todos");
+    setNpsGroup(config.preferences.nps_group_choice || "Todos");
+    setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
+    setTouchpointSource(config.preferences.touchpoint_source || "domain_touchpoint");
+    setMinSimilarity(config.preferences.min_similarity ?? 0.25);
+    setMaxDaysApart(config.preferences.max_days_apart ?? 10);
+    setMinN(config.preferences.min_n_opportunities ?? 200);
+    setMinNCross(config.preferences.min_n_cross_comparisons ?? 30);
+  }, [config]);
 
   const monthOptions = useMemo(() => {
     if (!config) {
@@ -217,7 +233,8 @@ export function App() {
       cohort_row: cohortRow,
       cohort_col: cohortCol,
       min_n: minN,
-      min_n_cross: minNCross
+      min_n_cross: minNCross,
+      theme_mode: themeMode
     }),
     [
       cohortCol,
@@ -232,7 +249,8 @@ export function App() {
       popYear,
       serviceOrigin,
       serviceOriginN1,
-      serviceOriginN2
+      serviceOriginN2,
+      themeMode
     ]
   );
 
@@ -247,7 +265,18 @@ export function App() {
 
   const linkingKey =
     mainArea === "insights" && insightTab === "linking" && serviceOrigin && serviceOriginN1
-      ? ["linking", serviceOrigin, serviceOriginN1, serviceOriginN2, popYear, popMonth, npsGroup]
+      ? [
+          "linking",
+          serviceOrigin,
+          serviceOriginN1,
+          serviceOriginN2,
+          popYear,
+          popMonth,
+          npsGroup,
+          minSimilarity,
+          maxDaysApart,
+          themeMode
+        ]
       : null;
   const {
     data: linking,
@@ -261,7 +290,10 @@ export function App() {
       service_origin_n2: serviceOriginN2,
       pop_year: popYear,
       pop_month: popMonth,
-      nps_group: npsGroup
+      nps_group: npsGroup,
+      min_similarity: minSimilarity,
+      max_days_apart: maxDaysApart,
+      theme_mode: themeMode
     })
   );
 
@@ -329,6 +361,14 @@ export function App() {
       return;
     }
     setError(null);
+    if (isGeneratingReport) {
+      setStatusCopy("Generando la presentación ejecutiva en PowerPoint...");
+      return;
+    }
+    if (isSavingHierarchy) {
+      setStatusCopy("Persistiendo la jerarquía de Service Origin...");
+      return;
+    }
     if (isMutating) {
       setStatusCopy("Importando y rehidratando el histórico persistente...");
       return;
@@ -345,7 +385,9 @@ export function App() {
     dashboardLoading,
     datasetError,
     datasetLoading,
+    isGeneratingReport,
     isMutating,
+    isSavingHierarchy,
     linkingError,
     linkingLoading,
     uploadsError,
@@ -353,6 +395,11 @@ export function App() {
   ]);
 
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
+  const n2Options =
+    config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] ||
+    config?.service_origin_n2_options ||
+    [];
+  const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
 
   useEffect(() => {
     if (!n1Options.length) {
@@ -362,6 +409,73 @@ export function App() {
       setServiceOriginN1(n1Options[0]);
     }
   }, [n1Options, serviceOriginN1]);
+
+  useEffect(() => {
+    if (!config) {
+      return;
+    }
+    if (!config.available_years.includes(popYear)) {
+      setPopYear(config.available_years[0] || "Todos");
+    }
+  }, [config, popYear]);
+
+  useEffect(() => {
+    if (!n2Options.length) {
+      return;
+    }
+    const nextSelectedValues = selectedN2Values.filter((value) => n2Options.includes(value));
+    if (nextSelectedValues.length !== selectedN2Values.length) {
+      setServiceOriginN2(serializeServiceOriginN2(nextSelectedValues));
+    }
+  }, [n2Options, selectedN2Values]);
+
+  useEffect(() => {
+    applyDocumentTheme(themeMode);
+    persistThemeMode(themeMode);
+  }, [themeMode]);
+
+  const preferencesPayload = useMemo<PreferencesPayload>(
+    () => ({
+      service_origin: serviceOrigin,
+      service_origin_n1: serviceOriginN1,
+      service_origin_n2: serviceOriginN2,
+      pop_year: popYear,
+      pop_month: popMonth,
+      nps_group_choice: npsGroup,
+      theme_mode: themeMode,
+      touchpoint_source: touchpointSource,
+      min_similarity: minSimilarity,
+      max_days_apart: maxDaysApart,
+      min_n_opportunities: minN,
+      min_n_cross_comparisons: minNCross
+    }),
+    [
+      maxDaysApart,
+      minN,
+      minNCross,
+      minSimilarity,
+      npsGroup,
+      popMonth,
+      popYear,
+      serviceOrigin,
+      serviceOriginN1,
+      serviceOriginN2,
+      themeMode,
+      touchpointSource
+    ]
+  );
+
+  useEffect(() => {
+    if (!didHydrate.current || !serviceOrigin || !serviceOriginN1) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void persistPreferences(preferencesPayload).catch((caughtError) => {
+        setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+      });
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [preferencesPayload, serviceOrigin, serviceOriginN1]);
 
   async function handleNpsUpload(payload: { file: File; sheetName: string }) {
     setIsMutating(true);
@@ -428,6 +542,44 @@ export function App() {
     }
   }
 
+  async function handleSaveHierarchy(payload: ServiceOriginHierarchyPayload) {
+    setIsSavingHierarchy(true);
+    setError(null);
+    try {
+      const nextConfig = await updateServiceOrigins(payload);
+      await mutateConfig(nextConfig, { revalidate: false });
+      await Promise.all([mutateDashboard(), mutateLinking(), mutateDataset()]);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsSavingHierarchy(false);
+    }
+  }
+
+  async function handleDownloadReport() {
+    setIsGeneratingReport(true);
+    setError(null);
+    try {
+      const report = await downloadExecutiveReport({
+        service_origin: serviceOrigin,
+        service_origin_n1: serviceOriginN1,
+        service_origin_n2: serviceOriginN2,
+        pop_year: popYear,
+        pop_month: popMonth,
+        nps_group: npsGroup,
+        min_n: minN,
+        min_similarity: minSimilarity,
+        max_days_apart: maxDaysApart,
+        touchpoint_source: touchpointSource
+      });
+      triggerBlobDownload(report.blob, report.fileName);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
   const contextPills = dashboard?.context_pills || [];
   const npsDatasetStatus: DatasetStatus =
     config?.nps_dataset || {
@@ -446,6 +598,122 @@ export function App() {
       status: "missing"
     };
   const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
+
+  function toggleServiceOriginN2(option: string) {
+    const nextValues = selectedN2Values.includes(option)
+      ? selectedN2Values.filter((value) => value !== option)
+      : [...selectedN2Values, option];
+    setServiceOriginN2(serializeServiceOriginN2(nextValues));
+  }
+
+  function renderServiceContainer() {
+    return (
+      <section className="surface-card context-strip-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Service Container</p>
+            <h2>Contexto de servicio</h2>
+            <p className="secondary-copy">
+              El contexto principal vive ahora entre el hero y el área core para reducir fricción operativa.
+            </p>
+          </div>
+        </div>
+        <div className="field-grid">
+          <label>
+            <span>Service Origin BUUG</span>
+            <select onChange={(event) => setServiceOrigin(event.target.value)} value={serviceOrigin}>
+              {(config?.service_origins || []).map((origin) => (
+                <option key={origin} value={origin}>
+                  {origin}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Service Origin N1</span>
+            <select onChange={(event) => setServiceOriginN1(event.target.value)} value={serviceOriginN1}>
+              {n1Options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-span-2">
+            <span>Service Origin N2</span>
+            {n2Options.length ? (
+              <div className="choice-grid">
+                {n2Options.map((option) => (
+                  <button
+                    className={`choice-chip${selectedN2Values.includes(option) ? " is-selected" : ""}`}
+                    key={option}
+                    onClick={() => toggleServiceOriginN2(option)}
+                    type="button"
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input
+                onChange={(event) => setServiceOriginN2(event.target.value)}
+                placeholder="Opcional. Puedes escribir varios N2 separados por coma."
+                value={serviceOriginN2}
+              />
+            )}
+          </label>
+        </div>
+      </section>
+    );
+  }
+
+  function renderFiltersContainer() {
+    return (
+      <section className="surface-card context-strip-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Filters</p>
+            <h2>Recorte analítico</h2>
+            <p className="secondary-copy">
+              Año, mes y grupo NPS se aplican antes del área core para mantener un flujo de lectura estable.
+            </p>
+          </div>
+        </div>
+        <div className="field-grid">
+          <label>
+            <span>Año</span>
+            <select onChange={(event) => setPopYear(event.target.value)} value={popYear}>
+              {(config?.available_years || ["Todos"]).map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Mes</span>
+            <select onChange={(event) => setPopMonth(event.target.value)} value={popMonth}>
+              {monthOptions.map((month) => (
+                <option key={month} value={month}>
+                  {month}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-span-2">
+            <span>Grupo NPS</span>
+            <select onChange={(event) => setNpsGroup(event.target.value)} value={npsGroup}>
+              {(config?.nps_groups || ["Todos"]).map((group) => (
+                <option key={group} value={group}>
+                  {group}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+    );
+  }
 
   function renderOverviewTab() {
     if (dashboard?.empty_state) {
@@ -1273,9 +1541,11 @@ export function App() {
               <p data-testid="status-copy">{statusCopy}</p>
             </div>
             <div className="topbar-actions">
-              <span className={`status-chip${isMutating ? " is-busy" : ""}`}>{isMutating ? "Sincronizando" : "Operativo"}</span>
-              <button className="secondary-button" onClick={() => setReportOpen(true)} type="button">
-                Reporte
+              <span className={`status-chip${isMutating || isGeneratingReport ? " is-busy" : ""}`}>
+                {isMutating || isGeneratingReport ? "Sincronizando" : "Operativo"}
+              </span>
+              <button className="secondary-button" onClick={() => void handleDownloadReport()} type="button">
+                {isGeneratingReport ? "Generando reporte..." : "Reporte"}
               </button>
               <button
                 aria-label="Abrir configuración global"
@@ -1295,6 +1565,9 @@ export function App() {
             </section>
           ) : null}
 
+          {renderServiceContainer()}
+          {renderFiltersContainer()}
+
           {mainArea === "insights" ? renderInsightsArea() : null}
           {mainArea === "ingest" ? renderIngestArea() : null}
           {mainArea === "data" ? renderDataArea() : null}
@@ -1309,32 +1582,25 @@ export function App() {
 
       <SettingsSheet
         activeTab={settingsTab}
-        availableYears={config?.available_years || ["Todos"]}
+        hierarchySaving={isSavingHierarchy}
         minN={minN}
         minNCross={minNCross}
-        monthOptions={monthOptions}
-        n1Options={n1Options}
-        npsGroups={config?.nps_groups || ["Todos"]}
+        minSimilarity={minSimilarity}
+        maxDaysApart={maxDaysApart}
         onClose={() => setSettingsOpen(false)}
+        onSaveHierarchy={handleSaveHierarchy}
         onTabChange={setSettingsTab}
         open={settingsOpen}
-        popMonth={popMonth}
-        popYear={popYear}
-        serviceOrigin={serviceOrigin}
-        serviceOriginN1={serviceOriginN1}
-        serviceOriginN2={serviceOriginN2}
+        serviceOriginN1Map={config?.service_origin_n1_map || {}}
+        serviceOriginN2Map={config?.service_origin_n2_map || {}}
         serviceOrigins={config?.service_origins || []}
         setMinN={setMinN}
         setMinNCross={setMinNCross}
-        setNpsGroup={setNpsGroup}
-        setPopMonth={setPopMonth}
-        setPopYear={setPopYear}
-        setServiceOrigin={setServiceOrigin}
-        setServiceOriginN1={setServiceOriginN1}
-        setServiceOriginN2={setServiceOriginN2}
-        npsGroup={npsGroup}
+        setMinSimilarity={setMinSimilarity}
+        setMaxDaysApart={setMaxDaysApart}
+        setThemeMode={setThemeMode}
+        themeMode={themeMode}
       />
-      <ReportModal onClose={() => setReportOpen(false)} open={reportOpen} report={dashboard?.report_markdown || ""} />
     </>
   );
 }

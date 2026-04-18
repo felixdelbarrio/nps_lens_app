@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, cast
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,9 @@ from nps_lens.api.schemas import (
     DatasetTableResponse,
     HelixUploadResponse,
     LinkingResponse,
+    PreferencesResponse,
+    PreferencesUpdateRequest,
+    ServiceOriginHierarchyRequest,
     SummaryResponse,
     UploadResponse,
 )
@@ -21,7 +25,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
-from nps_lens.settings import Settings
+from nps_lens.settings import Settings, persist_service_origin_hierarchy, persist_ui_prefs
 
 
 def _resolve_context(
@@ -30,10 +34,17 @@ def _resolve_context(
     service_origin_n1: Optional[str],
     service_origin_n2: Optional[str],
 ) -> UploadContext:
+    preferences = settings.ui_defaults()
     return UploadContext(
-        service_origin=service_origin or settings.default_service_origin,
-        service_origin_n1=service_origin_n1 or settings.default_service_origin_n1,
-        service_origin_n2=service_origin_n2 or "",
+        service_origin=str(
+            service_origin or preferences["service_origin"] or settings.default_service_origin
+        ),
+        service_origin_n1=str(
+            service_origin_n1
+            or preferences["service_origin_n1"]
+            or settings.default_service_origin_n1
+        ),
+        service_origin_n2=str(service_origin_n2 or preferences["service_origin_n2"] or ""),
     )
 
 
@@ -77,12 +88,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def get_dashboard_service(request: Request) -> DashboardService:
         return cast(DashboardService, request.app.state.dashboard_service)
 
+    def refresh_settings(request: Request) -> Settings:
+        reloaded = Settings.from_env()
+        request.app.state.settings = reloaded
+        request.app.state.service.settings = reloaded
+        request.app.state.dashboard_service.settings = reloaded
+        request.app.state.dashboard_service.helix_store = request.app.state.dashboard_service.helix_store.__class__(
+            reloaded.data_dir / "helix"
+        )
+        return reloaded
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/api/config", response_model=ContextOptionsResponse)
     def config(
+        request: Request,
         service_origin: Optional[str] = None,
         service_origin_n1: Optional[str] = None,
         service_origin_n2: Optional[str] = None,
@@ -90,7 +112,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, object]:
         return dashboard_layer.context_options(
             _resolve_context(
-                app_settings,
+                cast(Settings, request.app.state.settings),
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
@@ -183,6 +205,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/api/dashboard/context", response_model=ContextOptionsResponse)
     def dashboard_context(
+        request: Request,
         service_origin: Optional[str] = None,
         service_origin_n1: Optional[str] = None,
         service_origin_n2: Optional[str] = None,
@@ -190,15 +213,88 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, object]:
         return dashboard_layer.context_options(
             _resolve_context(
-                app_settings,
+                cast(Settings, request.app.state.settings),
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
             )
         )
 
+    @app.get("/api/preferences", response_model=PreferencesResponse)
+    def preferences(request: Request) -> dict[str, object]:
+        current_settings = cast(Settings, request.app.state.settings)
+        return current_settings.ui_defaults()
+
+    @app.put("/api/preferences", response_model=PreferencesResponse)
+    def update_preferences(
+        payload: PreferencesUpdateRequest,
+        request: Request,
+    ) -> dict[str, object]:
+        current_settings = cast(Settings, request.app.state.settings)
+        persist_ui_prefs(current_settings.dotenv_path, payload.model_dump())
+        return refresh_settings(request).ui_defaults()
+
+    @app.put("/api/settings/service-origins", response_model=ContextOptionsResponse)
+    def update_service_origins(
+        payload: ServiceOriginHierarchyRequest,
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, object]:
+        service_origins = [value.strip() for value in payload.service_origins if value.strip()]
+        if not service_origins:
+            raise HTTPException(
+                status_code=400,
+                detail="Debe existir al menos un Service Origin BUUG.",
+            )
+
+        service_origin_n1_map: dict[str, list[str]] = {}
+        service_origin_n2_map: dict[str, dict[str, list[str]]] = {}
+        for origin in service_origins:
+            n1_values = [
+                value.strip()
+                for value in payload.service_origin_n1_map.get(origin, [])
+                if value.strip()
+            ]
+            if not n1_values:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El origen '{origin}' debe incluir al menos un N1.",
+                )
+            service_origin_n1_map[origin] = list(dict.fromkeys(n1_values))
+            origin_n2_map = payload.service_origin_n2_map.get(origin, {})
+            service_origin_n2_map[origin] = {
+                n1: list(dict.fromkeys([value.strip() for value in origin_n2_map.get(n1, []) if value.strip()]))
+                for n1 in service_origin_n1_map[origin]
+            }
+
+        current_settings = cast(Settings, request.app.state.settings)
+        current_preferences = current_settings.ui_defaults()
+        default_service_origin = str(current_preferences["service_origin"])
+        if default_service_origin not in service_origins:
+            default_service_origin = service_origins[0]
+        default_service_origin_n1 = str(current_preferences["service_origin_n1"])
+        if default_service_origin_n1 not in service_origin_n1_map.get(default_service_origin, []):
+            default_service_origin_n1 = service_origin_n1_map[default_service_origin][0]
+
+        persist_service_origin_hierarchy(
+            current_settings.dotenv_path,
+            service_origins=service_origins,
+            service_origin_n1_map=service_origin_n1_map,
+            service_origin_n2_map=service_origin_n2_map,
+            default_service_origin=default_service_origin,
+            default_service_origin_n1=default_service_origin_n1,
+        )
+        reloaded = refresh_settings(request)
+        request.app.state.dashboard_service = DashboardService(
+            repository=cast(SqliteNpsRepository, request.app.state.repository),
+            settings=reloaded,
+        )
+        updated_dashboard_layer = request.app.state.dashboard_service
+        return updated_dashboard_layer.context_options(updated_dashboard_layer.resolve_context())
+
     @app.get("/api/dashboard/nps", response_model=DashboardResponse)
     def dashboard_nps(
+        request: Request,
         service_origin: Optional[str] = None,
         service_origin_n1: Optional[str] = None,
         service_origin_n2: Optional[str] = None,
@@ -212,11 +308,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         cohort_col: str = "Canal",
         min_n: int = 200,
         min_n_cross: int = 30,
+        theme_mode: str = "light",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         return dashboard_layer.nps_dashboard(
             context=_resolve_context(
-                app_settings,
+                cast(Settings, request.app.state.settings),
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
@@ -231,21 +328,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             cohort_col=cohort_col,
             min_n=min_n,
             min_n_cross=min_n_cross,
+            theme_mode=theme_mode,
         )
 
     @app.get("/api/dashboard/linking", response_model=LinkingResponse)
     def dashboard_linking(
+        request: Request,
         service_origin: Optional[str] = None,
         service_origin_n1: Optional[str] = None,
         service_origin_n2: Optional[str] = None,
         pop_year: str = "Todos",
         pop_month: str = "Todos",
         nps_group: str = "Todos",
+        min_similarity: float = 0.25,
+        max_days_apart: int = 10,
+        theme_mode: str = "light",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         return dashboard_layer.linking_dashboard(
             context=_resolve_context(
-                app_settings,
+                cast(Settings, request.app.state.settings),
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,
@@ -253,10 +355,60 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             pop_year=pop_year,
             pop_month=pop_month,
             nps_group=nps_group,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            theme_mode=theme_mode,
+        )
+
+    @app.get("/api/dashboard/report/pptx")
+    def dashboard_report(
+        request: Request,
+        service_origin: Optional[str] = None,
+        service_origin_n1: Optional[str] = None,
+        service_origin_n2: Optional[str] = None,
+        pop_year: str = "Todos",
+        pop_month: str = "Todos",
+        nps_group: str = "Todos",
+        min_n: int = 200,
+        min_similarity: float = 0.25,
+        max_days_apart: int = 10,
+        touchpoint_source: str = "",
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> Response:
+        try:
+            report = dashboard_layer.generate_ppt_report(
+                context=_resolve_context(
+                    cast(Settings, request.app.state.settings),
+                    service_origin,
+                    service_origin_n1,
+                    service_origin_n2,
+                ),
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=nps_group,
+                min_n=min_n,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                touchpoint_source=touchpoint_source,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        headers = {
+            "Content-Disposition": (
+                f"attachment; filename=\"{report.file_name}\"; "
+                f"filename*=UTF-8''{quote(report.file_name)}"
+            )
+        }
+        return Response(
+            content=report.content,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers=headers,
         )
 
     @app.get("/api/dashboard/data/{dataset_kind}", response_model=DatasetTableResponse)
     def dashboard_table(
+        request: Request,
         dataset_kind: str,
         service_origin: Optional[str] = None,
         service_origin_n1: Optional[str] = None,
@@ -274,7 +426,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return dashboard_layer.dataset_rows(
             dataset_kind=kind,
             context=_resolve_context(
-                app_settings,
+                cast(Settings, request.app.state.settings),
                 service_origin,
                 service_origin_n1,
                 service_origin_n2,

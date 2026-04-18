@@ -39,11 +39,16 @@ export type DatasetStatus = {
 export type DashboardConfig = {
   default_service_origin: string;
   default_service_origin_n1: string;
+  default_service_origin_n2: string;
   service_origins: string[];
   service_origin_n1_map: Record<string, string[]>;
+  service_origin_n2_values: string[];
+  service_origin_n2_map: Record<string, Record<string, string[]>>;
+  service_origin_n2_options: string[];
   available_years: string[];
   available_months_by_year: Record<string, string[]>;
   nps_groups: string[];
+  preferences: PreferencesPayload;
   nps_dataset: DatasetStatus;
   helix_dataset: DatasetStatus;
 };
@@ -170,6 +175,28 @@ export type DashboardQuery = {
   cohort_col: string;
   min_n: number;
   min_n_cross: number;
+  theme_mode: string;
+};
+
+export type PreferencesPayload = {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+  pop_year: string;
+  pop_month: string;
+  nps_group_choice: string;
+  theme_mode: "light" | "dark";
+  touchpoint_source: string;
+  min_similarity: number;
+  max_days_apart: number;
+  min_n_opportunities: number;
+  min_n_cross_comparisons: number;
+};
+
+export type ServiceOriginHierarchyPayload = {
+  service_origins: string[];
+  service_origin_n1_map: Record<string, string[]>;
+  service_origin_n2_map: Record<string, Record<string, string[]>>;
 };
 
 export type ReprocessSummary = {
@@ -202,6 +229,21 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+function parseContentDispositionFilename(headerValue: string | null): string {
+  if (!headerValue) {
+    return "reporte-ejecutivo.pptx";
+  }
+  const encodedMatch = headerValue.match(/filename\*\=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    return decodeURIComponent(encodedMatch[1]);
+  }
+  const plainMatch = headerValue.match(/filename=\"?([^\";]+)\"?/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1];
+  }
+  return "reporte-ejecutivo.pptx";
+}
+
 export async function fetchConfig(params: {
   service_origin?: string;
   service_origin_n1?: string;
@@ -229,6 +271,9 @@ export async function fetchLinkingDashboard(params: {
   pop_year: string;
   pop_month: string;
   nps_group: string;
+  min_similarity: number;
+  max_days_apart: number;
+  theme_mode: string;
 }): Promise<LinkingPayload> {
   return parseResponse<LinkingPayload>(await fetch(buildUrl("/api/dashboard/linking", params)));
 }
@@ -303,4 +348,58 @@ export async function reprocessSummary(params: {
       method: "POST"
     })
   );
+}
+
+export async function persistPreferences(payload: PreferencesPayload): Promise<PreferencesPayload> {
+  return parseResponse<PreferencesPayload>(
+    await fetch("/api/preferences", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function updateServiceOrigins(
+  payload: ServiceOriginHierarchyPayload
+): Promise<DashboardConfig> {
+  return parseResponse<DashboardConfig>(
+    await fetch("/api/settings/service-origins", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function downloadExecutiveReport(params: {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+  pop_year: string;
+  pop_month: string;
+  nps_group: string;
+  min_n: number;
+  min_similarity: number;
+  max_days_apart: number;
+  touchpoint_source: string;
+}): Promise<{ blob: Blob; fileName: string }> {
+  const response = await fetch(buildUrl("/api/dashboard/report/pptx", params));
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      const payload = JSON.parse(text) as { detail?: string };
+      throw new Error(payload.detail || `Request failed with ${response.status}`);
+    } catch {
+      throw new Error(text || `Request failed with ${response.status}`);
+    }
+  }
+  return {
+    blob: await response.blob(),
+    fileName: parseContentDispositionFilename(response.headers.get("content-disposition"))
+  };
 }

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from pptx import Presentation
 
 from nps_lens.api.app import create_app
 from nps_lens.settings import Settings
@@ -205,3 +207,54 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
     assert linking_payload["journey_routes_table"] is not None
+
+
+def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    _upload_nps_march(client)
+    helix_fixture = _build_helix_fixture(tmp_path / "helix-report.xlsx")
+
+    with helix_fixture.open("rb") as handle:
+        upload_response = client.post(
+            "/api/uploads/helix",
+            data={
+                "service_origin": "BBVA México",
+                "service_origin_n1": "Senda",
+                "service_origin_n2": "",
+            },
+            files={
+                "file": (
+                    helix_fixture.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 200
+
+    report_response = client.get(
+        "/api/dashboard/report/pptx",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "nps_group": "Todos",
+            "min_n": 200,
+            "min_similarity": 0.25,
+            "max_days_apart": 10,
+            "touchpoint_source": "domain_touchpoint",
+        },
+    )
+
+    assert report_response.status_code == 200
+    assert (
+        report_response.headers["content-type"]
+        == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    assert "attachment;" in report_response.headers["content-disposition"]
+
+    presentation = Presentation(BytesIO(report_response.content))
+    assert len(presentation.slides) >= 8

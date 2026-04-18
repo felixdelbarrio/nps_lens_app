@@ -6,12 +6,30 @@ import App from "./App";
 
 const contextPayload = {
   default_service_origin: "BBVA México",
+  default_service_origin_n2: "",
   default_service_origin_n1: "Senda",
   service_origins: ["BBVA México"],
   service_origin_n1_map: { "BBVA México": ["Senda"] },
+  service_origin_n2_values: [],
+  service_origin_n2_map: { "BBVA México": { "Senda": [] } },
+  service_origin_n2_options: [],
   available_years: ["Todos", "2026"],
   available_months_by_year: { Todos: ["Todos", "03"], "2026": ["Todos", "03"] },
   nps_groups: ["Todos", "Detractores", "Neutros", "Promotores"],
+  preferences: {
+    service_origin: "BBVA México",
+    service_origin_n1: "Senda",
+    service_origin_n2: "",
+    pop_year: "Todos",
+    pop_month: "Todos",
+    nps_group_choice: "Todos",
+    theme_mode: "light",
+    touchpoint_source: "domain_touchpoint",
+    min_similarity: 0.25,
+    max_days_apart: 10,
+    min_n_opportunities: 200,
+    min_n_cross_comparisons: 30
+  },
   nps_dataset: {
     available: true,
     rows: 26618,
@@ -110,7 +128,19 @@ const tablePayload = {
 };
 
 describe("App", () => {
+  const createObjectUrl = vi.fn(() => "blob:report");
+  const revokeObjectUrl = vi.fn();
+  const anchorClick = vi.fn();
+
   beforeEach(() => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: createObjectUrl,
+        revokeObjectURL: revokeObjectUrl
+      })
+    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(anchorClick);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -124,8 +154,36 @@ describe("App", () => {
         if (url.includes("/api/dashboard/nps")) {
           return new Response(JSON.stringify(dashboardPayload));
         }
+        if (url.includes("/api/dashboard/linking")) {
+          return new Response(
+            JSON.stringify({
+              available: false,
+              context_pills: [],
+              focus_group: "Todos",
+              focus_label: "Sin foco",
+              empty_state: "Sin base cruzada",
+              kpis: {},
+              ranking_table: [],
+              evidence_table: [],
+              journey_routes_table: [],
+              top_topic: ""
+            })
+          );
+        }
         if (url.includes("/api/dashboard/data/")) {
           return new Response(JSON.stringify(tablePayload));
+        }
+        if (url.includes("/api/preferences") && init?.method === "PUT") {
+          return new Response(init.body as BodyInit, {
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.includes("/api/dashboard/report/pptx")) {
+          return new Response("pptx-content", {
+            headers: {
+              "Content-Disposition": 'attachment; filename="reporte-ejecutivo.pptx"'
+            }
+          });
         }
         throw new Error(`Unhandled fetch ${url}`);
       })
@@ -134,9 +192,10 @@ describe("App", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("renders restored navigation, traceability and upload issues", async () => {
+  it("renders restored navigation, filters, traceability and uploads", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -149,6 +208,8 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: /Analisis del NPS Térmico/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Contexto de servicio/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Recorte analítico/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     await user.click(screen.getByRole("tab", { name: "Histórico" }));
@@ -164,5 +225,30 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: /Datos/i }));
     expect(screen.getByTestId("data-table")).toHaveTextContent("Acceso");
+  });
+
+  it("downloads the restored executive report from the top bar", async () => {
+    const user = userEvent.setup();
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Producto sincronizado con histórico persistente/i)
+      ).toBeInTheDocument()
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Reporte$/i }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/dashboard/report/pptx")
+        )
+      ).toBe(true)
+    );
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(anchorClick).toHaveBeenCalled();
   });
 });
