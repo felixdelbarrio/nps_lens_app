@@ -26,10 +26,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("uploads-table")).toContainText("NPS Térmico Senda - 03Marzo.xlsx", {
     timeout: 180000
   });
+  await page.getByRole("button", { name: "Ver issues" }).click();
   await expect(page.getByTestId("selected-upload-name")).toContainText(
     "NPS Térmico Senda - 03Marzo.xlsx"
   );
-  await expect(page.getByTestId("issues-list")).toContainText("extra_columns_detected");
+  await expect(page.getByTestId("selected-issues-list")).toContainText("extra_columns_detected");
 
   await page.getByTestId("reprocess-button").click();
   await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados");

@@ -136,6 +136,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
 
 def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
+    _upload_nps_march(client)
     helix_fixture = _build_helix_fixture(tmp_path / "helix.xlsx")
 
     with helix_fixture.open("rb") as handle:
@@ -188,3 +189,20 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert data_payload["total_rows"] == 2
     assert "Incident Number" in data_payload["columns"]
     assert data_payload["rows"][0]["BBVA_SourceServiceN1"] == "Senda"
+
+    linking_response = client.get(
+        "/api/dashboard/linking",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "nps_group": "Todos",
+        },
+    )
+    assert linking_response.status_code == 200
+    linking_payload = linking_response.json()
+    assert linking_payload["available"] is True
+    assert linking_payload["kpis"]["incidents"] == 2
+    assert linking_payload["journey_routes_table"] is not None

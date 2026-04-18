@@ -155,7 +155,9 @@ describe("App", () => {
     expect(screen.getByTestId("selected-upload-name")).toHaveTextContent(
       "NPS Térmico Senda - 03Marzo.xlsx"
     );
-    expect(screen.getByTestId("issues-list")).toHaveTextContent("extra_columns_detected");
+    expect(screen.getByTestId("selected-issues-list")).toHaveTextContent(
+      "extra_columns_detected"
+    );
 
     await user.click(screen.getByRole("tab", { name: /🧾 Datos/i }));
     expect(screen.getByTestId("data-table")).toHaveTextContent("Acceso");

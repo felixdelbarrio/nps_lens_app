@@ -116,6 +116,24 @@ export type DashboardPayload = {
   empty_state: string;
 };
 
+export type LinkingPayload = {
+  available: boolean;
+  context_pills: string[];
+  focus_group: string;
+  focus_label: string;
+  empty_state: string;
+  kpis: Record<string, number>;
+  overview_figure?: PlotlyFigureSpec | null;
+  priority_figure?: PlotlyFigureSpec | null;
+  risk_recovery_figure?: PlotlyFigureSpec | null;
+  heatmap_figure?: PlotlyFigureSpec | null;
+  lag_figure?: PlotlyFigureSpec | null;
+  ranking_table: Array<Record<string, unknown>>;
+  evidence_table: Array<Record<string, unknown>>;
+  journey_routes_table: Array<Record<string, unknown>>;
+  top_topic: string;
+};
+
 export type DatasetTable = {
   dataset_kind: string;
   total_rows: number;
@@ -202,6 +220,17 @@ export async function fetchUploads(params: {
 
 export async function fetchDashboard(params: DashboardQuery): Promise<DashboardPayload> {
   return parseResponse<DashboardPayload>(await fetch(buildUrl("/api/dashboard/nps", params)));
+}
+
+export async function fetchLinkingDashboard(params: {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+  pop_year: string;
+  pop_month: string;
+  nps_group: string;
+}): Promise<LinkingPayload> {
+  return parseResponse<LinkingPayload>(await fetch(buildUrl("/api/dashboard/linking", params)));
 }
 
 export async function fetchDatasetTable(

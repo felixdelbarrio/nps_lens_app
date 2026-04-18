@@ -13,6 +13,7 @@ from nps_lens.api.schemas import (
     DashboardResponse,
     DatasetTableResponse,
     HelixUploadResponse,
+    LinkingResponse,
     SummaryResponse,
     UploadResponse,
 )
@@ -230,6 +231,28 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             cohort_col=cohort_col,
             min_n=min_n,
             min_n_cross=min_n_cross,
+        )
+
+    @app.get("/api/dashboard/linking", response_model=LinkingResponse)
+    def dashboard_linking(
+        service_origin: Optional[str] = None,
+        service_origin_n1: Optional[str] = None,
+        service_origin_n2: Optional[str] = None,
+        pop_year: str = "Todos",
+        pop_month: str = "Todos",
+        nps_group: str = "Todos",
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, object]:
+        return dashboard_layer.linking_dashboard(
+            context=_resolve_context(
+                app_settings,
+                service_origin,
+                service_origin_n1,
+                service_origin_n2,
+            ),
+            pop_year=pop_year,
+            pop_month=pop_month,
+            nps_group=nps_group,
         )
 
     @app.get("/api/dashboard/data/{dataset_kind}", response_model=DatasetTableResponse)

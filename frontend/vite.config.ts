@@ -4,6 +4,11 @@ import { configDefaults } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Plotly is lazy-loaded into its own async chunk on purpose. Raising the threshold
+    // avoids a noisy warning without changing the runtime split strategy.
+    chunkSizeWarningLimit: 5000
+  },
   server: {
     port: 5173,
     proxy: {

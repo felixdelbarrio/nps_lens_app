@@ -92,3 +92,21 @@ class DashboardResponse(BaseModel):
     controls: dict[str, Any] = Field(default_factory=dict)
     report_markdown: str = ""
     empty_state: str = ""
+
+
+class LinkingResponse(BaseModel):
+    available: bool = False
+    context_pills: list[str] = Field(default_factory=list)
+    focus_group: str = ""
+    focus_label: str = ""
+    empty_state: str = ""
+    kpis: dict[str, Any] = Field(default_factory=dict)
+    overview_figure: Optional[dict[str, Any]] = None
+    priority_figure: Optional[dict[str, Any]] = None
+    risk_recovery_figure: Optional[dict[str, Any]] = None
+    heatmap_figure: Optional[dict[str, Any]] = None
+    lag_figure: Optional[dict[str, Any]] = None
+    ranking_table: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_table: list[dict[str, Any]] = Field(default_factory=list)
+    journey_routes_table: list[dict[str, Any]] = Field(default_factory=list)
+    top_topic: str = ""

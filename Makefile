@@ -1,7 +1,19 @@
 .DEFAULT_GOAL := default
 
-PYTHON ?= python3.9
 VENV ?= .venv
+
+ifeq ($(OS),Windows_NT)
+PYTHON ?= python
+VENV_BIN = $(VENV)/Scripts
+BIN_EXT := .exe
+PLAYWRIGHT := $(FRONTEND_DIR)/node_modules/.bin/playwright.cmd
+else
+PYTHON ?= python3.9
+VENV_BIN = $(VENV)/bin
+BIN_EXT :=
+PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright
+endif
+
 FRONTEND_DIR ?= frontend
 DESKTOP_SCRIPT ?= src/nps_lens/desktop.py
 ICON_SOURCE ?= assets/logo.png
@@ -16,14 +28,13 @@ MACOS_INSTALL_TO_APPLICATIONS ?= 0
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
 
-PIP = $(VENV)/bin/pip
-PY = $(VENV)/bin/python
-RUFF = $(VENV)/bin/ruff
-BLACK = $(VENV)/bin/black
-MYPY = $(VENV)/bin/mypy
-PYTEST = $(VENV)/bin/pytest
+PIP = $(VENV_BIN)/pip$(BIN_EXT)
+PY = $(VENV_BIN)/python$(BIN_EXT)
+RUFF = $(VENV_BIN)/ruff$(BIN_EXT)
+BLACK = $(VENV_BIN)/black$(BIN_EXT)
+MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
+PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
-PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright
 
 .PHONY: default setup frontend-install frontend-build frontend-test frontend-e2e build run test ci clean
 
@@ -105,7 +116,7 @@ build:
 		else \
 			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
 		fi; \
-		$(VENV)/bin/pyinstaller "$$@"; \
+		"$(VENV_BIN)/pyinstaller$(BIN_EXT)" "$$@"; \
 		echo "Built app: $$out/dist/nps-lens.app"; \
 		if [ "$(MACOS_INSTALL_TO_APPLICATIONS)" = "1" ]; then \
 			app_dst="/Applications/nps-lens.app"; \
@@ -119,7 +130,7 @@ build:
 	elif [ "$$uname_s" = "Linux" ]; then \
 		out=build/pyinstaller/linux; \
 		mkdir -p $$out/dist $$out/work $$out/spec; \
-		$(VENV)/bin/pyinstaller --clean --noconfirm \
+		"$(VENV_BIN)/pyinstaller$(BIN_EXT)" --clean --noconfirm \
 			--name nps-lens \
 			--onefile \
 			--icon "$(ROOT)/$(ICON_PNG)" \
@@ -138,13 +149,35 @@ build:
 			--specpath $$out/spec \
 			"$(DESKTOP_SCRIPT)"; \
 		echo "Built binary: $$out/dist/nps-lens"; \
+	elif [ "$(OS)" = "Windows_NT" ] || printf "%s" "$$uname_s" | grep -Eq 'MINGW|MSYS|CYGWIN'; then \
+		out=build/pyinstaller/windows; \
+		mkdir -p $$out/dist $$out/work $$out/spec; \
+		"$(VENV_BIN)/pyinstaller$(BIN_EXT)" --clean --noconfirm \
+			--name nps-lens \
+			--windowed \
+			--icon "$(ROOT)/$(ICON_ICO)" \
+			--add-data="$(ROOT)/frontend/dist;frontend/dist" \
+			--add-data="$(ROOT)/assets;assets" \
+			--add-data="$(ROOT)/.env.example;." \
+			--collect-submodules nps_lens \
+			--collect-submodules webview \
+			--copy-metadata python-dotenv \
+			--copy-metadata pywebview \
+			--copy-metadata fastapi \
+			--copy-metadata uvicorn \
+			--collect-data pptx \
+			--distpath $$out/dist \
+			--workpath $$out/work \
+			--specpath $$out/spec \
+			"$(DESKTOP_SCRIPT)"; \
+		echo "Built binary: $$out/dist/nps-lens.exe"; \
 	else \
 		echo "Unsupported OS for local build: $$uname_s"; \
 		exit 1; \
 	fi
 
 run:
-	@test -x "$(PY)" || $(MAKE) setup
+	@test -x "$(PY)" && test -x "$(PIP)" || $(MAKE) setup
 	$(PIP) install -e ".[build]"
 	$(MAKE) frontend-build
 	rm -rf $(ICON_DIR)
@@ -159,7 +192,7 @@ test:
 	$(PYTEST) --override-ini addopts="" -q --cov=src/nps_lens --cov-report=term-missing --cov-fail-under=80
 
 ci:
-	@test -x "$(PY)" || $(MAKE) setup
+	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" && test -x "$(MYPY)" || $(MAKE) setup
 	$(RUFF) check --no-fix .
 	$(BLACK) --check .
 	$(MYPY) .

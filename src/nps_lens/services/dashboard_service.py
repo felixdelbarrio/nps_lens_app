@@ -723,12 +723,22 @@ class DashboardService:
 
         x_column = "date" if "date" in trend_df.columns else "week"
         chart_df = trend_df.copy().sort_values(x_column)
+        focus_rate_series = (
+            chart_df["focus_rate"]
+            if "focus_rate" in chart_df.columns
+            else pd.Series([0.0] * len(chart_df), index=chart_df.index)
+        )
+        incidents_series = (
+            chart_df["incidents"]
+            if "incidents" in chart_df.columns
+            else pd.Series([0.0] * len(chart_df), index=chart_df.index)
+        )
         chart_df["focus_rate"] = pd.to_numeric(
-            chart_df.get("focus_rate"),
+            focus_rate_series,
             errors="coerce",
         ).fillna(0.0)
         chart_df["incidents"] = pd.to_numeric(
-            chart_df.get("incidents"),
+            incidents_series,
             errors="coerce",
         ).fillna(0.0)
         chart_df[x_column] = pd.to_datetime(chart_df[x_column], errors="coerce")

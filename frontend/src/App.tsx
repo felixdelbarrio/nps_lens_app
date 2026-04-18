@@ -5,6 +5,7 @@ import {
   fetchConfig,
   fetchDashboard,
   fetchDatasetTable,
+  fetchLinkingDashboard,
   fetchUploads,
   reprocessSummary,
   uploadHelixFile,
@@ -14,6 +15,7 @@ import type {
   DashboardPayload,
   DatasetStatus,
   HelixUploadResult,
+  LinkingPayload,
   UploadResult
 } from "./api";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
@@ -47,6 +49,12 @@ const OVERVIEW_TABS = [
 const DATA_TABS = [
   { id: "nps", label: "NPS" },
   { id: "helix", label: "Helix" }
+];
+
+const LINKING_TABS = [
+  { id: "situation", label: "Situación del periodo" },
+  { id: "journeys", label: "Journeys de detracción" },
+  { id: "scenarios", label: "Escenarios causales" }
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
@@ -113,6 +121,7 @@ export function App() {
   const [mainSection, setMainSection] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
   const [overviewTab, setOverviewTab] = useState("daily");
+  const [linkingTab, setLinkingTab] = useState("situation");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
   const [historyFilter, setHistoryFilter] = useState("");
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
@@ -205,6 +214,26 @@ export function App() {
     mutate: mutateDashboard
   } = useSWR<DashboardPayload>(dashboardKey, () => fetchDashboard(dashboardQuery));
 
+  const linkingKey =
+    mainSection === "linking" && serviceOrigin && serviceOriginN1
+      ? ["linking", serviceOrigin, serviceOriginN1, serviceOriginN2, popYear, popMonth, npsGroup]
+      : null;
+  const {
+    data: linking,
+    error: linkingError,
+    isLoading: linkingLoading,
+    mutate: mutateLinking
+  } = useSWR<LinkingPayload>(linkingKey, () =>
+    fetchLinkingDashboard({
+      service_origin: serviceOrigin,
+      service_origin_n1: serviceOriginN1,
+      service_origin_n2: serviceOriginN2,
+      pop_year: popYear,
+      pop_month: popMonth,
+      nps_group: npsGroup
+    })
+  );
+
   const uploadsKey =
     serviceOrigin && serviceOriginN1 ? ["uploads", serviceOrigin, serviceOriginN1, serviceOriginN2] : null;
   const {
@@ -263,7 +292,7 @@ export function App() {
   }, [uploads]);
 
   useEffect(() => {
-    const currentError = configError || dashboardError || uploadsError || datasetError;
+    const currentError = configError || dashboardError || uploadsError || datasetError || linkingError;
     if (currentError) {
       setError(currentError.message);
       setStatusCopy("La interfaz no pudo sincronizar el contexto operativo.");
@@ -274,12 +303,23 @@ export function App() {
       setStatusCopy("Importando y rehidratando el histórico persistente...");
       return;
     }
-    if (configLoading || dashboardLoading || uploadsLoading) {
+    if (configLoading || dashboardLoading || uploadsLoading || linkingLoading) {
       setStatusCopy("Cargando contexto, histórico y vistas analíticas...");
       return;
     }
     setStatusCopy("Contexto, histórico y analítica alineados con el dataset persistido.");
-  }, [configError, configLoading, dashboardError, dashboardLoading, datasetError, isMutating, uploadsError, uploadsLoading]);
+  }, [
+    configError,
+    configLoading,
+    dashboardError,
+    dashboardLoading,
+    datasetError,
+    isMutating,
+    linkingError,
+    linkingLoading,
+    uploadsError,
+    uploadsLoading
+  ]);
 
   const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
@@ -304,7 +344,13 @@ export function App() {
         serviceOriginN2
       });
       setLatestNpsUpload(result);
-      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset()]);
+      await Promise.all([
+        mutateConfig(),
+        mutateUploads(),
+        mutateDashboard(),
+        mutateDataset(),
+        mutateLinking()
+      ]);
       startTransition(() => {
         setActiveUploadId(result.upload_id);
         setMainSection("nps");
@@ -327,7 +373,7 @@ export function App() {
         serviceOriginN2
       });
       setLatestHelixUpload(result);
-      await Promise.all([mutateConfig(), mutateDataset()]);
+      await Promise.all([mutateConfig(), mutateDataset(), mutateLinking()]);
       startTransition(() => {
         setMainSection("linking");
         setDataTab("helix");
@@ -349,7 +395,13 @@ export function App() {
         service_origin_n1: serviceOriginN1,
         service_origin_n2: serviceOriginN2
       });
-      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset()]);
+      await Promise.all([
+        mutateConfig(),
+        mutateUploads(),
+        mutateDashboard(),
+        mutateDataset(),
+        mutateLinking()
+      ]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -726,69 +778,190 @@ export function App() {
   }
 
   function renderLinkingSection() {
+    if (!linking?.available) {
+      return (
+        <section className="panel stack-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Incidencias ↔ NPS</p>
+              <h2>Base cruzada y readiness operativo</h2>
+            </div>
+          </div>
+
+          <div className="kpi-grid">
+            <article className="kpi-card">
+              <span>Dataset NPS</span>
+              <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            </article>
+            <article className="kpi-card">
+              <span>Dataset Helix</span>
+              <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            </article>
+            <article className="kpi-card">
+              <span>Última actualización NPS</span>
+              <strong>{npsDatasetStatus.updated_at ? new Date(npsDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+            </article>
+            <article className="kpi-card">
+              <span>Última actualización Helix</span>
+              <strong>{helixDatasetStatus.updated_at ? new Date(helixDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+            </article>
+          </div>
+
+          <article className="note-card">
+            <p className="panel-copy">
+              {linking?.empty_state ||
+                "El dataset Helix aún no está cargado para este contexto. La vista causal se activará cuando exista base cruzada suficiente."}
+            </p>
+          </article>
+        </section>
+      );
+    }
+
     return (
       <section className="panel stack-panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Incidencias ↔ NPS</p>
-            <h2>Base cruzada y readiness operativo</h2>
+            <h2>Lectura causal operativa</h2>
           </div>
         </div>
 
         <div className="kpi-grid">
           <article className="kpi-card">
-            <span>Dataset NPS</span>
-            <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            <span>Respuestas analizadas</span>
+            <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
           </article>
           <article className="kpi-card">
-            <span>Dataset Helix</span>
-            <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            <span>Incidencias del periodo</span>
+            <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
           </article>
           <article className="kpi-card">
-            <span>Última actualización NPS</span>
-            <strong>{npsDatasetStatus.updated_at ? new Date(npsDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+            <span>NPS en riesgo</span>
+            <strong>{formatNumber(linking.kpis.nps_points_at_risk, 2)}</strong>
           </article>
           <article className="kpi-card">
-            <span>Última actualización Helix</span>
-            <strong>{helixDatasetStatus.updated_at ? new Date(helixDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+            <span>NPS recuperable</span>
+            <strong>{formatNumber(linking.kpis.nps_points_recoverable, 2)}</strong>
           </article>
         </div>
 
-        {!helixDatasetStatus.available ? (
-          <article className="note-card">
-            <p className="panel-copy">
-              El dataset Helix aún no está cargado para este contexto. La UI conserva el flujo de importación y trazabilidad para reactivar el análisis cruzado sin reintroducir lógica de negocio en la capa visual.
-            </p>
-          </article>
-        ) : (
+        <NavigationTabs compact items={LINKING_TABS} onChange={setLinkingTab} value={linkingTab} />
+
+        {linkingTab === "situation" ? (
           <>
-            <article className="note-card">
-              <p className="panel-copy">
-                Helix queda persistido por contexto y disponible desde la sección de datos. Esta migración recupera la carga, el estado activo del dataset y la inspección operativa sin volver a acoplar el frontend a la lógica de parsing.
-              </p>
-            </article>
+            <PlotFigure
+              emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
+              figure={linking.overview_figure}
+              testId="linking-overview-figure"
+            />
             <div className="table-shell">
               <table className="data-table">
                 <thead>
                   <tr>
-                    {(datasetTable?.columns || []).slice(0, 6).map((column) => (
-                      <th key={column}>{column}</th>
-                    ))}
+                    <th>Tópico</th>
+                    <th>Similarity</th>
+                    <th>Incidencia</th>
+                    <th>Evidencia Helix</th>
+                    <th>Comentario detractor</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(datasetTable?.rows || []).slice(0, 10).map((row, index) => (
-                    <tr key={`helix-preview-${index}`}>
-                      {(datasetTable?.columns || []).slice(0, 6).map((column) => (
-                        <td key={`${index}-${column}`}>{String(row[column] ?? "")}</td>
-                      ))}
+                  {linking.evidence_table.map((row, index) => (
+                    <tr key={`evidence-${index}`}>
+                      <td>{String(row.nps_topic ?? "")}</td>
+                      <td>{String(row.similarity ?? "")}</td>
+                      <td>{String(row.incident_id ?? "")}</td>
+                      <td>{String(row.incident_summary ?? "")}</td>
+                      <td>{String(row.detractor_comment ?? "")}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </>
-        )}
+        ) : null}
+
+        {linkingTab === "journeys" ? (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Route signature</th>
+                  <th>n</th>
+                  <th>% detractor</th>
+                  <th>Score</th>
+                  <th>Touchpoint</th>
+                  <th>Subtouchpoint</th>
+                  <th>Topic</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linking.journey_routes_table.map((row, index) => (
+                  <tr key={`route-${index}`}>
+                    <td>{String(row.route_signature ?? "")}</td>
+                    <td>{String(row.n ?? "")}</td>
+                    <td>{String(row.detractor_rate ?? "")}</td>
+                    <td>{String(row.score ?? "")}</td>
+                    <td>{String(row.touchpoint ?? "")}</td>
+                    <td>{String(row.subtouchpoint ?? "")}</td>
+                    <td>{String(row.topic ?? "")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {linkingTab === "scenarios" ? (
+          <>
+            <PlotFigure
+              emptyMessage="No hay suficientes tópicos para construir la matriz de prioridad."
+              figure={linking.priority_figure}
+              testId="linking-priority-figure"
+            />
+            <PlotFigure
+              emptyMessage="No hay suficientes señales para comparar riesgo y recuperación."
+              figure={linking.risk_recovery_figure}
+              testId="linking-risk-recovery-figure"
+            />
+            <PlotFigure
+              emptyMessage="No hay heatmap diario para el tópico líder."
+              figure={linking.heatmap_figure}
+              testId="linking-heatmap-figure"
+            />
+            <PlotFigure
+              emptyMessage="No hay lag diario defendible para el tópico líder."
+              figure={linking.lag_figure}
+              testId="linking-lag-figure"
+            />
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Tópico</th>
+                    <th>Incidencias</th>
+                    <th>Respuestas</th>
+                    <th>Prioridad</th>
+                    <th>Confianza</th>
+                    <th>Impacto total NPS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linking.ranking_table.map((row, index) => (
+                    <tr key={`rank-${index}`}>
+                      <td>{String(row.nps_topic ?? "")}</td>
+                      <td>{String(row.incidents ?? "")}</td>
+                      <td>{String(row.responses ?? "")}</td>
+                      <td>{String(row.priority ?? "")}</td>
+                      <td>{String(row.confidence ?? "")}</td>
+                      <td>{String(row.total_nps_impact ?? "")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
       </section>
     );
   }
@@ -1071,6 +1244,7 @@ export function App() {
                   <IssueList
                     emptyMessage="La carga no generó avisos ni errores."
                     issues={selectedUpload.issues}
+                    testId="selected-issues-list"
                   />
                 </>
               )}

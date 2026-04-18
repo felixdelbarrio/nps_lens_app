@@ -3,12 +3,13 @@ import type { Issue } from "../api";
 type IssueListProps = {
   issues: Issue[];
   emptyMessage: string;
+  testId?: string;
 };
 
-export function IssueList({ issues, emptyMessage }: IssueListProps) {
+export function IssueList({ issues, emptyMessage, testId = "issues-list" }: IssueListProps) {
   if (!issues.length) {
     return (
-      <ul className="issue-list" data-testid="issues-list">
+      <ul className="issue-list" data-testid={testId}>
         <li className="issue-card issue-info">
           <span>INFO</span>
           <strong>sin_issues</strong>
@@ -19,7 +20,7 @@ export function IssueList({ issues, emptyMessage }: IssueListProps) {
   }
 
   return (
-    <ul className="issue-list" data-testid="issues-list">
+    <ul className="issue-list" data-testid={testId}>
       {issues.map((issue) => (
         <li className={`issue-card issue-${issue.level.toLowerCase()}`} key={`${issue.code}-${issue.message}`}>
           <span>{issue.level}</span>
