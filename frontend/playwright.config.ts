@@ -11,7 +11,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "sh -lc 'rm -rf .playwright-data && mkdir -p .playwright-data && NPS_LENS_DATA_DIR=.playwright-data NPS_LENS_DATABASE_PATH=.playwright-data/e2e.sqlite3 NPS_LENS_FRONTEND_DIST_DIR=dist NPS_LENS_SERVICE_ORIGIN_BUUG=\"BBVA México\" NPS_LENS_SERVICE_ORIGIN_N1=\"BBVA México:Senda\" NPS_LENS_DEFAULT_SERVICE_ORIGIN=\"BBVA México\" NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1=\"Senda\" ../.venv/bin/python -m nps_lens.cli serve --host 127.0.0.1 --port 4100'",
+      "sh -lc 'rm -rf .playwright-data && mkdir -p .playwright-data && NPS_LENS_DATA_DIR=.playwright-data NPS_LENS_DATABASE_PATH=.playwright-data/e2e.sqlite3 NPS_LENS_FRONTEND_DIST_DIR=dist NPS_LENS_SERVICE_ORIGIN_BUUG=\"BBVA México\" NPS_LENS_SERVICE_ORIGIN_N1=\"BBVA México:ENTERPRISE WEB\" NPS_LENS_DEFAULT_SERVICE_ORIGIN=\"BBVA México\" NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1=\"ENTERPRISE WEB\" ../.venv/bin/python -m nps_lens.cli serve --host 127.0.0.1 --port 4100'",
     port: 4100,
     reuseExistingServer: false,
     timeout: 120000

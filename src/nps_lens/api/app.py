@@ -28,6 +28,7 @@ from nps_lens.services.nps_service import NpsService
 from nps_lens.settings import (
     Settings,
     load_runtime_dotenv,
+    normalize_downloads_path,
     persist_service_origin_hierarchy,
     persist_ui_prefs,
 )
@@ -238,7 +239,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request: Request,
     ) -> dict[str, object]:
         current_settings = cast(Settings, request.app.state.settings)
-        persist_ui_prefs(current_settings.dotenv_path, payload.model_dump())
+        next_values = payload.model_dump()
+        try:
+            next_values["downloads_path"] = normalize_downloads_path(
+                next_values.get("downloads_path")
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        persist_ui_prefs(current_settings.dotenv_path, next_values)
         return refresh_settings(request).ui_defaults()
 
     @app.put("/api/settings/service-origins", response_model=ContextOptionsResponse)
@@ -409,7 +417,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "Content-Disposition": (
                 f'attachment; filename="{report.file_name}"; '
                 f"filename*=UTF-8''{quote(report.file_name)}"
-            )
+            ),
+            "X-NPS-LENS-SAVED-PATH": report.saved_path,
         }
         return Response(
             content=report.content,

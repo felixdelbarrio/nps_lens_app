@@ -327,7 +327,7 @@ def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> N
 
     step = max(1, int(len(days) / max_ticks))
     tick_days = days[::step]
-    ticktext = [f"{_weekday_letter_es(d)}<br>{d.strftime('%b %d')}" for d in tick_days]
+    ticktext = [f"{_weekday_letter_es(d)}<br>{d.strftime('%d/%m')}" for d in tick_days]
     fig.update_xaxes(
         tickmode="array",
         tickvals=tick_days,
@@ -400,12 +400,16 @@ def chart_daily_kpis(
     fig.update_traces(selector=dict(name="NPS clásico"), line_color=th.accent)
     fig.update_traces(selector=dict(name="% detractores"), line_color=th.text)
 
-    fig.update_layout(showlegend=True)
-    fig.update_xaxes(title_text="Día")
-    fig.update_yaxes(title_text="NPS clásico (pp)", secondary_y=False)
-    fig.update_yaxes(title_text="% detractores", secondary_y=True)
-
     _layout_common(fig, th, height=300)
+    fig.update_layout(
+        showlegend=True,
+        hovermode="x unified",
+        legend=dict(orientation="h", x=0, y=1.18, title_text=""),
+        margin=dict(l=10, r=10, t=92, b=18),
+    )
+    fig.update_xaxes(title_text="Día")
+    fig.update_yaxes(title_text="NPS clásico (pp)", secondary_y=False, rangemode="tozero")
+    fig.update_yaxes(title_text="% detractores", secondary_y=True, ticksuffix="%")
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     return apply_plotly_template(fig, theme)
 
@@ -485,15 +489,18 @@ def chart_daily_mix_business(
         )
     )
 
+    _layout_common(fig, th, height=320)
     fig.update_layout(
         barmode="stack",
         yaxis_title="Mix diario (% de respuestas)",
         xaxis_title="Día",
-        legend_title_text="Cómo leerlo",
+        legend=dict(orientation="h", x=0, y=1.18, title_text=""),
+        hovermode="x unified",
+        bargap=0.14,
+        margin=dict(l=10, r=10, t=92, b=18),
     )
-    _layout_common(fig, th, height=320)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
-    fig.update_yaxes(range=[0, 100])
+    fig.update_yaxes(range=[0, 100], ticksuffix="%")
     return apply_plotly_template(fig, theme)
 
 

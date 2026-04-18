@@ -163,6 +163,15 @@
   --bbva-color-primary-bg-success: #42a64c;
   --bbva-color-primary-bg-warning: #ffe761;
   --bbva-color-primary-bg-alert: #c30a0a;
+  --color-success-surface: color-mix(in srgb, var(--color-success) 20%, transparent);
+  --color-success-border: color-mix(in srgb, var(--color-success) 34%, transparent);
+  --color-warning-surface: color-mix(in srgb, var(--color-warning) 24%, transparent);
+  --color-warning-border: color-mix(in srgb, var(--color-warning) 42%, transparent);
+  --color-info-surface: color-mix(in srgb, var(--bbva-color-primary-accent-value-01-default) 18%, transparent);
+  --color-info-border: color-mix(in srgb, var(--bbva-color-primary-accent-value-01-default) 36%, transparent);
+  --color-danger-surface: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 30%, transparent);
+  --color-overlay: color-mix(in srgb, #000000 48%, transparent);
 }
 
 * {
@@ -570,6 +579,11 @@ ul {
   gap: var(--space-4);
 }
 
+.filters-inline-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
 .field-grid.single-column {
   grid-template-columns: 1fr;
 }
@@ -585,6 +599,12 @@ label {
   font-size: var(--font-size-caption);
   line-height: var(--line-height-caption);
   font-weight: 500;
+}
+
+.field-hint {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
 }
 
 input,
@@ -914,6 +934,12 @@ input::placeholder {
   gap: var(--space-4);
 }
 
+.settings-sheet .nav-tabs button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: var(--font-size-caption);
+}
+
 .context-strip-card {
   position: relative;
   overflow: hidden;
@@ -941,6 +967,34 @@ input::placeholder {
 .settings-sheet-title-wrap {
   display: grid;
   gap: 4px;
+}
+
+.settings-section-stack,
+.settings-subsection,
+.settings-subsection-copy,
+.settings-method-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settings-subsection {
+  padding: var(--space-4);
+  border-radius: var(--radius-element);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+}
+
+.settings-subsection-copy h4,
+.settings-method-card strong {
+  margin: 0;
+  color: var(--color-brand);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+
+.sidebar-service-card .choice-chip {
+  min-height: 36px;
 }
 
 .report-markdown {

@@ -94,6 +94,7 @@ class BusinessPptResult:
     file_name: str
     content: bytes
     slide_count: int
+    saved_path: str = ""
 
 
 @dataclass(frozen=True)

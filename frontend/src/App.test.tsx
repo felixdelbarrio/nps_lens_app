@@ -7,23 +7,38 @@ import App from "./App";
 const contextPayload = {
   default_service_origin: "BBVA México",
   default_service_origin_n2: "",
-  default_service_origin_n1: "Senda",
+  default_service_origin_n1: "ENTERPRISE WEB",
   service_origins: ["BBVA México"],
-  service_origin_n1_map: { "BBVA México": ["Senda"] },
+  service_origin_n1_map: { "BBVA México": ["ENTERPRISE WEB"] },
   service_origin_n2_values: [],
-  service_origin_n2_map: { "BBVA México": { "Senda": [] } },
+  service_origin_n2_map: { "BBVA México": { "ENTERPRISE WEB": [] } },
   service_origin_n2_options: [],
   available_years: ["Todos", "2026"],
   available_months_by_year: { Todos: ["Todos", "03"], "2026": ["Todos", "03"] },
   nps_groups: ["Todos", "Detractores", "Neutros", "Promotores"],
+  causal_method_options: [
+    {
+      value: "domain_touchpoint",
+      label: "Por Subpalanca",
+      summary: "La lectura causal fija el touchpoint desde Subpalanca.",
+      flow: "Incidencias -> Touchpoint afectado -> Subpalanca -> Comentario -> NPS"
+    },
+    {
+      value: "executive_journeys",
+      label: "Journeys de detracción",
+      summary: "La lectura causal se reorganiza en journeys de comité.",
+      flow: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
+    }
+  ],
   preferences: {
     service_origin: "BBVA México",
-    service_origin_n1: "Senda",
+    service_origin_n1: "ENTERPRISE WEB",
     service_origin_n2: "",
     pop_year: "Todos",
     pop_month: "Todos",
     nps_group_choice: "Todos",
     theme_mode: "light",
+    downloads_path: "/Users/test/Downloads",
     touchpoint_source: "domain_touchpoint",
     min_similarity: 0.25,
     max_days_apart: 10,
@@ -55,7 +70,7 @@ const uploadPayload = {
   parser_version: "2026.04.17",
   status: "completed",
   service_origin: "BBVA México",
-  service_origin_n1: "Senda",
+  service_origin_n1: "ENTERPRISE WEB",
   service_origin_n2: "",
   total_rows: 26618,
   normalized_rows: 26618,
@@ -78,7 +93,7 @@ const dashboardPayload = {
   context_label: "Marzo 2026",
   context_pills: [
     "Service origin: BBVA México",
-    "N1: Senda",
+    "N1: ENTERPRISE WEB",
     "N2: -",
     "Año: Todos",
     "Mes: Todos",
@@ -208,10 +223,11 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: /Analisis del NPS Térmico/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Contexto de servicio/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Recorte analítico/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
+    expect(screen.queryByRole("heading", { name: /Recorte analítico/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Histórico" }));
     expect(screen.getByText("Histórico de cargas")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Ver issues" }));

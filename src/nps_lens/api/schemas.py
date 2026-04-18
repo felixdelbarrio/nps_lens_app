@@ -46,6 +46,13 @@ class SummaryResponse(BaseModel):
     latest_uploads: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class CausalMethodOption(BaseModel):
+    value: str
+    label: str
+    summary: str
+    flow: str
+
+
 class ContextOptionsResponse(BaseModel):
     default_service_origin: str
     default_service_origin_n1: str
@@ -58,6 +65,7 @@ class ContextOptionsResponse(BaseModel):
     available_years: list[str] = Field(default_factory=list)
     available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
     nps_groups: list[str] = Field(default_factory=list)
+    causal_method_options: list[CausalMethodOption] = Field(default_factory=list)
     preferences: dict[str, Any] = Field(default_factory=dict)
     nps_dataset: dict[str, Any] = Field(default_factory=dict)
     helix_dataset: dict[str, Any] = Field(default_factory=dict)
@@ -71,6 +79,7 @@ class PreferencesResponse(BaseModel):
     pop_month: str = "Todos"
     nps_group_choice: str = "Todos"
     theme_mode: str = "light"
+    downloads_path: str = ""
     touchpoint_source: str = "domain_touchpoint"
     min_similarity: float = 0.25
     max_days_apart: int = 10

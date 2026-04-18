@@ -140,6 +140,7 @@ export function App() {
   const [popMonth, setPopMonth] = useState("Todos");
   const [npsGroup, setNpsGroup] = useState("Todos");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
+  const [downloadsPath, setDownloadsPath] = useState("");
   const [touchpointSource, setTouchpointSource] = useState("domain_touchpoint");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
@@ -199,6 +200,7 @@ export function App() {
     setPopMonth(config.preferences.pop_month || "Todos");
     setNpsGroup(config.preferences.nps_group_choice || "Todos");
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
+    setDownloadsPath(config.preferences.downloads_path || "");
     setTouchpointSource(config.preferences.touchpoint_source || "domain_touchpoint");
     setMinSimilarity(config.preferences.min_similarity ?? 0.25);
     setMaxDaysApart(config.preferences.max_days_apart ?? 10);
@@ -399,6 +401,7 @@ export function App() {
     config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] ||
     config?.service_origin_n2_options ||
     [];
+  const causalMethodOptions = config?.causal_method_options || [];
   const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
 
   useEffect(() => {
@@ -430,6 +433,15 @@ export function App() {
   }, [n2Options, selectedN2Values]);
 
   useEffect(() => {
+    if (!causalMethodOptions.length) {
+      return;
+    }
+    if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
+      setTouchpointSource(causalMethodOptions[0]?.value || "domain_touchpoint");
+    }
+  }, [causalMethodOptions, touchpointSource]);
+
+  useEffect(() => {
     applyDocumentTheme(themeMode);
     persistThemeMode(themeMode);
   }, [themeMode]);
@@ -443,6 +455,7 @@ export function App() {
       pop_month: popMonth,
       nps_group_choice: npsGroup,
       theme_mode: themeMode,
+      downloads_path: downloadsPath,
       touchpoint_source: touchpointSource,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
@@ -454,6 +467,7 @@ export function App() {
       minN,
       minNCross,
       minSimilarity,
+      downloadsPath,
       npsGroup,
       popMonth,
       popYear,
@@ -477,7 +491,7 @@ export function App() {
     return () => window.clearTimeout(timeoutId);
   }, [preferencesPayload, serviceOrigin, serviceOriginN1]);
 
-  async function handleNpsUpload(payload: { file: File; sheetName: string }) {
+  async function handleNpsUpload(payload: { file: File }) {
     setIsMutating(true);
     setError(null);
     try {
@@ -501,7 +515,7 @@ export function App() {
     }
   }
 
-  async function handleHelixUpload(payload: { file: File; sheetName: string }) {
+  async function handleHelixUpload(payload: { file: File }) {
     setIsMutating(true);
     setError(null);
     try {
@@ -580,7 +594,6 @@ export function App() {
     }
   }
 
-  const contextPills = dashboard?.context_pills || [];
   const npsDatasetStatus: DatasetStatus =
     config?.nps_dataset || {
       available: false,
@@ -608,17 +621,17 @@ export function App() {
 
   function renderServiceContainer() {
     return (
-      <section className="surface-card context-strip-card">
+      <section className="surface-card context-strip-card sidebar-service-card">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Service Container</p>
-            <h2>Contexto de servicio</h2>
+            <h2>Service Origin</h2>
             <p className="secondary-copy">
-              El contexto principal vive ahora entre el hero y el área core para reducir fricción operativa.
+              El contexto activo vive en el lateral para acompañar Insights, Ingesta y Datos sin duplicidades.
             </p>
           </div>
         </div>
-        <div className="field-grid">
+        <div className="field-grid single-column">
           <label>
             <span>Service Origin BUUG</span>
             <select onChange={(event) => setServiceOrigin(event.target.value)} value={serviceOrigin}>
@@ -679,7 +692,7 @@ export function App() {
             </p>
           </div>
         </div>
-        <div className="field-grid">
+        <div className="field-grid filters-inline-grid">
           <label>
             <span>Año</span>
             <select onChange={(event) => setPopYear(event.target.value)} value={popYear}>
@@ -700,7 +713,7 @@ export function App() {
               ))}
             </select>
           </label>
-          <label className="field-span-2">
+          <label>
             <span>Grupo NPS</span>
             <select onChange={(event) => setNpsGroup(event.target.value)} value={npsGroup}>
               {(config?.nps_groups || ["Todos"]).map((group) => (
@@ -1515,22 +1528,13 @@ export function App() {
             </p>
           </div>
 
+          {renderServiceContainer()}
+
           <PrimaryNav
             items={MAIN_AREAS}
             onChange={(value) => startTransition(() => setMainArea(value))}
             value={mainArea}
           />
-
-          <section className="sidebar-summary-card">
-            <p className="eyebrow">Contexto activo</p>
-            <div className="pill-row">
-              {contextPills.map((pill) => (
-                <span className="pill" key={pill}>
-                  {pill}
-                </span>
-              ))}
-            </div>
-          </section>
         </aside>
 
         <section className="workspace">
@@ -1565,8 +1569,7 @@ export function App() {
             </section>
           ) : null}
 
-          {renderServiceContainer()}
-          {renderFiltersContainer()}
+          {mainArea !== "ingest" ? renderFiltersContainer() : null}
 
           {mainArea === "insights" ? renderInsightsArea() : null}
           {mainArea === "ingest" ? renderIngestArea() : null}
@@ -1582,6 +1585,8 @@ export function App() {
 
       <SettingsSheet
         activeTab={settingsTab}
+        causalMethodOptions={causalMethodOptions}
+        downloadsPath={downloadsPath}
         hierarchySaving={isSavingHierarchy}
         minN={minN}
         minNCross={minNCross}
@@ -1594,12 +1599,15 @@ export function App() {
         serviceOriginN1Map={config?.service_origin_n1_map || {}}
         serviceOriginN2Map={config?.service_origin_n2_map || {}}
         serviceOrigins={config?.service_origins || []}
+        setDownloadsPath={setDownloadsPath}
         setMinN={setMinN}
         setMinNCross={setMinNCross}
         setMinSimilarity={setMinSimilarity}
         setMaxDaysApart={setMaxDaysApart}
         setThemeMode={setThemeMode}
+        setTouchpointSource={setTouchpointSource}
         themeMode={themeMode}
+        touchpointSource={touchpointSource}
       />
     </>
   );
