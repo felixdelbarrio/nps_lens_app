@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import streamlit as st
-
 from nps_lens.design.tokens import DesignTokens, palette
+
+try:
+    import streamlit as st
+except ImportError:  # pragma: no cover - legacy Streamlit UI removed from production flow
+    st = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,9 @@ def apply_theme(t: Theme) -> None:
     - styling the main containers, headings, cards, and controls
     - keeping all styling in one place
     """
+
+    if st is None:
+        return
 
     st.markdown(
         f"""

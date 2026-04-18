@@ -28,6 +28,7 @@ def test_settings_reads_context_values_from_env(monkeypatch):
     assert s.service_origin_n1_map["BBVA México"] == ["Senda", "Helix"]
     assert s.service_origin_n2_values == ["SN2A", "SN2B"]
     assert s.default_min_n_cross_comparisons == 40
+    assert s.default_downloads_path.endswith("Downloads")
 
 
 def test_settings_accepts_compact_n1_format(monkeypatch):
@@ -94,13 +95,16 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
         {
             "service_origin": "BBVA México",
             "theme_mode": "dark",
+            "downloads_path": "~/Downloads/nps-lens",
             "unknown": "ignored",
         },
     )
 
     assert "NPS_LENS_UI_SERVICE_ORIGIN" in dotenv_path.read_text(encoding="utf-8")
+    assert "NPS_LENS_UI_DOWNLOADS_PATH" in dotenv_path.read_text(encoding="utf-8")
     assert ui_pref("service_origin") == "BBVA México"
     assert ui_pref("theme_mode") == "dark"
+    assert ui_pref("downloads_path").endswith("Downloads/nps-lens")
     assert ui_pref("missing", default="fallback") == "fallback"
 
     monkeypatch.delenv("NPS_LENS_UI_SERVICE_ORIGIN", raising=False)

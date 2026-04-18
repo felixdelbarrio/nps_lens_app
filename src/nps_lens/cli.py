@@ -1,105 +1,81 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Optional
 
-import pandas as pd
 import typer
-from dotenv import load_dotenv
+import uvicorn
 from rich import print as rprint
 
-from nps_lens.analytics.causal import best_effort_ate_logit
-from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.application.service import AppService
-from nps_lens.config import Settings
-from nps_lens.core.disk_cache import DiskCache
-from nps_lens.core.perf import PerfTracker
-from nps_lens.core.store import DatasetStore
-from nps_lens.ingest import read_nps_thermal_excel
-from nps_lens.llm.pack import build_insight_pack, export_pack
+from nps_lens.domain.models import UploadContext
 from nps_lens.logging import setup_logging
-from nps_lens.platform.batch import load_batch_config, run_platform_batch
+from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.nps_service import NpsService
+from nps_lens.settings import Settings, load_runtime_dotenv
 
 app = typer.Typer(add_completion=False)
 
-EXCEL_PATH_ARG = typer.Argument(..., exists=True)
-CONFIG_PATH_ARG = typer.Argument(..., exists=True, help="Path to batch config JSON")
-OUT_ROOT_OPT = typer.Option(Path("artifacts"), help="Root directory for exported artifacts")
 
-
-@app.command()
-def profile_nps(
-    excel_path: Path = EXCEL_PATH_ARG,
-    service_origin: str = "BBVA México",
-    service_origin_n1: str = "Senda",
-) -> None:
-    """Ingesta + profiling rápido desde Excel de NPS térmico."""
-    load_dotenv()
-    setup_logging(Settings.from_env().log_level)
-    res = read_nps_thermal_excel(
-        str(excel_path), service_origin=service_origin, service_origin_n1=service_origin_n1
-    )
-    if res.issues:
-        rprint(res.issues)
-    rprint(res.df.head())
-    rprint({"rows": len(res.df), "cols": list(res.df.columns)})
-
-
-@app.command()
-def build_example_pack(
-    sample_csv: Path = Path("data/examples/nps_thermal_senda_mx_sample.csv"),
-    out_dir: Path = Path("reports/examples"),
-) -> None:
-    """Genera un ejemplo de LLM Deep-Dive Pack (MD + JSON)."""
-    df = pd.read_csv(sample_csv)
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
-    # choose an opportunity driver
-    opps = rank_opportunities(df, dimensions=["Palanca", "Subpalanca", "Canal"], min_n=200)
-    if not opps:
-        raise typer.Exit(code=2)
-
-    top = opps[0]
-    slice_df = df.loc[df[top.dimension].astype(str) == top.value].copy()
-    causal = best_effort_ate_logit(
-        df=df,
-        treatment_col=top.dimension,
-        treatment_value=top.value,
-        control_cols=["Canal", "Palanca", "Subpalanca"],
-    )
-    context = {
-        "service_origin": "BBVA México",
-        "service_origin_n1": "Senda",
-        "driver_dim": top.dimension,
-        "driver_val": top.value,
-    }
-    pack = build_insight_pack(
-        title=f"Oportunidad priorizada: {top.dimension}={top.value}",
-        context=context,
-        nps_slice=slice_df,
-        driver={"dimension": top.dimension, "value": top.value},
-        causal=causal,
-    )
-    exported = export_pack(pack, out_dir)
-    rprint(exported)
-
-
-@app.command()
-def platform_batch(
-    config_path: Path = CONFIG_PATH_ARG,
-    out_root: Path = OUT_ROOT_OPT,
-) -> None:
-    """Run the project as a platform (batch mode) and export versioned artifacts."""
-    load_dotenv()
+def _service() -> NpsService:
+    load_runtime_dotenv()
     settings = Settings.from_env()
     setup_logging(settings.log_level)
+    return NpsService(SqliteNpsRepository(settings.database_path), settings)
 
-    store = DatasetStore(settings.data_dir)
-    app_svc = AppService(
-        disk_cache=DiskCache(settings.data_dir / "cache" / "compute"), perf=PerfTracker()
+
+@app.command()
+def serve(
+    host: Optional[str] = typer.Option(None, help="API host"),
+    port: Optional[int] = typer.Option(None, help="API port"),
+) -> None:
+    load_runtime_dotenv()
+    settings = Settings.from_env()
+    setup_logging(settings.log_level)
+    uvicorn.run(
+        "nps_lens.api.app:create_app",
+        factory=True,
+        host=host or settings.api_host,
+        port=port or settings.api_port,
     )
 
-    specs = load_batch_config(config_path)
-    summary = run_platform_batch(specs=specs, store=store, app=app_svc, out_root=out_root)
-    rprint(summary)
+
+@app.command()
+def ingest(
+    excel_path: Path = typer.Argument(..., exists=True),
+    service_origin: Optional[str] = typer.Option(None),
+    service_origin_n1: Optional[str] = typer.Option(None),
+    service_origin_n2: str = typer.Option(""),
+) -> None:
+    service = _service()
+    context = UploadContext(
+        service_origin=service_origin or service.settings.default_service_origin,
+        service_origin_n1=service_origin_n1 or service.settings.default_service_origin_n1,
+        service_origin_n2=service_origin_n2,
+    )
+    result = service.ingest_excel(
+        filename=excel_path.name,
+        payload=excel_path.read_bytes(),
+        context=context,
+    )
+    rprint(result)
+
+
+@app.command()
+def summary(
+    service_origin: Optional[str] = typer.Option(None),
+    service_origin_n1: Optional[str] = typer.Option(None),
+    service_origin_n2: str = typer.Option(""),
+) -> None:
+    service = _service()
+    context = None
+    if service_origin and service_origin_n1:
+        context = UploadContext(
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+        )
+    rprint(json.dumps(service.summary(context), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
