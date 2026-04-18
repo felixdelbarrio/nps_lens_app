@@ -1,14 +1,26 @@
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { expect, test } from "@playwright/test";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const marchFixture = path.resolve(
-  __dirname,
-  "../../tests/fixtures/excel/NPS Térmico Senda - 03Marzo.xlsx"
-);
+function fixtureExcel(name: string) {
+  const fixturesDir = path.resolve(__dirname, "../../tests/fixtures/excel");
+  const expected = name.normalize("NFD");
+  const match = fs
+    .readdirSync(fixturesDir)
+    .find((entry) => entry.normalize("NFD") === expected);
+
+  if (!match) {
+    throw new Error(`Fixture not found: ${name}`);
+  }
+
+  return path.join(fixturesDir, match);
+}
+
+const marchFixture = fixtureExcel("NPS Térmico Senda - 03Marzo.xlsx");
 
 test("uploads a schema-drift file and shows cumulative results", async ({ page }) => {
   test.setTimeout(180000);

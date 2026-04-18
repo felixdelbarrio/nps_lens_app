@@ -6,8 +6,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
 from nps_lens.settings import Settings
-
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "excel"
+from nps_lens.testing.fixtures import fixture_excel
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -31,8 +30,8 @@ def test_sequential_uploads_are_accumulative_and_duplicate_safe(tmp_path: Path) 
     service = NpsService(SqliteNpsRepository(settings.database_path), settings)
     context = UploadContext(service_origin="BBVA México", service_origin_n1="Senda")
 
-    jan_feb = FIXTURES_DIR / "NPS Térmico Senda - 01Enero-02Febrero.xlsx"
-    march = FIXTURES_DIR / "NPS Térmico Senda - 03Marzo.xlsx"
+    jan_feb = fixture_excel("NPS Térmico Senda - 01Enero-02Febrero.xlsx")
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
 
     first = service.ingest_excel(
         filename=jan_feb.name,
@@ -69,7 +68,7 @@ def test_historical_merge_keeps_single_record_per_business_key(tmp_path: Path) -
     repository = SqliteNpsRepository(settings.database_path)
     service = NpsService(repository, settings)
     context = UploadContext(service_origin="BBVA México", service_origin_n1="Senda")
-    march = FIXTURES_DIR / "NPS Térmico Senda - 03Marzo.xlsx"
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
 
     service.ingest_excel(filename=march.name, payload=march.read_bytes(), context=context)
     frame = repository.load_records_df(context)

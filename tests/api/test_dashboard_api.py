@@ -7,8 +7,7 @@ from fastapi.testclient import TestClient
 
 from nps_lens.api.app import create_app
 from nps_lens.settings import Settings
-
-FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "excel"
+from nps_lens.testing.fixtures import fixture_excel
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -28,7 +27,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _upload_nps_march(client: TestClient) -> dict[str, object]:
-    march = FIXTURES_DIR / "NPS Térmico Senda - 03Marzo.xlsx"
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
     with march.open("rb") as handle:
         response = client.post(
             "/api/uploads/nps",

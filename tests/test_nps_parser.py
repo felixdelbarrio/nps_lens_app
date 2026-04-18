@@ -5,8 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
-
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "excel"
+from nps_lens.testing.fixtures import fixture_excel
 
 
 def test_parser_normalizes_headers_tolerates_extra_columns_and_deduplicates(tmp_path: Path) -> None:
@@ -63,7 +62,7 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
 
 
 def test_regression_parser_handles_march_file_with_schema_drift() -> None:
-    path = FIXTURES_DIR / "NPS Térmico Senda - 03Marzo.xlsx"
+    path = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
 
     result = read_nps_thermal_excel(
         str(path),

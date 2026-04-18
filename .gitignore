@@ -73,6 +73,7 @@ Thumbs.db
 data/*
 *.csv
 *.xlsx
+!tests/fixtures/excel/*.xlsx
 *.xlsm
 *.parquet
 *.jsonl
