@@ -20,6 +20,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
     })
   ).toBeVisible();
 
+  await page.getByRole("button", { name: /Ingesta/i }).click();
   await page.getByTestId("upload-input").setInputFiles(marchFixture);
   await page.getByRole("button", { name: "Importar / actualizar NPS" }).click();
 
@@ -32,10 +33,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   );
   await expect(page.getByTestId("selected-issues-list")).toContainText("extra_columns_detected");
 
+  await page.getByRole("button", { name: /Insights/i }).click();
   await page.getByTestId("reprocess-button").click();
   await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados");
 
-  await page.getByRole("tab", { name: /🧾 Datos/i }).click();
+  await page.getByRole("button", { name: /Datos/i }).click();
   await expect(page.getByTestId("data-table")).toContainText("Browser");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 });

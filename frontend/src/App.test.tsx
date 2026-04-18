@@ -142,14 +142,17 @@ describe("App", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Contexto, histórico y analítica alineados/i)
+        screen.getByText(/Producto sincronizado con histórico persistente/i)
       ).toBeInTheDocument()
     );
 
     expect(screen.getByRole("heading", { name: /Analisis del NPS Térmico/i })).toBeInTheDocument();
-    expect(screen.getByText("Histórico de cargas")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /Ingesta/i }));
+    await user.click(screen.getByRole("tab", { name: "Histórico" }));
+    expect(screen.getByText("Histórico de cargas")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Ver issues" }));
 
     expect(screen.getByTestId("selected-upload-name")).toHaveTextContent(
@@ -159,7 +162,7 @@ describe("App", () => {
       "extra_columns_detected"
     );
 
-    await user.click(screen.getByRole("tab", { name: /🧾 Datos/i }));
+    await user.click(screen.getByRole("button", { name: /Datos/i }));
     expect(screen.getByTestId("data-table")).toHaveTextContent("Acceso");
   });
 });

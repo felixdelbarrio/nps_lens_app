@@ -22,12 +22,40 @@ import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
 import { NavigationTabs } from "./components/NavigationTabs";
 import { PlotFigure } from "./components/PlotFigure";
+import { PrimaryNav } from "./components/PrimaryNav";
+import { SettingsSheet } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
 
-const MAIN_SECTIONS = [
-  { id: "nps", label: "📊 NPS Térmico" },
-  { id: "linking", label: "🔗 Incidencias ↔ NPS" },
-  { id: "data", label: "🧾 Datos" }
+const MAIN_AREAS = [
+  {
+    id: "insights",
+    label: "Insights",
+    description: "Seguimiento analítico y causal",
+    icon: "home" as const
+  },
+  {
+    id: "ingest",
+    label: "Ingesta",
+    description: "Nuevas cargas e histórico",
+    icon: "upload" as const
+  },
+  {
+    id: "data",
+    label: "Datos",
+    description: "Exploración tabular",
+    icon: "database" as const
+  }
+];
+
+const INSIGHT_TABS = [
+  { id: "nps", label: "NPS térmico" },
+  { id: "linking", label: "Incidencias ↔ NPS" }
+];
+
+const INGEST_TABS = [
+  { id: "new", label: "Nueva carga" },
+  { id: "history", label: "Histórico" },
+  { id: "traceability", label: "Detalle de ejecución" }
 ];
 
 const NPS_TABS = [
@@ -87,9 +115,9 @@ function ReportModal({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div aria-modal="true" className="modal-card" role="dialog">
-        <div className="panel-heading panel-heading-inline">
+    <div className="modal-backdrop" onClick={onClose} role="presentation">
+      <div aria-modal="true" className="modal-card" onClick={(event) => event.stopPropagation()} role="dialog">
+        <div className="section-heading">
           <div>
             <p className="eyebrow">Reporte</p>
             <h2>Reporte ejecutivo</h2>
@@ -118,11 +146,15 @@ export function App() {
   const [cohortCol, setCohortCol] = useState("Canal");
   const [minN, setMinN] = useState(200);
   const [minNCross, setMinNCross] = useState(30);
-  const [mainSection, setMainSection] = useState("nps");
+  const [mainArea, setMainArea] = useState("insights");
+  const [insightTab, setInsightTab] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
   const [overviewTab, setOverviewTab] = useState("daily");
   const [linkingTab, setLinkingTab] = useState("situation");
+  const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"preferences" | "appearance" | "advanced">("preferences");
   const [historyFilter, setHistoryFilter] = useState("");
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -206,7 +238,6 @@ export function App() {
 
   const dashboardKey =
     serviceOrigin && serviceOriginN1 ? ["dashboard", ...Object.values(dashboardQuery)] : null;
-
   const {
     data: dashboard,
     error: dashboardError,
@@ -215,7 +246,7 @@ export function App() {
   } = useSWR<DashboardPayload>(dashboardKey, () => fetchDashboard(dashboardQuery));
 
   const linkingKey =
-    mainSection === "linking" && serviceOrigin && serviceOriginN1
+    mainArea === "insights" && insightTab === "linking" && serviceOrigin && serviceOriginN1
       ? ["linking", serviceOrigin, serviceOriginN1, serviceOriginN2, popYear, popMonth, npsGroup]
       : null;
   const {
@@ -249,12 +280,11 @@ export function App() {
     })
   );
 
-  const activeDatasetKind = mainSection === "linking" ? "helix" : dataTab;
   const datasetKey =
-    serviceOrigin && serviceOriginN1
+    mainArea === "data" && serviceOrigin && serviceOriginN1
       ? [
           "dataset",
-          activeDatasetKind,
+          dataTab,
           serviceOrigin,
           serviceOriginN1,
           serviceOriginN2,
@@ -271,7 +301,7 @@ export function App() {
     isLoading: datasetLoading,
     mutate: mutateDataset
   } = useSWR(datasetKey, () =>
-    fetchDatasetTable(activeDatasetKind, {
+    fetchDatasetTable(dataTab, {
       service_origin: serviceOrigin,
       service_origin_n1: serviceOriginN1,
       service_origin_n2: serviceOriginN2,
@@ -303,17 +333,18 @@ export function App() {
       setStatusCopy("Importando y rehidratando el histórico persistente...");
       return;
     }
-    if (configLoading || dashboardLoading || uploadsLoading || linkingLoading) {
-      setStatusCopy("Cargando contexto, histórico y vistas analíticas...");
+    if (configLoading || dashboardLoading || uploadsLoading || linkingLoading || datasetLoading) {
+      setStatusCopy("Cargando contexto, histórico e insights...");
       return;
     }
-    setStatusCopy("Contexto, histórico y analítica alineados con el dataset persistido.");
+    setStatusCopy("Producto sincronizado con histórico persistente y reglas de negocio desacopladas.");
   }, [
     configError,
     configLoading,
     dashboardError,
     dashboardLoading,
     datasetError,
+    datasetLoading,
     isMutating,
     linkingError,
     linkingLoading,
@@ -321,7 +352,6 @@ export function App() {
     uploadsLoading
   ]);
 
-  const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
 
   useEffect(() => {
@@ -344,16 +374,11 @@ export function App() {
         serviceOriginN2
       });
       setLatestNpsUpload(result);
-      await Promise.all([
-        mutateConfig(),
-        mutateUploads(),
-        mutateDashboard(),
-        mutateDataset(),
-        mutateLinking()
-      ]);
+      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset(), mutateLinking()]);
       startTransition(() => {
+        setMainArea("ingest");
+        setIngestTab("traceability");
         setActiveUploadId(result.upload_id);
-        setMainSection("nps");
       });
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
@@ -375,9 +400,9 @@ export function App() {
       setLatestHelixUpload(result);
       await Promise.all([mutateConfig(), mutateDataset(), mutateLinking()]);
       startTransition(() => {
-        setMainSection("linking");
+        setMainArea("ingest");
+        setIngestTab("new");
         setDataTab("helix");
-        setTableOffset(0);
       });
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
@@ -395,13 +420,7 @@ export function App() {
         service_origin_n1: serviceOriginN1,
         service_origin_n2: serviceOriginN2
       });
-      await Promise.all([
-        mutateConfig(),
-        mutateUploads(),
-        mutateDashboard(),
-        mutateDataset(),
-        mutateLinking()
-      ]);
+      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset(), mutateLinking()]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -426,6 +445,7 @@ export function App() {
       updated_at: null,
       status: "missing"
     };
+  const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
 
   function renderOverviewTab() {
     if (dashboard?.empty_state) {
@@ -434,8 +454,8 @@ export function App() {
 
     if (overviewTab === "daily") {
       return (
-        <section className="panel">
-          <p className="panel-copy">Lectura diaria: NPS clásico y porcentaje de detractores dentro del periodo activo.</p>
+        <section className="surface-card">
+          <p className="secondary-copy">Lectura diaria del NPS y del peso relativo de detractores en el periodo activo.</p>
           <PlotFigure
             emptyMessage="No hay suficientes datos para construir la vista diaria."
             figure={dashboard?.overview.daily_kpis_figure}
@@ -447,7 +467,7 @@ export function App() {
 
     if (overviewTab === "weekly") {
       return (
-        <section className="panel stack-panel">
+        <section className="surface-card stack-panel">
           <PlotFigure
             emptyMessage="No hay suficientes datos para construir una tendencia."
             figure={dashboard?.overview.weekly_trend_figure}
@@ -463,7 +483,7 @@ export function App() {
 
     if (overviewTab === "topics") {
       return (
-        <section className="panel stack-panel">
+        <section className="surface-card stack-panel">
           <PlotFigure
             emptyMessage="No hay texto suficiente para extraer temas."
             figure={dashboard?.overview.topics_figure}
@@ -497,7 +517,7 @@ export function App() {
 
     if (overviewTab === "volume") {
       return (
-        <section className="panel">
+        <section className="surface-card">
           <PlotFigure
             emptyMessage="No hay suficientes datos para construir la vista de volumen diario."
             figure={dashboard?.overview.daily_volume_figure}
@@ -508,9 +528,9 @@ export function App() {
     }
 
     return (
-      <section className="panel stack-panel">
+      <section className="surface-card stack-panel">
         <article className="note-card">
-          <p className="panel-copy">
+          <p className="secondary-copy">
             Cómo leerlo: más rojo empeora NPS, más verde lo mejora. Usa el volumen para no sobre-interpretar días con pocas respuestas.
           </p>
         </article>
@@ -526,8 +546,8 @@ export function App() {
   function renderNpsSection() {
     return (
       <>
-        <section className="panel">
-          <div className="panel-heading panel-heading-inline">
+        <section className="surface-card stack-panel">
+          <div className="section-heading section-heading-inline">
             <div>
               <p className="eyebrow">Resumen ejecutivo</p>
               <h2>{dashboard?.context_label || "Periodo seleccionado"}</h2>
@@ -535,28 +555,27 @@ export function App() {
             <button
               className="secondary-button"
               data-testid="reprocess-button"
-              onClick={() => {
-                void handleReprocess();
-              }}
+              onClick={() => void handleReprocess()}
               type="button"
             >
               {isMutating ? "Reprocesando..." : "Reprocesar agregados"}
             </button>
           </div>
-          <div className="kpi-grid">
-            <article className="kpi-card">
+
+          <div className="metric-grid">
+            <article className="metric-card">
               <span>Muestras</span>
               <strong>{dashboard?.kpis.samples?.toLocaleString("es-ES") || "0"}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>NPS medio (0-10)</span>
               <strong>{formatNumber(dashboard?.kpis.nps_average, 2)}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>Detractores (≤6)</span>
               <strong>{formatPercent(dashboard?.kpis.detractor_rate)}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>Promotores (≥9)</span>
               <strong>{formatPercent(dashboard?.kpis.promoter_rate)}</strong>
             </article>
@@ -573,8 +592,8 @@ export function App() {
         ) : null}
 
         {npsTab === "comparison" ? (
-          <section className="panel stack-panel">
-            <div className="split-head">
+          <section className="surface-card stack-panel">
+            <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Comparativa</p>
                 <h2>{dashboard?.comparison.summary?.label_current || "Sin base comparativa"}</h2>
@@ -629,8 +648,8 @@ export function App() {
         ) : null}
 
         {npsTab === "cohorts" ? (
-          <section className="panel stack-panel">
-            <div className="split-head">
+          <section className="surface-card stack-panel">
+            <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Cohortes</p>
                 <h2>Bolsas de fricción</h2>
@@ -667,8 +686,8 @@ export function App() {
         ) : null}
 
         {npsTab === "gaps" ? (
-          <section className="panel stack-panel">
-            <div className="split-head">
+          <section className="surface-card stack-panel">
+            <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Brechas</p>
                 <h2>Dónde el NPS se separa del global</h2>
@@ -715,18 +734,15 @@ export function App() {
         ) : null}
 
         {npsTab === "opportunities" ? (
-          <section className="panel stack-panel">
-            <div className="split-head">
+          <section className="surface-card stack-panel">
+            <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Priorización</p>
                 <h2>Oportunidades priorizadas</h2>
               </div>
               <label className="inline-field">
                 <span>Dimensión</span>
-                <select
-                  onChange={(event) => setOpportunityDimension(event.target.value)}
-                  value={opportunityDimension}
-                >
+                <select onChange={(event) => setOpportunityDimension(event.target.value)} value={opportunityDimension}>
                   {(dashboard?.controls.dimensions || []).map((option) => (
                     <option key={option} value={option}>
                       {option}
@@ -780,35 +796,33 @@ export function App() {
   function renderLinkingSection() {
     if (!linking?.available) {
       return (
-        <section className="panel stack-panel">
-          <div className="panel-heading">
+        <section className="surface-card stack-panel">
+          <div className="section-heading">
             <div>
               <p className="eyebrow">Incidencias ↔ NPS</p>
               <h2>Base cruzada y readiness operativo</h2>
             </div>
           </div>
-
-          <div className="kpi-grid">
-            <article className="kpi-card">
+          <div className="metric-grid">
+            <article className="metric-card">
               <span>Dataset NPS</span>
               <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>Dataset Helix</span>
               <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>Última actualización NPS</span>
               <strong>{npsDatasetStatus.updated_at ? new Date(npsDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
             </article>
-            <article className="kpi-card">
+            <article className="metric-card">
               <span>Última actualización Helix</span>
               <strong>{helixDatasetStatus.updated_at ? new Date(helixDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
             </article>
           </div>
-
           <article className="note-card">
-            <p className="panel-copy">
+            <p className="secondary-copy">
               {linking?.empty_state ||
                 "El dataset Helix aún no está cargado para este contexto. La vista causal se activará cuando exista base cruzada suficiente."}
             </p>
@@ -818,28 +832,28 @@ export function App() {
     }
 
     return (
-      <section className="panel stack-panel">
-        <div className="panel-heading">
+      <section className="surface-card stack-panel">
+        <div className="section-heading">
           <div>
             <p className="eyebrow">Incidencias ↔ NPS</p>
             <h2>Lectura causal operativa</h2>
           </div>
         </div>
 
-        <div className="kpi-grid">
-          <article className="kpi-card">
+        <div className="metric-grid">
+          <article className="metric-card">
             <span>Respuestas analizadas</span>
             <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
           </article>
-          <article className="kpi-card">
+          <article className="metric-card">
             <span>Incidencias del periodo</span>
             <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
           </article>
-          <article className="kpi-card">
+          <article className="metric-card">
             <span>NPS en riesgo</span>
             <strong>{formatNumber(linking.kpis.nps_points_at_risk, 2)}</strong>
           </article>
-          <article className="kpi-card">
+          <article className="metric-card">
             <span>NPS recuperable</span>
             <strong>{formatNumber(linking.kpis.nps_points_recoverable, 2)}</strong>
           </article>
@@ -966,86 +980,257 @@ export function App() {
     );
   }
 
-  function renderDataSection() {
+  function renderInsightsArea() {
     return (
-      <section className="panel stack-panel">
-        <div className="split-head">
+      <section className="workspace-stack">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Área core</p>
+            <h2>Insights operativos</h2>
+            <p className="secondary-copy">
+              La navegación analítica se concentra en una única área de trabajo para reducir ruido y mantener continuidad cognitiva.
+            </p>
+          </div>
+        </div>
+        <NavigationTabs items={INSIGHT_TABS} onChange={setInsightTab} value={insightTab} />
+        {insightTab === "nps" ? renderNpsSection() : renderLinkingSection()}
+      </section>
+    );
+  }
+
+  function renderIngestArea() {
+    const selectedDuplicateCount = selectedUpload
+      ? selectedUpload.duplicate_in_file_rows + selectedUpload.duplicate_historical_rows
+      : 0;
+
+    return (
+      <section className="workspace-stack">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Dominio</p>
+            <h2>Ingesta y trazabilidad</h2>
+            <p className="secondary-copy">
+              Nueva carga, histórico y detalle de ejecución conviven en el mismo flujo operativo.
+            </p>
+          </div>
+        </div>
+
+        <div className="metric-grid">
+          <article className="metric-card">
+            <span>Dataset NPS</span>
+            <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Dataset Helix</span>
+            <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Cargas registradas</span>
+            <strong>{uploads.length.toLocaleString("es-ES")}</strong>
+          </article>
+          <article className="metric-card">
+            <span>Último detalle seleccionado</span>
+            <strong>{selectedUpload ? selectedDuplicateCount.toLocaleString("es-ES") : "—"}</strong>
+          </article>
+        </div>
+
+        <NavigationTabs items={INGEST_TABS} onChange={setIngestTab} value={ingestTab} />
+
+        {ingestTab === "new" ? (
+          <section className="ingest-grid">
+            <DatasetUploadCard
+              ctaLabel="Importar / actualizar NPS"
+              datasetStatus={npsDatasetStatus}
+              description="Importa el Excel NPS térmico dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
+              eyebrow="Carga NPS"
+              feedback={latestNpsUpload}
+              onSubmit={handleNpsUpload}
+              testId="upload-input"
+              title="Dataset NPS"
+              uploading={isMutating}
+            />
+            <DatasetUploadCard
+              ctaLabel="Importar / actualizar Helix"
+              datasetStatus={helixDatasetStatus}
+              description="Importa el extracto Helix y deja el dataset persistido por contexto para explotación causal posterior."
+              eyebrow="Carga Helix"
+              feedback={latestHelixUpload}
+              onSubmit={handleHelixUpload}
+              testId="helix-upload-input"
+              title="Dataset Helix"
+              uploading={isMutating}
+            />
+          </section>
+        ) : null}
+
+        {ingestTab === "history" ? (
+          <UploadsTable
+            activeUploadId={activeUploadId}
+            filter={historyFilter}
+            onFilterChange={setHistoryFilter}
+            onSelectUpload={(uploadId) => {
+              setActiveUploadId(uploadId);
+              setIngestTab("traceability");
+            }}
+            uploads={uploads}
+          />
+        ) : null}
+
+        {ingestTab === "traceability" ? (
+          <div className="traceability-layout">
+            <section className="surface-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Histórico</p>
+                  <h2>Selecciona una ejecución</h2>
+                </div>
+              </div>
+              <UploadsTable
+                activeUploadId={activeUploadId}
+                filter={historyFilter}
+                onFilterChange={setHistoryFilter}
+                onSelectUpload={setActiveUploadId}
+                uploads={uploads}
+              />
+            </section>
+
+            <aside className="surface-card traceability-aside">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Detalle de ejecución</p>
+                  <h2>Trazabilidad e issues</h2>
+                </div>
+              </div>
+              {!selectedUpload ? (
+                <p className="empty-state">Selecciona una carga para inspeccionar warnings, errores y schema drift.</p>
+              ) : (
+                <>
+                  <dl className="detail-list">
+                    <div>
+                      <dt>Fichero</dt>
+                      <dd data-testid="selected-upload-name">{selectedUpload.filename}</dd>
+                    </div>
+                    <div>
+                      <dt>Estado</dt>
+                      <dd>{selectedUpload.status}</dd>
+                    </div>
+                    <div>
+                      <dt>Insertados</dt>
+                      <dd>{selectedUpload.inserted_rows.toLocaleString("es-ES")}</dd>
+                    </div>
+                    <div>
+                      <dt>Actualizados</dt>
+                      <dd>{selectedUpload.updated_rows.toLocaleString("es-ES")}</dd>
+                    </div>
+                    <div>
+                      <dt>Duplicados prevenidos</dt>
+                      <dd>{selectedDuplicateCount.toLocaleString("es-ES")}</dd>
+                    </div>
+                    <div>
+                      <dt>Timestamp</dt>
+                      <dd>{new Date(selectedUpload.uploaded_at).toLocaleString("es-ES")}</dd>
+                    </div>
+                  </dl>
+                  <IssueList
+                    emptyMessage="La carga no generó avisos ni errores."
+                    issues={selectedUpload.issues}
+                    testId="selected-issues-list"
+                  />
+                </>
+              )}
+            </aside>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderDataArea() {
+    return (
+      <section className="workspace-stack">
+        <div className="section-heading section-heading-inline">
           <div>
             <p className="eyebrow">Datos</p>
             <h2>Exploración tabular</h2>
+            <p className="secondary-copy">Vista tabular paginada para inspección directa de datasets persistidos.</p>
           </div>
-          <div className="inline-actions">
-            <label className="inline-field">
-              <span>Muestra</span>
-              <select
-                onChange={(event) => {
-                  setTableLimit(Number(event.target.value));
-                  setTableOffset(0);
-                }}
-                value={tableLimit}
-              >
-                {SAMPLE_SIZES.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="inline-field">
+            <span>Muestra</span>
+            <select
+              onChange={(event) => {
+                setTableLimit(Number(event.target.value));
+                setTableOffset(0);
+              }}
+              value={tableLimit}
+            >
+              {SAMPLE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        <NavigationTabs compact items={DATA_TABS} onChange={(value) => {
-          setDataTab(value as "nps" | "helix");
-          setTableOffset(0);
-        }} value={dataTab} />
+        <NavigationTabs
+          compact
+          items={DATA_TABS}
+          onChange={(value) => {
+            setDataTab(value as "nps" | "helix");
+            setTableOffset(0);
+          }}
+          value={dataTab}
+        />
 
-        <div className="table-meta">
-          <span>Filas: {datasetTable?.total_rows?.toLocaleString("es-ES") || "0"}</span>
-          <span>Columnas: {datasetTable?.columns.length || 0}</span>
-        </div>
+        <section className="surface-card stack-panel">
+          <div className="table-meta">
+            <span>Filas: {datasetTable?.total_rows?.toLocaleString("es-ES") || "0"}</span>
+            <span>Columnas: {datasetTable?.columns.length || 0}</span>
+          </div>
 
-        <div className="table-shell">
-          <table className="data-table" data-testid="data-table">
-            <thead>
-              <tr>
-                {(datasetTable?.columns || []).map((column) => (
-                  <th key={column}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(datasetTable?.rows || []).map((row, index) => (
-                <tr key={`row-${index}`}>
+          <div className="table-shell">
+            <table className="data-table" data-testid="data-table">
+              <thead>
+                <tr>
                   {(datasetTable?.columns || []).map((column) => (
-                    <td key={`${index}-${column}`}>{String(row[column] ?? "")}</td>
+                    <th key={column}>{column}</th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(datasetTable?.rows || []).map((row, index) => (
+                  <tr key={`row-${index}`}>
+                    {(datasetTable?.columns || []).map((column) => (
+                      <td key={`${index}-${column}`}>{String(row[column] ?? "")}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="pager">
-          <button
-            className="secondary-button"
-            disabled={tableOffset === 0}
-            onClick={() => setTableOffset((current) => Math.max(0, current - tableLimit))}
-            type="button"
-          >
-            Anterior
-          </button>
-          <span>
-            {datasetTable?.offset || 0}-{(datasetTable?.offset || 0) + (datasetTable?.rows.length || 0)} / {datasetTable?.total_rows || 0}
-          </span>
-          <button
-            className="secondary-button"
-            disabled={!datasetTable?.has_more}
-            onClick={() => setTableOffset((current) => current + tableLimit)}
-            type="button"
-          >
-            Siguiente
-          </button>
-        </div>
+          <div className="pager">
+            <button
+              className="secondary-button"
+              disabled={tableOffset === 0}
+              onClick={() => setTableOffset((current) => Math.max(0, current - tableLimit))}
+              type="button"
+            >
+              Anterior
+            </button>
+            <span>
+              {datasetTable?.offset || 0}-{(datasetTable?.offset || 0) + (datasetTable?.rows.length || 0)} / {datasetTable?.total_rows || 0}
+            </span>
+            <button
+              className="secondary-button"
+              disabled={!datasetTable?.has_more}
+              onClick={() => setTableOffset((current) => current + tableLimit)}
+              type="button"
+            >
+              Siguiente
+            </button>
+          </div>
+        </section>
       </section>
     );
   }
@@ -1053,151 +1238,52 @@ export function App() {
   return (
     <>
       <main className="app-shell">
-        <aside className="sidebar">
-          <section className="panel sidebar-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Contexto</p>
-                <h2>Filtros globales</h2>
-              </div>
-            </div>
-            <div className="field-grid">
-              <label>
-                <span>Service origin</span>
-                <select onChange={(event) => setServiceOrigin(event.target.value)} value={serviceOrigin}>
-                  {(config?.service_origins || []).map((origin) => (
-                    <option key={origin} value={origin}>
-                      {origin}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Service origin N1</span>
-                <select onChange={(event) => setServiceOriginN1(event.target.value)} value={serviceOriginN1}>
-                  {n1Options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Service origin N2</span>
-                <input
-                  onChange={(event) => setServiceOriginN2(event.target.value)}
-                  placeholder="Opcional"
-                  value={serviceOriginN2}
-                />
-              </label>
-              <label>
-                <span>Año</span>
-                <select onChange={(event) => setPopYear(event.target.value)} value={popYear}>
-                  {(config?.available_years || ["Todos"]).map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Mes</span>
-                <select onChange={(event) => setPopMonth(event.target.value)} value={popMonth}>
-                  {monthOptions.map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Grupo</span>
-                <select onChange={(event) => setNpsGroup(event.target.value)} value={npsGroup}>
-                  {(config?.nps_groups || ["Todos"]).map((group) => (
-                    <option key={group} value={group}>
-                      {group}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </section>
+        <aside className="app-sidebar">
+          <div className="brand-card">
+            <p className="eyebrow">BBVA Experience</p>
+            <h1>Analisis del NPS Térmico y causalidad con incidencias de clientes.</h1>
+            <p className="secondary-copy">
+              Producto desacoplado con navegación más clara, ingesta estructurada y sistema visual consistente.
+            </p>
+          </div>
 
-          <DatasetUploadCard
-            ctaLabel="Importar / actualizar NPS"
-            datasetStatus={npsDatasetStatus}
-            description="Importa el Excel NPS térmico dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
-            eyebrow="Carga NPS"
-            feedback={latestNpsUpload}
-            onSubmit={handleNpsUpload}
-            testId="upload-input"
-            title="Dataset NPS"
-            uploading={isMutating}
+          <PrimaryNav
+            items={MAIN_AREAS}
+            onChange={(value) => startTransition(() => setMainArea(value))}
+            value={mainArea}
           />
 
-          <DatasetUploadCard
-            ctaLabel="Importar / actualizar Helix"
-            datasetStatus={helixDatasetStatus}
-            description="Importa el extracto Helix sin acoplar parsing ni validaciones al frontend. El dataset queda persistido por contexto para explotación posterior."
-            eyebrow="Carga Helix"
-            feedback={latestHelixUpload}
-            onSubmit={handleHelixUpload}
-            testId="helix-upload-input"
-            title="Dataset Helix"
-            uploading={isMutating}
-          />
-
-          <section className="panel sidebar-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Parámetros</p>
-                <h2>Umbrales analíticos</h2>
-              </div>
-            </div>
-            <div className="field-grid">
-              <label>
-                <span>Min N oportunidades</span>
-                <input
-                  min={10}
-                  onChange={(event) => setMinN(Number(event.target.value))}
-                  type="number"
-                  value={minN}
-                />
-              </label>
-              <label>
-                <span>Min N comparativas</span>
-                <input
-                  min={10}
-                  onChange={(event) => setMinNCross(Number(event.target.value))}
-                  type="number"
-                  value={minNCross}
-                />
-              </label>
+          <section className="sidebar-summary-card">
+            <p className="eyebrow">Contexto activo</p>
+            <div className="pill-row">
+              {contextPills.map((pill) => (
+                <span className="pill" key={pill}>
+                  {pill}
+                </span>
+              ))}
             </div>
           </section>
         </aside>
 
         <section className="workspace">
-          <header className="hero panel">
-            <div className="hero-copy">
+          <header className="topbar">
+            <div className="topbar-copy">
               <p className="eyebrow">NPS Lens</p>
-              <h1>Analisis del NPS Térmico y causalidad con incidencias de clientes.</h1>
-              <p className="hero-subtitle">
-                Migración desacoplada a React preservando contexto operativo, densidad informativa y reglas de negocio del flujo original en Streamlit.
-              </p>
-            </div>
-            <div className="hero-side">
-              <span className="status-pill">{isMutating ? "SINCRONIZANDO" : "OPERATIVO"}</span>
+              <h2>Orquestación operativa</h2>
               <p data-testid="status-copy">{statusCopy}</p>
-              <div className="pill-row">
-                {contextPills.map((pill) => (
-                  <span className="pill" key={pill}>
-                    {pill}
-                  </span>
-                ))}
-              </div>
+            </div>
+            <div className="topbar-actions">
+              <span className={`status-chip${isMutating ? " is-busy" : ""}`}>{isMutating ? "Sincronizando" : "Operativo"}</span>
               <button className="secondary-button" onClick={() => setReportOpen(true)} type="button">
                 Reporte
+              </button>
+              <button
+                aria-label="Abrir configuración global"
+                className="secondary-button"
+                onClick={() => setSettingsOpen(true)}
+                type="button"
+              >
+                Configuración
               </button>
             </div>
           </header>
@@ -1209,56 +1295,45 @@ export function App() {
             </section>
           ) : null}
 
-          <NavigationTabs items={MAIN_SECTIONS} onChange={(value) => startTransition(() => setMainSection(value))} value={mainSection} />
-
-          {mainSection === "nps" ? renderNpsSection() : null}
-          {mainSection === "linking" ? renderLinkingSection() : null}
-          {mainSection === "data" ? renderDataSection() : null}
-
-          <section className="traceability-grid">
-            <UploadsTable
-              activeUploadId={activeUploadId}
-              filter={historyFilter}
-              onFilterChange={setHistoryFilter}
-              onSelectUpload={setActiveUploadId}
-              uploads={uploads}
-            />
-
-            <aside className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Validación</p>
-                  <h2>Issues de ingesta</h2>
-                </div>
-              </div>
-              {!selectedUpload ? (
-                <p className="empty-state">
-                  Selecciona una carga para inspeccionar warnings, errores y schema drift.
-                </p>
-              ) : (
-                <>
-                  <div className="inline-feedback-header">
-                    <strong data-testid="selected-upload-name">{selectedUpload.filename}</strong>
-                    <span>{selectedUpload.status}</span>
-                  </div>
-                  <IssueList
-                    emptyMessage="La carga no generó avisos ni errores."
-                    issues={selectedUpload.issues}
-                    testId="selected-issues-list"
-                  />
-                </>
-              )}
-            </aside>
-          </section>
+          {mainArea === "insights" ? renderInsightsArea() : null}
+          {mainArea === "ingest" ? renderIngestArea() : null}
+          {mainArea === "data" ? renderDataArea() : null}
 
           {(dashboardLoading || datasetLoading) && !dashboard ? (
-            <section className="panel">
+            <section className="surface-card">
               <p className="empty-state">Preparando la vista operativa...</p>
             </section>
           ) : null}
         </section>
       </main>
 
+      <SettingsSheet
+        activeTab={settingsTab}
+        availableYears={config?.available_years || ["Todos"]}
+        minN={minN}
+        minNCross={minNCross}
+        monthOptions={monthOptions}
+        n1Options={n1Options}
+        npsGroups={config?.nps_groups || ["Todos"]}
+        onClose={() => setSettingsOpen(false)}
+        onTabChange={setSettingsTab}
+        open={settingsOpen}
+        popMonth={popMonth}
+        popYear={popYear}
+        serviceOrigin={serviceOrigin}
+        serviceOriginN1={serviceOriginN1}
+        serviceOriginN2={serviceOriginN2}
+        serviceOrigins={config?.service_origins || []}
+        setMinN={setMinN}
+        setMinNCross={setMinNCross}
+        setNpsGroup={setNpsGroup}
+        setPopMonth={setPopMonth}
+        setPopYear={setPopYear}
+        setServiceOrigin={setServiceOrigin}
+        setServiceOriginN1={setServiceOriginN1}
+        setServiceOriginN2={setServiceOriginN2}
+        npsGroup={npsGroup}
+      />
       <ReportModal onClose={() => setReportOpen(false)} open={reportOpen} report={dashboard?.report_markdown || ""} />
     </>
   );
