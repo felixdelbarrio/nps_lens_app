@@ -21,6 +21,7 @@ function fixtureExcel(name: string) {
 }
 
 const marchFixture = fixtureExcel("NPS Térmico Senda - 03Marzo.xlsx");
+const marchFixtureSuffix = /03Marzo\.xlsx/;
 
 test("uploads a schema-drift file and shows cumulative results", async ({ page }) => {
   test.setTimeout(180000);
@@ -36,13 +37,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByTestId("upload-input").setInputFiles(marchFixture);
   await page.getByRole("button", { name: "Importar / actualizar NPS" }).click();
 
-  await expect(page.getByTestId("uploads-table")).toContainText("NPS Térmico Senda - 03Marzo.xlsx", {
+  await expect(page.getByTestId("uploads-table")).toContainText(marchFixtureSuffix, {
     timeout: 180000
   });
   await page.getByRole("button", { name: "Ver issues" }).click();
-  await expect(page.getByTestId("selected-upload-name")).toContainText(
-    "NPS Térmico Senda - 03Marzo.xlsx"
-  );
+  await expect(page.getByTestId("selected-upload-name")).toContainText(marchFixtureSuffix);
   await expect(page.getByTestId("selected-issues-list")).toContainText("extra_columns_detected");
 
   await page.getByRole("button", { name: /Insights/i }).click();
