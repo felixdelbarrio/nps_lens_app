@@ -25,7 +25,12 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
-from nps_lens.settings import Settings, persist_service_origin_hierarchy, persist_ui_prefs
+from nps_lens.settings import (
+    Settings,
+    load_runtime_dotenv,
+    persist_service_origin_hierarchy,
+    persist_ui_prefs,
+)
 
 
 def _resolve_context(
@@ -63,6 +68,8 @@ def _optional_context(
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
+    if settings is None:
+        load_runtime_dotenv()
     app_settings = settings or Settings.from_env()
     repository = SqliteNpsRepository(app_settings.database_path)
     service = NpsService(repository=repository, settings=app_settings)

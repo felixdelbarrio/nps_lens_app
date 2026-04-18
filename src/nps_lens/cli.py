@@ -6,20 +6,19 @@ from typing import Optional
 
 import typer
 import uvicorn
-from dotenv import load_dotenv
 from rich import print as rprint
 
 from nps_lens.domain.models import UploadContext
 from nps_lens.logging import setup_logging
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
-from nps_lens.settings import Settings
+from nps_lens.settings import Settings, load_runtime_dotenv
 
 app = typer.Typer(add_completion=False)
 
 
 def _service() -> NpsService:
-    load_dotenv()
+    load_runtime_dotenv()
     settings = Settings.from_env()
     setup_logging(settings.log_level)
     return NpsService(SqliteNpsRepository(settings.database_path), settings)
@@ -30,6 +29,7 @@ def serve(
     host: Optional[str] = typer.Option(None, help="API host"),
     port: Optional[int] = typer.Option(None, help="API port"),
 ) -> None:
+    load_runtime_dotenv()
     settings = Settings.from_env()
     setup_logging(settings.log_level)
     uvicorn.run(

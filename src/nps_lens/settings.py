@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional
 
-from dotenv import set_key
+from dotenv import load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
 DEFAULT_UI_TOUCHPOINT_SOURCE = "domain_touchpoint"
@@ -160,6 +160,13 @@ def resolve_dotenv_path() -> Optional[Path]:
         if candidate.exists():
             return candidate
     return repo_root / ".env"
+
+
+def load_runtime_dotenv(*, override: bool = False) -> Optional[Path]:
+    dotenv_path = resolve_dotenv_path()
+    if dotenv_path and dotenv_path.exists():
+        load_dotenv(dotenv_path, override=override)
+    return dotenv_path
 
 
 def _to_float(value: str, default: float) -> float:
