@@ -48,9 +48,17 @@ export type DashboardConfig = {
   available_years: string[];
   available_months_by_year: Record<string, string[]>;
   nps_groups: string[];
+  causal_method_options: CausalMethodOption[];
   preferences: PreferencesPayload;
   nps_dataset: DatasetStatus;
   helix_dataset: DatasetStatus;
+};
+
+export type CausalMethodOption = {
+  value: string;
+  label: string;
+  summary: string;
+  flow: string;
 };
 
 export type PlotlyFigureSpec = {
@@ -186,6 +194,7 @@ export type PreferencesPayload = {
   pop_month: string;
   nps_group_choice: string;
   theme_mode: "light" | "dark";
+  downloads_path: string;
   touchpoint_source: string;
   min_similarity: number;
   max_days_apart: number;
@@ -298,14 +307,12 @@ export async function fetchDatasetTable(
 
 export async function uploadNpsFile(payload: {
   file: File;
-  sheetName: string;
   serviceOrigin: string;
   serviceOriginN1: string;
   serviceOriginN2: string;
 }): Promise<UploadResult> {
   const formData = new FormData();
   formData.set("file", payload.file);
-  formData.set("sheet_name", payload.sheetName);
   formData.set("service_origin", payload.serviceOrigin);
   formData.set("service_origin_n1", payload.serviceOriginN1);
   formData.set("service_origin_n2", payload.serviceOriginN2);
@@ -319,14 +326,12 @@ export async function uploadNpsFile(payload: {
 
 export async function uploadHelixFile(payload: {
   file: File;
-  sheetName: string;
   serviceOrigin: string;
   serviceOriginN1: string;
   serviceOriginN2: string;
 }): Promise<HelixUploadResult> {
   const formData = new FormData();
   formData.set("file", payload.file);
-  formData.set("sheet_name", payload.sheetName);
   formData.set("service_origin", payload.serviceOrigin);
   formData.set("service_origin_n1", payload.serviceOriginN1);
   formData.set("service_origin_n2", payload.serviceOriginN2);
@@ -387,7 +392,7 @@ export async function downloadExecutiveReport(params: {
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
-}): Promise<{ blob: Blob; fileName: string }> {
+}): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
   const response = await fetch(buildUrl("/api/dashboard/report/pptx", params));
   if (!response.ok) {
     const text = await response.text();
@@ -400,6 +405,7 @@ export async function downloadExecutiveReport(params: {
   }
   return {
     blob: await response.blob(),
-    fileName: parseContentDispositionFilename(response.headers.get("content-disposition"))
+    fileName: parseContentDispositionFilename(response.headers.get("content-disposition")),
+    savedPath: response.headers.get("x-nps-lens-saved-path") || ""
   };
 }

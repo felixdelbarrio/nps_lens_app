@@ -18,6 +18,10 @@ from nps_lens.analytics.hotspot_metrics import (
     select_best_business_axis_for_hotspots,
 )
 from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_MODE_FLOWS,
+    TOUCHPOINT_MODE_MENU_LABELS,
+    TOUCHPOINT_MODE_OPTIONS,
+    TOUCHPOINT_MODE_SUMMARIES,
     TOUCHPOINT_SOURCE_DOMAIN,
     build_incident_attribution_chains,
     load_executive_journey_catalog,
@@ -48,7 +52,7 @@ from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
-from nps_lens.settings import Settings
+from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     default_windows,
     driver_delta_table,
@@ -154,6 +158,15 @@ class DashboardService:
             "available_years": years,
             "available_months_by_year": months_by_year,
             "nps_groups": _DEFAULT_NPS_GROUPS,
+            "causal_method_options": [
+                {
+                    "value": option,
+                    "label": TOUCHPOINT_MODE_MENU_LABELS[option],
+                    "summary": TOUCHPOINT_MODE_SUMMARIES[option],
+                    "flow": TOUCHPOINT_MODE_FLOWS[option],
+                }
+                for option in TOUCHPOINT_MODE_OPTIONS
+            ],
             "preferences": preferences,
             "nps_dataset": nps_dataset,
             "helix_dataset": helix_dataset,
@@ -763,7 +776,7 @@ class DashboardService:
         period_start, period_end = self._period_bounds(history_df)
         overall_series = overall_daily if not overall_daily.empty else overall_weekly
 
-        return generate_business_review_ppt(
+        report = generate_business_review_ppt(
             service_origin=context.service_origin,
             service_origin_n1=context.service_origin_n1,
             service_origin_n2=context.service_origin_n2,
@@ -791,6 +804,23 @@ class DashboardService:
             touchpoint_source=active_touchpoint_source,
             executive_journey_catalog=executive_journey_catalog,
         )
+        saved_path = self._persist_report_copy(report)
+        return BusinessPptResult(
+            file_name=report.file_name,
+            content=report.content,
+            slide_count=report.slide_count,
+            saved_path=str(saved_path),
+        )
+
+    def _persist_report_copy(self, report: BusinessPptResult) -> Path:
+        # Desktop/webview downloads cannot target an arbitrary folder directly, so the API
+        # writes the canonical copy server-side into the configured downloads directory.
+        downloads_dir = Path(
+            normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
+        )
+        saved_path = downloads_dir / report.file_name
+        saved_path.write_bytes(report.content)
+        return saved_path
 
     def _build_business_report_md(
         self,

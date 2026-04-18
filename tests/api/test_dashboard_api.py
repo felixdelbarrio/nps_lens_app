@@ -90,6 +90,11 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert "03" in context_payload["available_months_by_year"]["2026"]
     assert context_payload["nps_dataset"]["available"] is True
     assert context_payload["nps_dataset"]["rows"] == upload["inserted_rows"]
+    assert "Downloads" in context_payload["preferences"]["downloads_path"]
+    assert any(
+        option["value"] == "executive_journeys"
+        for option in context_payload["causal_method_options"]
+    )
 
     dashboard_response = client.get(
         "/api/dashboard/nps",
@@ -255,6 +260,8 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
         == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     )
     assert "attachment;" in report_response.headers["content-disposition"]
+    assert report_response.headers["x-nps-lens-saved-path"].endswith(".pptx")
+    assert Path(report_response.headers["x-nps-lens-saved-path"]).exists()
 
     presentation = Presentation(BytesIO(report_response.content))
     assert len(presentation.slides) >= 8

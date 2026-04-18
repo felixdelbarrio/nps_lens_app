@@ -28,6 +28,7 @@ UI_PREF_ENV_KEYS = {
     "pop_month": "NPS_LENS_UI_POP_MONTH",
     "nps_group_choice": "NPS_LENS_UI_NPS_GROUP",
     "theme_mode": "NPS_LENS_UI_THEME_MODE",
+    "downloads_path": "NPS_LENS_UI_DOWNLOADS_PATH",
     "touchpoint_source": "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
@@ -191,6 +192,30 @@ def ui_pref(name: str, default: str = "") -> str:
     return str(value).strip() if value is not None else default
 
 
+def default_downloads_path() -> str:
+    return str((Path.home() / "Downloads").expanduser().resolve())
+
+
+def normalize_downloads_path(value: object, *, create: bool = False) -> str:
+    raw = str(value or "").strip()
+    candidate = Path(raw).expanduser() if raw else Path(default_downloads_path())
+    if not candidate.is_absolute():
+        candidate = (Path.home() / candidate).expanduser()
+    candidate = candidate.resolve()
+    if candidate.exists() and not candidate.is_dir():
+        raise ValueError("La ruta de descargas debe apuntar a un directorio.")
+    if create:
+        candidate.mkdir(parents=True, exist_ok=True)
+    return str(candidate)
+
+
+def safe_normalize_downloads_path(value: object, fallback: object) -> str:
+    try:
+        return normalize_downloads_path(value)
+    except (OSError, ValueError):
+        return normalize_downloads_path(fallback)
+
+
 def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
     if dotenv_path is None:
         return
@@ -202,7 +227,9 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
         env_key = UI_PREF_ENV_KEYS.get(str(name))
         if not env_key:
             continue
-        value = str(raw_value)
+        value = (
+            normalize_downloads_path(raw_value) if str(name) == "downloads_path" else str(raw_value)
+        )
         os.environ[env_key] = value
         set_key(str(dotenv_path), env_key, value, quote_mode="auto")
 
@@ -254,6 +281,7 @@ class Settings:
     service_origin_n2_map: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
     default_touchpoint_source: str = DEFAULT_UI_TOUCHPOINT_SOURCE
+    default_downloads_path: str = field(default_factory=default_downloads_path)
     default_min_similarity: float = DEFAULT_UI_MIN_SIMILARITY
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
     default_min_n_opportunities: int = DEFAULT_UI_MIN_N_OPPORTUNITIES
@@ -342,6 +370,10 @@ class Settings:
             os.getenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", DEFAULT_UI_TOUCHPOINT_SOURCE).strip()
             or DEFAULT_UI_TOUCHPOINT_SOURCE
         )
+        default_downloads_dir = safe_normalize_downloads_path(
+            os.getenv("NPS_LENS_UI_DOWNLOADS_PATH", default_downloads_path()),
+            default_downloads_path(),
+        )
         default_min_similarity = min(
             max(
                 _to_float(
@@ -401,6 +433,7 @@ class Settings:
             service_origin_n2_map=service_origin_n2_map,
             default_theme_mode=default_theme_mode,
             default_touchpoint_source=default_touchpoint_source,
+            default_downloads_path=default_downloads_dir,
             default_min_similarity=default_min_similarity,
             default_max_days_apart=default_max_days_apart,
             default_min_n_opportunities=default_min_n_opportunities,
@@ -436,6 +469,10 @@ class Settings:
         touchpoint_source = (
             ui_pref("touchpoint_source", self.default_touchpoint_source)
             or self.default_touchpoint_source
+        )
+        downloads_path = safe_normalize_downloads_path(
+            ui_pref("downloads_path", self.default_downloads_path),
+            self.default_downloads_path,
         )
         min_similarity = min(
             max(
@@ -484,6 +521,7 @@ class Settings:
             "nps_group_choice": ui_pref("nps_group_choice", DEFAULT_UI_NPS_GROUP)
             or DEFAULT_UI_NPS_GROUP,
             "theme_mode": theme_mode,
+            "downloads_path": downloads_path,
             "touchpoint_source": touchpoint_source,
             "min_similarity": min_similarity,
             "max_days_apart": max_days_apart,

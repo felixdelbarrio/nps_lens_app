@@ -12,7 +12,7 @@ type DatasetUploadCardProps = {
   ctaLabel: string;
   datasetStatus: DatasetStatus;
   uploading: boolean;
-  onSubmit: (payload: { file: File; sheetName: string }) => Promise<void>;
+  onSubmit: (payload: { file: File }) => Promise<void>;
   feedback: UploadFeedback;
   testId: string;
 };
@@ -29,7 +29,6 @@ export function DatasetUploadCard({
   testId
 }: DatasetUploadCardProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [sheetName, setSheetName] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -37,9 +36,8 @@ export function DatasetUploadCard({
     if (!file) {
       return;
     }
-    await onSubmit({ file, sheetName });
+    await onSubmit({ file });
     setFile(null);
-    setSheetName("");
     if (inputRef.current) {
       inputRef.current.value = "";
     }
@@ -76,14 +74,6 @@ export function DatasetUploadCard({
             data-testid={testId}
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             type="file"
-          />
-        </label>
-        <label>
-          <span>Sheet</span>
-          <input
-            onChange={(event) => setSheetName(event.target.value)}
-            placeholder="Opcional"
-            value={sheetName}
           />
         </label>
       </div>
