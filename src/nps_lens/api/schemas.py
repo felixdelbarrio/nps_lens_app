@@ -49,13 +49,43 @@ class SummaryResponse(BaseModel):
 class ContextOptionsResponse(BaseModel):
     default_service_origin: str
     default_service_origin_n1: str
+    default_service_origin_n2: str = ""
     service_origins: list[str]
     service_origin_n1_map: dict[str, list[str]]
+    service_origin_n2_values: list[str] = Field(default_factory=list)
+    service_origin_n2_map: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    service_origin_n2_options: list[str] = Field(default_factory=list)
     available_years: list[str] = Field(default_factory=list)
     available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
     nps_groups: list[str] = Field(default_factory=list)
+    preferences: dict[str, Any] = Field(default_factory=dict)
     nps_dataset: dict[str, Any] = Field(default_factory=dict)
     helix_dataset: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreferencesResponse(BaseModel):
+    service_origin: str
+    service_origin_n1: str
+    service_origin_n2: str = ""
+    pop_year: str = "Todos"
+    pop_month: str = "Todos"
+    nps_group_choice: str = "Todos"
+    theme_mode: str = "light"
+    touchpoint_source: str = "domain_touchpoint"
+    min_similarity: float = 0.25
+    max_days_apart: int = 10
+    min_n_opportunities: int = 200
+    min_n_cross_comparisons: int = 30
+
+
+class PreferencesUpdateRequest(PreferencesResponse):
+    pass
+
+
+class ServiceOriginHierarchyRequest(BaseModel):
+    service_origins: list[str] = Field(default_factory=list)
+    service_origin_n1_map: dict[str, list[str]] = Field(default_factory=dict)
+    service_origin_n2_map: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
 
 class HelixUploadResponse(BaseModel):

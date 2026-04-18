@@ -32,21 +32,72 @@
 
 :root {
   color-scheme: light;
-  --color-bg: #f7f8fa;
-  --color-surface: #ffffff;
-  --color-surface-subtle: #f2f5fa;
-  --color-surface-muted: #edf3ff;
-  --color-border: #d4dae2;
-  --color-border-strong: #cad1d8;
-  --color-text: #121212;
-  --color-text-secondary: #46536d;
-  --color-text-muted: #66728a;
-  --color-brand: #072146;
-  --color-brand-strong: #001391;
-  --color-brand-soft: #eaf3ff;
-  --color-success: #42a64c;
-  --color-warning: #ffe761;
-  --color-danger: #c30a0a;
+  --bbva-color-primary-accent-value-01-default: #85c8ff;
+  --bbva-color-primary-accent-value-01-pressed: #53a9ef;
+  --bbva-color-primary-accent-value-05-default: #ffe761;
+  --bbva-color-primary-accent-value-07-default: #ff5252;
+  --bbva-color-primary-bg-alternative-default: #ffffff;
+  --bbva-color-app-surface-default: #ffffff;
+  --bbva-color-app-surface-raised: #f7f8fa;
+  --bbva-color-app-chart-paper: #ffffff;
+  --bbva-color-app-chart-plot: #f7f8fa;
+  --bbva-color-app-chart-grid: #cad1d8;
+  --bbva-color-app-chart-zero-line: #adb8c2;
+  --bbva-color-app-table-bg: #ffffff;
+  --bbva-color-app-table-bg-alt: #f7f8fa;
+  --bbva-color-app-table-bg-hover: #edf3ff;
+  --bbva-color-app-table-header-bg: #f2f5fa;
+  --bbva-color-app-table-header-text: #46536d;
+  --bbva-color-app-table-border: #cad1d8;
+  --bbva-color-app-control-bg: #f7f8fa;
+  --bbva-color-app-control-bg-hover: #edf3ff;
+  --bbva-color-app-control-border: #cad1d8;
+  --bbva-color-app-control-text: #070e46;
+  --bbva-color-app-control-placeholder: #66728a;
+  --bbva-color-app-control-icon: #001391;
+  --bbva-color-app-control-menu-bg: #ffffff;
+  --bbva-color-app-control-menu-item-hover: #edf3ff;
+  --bbva-color-app-control-menu-item-selected: #dbeafe;
+  --bbva-color-primary-bg-action-default: #001391;
+  --bbva-color-primary-bg-action-active: #070e46;
+  --bbva-color-primary-bg-selection-default: #85c8ff;
+  --bbva-color-primary-bg-bar: #cad1d8;
+  --bbva-color-primary-text-primary: #070e46;
+  --bbva-color-primary-text-disabled: #adb8c2;
+  --bbva-color-primary-text-main-inverse-default: #ffffff;
+  --bbva-color-primary-text-action-default: #001391;
+  --bbva-color-app-text-on-accent: #070e46;
+  --bbva-color-primary-bg-success: #42a64c;
+  --bbva-color-primary-bg-warning: #ffe761;
+  --bbva-color-primary-bg-alert: #c30a0a;
+  --color-bg: var(--bbva-color-primary-bg-alternative-default);
+  --color-surface: var(--bbva-color-app-surface-default);
+  --color-surface-subtle: var(--bbva-color-app-surface-raised);
+  --color-surface-muted: var(--bbva-color-app-table-bg-hover);
+  --color-border: color-mix(in srgb, var(--bbva-color-app-table-border) 88%, transparent);
+  --color-border-strong: var(--bbva-color-app-table-border);
+  --color-text: var(--bbva-color-primary-text-primary);
+  --color-text-secondary: var(--bbva-color-app-table-header-text);
+  --color-text-muted: var(--bbva-color-app-control-placeholder);
+  --color-brand: var(--bbva-color-primary-text-action-default);
+  --color-brand-strong: var(--bbva-color-primary-bg-action-default);
+  --color-brand-soft: var(--bbva-color-app-control-menu-item-selected);
+  --color-action-text: var(--bbva-color-primary-text-main-inverse-default);
+  --color-success: var(--bbva-color-primary-bg-success);
+  --color-warning: var(--bbva-color-primary-bg-warning);
+  --color-danger: var(--bbva-color-primary-bg-alert);
+  --color-success-surface: color-mix(in srgb, var(--color-success) 14%, transparent);
+  --color-success-border: color-mix(in srgb, var(--color-success) 24%, transparent);
+  --color-success-text: color-mix(in srgb, var(--color-success) 78%, var(--color-text) 22%);
+  --color-warning-surface: color-mix(in srgb, var(--color-warning) 28%, transparent);
+  --color-warning-border: color-mix(in srgb, var(--color-warning) 48%, transparent);
+  --color-info-surface: color-mix(in srgb, var(--color-brand-strong) 8%, transparent);
+  --color-info-border: color-mix(in srgb, var(--color-brand-strong) 18%, transparent);
+  --color-danger-surface: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  --color-overlay: color-mix(in srgb, var(--color-brand-strong) 18%, transparent);
+  --color-hero-start: color-mix(in srgb, var(--color-brand-soft) 72%, var(--color-surface) 28%);
+  --color-hero-end: color-mix(in srgb, var(--color-surface-subtle) 72%, var(--color-bg) 28%);
   --font-ui: "Benton Sans BBVA", "Segoe UI", sans-serif;
   --font-display: "Tiempos Headline", "Georgia", serif;
   --font-size-caption: 12px;
@@ -69,7 +120,49 @@
   --space-8: 32px;
   --space-10: 40px;
   --layout-max: 1440px;
-  --shadow-soft: 0 8px 24px rgba(7, 33, 70, 0.06);
+  --shadow-soft: 0 8px 24px color-mix(in srgb, var(--bbva-color-primary-bg-action-default) 8%, transparent);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bbva-color-primary-accent-value-01-default: #85c8ff;
+  --bbva-color-primary-accent-value-01-pressed: #53a9ef;
+  --bbva-color-primary-accent-value-05-default: #ffe761;
+  --bbva-color-primary-accent-value-07-default: #ff5252;
+  --bbva-color-primary-bg-alternative-default: #11192d;
+  --bbva-color-app-surface-default: #11192d;
+  --bbva-color-app-surface-raised: #16203a;
+  --bbva-color-app-chart-paper: #11192d;
+  --bbva-color-app-chart-plot: #16203a;
+  --bbva-color-app-chart-grid: #3a4761;
+  --bbva-color-app-chart-zero-line: #4a5975;
+  --bbva-color-app-table-bg: #11192d;
+  --bbva-color-app-table-bg-alt: #16203a;
+  --bbva-color-app-table-bg-hover: #1f2c49;
+  --bbva-color-app-table-header-bg: #1b2844;
+  --bbva-color-app-table-header-text: #c9d4ef;
+  --bbva-color-app-table-border: #334056;
+  --bbva-color-app-control-bg: #16203a;
+  --bbva-color-app-control-bg-hover: #1f2c49;
+  --bbva-color-app-control-border: #3a4761;
+  --bbva-color-app-control-text: #ffffff;
+  --bbva-color-app-control-placeholder: #c9d4ef;
+  --bbva-color-app-control-icon: #85c8ff;
+  --bbva-color-app-control-menu-bg: #16203a;
+  --bbva-color-app-control-menu-item-hover: #233455;
+  --bbva-color-app-control-menu-item-selected: #2b3f66;
+  --bbva-color-primary-bg-action-default: #001391;
+  --bbva-color-primary-bg-action-active: #070e46;
+  --bbva-color-primary-bg-selection-default: #334056;
+  --bbva-color-primary-bg-bar: #334056;
+  --bbva-color-primary-text-primary: #ffffff;
+  --bbva-color-primary-text-disabled: #46536d;
+  --bbva-color-primary-text-main-inverse-default: #ffffff;
+  --bbva-color-primary-text-action-default: #85c8ff;
+  --bbva-color-app-text-on-accent: #070e46;
+  --bbva-color-primary-bg-success: #42a64c;
+  --bbva-color-primary-bg-warning: #ffe761;
+  --bbva-color-primary-bg-alert: #c30a0a;
 }
 
 * {
@@ -85,6 +178,9 @@ body,
 body {
   margin: 0;
   background: var(--color-bg);
+  background-image:
+    radial-gradient(circle at top right, var(--color-hero-start), transparent 36%),
+    linear-gradient(180deg, var(--color-hero-end), transparent 28%);
   color: var(--color-text);
   font-family: var(--font-ui);
   font-size: var(--font-size-body);
@@ -110,7 +206,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgba(0, 19, 145, 0.22);
+  outline: 3px solid color-mix(in srgb, var(--color-brand-strong) 22%, transparent);
   outline-offset: 2px;
 }
 
@@ -150,6 +246,7 @@ textarea:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-container);
   box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(14px);
 }
 
 .brand-card,
@@ -172,6 +269,12 @@ textarea:focus-visible {
   font-size: clamp(32px, 3vw, var(--font-size-hero));
   line-height: var(--line-height-hero);
   color: var(--color-brand);
+}
+
+.brand-card {
+  background:
+    linear-gradient(135deg, var(--color-hero-start), transparent 58%),
+    linear-gradient(180deg, var(--color-surface), var(--color-surface));
 }
 
 .topbar h2,
@@ -314,8 +417,9 @@ ul {
   min-height: 40px;
   padding: 0 14px;
   border-radius: 999px;
-  background: rgba(66, 166, 76, 0.12);
-  color: #245d2b;
+  border: 1px solid var(--color-success-border);
+  background: var(--color-success-surface);
+  color: var(--color-success-text);
   font-size: var(--font-size-caption);
   font-weight: 700;
   text-transform: uppercase;
@@ -323,7 +427,8 @@ ul {
 }
 
 .status-chip.is-busy {
-  background: rgba(0, 19, 145, 0.1);
+  border-color: var(--color-info-border);
+  background: var(--color-info-surface);
   color: var(--color-brand-strong);
 }
 
@@ -382,6 +487,40 @@ ul {
 }
 
 .nav-tabs button.is-active {
+  border-color: var(--color-brand-strong);
+  background: var(--color-brand-soft);
+  color: var(--color-brand-strong);
+}
+
+.choice-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.choice-chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.choice-chip:hover {
+  background: var(--color-surface-muted);
+  transform: translateY(-1px);
+}
+
+.choice-chip.is-selected,
+.choice-chip.is-static {
   border-color: var(--color-brand-strong);
   background: var(--color-brand-soft);
   color: var(--color-brand-strong);
@@ -488,7 +627,7 @@ input::placeholder {
 .primary-button {
   background: var(--color-brand-strong);
   border-color: var(--color-brand-strong);
-  color: #ffffff;
+  color: var(--color-action-text);
 }
 
 .secondary-button,
@@ -530,21 +669,21 @@ input::placeholder {
 }
 
 .dataset-status-active {
-  background: rgba(66, 166, 76, 0.12);
-  border-color: rgba(66, 166, 76, 0.24);
-  color: #245d2b;
+  background: var(--color-success-surface);
+  border-color: var(--color-success-border);
+  color: var(--color-success-text);
 }
 
 .dataset-status-completed {
-  background: rgba(0, 19, 145, 0.08);
-  border-color: rgba(0, 19, 145, 0.18);
+  background: var(--color-info-surface);
+  border-color: var(--color-info-border);
   color: var(--color-brand-strong);
 }
 
 .dataset-status-missing,
 .dataset-status-failed {
-  background: rgba(195, 10, 10, 0.08);
-  border-color: rgba(195, 10, 10, 0.2);
+  background: var(--color-danger-surface);
+  border-color: var(--color-danger-border);
   color: var(--color-danger);
 }
 
@@ -591,18 +730,18 @@ input::placeholder {
 }
 
 .issue-warn {
-  border-color: rgba(255, 231, 97, 0.5);
-  background: rgba(255, 231, 97, 0.24);
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-surface);
 }
 
 .issue-error {
-  border-color: rgba(195, 10, 10, 0.25);
-  background: rgba(195, 10, 10, 0.05);
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-surface);
 }
 
 .issue-info {
-  border-color: rgba(0, 19, 145, 0.16);
-  background: rgba(0, 19, 145, 0.04);
+  border-color: var(--color-info-border);
+  background: var(--color-info-surface);
 }
 
 .delta-strip {
@@ -651,7 +790,7 @@ input::placeholder {
 }
 
 .data-table tbody tr.is-active {
-  background: rgba(0, 19, 145, 0.06);
+  background: var(--color-info-surface);
 }
 
 .data-table td strong {
@@ -733,8 +872,8 @@ input::placeholder {
 .error-banner {
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-container);
-  background: rgba(195, 10, 10, 0.06);
-  border: 1px solid rgba(195, 10, 10, 0.15);
+  background: var(--color-danger-surface);
+  border: 1px solid var(--color-danger-border);
   color: var(--color-danger);
 }
 
@@ -742,7 +881,7 @@ input::placeholder {
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(7, 33, 70, 0.2);
+  background: var(--color-overlay);
   display: grid;
   place-items: center;
   padding: var(--space-6);
@@ -775,6 +914,25 @@ input::placeholder {
   gap: var(--space-4);
 }
 
+.context-strip-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.context-strip-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--color-brand-soft), transparent 28%);
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.context-strip-card > * {
+  position: relative;
+  z-index: 1;
+}
+
 .settings-sheet-header {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -798,6 +956,59 @@ input::placeholder {
   overflow: auto;
 }
 
+.maintenance-shell,
+.maintenance-column {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.maintenance-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.maintenance-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.chip-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.editable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chip-remove {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  line-height: 1;
+}
+
+.inline-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.panel-heading-inline {
+  align-items: center;
+}
+
+.sidebar-panel {
+  align-content: start;
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -810,7 +1021,8 @@ input::placeholder {
   .traceability-layout,
   .ingest-grid,
   .metric-grid,
-  .kpi-grid {
+  .kpi-grid,
+  .maintenance-layout {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -843,7 +1055,9 @@ input::placeholder {
   .kpi-grid,
   .ingest-grid,
   .traceability-layout,
-  .field-grid {
+  .field-grid,
+  .maintenance-layout,
+  .inline-editor {
     grid-template-columns: 1fr;
   }
 

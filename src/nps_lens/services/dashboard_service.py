@@ -4,13 +4,25 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional, cast
 
 import pandas as pd
 
 from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.hotspot_metrics import (
+    align_hotspot_evidence_to_axis,
+    build_hotspot_evidence,
+    build_hotspot_timeline,
+    select_best_business_axis_for_hotspots,
+)
+from nps_lens.analytics.incident_attribution import (
+    TOUCHPOINT_SOURCE_DOMAIN,
+    build_incident_attribution_chains,
+    load_executive_journey_catalog,
+    summarize_attribution_chains,
+)
 from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
@@ -21,6 +33,8 @@ from nps_lens.analytics.nps_helix_link import (
     can_use_daily_resample,
     causal_rank_by_topic,
     daily_aggregates,
+    detect_detractor_changepoints_with_bootstrap,
+    estimate_best_lag_by_topic,
     estimate_best_lag_days_by_topic,
     link_incidents_to_nps_topics,
     weekly_aggregates,
@@ -32,6 +46,7 @@ from nps_lens.core.store import DatasetContext, HelixIncidentStore
 from nps_lens.domain.models import UploadContext
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.settings import Settings
 from nps_lens.ui.business import (
@@ -57,6 +72,7 @@ from nps_lens.ui.charts import (
 )
 from nps_lens.ui.narratives import (
     build_executive_story,
+    build_ppt_8slide_script,
     compare_periods,
     executive_summary,
     explain_opportunities,
@@ -83,7 +99,6 @@ class DashboardService:
         self.repository = repository
         self.settings = settings
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
-        self.theme: Theme = get_theme("light")
         self.logger = logging.getLogger(__name__)
 
     def resolve_context(
@@ -93,18 +108,26 @@ class DashboardService:
         service_origin_n1: Optional[str] = None,
         service_origin_n2: Optional[str] = None,
     ) -> UploadContext:
-        origin = service_origin or self.settings.default_service_origin
-        origin_n1 = service_origin_n1 or self.settings.default_service_origin_n1
+        preferences = self.settings.ui_defaults()
+        origin = str(
+            service_origin or preferences["service_origin"] or self.settings.default_service_origin
+        )
+        origin_n1 = str(
+            service_origin_n1
+            or preferences["service_origin_n1"]
+            or self.settings.default_service_origin_n1
+        )
         return UploadContext(
             service_origin=origin,
             service_origin_n1=origin_n1,
-            service_origin_n2=service_origin_n2 or "",
+            service_origin_n2=str(service_origin_n2 or preferences["service_origin_n2"] or ""),
         )
 
     def context_options(
         self,
         context: UploadContext,
     ) -> dict[str, object]:
+        preferences = self.settings.ui_defaults()
         records = self.repository.load_records_df(context)
         years, months_by_year = self._available_periods(records)
         latest_upload = self.repository.list_uploads(limit=1, context=context)
@@ -117,13 +140,21 @@ class DashboardService:
         }
         helix_dataset = self._helix_dataset_status(context)
         return {
-            "default_service_origin": self.settings.default_service_origin,
-            "default_service_origin_n1": self.settings.default_service_origin_n1,
+            "default_service_origin": preferences["service_origin"],
+            "default_service_origin_n1": preferences["service_origin_n1"],
+            "default_service_origin_n2": preferences["service_origin_n2"],
             "service_origins": self.settings.allowed_service_origins,
             "service_origin_n1_map": self.settings.allowed_service_origin_n1,
+            "service_origin_n2_values": self.settings.service_origin_n2_values,
+            "service_origin_n2_map": self.settings.service_origin_n2_map,
+            "service_origin_n2_options": self.settings.service_origin_n2_options(
+                context.service_origin,
+                context.service_origin_n1,
+            ),
             "available_years": years,
             "available_months_by_year": months_by_year,
             "nps_groups": _DEFAULT_NPS_GROUPS,
+            "preferences": preferences,
             "nps_dataset": nps_dataset,
             "helix_dataset": helix_dataset,
         }
@@ -202,7 +233,9 @@ class DashboardService:
         cohort_col: str = "Canal",
         min_n: int = 200,
         min_n_cross: int = 30,
+        theme_mode: str = "light",
     ) -> dict[str, object]:
+        theme = get_theme(theme_mode)
         all_records = self.repository.load_records_df(context)
         history_df = filter_by_nps_group(all_records.copy(), nps_group)
         current_df = self._apply_population_filters(history_df.copy(), pop_year, pop_month)
@@ -254,7 +287,7 @@ class DashboardService:
                     "n_baseline": comparison_story.n_baseline,
                 },
                 "dimension": comparison_dimension,
-                "figure": self._serialize_figure(chart_driver_delta(delta_df, self.theme)),
+                "figure": self._serialize_figure(chart_driver_delta(delta_df, theme)),
                 "table": self._serialize_rows(delta_df.head(30)),
                 "has_data": not delta_df.empty,
             }
@@ -295,19 +328,17 @@ class DashboardService:
                 "promoter_rate": summary.promoter_rate,
             },
             "overview": {
-                "daily_kpis_figure": self._serialize_figure(
-                    chart_daily_kpis(current_df, self.theme)
-                ),
+                "daily_kpis_figure": self._serialize_figure(chart_daily_kpis(current_df, theme)),
                 "weekly_trend_figure": self._serialize_figure(
-                    chart_nps_trend(current_df, self.theme, freq="W")
+                    chart_nps_trend(current_df, theme, freq="W")
                 ),
-                "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, self.theme)),
+                "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                 "topics_table": self._serialize_rows(topics_df),
                 "daily_volume_figure": self._serialize_figure(
-                    chart_daily_volume(current_df, self.theme)
+                    chart_daily_volume(current_df, theme)
                 ),
                 "daily_mix_figure": self._serialize_figure(
-                    chart_daily_mix_business(current_df, self.theme)
+                    chart_daily_mix_business(current_df, theme)
                 ),
                 "insight_bullets": topics_bullets,
             },
@@ -318,7 +349,7 @@ class DashboardService:
                 "figure": self._serialize_figure(
                     chart_cohort_heatmap(
                         current_df,
-                        self.theme,
+                        theme,
                         row_dim=_COHORT_ROW_DIMENSIONS.get(cohort_row, "Palanca"),
                         col_dim=_COHORT_COLUMN_DIMENSIONS.get(cohort_col, "Canal"),
                         min_n=min_n_cross,
@@ -327,15 +358,13 @@ class DashboardService:
             },
             "gaps": {
                 "dimension": gap_dimension,
-                "figure": self._serialize_figure(chart_driver_bar(gap_stats, self.theme)),
+                "figure": self._serialize_figure(chart_driver_bar(gap_stats, theme)),
                 "table": self._serialize_rows(gap_stats.head(30)),
                 "has_data": not gap_stats.empty,
             },
             "opportunities": {
                 "dimension": opportunity_dimension,
-                "figure": self._serialize_figure(
-                    chart_opportunities_bar(opportunities_df, self.theme)
-                ),
+                "figure": self._serialize_figure(chart_opportunities_bar(opportunities_df, theme)),
                 "table": self._serialize_rows(opportunities_df.head(25)),
                 "bullets": opportunity_bullets,
                 "has_data": not opportunities_df.empty,
@@ -389,7 +418,11 @@ class DashboardService:
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
         nps_group: str = POP_ALL,
+        min_similarity: float = 0.25,
+        max_days_apart: int = 10,
+        theme_mode: str = "light",
     ) -> dict[str, object]:
+        theme = get_theme(theme_mode)
         nps_frame = self.repository.load_records_df(context)
         nps_slice = self._apply_population_filters(
             filter_by_nps_group(nps_frame.copy(), nps_group),
@@ -448,7 +481,12 @@ class DashboardService:
                 "top_topic": "",
             }
 
-        assignments_df, links_df = link_incidents_to_nps_topics(focus_df, helix_slice)
+        assignments_df, links_df = link_incidents_to_nps_topics(
+            focus_df,
+            helix_slice,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+        )
         overall_weekly, by_topic_weekly = weekly_aggregates(
             nps_slice,
             helix_slice,
@@ -526,22 +564,23 @@ class DashboardService:
                 self._build_linking_overview_figure(
                     overall_daily if not overall_daily.empty else overall_weekly,
                     focus_label=focus_label,
+                    theme=theme,
                 )
             ),
             "priority_figure": self._serialize_figure(
-                chart_incident_priority_matrix(rationale_df, self.theme)
+                chart_incident_priority_matrix(rationale_df, theme)
             ),
             "risk_recovery_figure": self._serialize_figure(
-                chart_incident_risk_recovery(rationale_df, self.theme)
+                chart_incident_risk_recovery(rationale_df, theme)
             ),
             "heatmap_figure": self._serialize_figure(
-                chart_case_incident_heatmap(by_topic_daily, self.theme, topic=top_topic)
+                chart_case_incident_heatmap(by_topic_daily, theme, topic=top_topic)
             ),
             "lag_figure": self._serialize_figure(
                 chart_case_lag_days(
                     by_topic_daily,
                     lag_days,
-                    self.theme,
+                    theme,
                     topic=top_topic,
                     focus_name=focus_label,
                 )
@@ -553,6 +592,317 @@ class DashboardService:
             "journey_routes_table": self._serialize_rows(routes_df.head(20)),
             "top_topic": top_topic,
         }
+
+    def generate_ppt_report(
+        self,
+        *,
+        context: UploadContext,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        nps_group: str = POP_ALL,
+        min_n: int = 200,
+        min_similarity: float = 0.25,
+        max_days_apart: int = 10,
+        touchpoint_source: str = "",
+    ) -> BusinessPptResult:
+        history_df = filter_by_nps_group(self.repository.load_records_df(context).copy(), nps_group)
+        if history_df.empty:
+            raise ValueError("No hay datos NPS para el contexto seleccionado.")
+
+        helix_history = self._load_helix_df(context)
+        if helix_history.empty:
+            raise ValueError(
+                "No hay incidencias Helix cargadas para el contexto actual. La PPT requiere base cruzada."
+            )
+
+        current_df = self._apply_population_filters(history_df.copy(), pop_year, pop_month)
+        if current_df.empty:
+            raise ValueError(
+                "El periodo filtrado no tiene respuestas NPS. Ajusta año, mes o grupo antes de generar la PPT."
+            )
+
+        focus_group, _ = self._linking_focus_group(nps_group)
+        focus_name = self._focus_name(focus_group)
+        focus_history = history_df.loc[focus_mask(history_df, focus_group=focus_group)].copy()
+        if focus_history.empty:
+            raise ValueError(
+                "El grupo focal seleccionado no tiene suficientes respuestas para construir el racional causal."
+            )
+
+        active_touchpoint_source = str(
+            touchpoint_source
+            or self.settings.ui_defaults()["touchpoint_source"]
+            or TOUCHPOINT_SOURCE_DOMAIN
+        ).strip()
+
+        assignments_df, links_df = link_incidents_to_nps_topics(
+            focus_history,
+            helix_history,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+        )
+        if links_df.empty:
+            raise ValueError(
+                "No se encontraron vínculos defendibles entre Helix y VoC con los umbrales actuales."
+            )
+
+        overall_weekly, by_topic_weekly = weekly_aggregates(
+            history_df,
+            helix_history,
+            assignments_df,
+            focus_group=focus_group,
+        )
+        overall_daily, by_topic_daily = daily_aggregates(
+            history_df,
+            helix_history,
+            assignments_df,
+            focus_group=focus_group,
+        )
+        overall_daily = self._attach_daily_nps_mean(overall_daily, history_df)
+
+        rationale_rank = causal_rank_by_topic(by_topic_weekly)
+        lag_weeks = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
+        changepoints = detect_detractor_changepoints_with_bootstrap(
+            by_topic_weekly,
+            pen=6.0,
+            n_boot=200,
+            block_size=2,
+            tol_periods=1,
+        )
+        ranking_df = (
+            rationale_rank.merge(changepoints, on="nps_topic", how="left").merge(
+                lag_weeks, on="nps_topic", how="left"
+            )
+            if not rationale_rank.empty
+            else rationale_rank
+        )
+
+        rationale_df = build_incident_nps_rationale(
+            by_topic_weekly,
+            focus_group=focus_group,
+            rank_df=ranking_df if not ranking_df.empty else rationale_rank,
+            min_topic_responses=80,
+            recovery_factor=0.65,
+        )
+        if rationale_df.empty:
+            raise ValueError(
+                "No hay señal suficiente para construir el racional causal con el contexto actual."
+            )
+
+        rationale_summary = summarize_incident_nps_rationale(rationale_df)
+        lag_days = (
+            estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
+            if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45)
+            else pd.DataFrame()
+        )
+
+        executive_journey_catalog = load_executive_journey_catalog(
+            self.settings.knowledge_dir,
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+        )
+        attribution_df = build_incident_attribution_chains(
+            links_df,
+            focus_history,
+            helix_history,
+            rationale_df=rationale_df,
+            top_k=0,
+            max_incident_examples=5,
+            max_comment_examples=2,
+            min_links_per_topic=1,
+            touchpoint_source=active_touchpoint_source,
+            executive_journey_catalog=executive_journey_catalog,
+        )
+        attribution_df = self._select_top_chain_rows(attribution_df)
+        attribution_summary = summarize_attribution_chains(attribution_df)
+
+        business_story_md = self._build_business_report_md(
+            current_df=current_df,
+            history_df=history_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            min_n=min_n,
+        )
+        ppt_8slides_md = build_ppt_8slide_script(
+            rationale_summary,
+            rationale_df,
+            attribution_df=attribution_df,
+            attribution_summary=attribution_summary,
+            touchpoint_source=active_touchpoint_source,
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+            focus_name=focus_name,
+            period_label=self._period_label(history_df),
+            top_k=6,
+        )
+
+        incident_evidence_df = build_hotspot_evidence(
+            links_df,
+            focus_history,
+            helix_history,
+            system_date=pd.Timestamp.now().date(),
+            max_hotspots=10,
+            min_validated_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+        )
+        incident_evidence_df, hotspot_focus_note = self._align_evidence_to_best_axis(
+            history_df,
+            helix_history,
+            incident_evidence_df,
+        )
+        incident_timeline_df = build_hotspot_timeline(
+            links_df,
+            focus_history,
+            helix_history,
+            incident_evidence_df=incident_evidence_df,
+            max_hotspots=10,
+            min_validated_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+        )
+
+        period_start, period_end = self._period_bounds(history_df)
+        overall_series = overall_daily if not overall_daily.empty else overall_weekly
+
+        return generate_business_review_ppt(
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+            service_origin_n2=context.service_origin_n2,
+            period_start=period_start,
+            period_end=period_end,
+            focus_name=focus_name,
+            overall_weekly=overall_series,
+            rationale_df=rationale_df,
+            nps_points_at_risk=float(rationale_summary.nps_points_at_risk),
+            nps_points_recoverable=float(rationale_summary.nps_points_recoverable),
+            top3_incident_share=float(rationale_summary.top3_incident_share),
+            median_lag_weeks=float(rationale_summary.median_lag_weeks),
+            story_md=business_story_md,
+            script_8slides_md=ppt_8slides_md,
+            attribution_df=attribution_df,
+            ranking_df=ranking_df,
+            by_topic_daily=by_topic_daily,
+            lag_days_by_topic=lag_days,
+            by_topic_weekly=by_topic_weekly,
+            lag_weeks_by_topic=lag_weeks,
+            incident_evidence_df=incident_evidence_df,
+            changepoints_by_topic=changepoints,
+            incident_timeline_df=incident_timeline_df,
+            hotspot_focus_note=hotspot_focus_note,
+            touchpoint_source=active_touchpoint_source,
+            executive_journey_catalog=executive_journey_catalog,
+        )
+
+    def _build_business_report_md(
+        self,
+        *,
+        current_df: pd.DataFrame,
+        history_df: pd.DataFrame,
+        pop_year: str,
+        pop_month: str,
+        min_n: int,
+    ) -> str:
+        summary = executive_summary(current_df)
+        topics_df = self._topics_df(current_df)
+        topics_bullets = explain_topics(topics_df, max_items=5)
+        opportunities_df = pd.DataFrame(
+            [
+                item.__dict__
+                for item in rank_opportunities(current_df, dimensions=["Palanca"], min_n=min_n)
+            ]
+        )
+        opportunity_bullets = explain_opportunities(opportunities_df, max_items=5)
+        comparison_story = None
+        w_cur, w_base = default_windows(history_df, pop_year=pop_year, pop_month=pop_month)
+        if w_cur is not None and w_base is not None:
+            comparison_story = compare_periods(
+                slice_by_window(history_df, w_cur),
+                slice_by_window(history_df, w_base),
+            )
+        return build_executive_story(
+            summary,
+            comparison=comparison_story,
+            top_opportunities=opportunity_bullets,
+            top_topics=topics_bullets,
+        )
+
+    @staticmethod
+    def _attach_daily_nps_mean(base_df: pd.DataFrame, nps_df: pd.DataFrame) -> pd.DataFrame:
+        if base_df.empty or "date" not in base_df.columns:
+            return base_df
+        source = nps_df.copy()
+        if "Fecha" not in source.columns or "NPS" not in source.columns:
+            return base_df
+        source["Fecha"] = pd.to_datetime(source["Fecha"], errors="coerce")
+        source["NPS"] = pd.to_numeric(source["NPS"], errors="coerce")
+        source = source.dropna(subset=["Fecha"])
+        if source.empty:
+            return base_df
+        daily_nps = (
+            source.assign(date=lambda frame: frame["Fecha"].dt.normalize())
+            .groupby("date", as_index=False)
+            .agg(nps_mean=("NPS", "mean"))
+        )
+        output = base_df.copy()
+        output["date"] = pd.to_datetime(output["date"], errors="coerce").dt.normalize()
+        return output.merge(daily_nps, on="date", how="left")
+
+    @staticmethod
+    def _select_top_chain_rows(attribution_df: pd.DataFrame) -> pd.DataFrame:
+        if attribution_df.empty:
+            return attribution_df
+        if "priority" in attribution_df.columns:
+            return attribution_df.sort_values("priority", ascending=False).head(3).copy()
+        return attribution_df.head(3).copy()
+
+    @staticmethod
+    def _period_bounds(frame: pd.DataFrame) -> tuple[date, date]:
+        if "Fecha" not in frame.columns:
+            raise ValueError("No se pudo resolver la ventana temporal del reporte.")
+        dates = pd.to_datetime(frame["Fecha"], errors="coerce").dropna()
+        if dates.empty:
+            raise ValueError("No se pudo resolver la ventana temporal del reporte.")
+        return dates.min().date(), dates.max().date()
+
+    @staticmethod
+    def _period_label(frame: pd.DataFrame) -> str:
+        start, end = DashboardService._period_bounds(frame)
+        return f"{start.isoformat()} -> {end.isoformat()}"
+
+    @staticmethod
+    def _focus_name(focus_group: str) -> str:
+        if focus_group == "promoter":
+            return "promotores"
+        if focus_group == "passive":
+            return "neutros"
+        return "detractores"
+
+    @staticmethod
+    def _align_evidence_to_best_axis(
+        nps_df: pd.DataFrame,
+        helix_df: pd.DataFrame,
+        evidence_df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, str]:
+        if evidence_df.empty:
+            return evidence_df, ""
+        axis_info = select_best_business_axis_for_hotspots(nps_df, helix_df, min_n=200)
+        axis = str(axis_info.get("best_axis", "Palanca"))
+        red_map = axis_info.get("red_labels", {})
+        labels = list(red_map.get(axis, [])) if isinstance(red_map, dict) else []
+        aligned = align_hotspot_evidence_to_axis(
+            evidence_df,
+            axis=axis,
+            red_labels=labels,
+            max_hotspots=10,
+        )
+        ratios = axis_info.get("axis_ratios", {})
+        palanca_ratio = float(ratios.get("Palanca", 0.0)) if isinstance(ratios, dict) else 0.0
+        subpalanca_ratio = float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
+        note = (
+            f"Eje seleccionado para el racional: {axis} "
+            f"(cobertura Helix en rojos: Palanca {palanca_ratio*100:.1f}% · "
+            f"Subpalanca {subpalanca_ratio*100:.1f}%)."
+        )
+        return (aligned if not aligned.empty else evidence_df), note
 
     def _apply_population_filters(
         self,
@@ -715,6 +1065,7 @@ class DashboardService:
         trend_df: pd.DataFrame,
         *,
         focus_label: str,
+        theme: Theme,
     ) -> object:
         if trend_df.empty:
             return None
@@ -753,8 +1104,8 @@ class DashboardService:
                 y=chart_df["focus_rate"],
                 mode="lines+markers",
                 name=focus_label,
-                line=dict(color=self.theme.danger_soft, width=2.5),
-                marker=dict(color=self.theme.danger_soft, size=6),
+                line=dict(color=theme.danger_soft, width=2.5),
+                marker=dict(color=theme.danger_soft, size=6),
                 hovertemplate=f"{focus_label}: %{{y:.1%}}<extra></extra>",
             )
         )
@@ -765,27 +1116,27 @@ class DashboardService:
                 name="Incidencias",
                 yaxis="y2",
                 opacity=0.72,
-                marker=dict(color=self.theme.accent),
+                marker=dict(color=theme.accent),
                 hovertemplate="Incidencias: %{y:.0f}<extra></extra>",
             )
         )
         fig.update_layout(
             height=380,
             margin=dict(l=10, r=10, t=62, b=10),
-            paper_bgcolor=self.theme.chart_paper,
-            plot_bgcolor=self.theme.chart_plot,
-            font=dict(color=self.theme.text),
+            paper_bgcolor=theme.chart_paper,
+            plot_bgcolor=theme.chart_plot,
+            font=dict(color=theme.text),
             legend=dict(orientation="h"),
-            yaxis=dict(title=focus_label, tickformat=".0%", gridcolor=self.theme.chart_grid),
+            yaxis=dict(title=focus_label, tickformat=".0%", gridcolor=theme.chart_grid),
             yaxis2=dict(
                 title="Incidencias",
                 overlaying="y",
                 side="right",
                 showgrid=False,
             ),
-            xaxis=dict(gridcolor=self.theme.chart_grid),
+            xaxis=dict(gridcolor=theme.chart_grid),
         )
-        return apply_plotly_theme(fig, self.theme)
+        return apply_plotly_theme(fig, theme)
 
     @staticmethod
     def _linking_focus_group(nps_group: str) -> tuple[str, str]:

@@ -4,6 +4,9 @@ import { SWRConfig } from "swr";
 
 import App from "./App";
 import "./styles.css";
+import { applyDocumentTheme, readStoredThemeMode } from "./theme";
+
+applyDocumentTheme(readStoredThemeMode());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

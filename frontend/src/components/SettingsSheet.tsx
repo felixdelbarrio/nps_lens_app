@@ -1,42 +1,39 @@
 import { useEffect } from "react";
 
+import type { ServiceOriginHierarchyPayload } from "../api";
+import type { ThemeMode } from "../theme";
 import { Icon } from "./Icon";
 import { NavigationTabs } from "./NavigationTabs";
+import { ServiceOriginMaintenance } from "./ServiceOriginMaintenance";
 
-type SettingsTab = "preferences" | "appearance" | "advanced";
+export type SettingsTab = "appearance" | "advanced" | "maintenance";
 
 type SettingsSheetProps = {
   open: boolean;
   activeTab: SettingsTab;
   onTabChange: (value: SettingsTab) => void;
   onClose: () => void;
-  serviceOrigin: string;
-  setServiceOrigin: (value: string) => void;
-  serviceOriginN1: string;
-  setServiceOriginN1: (value: string) => void;
-  serviceOriginN2: string;
-  setServiceOriginN2: (value: string) => void;
-  popYear: string;
-  setPopYear: (value: string) => void;
-  popMonth: string;
-  setPopMonth: (value: string) => void;
-  npsGroup: string;
-  setNpsGroup: (value: string) => void;
+  themeMode: ThemeMode;
+  setThemeMode: (value: ThemeMode) => void;
+  minSimilarity: number;
+  setMinSimilarity: (value: number) => void;
+  maxDaysApart: number;
+  setMaxDaysApart: (value: number) => void;
   minN: number;
   setMinN: (value: number) => void;
   minNCross: number;
   setMinNCross: (value: number) => void;
   serviceOrigins: string[];
-  n1Options: string[];
-  availableYears: string[];
-  monthOptions: string[];
-  npsGroups: string[];
+  serviceOriginN1Map: Record<string, string[]>;
+  serviceOriginN2Map: Record<string, Record<string, string[]>>;
+  hierarchySaving: boolean;
+  onSaveHierarchy: (payload: ServiceOriginHierarchyPayload) => Promise<void>;
 };
 
 const SETTINGS_TABS = [
-  { id: "preferences", label: "Preferencias" },
-  { id: "appearance", label: "Apariencia / visualización" },
-  { id: "advanced", label: "Ajustes avanzados" }
+  { id: "appearance", label: "Apariencia y visualización" },
+  { id: "advanced", label: "Ajustes avanzados" },
+  { id: "maintenance", label: "Mantenimiento Service Origin" }
 ] as const;
 
 export function SettingsSheet({
@@ -44,27 +41,21 @@ export function SettingsSheet({
   activeTab,
   onTabChange,
   onClose,
-  serviceOrigin,
-  setServiceOrigin,
-  serviceOriginN1,
-  setServiceOriginN1,
-  serviceOriginN2,
-  setServiceOriginN2,
-  popYear,
-  setPopYear,
-  popMonth,
-  setPopMonth,
-  npsGroup,
-  setNpsGroup,
+  themeMode,
+  setThemeMode,
+  minSimilarity,
+  setMinSimilarity,
+  maxDaysApart,
+  setMaxDaysApart,
   minN,
   setMinN,
   minNCross,
   setMinNCross,
   serviceOrigins,
-  n1Options,
-  availableYears,
-  monthOptions,
-  npsGroups
+  serviceOriginN1Map,
+  serviceOriginN2Map,
+  hierarchySaving,
+  onSaveHierarchy
 }: SettingsSheetProps) {
   useEffect(() => {
     if (!open) {
@@ -97,7 +88,7 @@ export function SettingsSheet({
             <p className="eyebrow">Configuración global</p>
             <h2 id="settings-sheet-title">Preferencias del producto</h2>
             <p className="secondary-copy">
-              Ajusta contexto, visualización y umbrales sin sacar la configuración al primer nivel.
+              Ajusta ambientación, umbrales analíticos y mantenimiento del catálogo de servicio.
             </p>
           </div>
           <button aria-label="Cerrar configuración" className="icon-button" onClick={onClose} type="button">
@@ -112,84 +103,25 @@ export function SettingsSheet({
           value={activeTab}
         />
 
-        {activeTab === "preferences" ? (
-          <section className="settings-group">
-            <div className="section-heading">
-              <div>
-                <h3>Preferencias operativas</h3>
-                <p className="secondary-copy">Contexto de servicio persistente para carga y lectura analítica.</p>
-              </div>
-            </div>
-            <div className="field-grid">
-              <label>
-                <span>Service origin</span>
-                <select onChange={(event) => setServiceOrigin(event.target.value)} value={serviceOrigin}>
-                  {serviceOrigins.map((origin) => (
-                    <option key={origin} value={origin}>
-                      {origin}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Service origin N1</span>
-                <select onChange={(event) => setServiceOriginN1(event.target.value)} value={serviceOriginN1}>
-                  {n1Options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field-span-2">
-                <span>Service origin N2</span>
-                <input
-                  onChange={(event) => setServiceOriginN2(event.target.value)}
-                  placeholder="Opcional"
-                  value={serviceOriginN2}
-                />
-              </label>
-            </div>
-          </section>
-        ) : null}
-
         {activeTab === "appearance" ? (
           <section className="settings-group">
             <div className="section-heading">
               <div>
-                <h3>Visualización analítica</h3>
-                <p className="secondary-copy">Controla el recorte temporal y el segmento que se presenta en insights.</p>
+                <h3>Apariencia y visualización</h3>
+                <p className="secondary-copy">
+                  El ambient light/dark se aplica sobre tokens BBVA y se conserva entre sesiones.
+                </p>
               </div>
             </div>
             <div className="field-grid">
-              <label>
-                <span>Año</span>
-                <select onChange={(event) => setPopYear(event.target.value)} value={popYear}>
-                  {availableYears.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Mes</span>
-                <select onChange={(event) => setPopMonth(event.target.value)} value={popMonth}>
-                  {monthOptions.map((month) => (
-                    <option key={month} value={month}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className="field-span-2">
-                <span>Grupo NPS</span>
-                <select onChange={(event) => setNpsGroup(event.target.value)} value={npsGroup}>
-                  {npsGroups.map((group) => (
-                    <option key={group} value={group}>
-                      {group}
-                    </option>
-                  ))}
+                <span>Ambient</span>
+                <select
+                  onChange={(event) => setThemeMode(event.target.value as ThemeMode)}
+                  value={themeMode}
+                >
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
                 </select>
               </label>
             </div>
@@ -201,24 +133,74 @@ export function SettingsSheet({
             <div className="section-heading">
               <div>
                 <h3>Umbrales avanzados</h3>
-                <p className="secondary-copy">Parámetros de robustez para comparativas y priorización.</p>
+                <p className="secondary-copy">
+                  Se restauran los cuatro parámetros operativos del flujo causal y de priorización.
+                </p>
               </div>
             </div>
             <div className="field-grid">
               <label>
-                <span>Min N oportunidades</span>
-                <input min={10} onChange={(event) => setMinN(Number(event.target.value))} type="number" value={minN} />
+                <span>Similitud en la causalidad</span>
+                <input
+                  max={1}
+                  min={0.05}
+                  onChange={(event) => setMinSimilarity(Number(event.target.value))}
+                  step={0.05}
+                  type="number"
+                  value={minSimilarity}
+                />
               </label>
               <label>
-                <span>Min N comparativas</span>
+                <span>Ventana de días</span>
+                <input
+                  max={30}
+                  min={1}
+                  onChange={(event) => setMaxDaysApart(Number(event.target.value))}
+                  type="number"
+                  value={maxDaysApart}
+                />
+              </label>
+              <label>
+                <span>Mínimo N para oportunidades</span>
+                <input
+                  min={50}
+                  onChange={(event) => setMinN(Number(event.target.value))}
+                  step={10}
+                  type="number"
+                  value={minN}
+                />
+              </label>
+              <label>
+                <span>Mínimo N para comparativas cruzadas</span>
                 <input
                   min={10}
                   onChange={(event) => setMinNCross(Number(event.target.value))}
+                  step={10}
                   type="number"
                   value={minNCross}
                 />
               </label>
             </div>
+          </section>
+        ) : null}
+
+        {activeTab === "maintenance" ? (
+          <section className="settings-group">
+            <div className="section-heading">
+              <div>
+                <h3>Mantenimiento Service Origin</h3>
+                <p className="secondary-copy">
+                  Gestiona jerarquías BUUG → N1 → N2 y persístelas en la configuración del producto.
+                </p>
+              </div>
+            </div>
+            <ServiceOriginMaintenance
+              onSave={onSaveHierarchy}
+              serviceOriginN1Map={serviceOriginN1Map}
+              serviceOriginN2Map={serviceOriginN2Map}
+              serviceOrigins={serviceOrigins}
+              saving={hierarchySaving}
+            />
           </section>
         ) : null}
       </aside>
