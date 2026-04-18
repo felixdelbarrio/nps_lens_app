@@ -4,7 +4,6 @@ import argparse
 import importlib
 import inspect
 import os
-import re
 import signal
 import socket
 import subprocess
@@ -15,10 +14,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
+import uvicorn
+
 DEFAULT_PORT = 8617
 STARTUP_TIMEOUT_SECONDS = 90
-HEALTH_PATH = "/_stcore/health"
-DEFAULT_STREAMLIT_EMAIL = "nps.lens@gmail.com"
+HEALTH_PATH = "/api/health"
 
 
 def _runtime_app_home() -> Path:
@@ -39,7 +39,6 @@ def _normalize_working_directory_for_frozen() -> None:
         app_home.mkdir(parents=True, exist_ok=True)
         os.chdir(str(app_home))
     except Exception:
-        # Best-effort only: startup should continue even if cwd cannot be changed.
         pass
 
 
@@ -51,8 +50,20 @@ def _resource_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _app_script_path() -> Path:
-    return _resource_root() / "app" / "streamlit_app.py"
+def _frontend_dist_path() -> Path:
+    env_dist = str(os.environ.get("NPS_LENS_FRONTEND_DIST_DIR", "")).strip()
+    if env_dist:
+        return Path(env_dist).expanduser().resolve()
+
+    candidates = [
+        _resource_root() / "frontend" / "dist",
+        _resource_root() / "dist",
+        Path.cwd() / "frontend" / "dist",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
 
 
 def _logo_path() -> Optional[Path]:
@@ -79,89 +90,29 @@ def _set_macos_app_icon(icon_path: Optional[Path]) -> None:
         if image:
             ns_application.sharedApplication().setApplicationIconImage_(image)
     except Exception:
-        # Best-effort only: pyobjc/AppKit may be unavailable in some runtimes.
         pass
 
 
-def _streamlit_credentials_path() -> Path:
-    return Path.home() / ".streamlit" / "credentials.toml"
-
-
-def _credentials_has_valid_email(contents: str) -> bool:
-    match = re.search(r'(?im)^\s*email\s*=\s*["\']?([^"\']+)', contents)
-    if not match:
-        return False
-    return "@" in match.group(1).strip()
-
-
-def _ensure_streamlit_credentials(email: str = DEFAULT_STREAMLIT_EMAIL) -> None:
-    creds_path = _streamlit_credentials_path()
-    safe_email = str(email).replace('"', "").strip()
-    if not safe_email:
-        safe_email = DEFAULT_STREAMLIT_EMAIL
-    try:
-        if creds_path.exists():
-            existing = creds_path.read_text(encoding="utf-8", errors="ignore")
-            if _credentials_has_valid_email(existing):
-                return
-        creds_path.parent.mkdir(parents=True, exist_ok=True)
-        creds_path.write_text(
-            f'[general]\nemail = "{safe_email}"\n',
-            encoding="utf-8",
+def _run_api_server(port: int) -> None:
+    frontend_dist_dir = _frontend_dist_path()
+    if not (frontend_dist_dir / "index.html").exists():
+        raise FileNotFoundError(
+            f"Frontend dist not found at {frontend_dist_dir}. Run the frontend build first."
         )
-    except Exception:
-        # Best-effort only: app startup should not fail if home is not writable.
-        pass
-
-
-def _apply_streamlit_non_interactive_defaults() -> None:
-    os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
-    os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
-    os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
-
-
-def _run_streamlit_server(port: int) -> None:
-    _apply_streamlit_non_interactive_defaults()
-    _ensure_streamlit_credentials()
-
-    from streamlit.web import bootstrap
-
-    app_script = _app_script_path()
-    if not app_script.exists():
-        raise FileNotFoundError(f"Streamlit app script not found: {app_script}")
-
-    flags = {
-        # In frozen builds, Streamlit may auto-detect development mode.
-        # Force production mode so custom server.* options are accepted.
-        "global.developmentMode": False,
-        "server.port": port,
-        "server.address": "127.0.0.1",
-        "server.headless": True,
-        "server.fileWatcherType": "none",
-        "server.runOnSave": False,
-        "browser.gatherUsageStats": False,
-    }
-    bootstrap.load_config_options(flags)
-    bootstrap.run(str(app_script), False, [], flags)
+    os.environ["NPS_LENS_FRONTEND_DIST_DIR"] = str(frontend_dist_dir)
+    uvicorn.run(
+        "nps_lens.api.app:create_app",
+        factory=True,
+        host="127.0.0.1",
+        port=port,
+        log_level=str(os.environ.get("NPS_LENS_LOG_LEVEL", "info")).lower(),
+    )
 
 
 def _server_cmd(port: int) -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--internal-server", "--port", str(port)]
     return [sys.executable, "-m", "nps_lens.desktop", "--internal-server", "--port", str(port)]
-
-
-def _wait_for_server(port: int, timeout_seconds: int = STARTUP_TIMEOUT_SECONDS) -> None:
-    deadline = time.time() + timeout_seconds
-    url = f"http://127.0.0.1:{port}{HEALTH_PATH}"
-    while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=1.0) as response:
-                if response.status == 200:
-                    return
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
-            time.sleep(0.2)
-    raise TimeoutError(f"Timed out waiting for Streamlit server at {url}")
 
 
 def _wait_for_server_with_process(
@@ -172,7 +123,7 @@ def _wait_for_server_with_process(
     while time.time() < deadline:
         if proc.poll() is not None:
             raise RuntimeError(
-                "Embedded Streamlit server exited before startup completed. "
+                "Embedded API server exited before startup completed. "
                 f"Exit code: {proc.returncode}."
             )
         try:
@@ -181,7 +132,7 @@ def _wait_for_server_with_process(
                     return
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
             time.sleep(0.2)
-    raise TimeoutError(f"Timed out waiting for Streamlit server at {url}")
+    raise TimeoutError(f"Timed out waiting for API server at {url}")
 
 
 def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
@@ -201,28 +152,22 @@ def _is_port_open(port: int) -> bool:
 
 
 def _list_listen_pids(port: int) -> list[int]:
-    """Best-effort listing of LISTEN pids for a TCP port."""
     if os.name == "nt":
         return []
     try:
-        cp = subprocess.run(
-            ["lsof", "-tiTCP:%d" % int(port), "-sTCP:LISTEN"],
+        completed = subprocess.run(
+            ["lsof", f"-tiTCP:{int(port)}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             check=False,
         )
     except Exception:
         return []
-    out = str(cp.stdout or "").strip()
-    if not out:
-        return []
+
     pids: list[int] = []
-    for line in out.splitlines():
-        s = line.strip()
-        if not s:
-            continue
+    for line in str(completed.stdout or "").splitlines():
         try:
-            pids.append(int(s))
+            pids.append(int(line.strip()))
         except Exception:
             continue
     return pids
@@ -232,7 +177,7 @@ def _pid_command(pid: int) -> str:
     if os.name == "nt":
         return ""
     try:
-        cp = subprocess.run(
+        completed = subprocess.run(
             ["ps", "-p", str(int(pid)), "-o", "command="],
             capture_output=True,
             text=True,
@@ -240,20 +185,21 @@ def _pid_command(pid: int) -> str:
         )
     except Exception:
         return ""
-    return str(cp.stdout or "").strip()
+    return str(completed.stdout or "").strip()
 
 
 def _pid_is_nps_lens_instance(pid: int) -> bool:
     cmd = _pid_command(pid).lower()
     if not cmd:
         return False
-    app_markers = [
+    markers = [
         "nps_lens.desktop",
-        "app/streamlit_app.py",
         "--internal-server",
         "nps_lens_app",
+        "127.0.0.1:8617",
+        "nps_lens.cli serve",
     ]
-    return any(m in cmd for m in app_markers)
+    return any(marker in cmd for marker in markers)
 
 
 def _kill_pid(pid: int, *, timeout_seconds: float = 3.0) -> None:
@@ -277,11 +223,10 @@ def _kill_pid(pid: int, *, timeout_seconds: float = 3.0) -> None:
 
 
 def _reclaim_port_from_previous_instance(port: int) -> None:
-    """Kill previous NPS Lens listeners on the selected port."""
     if not _is_port_open(port):
         return
 
-    pids = [p for p in _list_listen_pids(port) if p != os.getpid()]
+    pids = [pid for pid in _list_listen_pids(port) if pid != os.getpid()]
     for pid in pids:
         if _pid_is_nps_lens_instance(pid):
             _kill_pid(pid)
@@ -325,7 +270,7 @@ def _parse_args() -> argparse.Namespace:
         "--port",
         type=int,
         default=int(os.environ.get("NPS_LENS_PORT", DEFAULT_PORT)),
-        help=f"Port for the embedded Streamlit server (default: {DEFAULT_PORT})",
+        help=f"Port for the embedded API server (default: {DEFAULT_PORT})",
     )
     return parser.parse_args()
 
@@ -335,7 +280,7 @@ def main() -> None:
     args = _parse_args()
 
     if args.internal_server:
-        _run_streamlit_server(args.port)
+        _run_api_server(args.port)
         return
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)

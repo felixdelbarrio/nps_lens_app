@@ -20,21 +20,19 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _square_crop_alpha(img: Image.Image) -> Image.Image:
-    """Trim transparent margins and return a square icon source."""
     alpha = img.split()[-1]
     bbox = alpha.getbbox()
     if bbox:
         img = img.crop(bbox)
 
-    w, h = img.size
-    side = max(w, h)
+    width, height = img.size
+    side = max(width, height)
     square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    square.paste(img, ((side - w) // 2, (side - h) // 2), img)
+    square.paste(img, ((side - width) // 2, (side - height) // 2), img)
     return square
 
 
 def _build_canvas(img: Image.Image) -> Image.Image:
-    """Normalize icon visual weight so macOS does not look undersized."""
     source = _square_crop_alpha(img)
     target_content = max(32, int(round(OUTPUT_SIZE * CONTENT_SCALE)))
     source = source.resize((target_content, target_content), RESAMPLE)
@@ -54,8 +52,8 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input image not found: {input_path}")
 
-    img = Image.open(input_path).convert("RGBA")
-    canvas = _build_canvas(img)
+    image = Image.open(input_path).convert("RGBA")
+    canvas = _build_canvas(image)
     canvas.save(out_dir / "app.png")
     canvas.save(out_dir / "app.ico", sizes=ICO_SIZES)
     canvas.save(out_dir / "app.icns")
