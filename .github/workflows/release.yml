@@ -1,0 +1,114 @@
+name: release
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux
+            runner: ubuntu-latest
+            shell: bash
+            archive_shell: bash
+            artifact_name: nps-lens-linux
+            artifact_path: build/pyinstaller/linux/nps-lens-linux.tar.gz
+            archive_cmd: |
+              tar -czf build/pyinstaller/linux/nps-lens-linux.tar.gz \
+                -C build/pyinstaller/linux/dist nps-lens
+          - label: macos
+            runner: macos-13
+            shell: bash
+            archive_shell: bash
+            artifact_name: nps-lens-macos
+            artifact_path: build/pyinstaller/macos/nps-lens-macos.zip
+            archive_cmd: |
+              ditto -c -k --sequesterRsrc --keepParent \
+                build/pyinstaller/macos/dist/nps-lens.app \
+                build/pyinstaller/macos/nps-lens-macos.zip
+          - label: windows
+            runner: windows-latest
+            shell: bash
+            artifact_name: nps-lens-windows
+            artifact_path: build/pyinstaller/windows/nps-lens-windows.zip
+            archive_shell: pwsh
+            archive_cmd: |
+              Compress-Archive `
+                -Path build/pyinstaller/windows/dist/nps-lens.exe `
+                -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
+                -Force
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.9.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9.13"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux system libraries for pywebview packaging
+        if: matrix.label == 'linux'
+        shell: ${{ matrix.shell }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
+
+      - name: Install dependencies
+        shell: ${{ matrix.shell }}
+        run: |
+          make python-build
+          npm --prefix frontend ci
+
+      - name: Build native desktop application
+        shell: ${{ matrix.shell }}
+        run: make build
+
+      - name: Archive build output
+        shell: ${{ matrix.archive_shell }}
+        run: ${{ matrix.archive_cmd }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-artifacts/nps-lens-linux/nps-lens-linux.tar.gz
+            dist-artifacts/nps-lens-macos/nps-lens-macos.zip
+            dist-artifacts/nps-lens-windows/nps-lens-windows.zip

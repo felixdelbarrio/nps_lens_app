@@ -46,7 +46,7 @@ MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
 PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
 
-.PHONY: default setup frontend-install frontend-build frontend-test frontend-e2e build run test ci clean
+.PHONY: default venv python-dev python-build setup frontend-install frontend-build frontend-test frontend-e2e build run lint typecheck test ci clean
 
 default:
 	@echo ""
@@ -54,16 +54,29 @@ default:
 	@printf "  %-18s %s\n" "setup" "Recrea .venv e instala dependencias backend/frontend/build"
 	@printf "  %-18s %s\n" "build" "Compila el frontend y empaqueta la app de escritorio"
 	@printf "  %-18s %s\n" "run" "Construye React y arranca la app de escritorio nativa"
+	@printf "  %-18s %s\n" "lint" "Ejecuta ruff y black en modo verificación"
+	@printf "  %-18s %s\n" "typecheck" "Ejecuta mypy sobre el código backend tipado"
 	@printf "  %-18s %s\n" "test" "Ejecuta pytest backend con cobertura"
-	@printf "  %-18s %s\n" "ci" "Ejecuta backend + frontend + E2E"
+	@printf "  %-18s %s\n" "ci" "Ejecuta lint backend + frontend + E2E"
 	@printf "  %-18s %s\n" "clean" "Limpia caches, builds y node_modules"
 	@echo ""
+
+venv:
+	@test -x "$(PY)" || $(PYTHON) -m venv $(VENV)
+	$(PIP) install -U pip
+
+python-dev:
+	$(MAKE) venv
+	$(PIP) install -e ".[dev]"
+
+python-build:
+	$(MAKE) venv
+	$(PIP) install -e ".[build]"
 
 setup:
 	$(MAKE) clean
 	rm -rf $(VENV)
-	$(PYTHON) -m venv $(VENV)
-	$(PIP) install -U pip
+	$(MAKE) venv
 	$(PIP) install -e ".[dev,build]"
 	$(MAKE) frontend-install
 
@@ -85,8 +98,7 @@ frontend-e2e:
 	$(NPM) run e2e
 
 build:
-	@test -x "$(PY)" || $(MAKE) setup
-	$(PIP) install -e ".[build]"
+	$(MAKE) python-build
 	$(MAKE) frontend-build
 	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
 	rm -rf build/pyinstaller dist || true
@@ -190,8 +202,7 @@ build:
 	fi
 
 run:
-	@test -x "$(PY)" && test -x "$(PIP)" || $(MAKE) setup
-	$(PIP) install -e ".[build]"
+	$(MAKE) python-build
 	$(MAKE) frontend-build
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
@@ -200,16 +211,22 @@ run:
 	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" \
 	$(PY) -m nps_lens.desktop
 
+lint:
+	@test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
+	$(RUFF) check --no-fix .
+	$(BLACK) --check .
+
+typecheck:
+	@test -x "$(MYPY)" || $(MAKE) python-dev
+	$(MYPY) .
+
 test:
-	@test -x "$(PYTEST)" || $(MAKE) setup
+	@test -x "$(PYTEST)" || $(MAKE) python-dev
 	$(PYTEST) --override-ini addopts="" -q --cov=src/nps_lens --cov-report=term-missing --cov-fail-under=80
 
 ci:
-	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" && test -x "$(MYPY)" || $(MAKE) setup
-	$(RUFF) check --no-fix .
-	$(BLACK) --check .
-	$(MYPY) .
-	$(MAKE) test
+	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
+	$(MAKE) lint
 	$(MAKE) frontend-test
 	$(MAKE) frontend-build
 	$(MAKE) frontend-e2e
