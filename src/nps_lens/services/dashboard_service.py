@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence, cast
+from typing import Any, Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -139,22 +139,17 @@ def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
     )
 
 
-def _series_or_default(
-    frame: pd.DataFrame, column: str, *, default: object = "", dtype: str | None = None
-) -> pd.Series:
+def _series_or_default(frame: pd.DataFrame, column: str, *, default: object = "") -> pd.Series[Any]:
     series = frame.get(column)
     if isinstance(series, pd.Series):
         return series
-    fallback = pd.Series([default] * len(frame), index=frame.index)
-    if dtype is not None:
-        return fallback.astype(dtype)
-    return fallback
+    return pd.Series([default] * len(frame), index=frame.index)
 
 
-def _numeric_series(frame: pd.DataFrame, column: str, *, default: float = 0.0) -> pd.Series:
-    return pd.to_numeric(_series_or_default(frame, column, default=default), errors="coerce").fillna(
-        default
-    )
+def _numeric_series(frame: pd.DataFrame, column: str, *, default: float = 0.0) -> pd.Series[Any]:
+    return pd.to_numeric(
+        _series_or_default(frame, column, default=default), errors="coerce"
+    ).fillna(default)
 
 
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
@@ -167,7 +162,7 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
         if isinstance(value, (int, np.integer)):
             return int(value)
         if isinstance(value, (float, np.floating)):
-            return 0 if pd.isna(value) else int(value)
+            return 0 if np.isnan(float(value)) else int(value)
         if isinstance(value, str):
             try:
                 return int(float(value))
@@ -815,7 +810,9 @@ class DashboardService:
             formatted_rank["factor"] = (
                 pd.to_numeric(formatted_rank["factor"], errors="coerce").fillna(1.0).round(3)
             )
-            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(3)
+            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(
+                3
+            )
             formatted_rank["max_cp_stability"] = _numeric_series(
                 formatted_rank, "max_cp_stability", default=np.nan
             ).round(3)
