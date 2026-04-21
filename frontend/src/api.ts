@@ -169,6 +169,41 @@ export type HelixUploadResult = {
   dataset: DatasetStatus;
 };
 
+export type UploadSelectionPayload = {
+  file?: File;
+  desktopFilePath?: string;
+  desktopFileName?: string;
+};
+
+export type DesktopFileSelection = {
+  path: string;
+  name: string;
+};
+
+type DesktopBridgeApi = {
+  pick_excel_file?: () => Promise<DesktopFileSelection | null>;
+  upload_nps_file?: (
+    filePath: string,
+    serviceOrigin: string,
+    serviceOriginN1: string,
+    serviceOriginN2: string
+  ) => Promise<UploadResult>;
+  upload_helix_file?: (
+    filePath: string,
+    serviceOrigin: string,
+    serviceOriginN1: string,
+    serviceOriginN2: string
+  ) => Promise<HelixUploadResult>;
+};
+
+declare global {
+  interface Window {
+    pywebview?: {
+      api?: DesktopBridgeApi;
+    };
+  }
+}
+
 export type DashboardQuery = {
   service_origin: string;
   service_origin_n1: string;
@@ -253,6 +288,23 @@ function parseContentDispositionFilename(headerValue: string | null): string {
   return "reporte-ejecutivo.pptx";
 }
 
+function getDesktopBridge(): DesktopBridgeApi | undefined {
+  return window.pywebview?.api;
+}
+
+export function canUseDesktopFileBridge(): boolean {
+  const bridge = getDesktopBridge();
+  return Boolean(bridge?.pick_excel_file);
+}
+
+export async function pickDesktopExcelFile(): Promise<DesktopFileSelection | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.pick_excel_file) {
+    return null;
+  }
+  return bridge.pick_excel_file();
+}
+
 export async function fetchConfig(params: {
   service_origin?: string;
   service_origin_n1?: string;
@@ -306,11 +358,24 @@ export async function fetchDatasetTable(
 }
 
 export async function uploadNpsFile(payload: {
-  file: File;
+  file?: File;
+  desktopFilePath?: string;
   serviceOrigin: string;
   serviceOriginN1: string;
   serviceOriginN2: string;
 }): Promise<UploadResult> {
+  const bridge = getDesktopBridge();
+  if (payload.desktopFilePath && bridge?.upload_nps_file) {
+    return bridge.upload_nps_file(
+      payload.desktopFilePath,
+      payload.serviceOrigin,
+      payload.serviceOriginN1,
+      payload.serviceOriginN2
+    );
+  }
+  if (!payload.file) {
+    throw new Error("Selecciona un fichero antes de importar.");
+  }
   const formData = new FormData();
   formData.set("file", payload.file);
   formData.set("service_origin", payload.serviceOrigin);
@@ -325,11 +390,24 @@ export async function uploadNpsFile(payload: {
 }
 
 export async function uploadHelixFile(payload: {
-  file: File;
+  file?: File;
+  desktopFilePath?: string;
   serviceOrigin: string;
   serviceOriginN1: string;
   serviceOriginN2: string;
 }): Promise<HelixUploadResult> {
+  const bridge = getDesktopBridge();
+  if (payload.desktopFilePath && bridge?.upload_helix_file) {
+    return bridge.upload_helix_file(
+      payload.desktopFilePath,
+      payload.serviceOrigin,
+      payload.serviceOriginN1,
+      payload.serviceOriginN2
+    );
+  }
+  if (!payload.file) {
+    throw new Error("Selecciona un fichero antes de importar.");
+  }
   const formData = new FormData();
   formData.set("file", payload.file);
   formData.set("service_origin", payload.serviceOrigin);

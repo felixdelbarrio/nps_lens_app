@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import inspect
+import json
 import os
 import signal
 import socket
@@ -11,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,6 +21,8 @@ import uvicorn
 DEFAULT_PORT = 8617
 STARTUP_TIMEOUT_SECONDS = 90
 HEALTH_PATH = "/api/health"
+_EXCEL_DIALOG_FILTERS = ("Excel files (*.xlsx;*.xlsm;*.xls)",)
+_EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 
 
 def _runtime_app_home() -> Path:
@@ -238,6 +242,151 @@ def _reclaim_port_from_previous_instance(port: int) -> None:
         )
 
 
+def _build_multipart_body(
+    *,
+    fields: dict[str, str],
+    file_field: str,
+    file_name: str,
+    file_payload: bytes,
+) -> tuple[str, bytes]:
+    boundary = f"----NpsLensBoundary{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for key, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field}"; '
+                f'filename="{file_name}"\r\n'
+            ).encode("utf-8"),
+            (
+                "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                "\r\n\r\n"
+            ).encode("utf-8"),
+            file_payload,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    return f"multipart/form-data; boundary={boundary}", b"".join(chunks)
+
+
+class DesktopBridge:
+    def __init__(self, *, port: int) -> None:
+        self.port = int(port)
+        self.window: Any = None
+
+    def attach_window(self, window: Any) -> None:
+        self.window = window
+
+    def pick_excel_file(self) -> Optional[dict[str, str]]:
+        if self.window is None:
+            return None
+
+        import webview
+
+        selection = self.window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=_EXCEL_DIALOG_FILTERS,
+        )
+        if not selection:
+            return None
+        selected_path = Path(str(selection[0])).expanduser().resolve()
+        return {"path": str(selected_path), "name": selected_path.name}
+
+    def upload_nps_file(
+        self,
+        file_path: str,
+        service_origin: str,
+        service_origin_n1: str,
+        service_origin_n2: str = "",
+    ) -> dict[str, Any]:
+        return self._upload_file(
+            endpoint="/api/uploads/nps",
+            file_path=file_path,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+        )
+
+    def upload_helix_file(
+        self,
+        file_path: str,
+        service_origin: str,
+        service_origin_n1: str,
+        service_origin_n2: str = "",
+    ) -> dict[str, Any]:
+        return self._upload_file(
+            endpoint="/api/uploads/helix",
+            file_path=file_path,
+            service_origin=service_origin,
+            service_origin_n1=service_origin_n1,
+            service_origin_n2=service_origin_n2,
+        )
+
+    def _upload_file(
+        self,
+        *,
+        endpoint: str,
+        file_path: str,
+        service_origin: str,
+        service_origin_n1: str,
+        service_origin_n2: str,
+    ) -> dict[str, Any]:
+        source_path = Path(str(file_path)).expanduser().resolve()
+        if not source_path.exists() or not source_path.is_file():
+            raise FileNotFoundError("El fichero seleccionado no existe o ya no está disponible.")
+        if source_path.suffix.lower() not in _EXCEL_SUFFIXES:
+            raise ValueError("Solo se admiten ficheros Excel.")
+
+        payload = source_path.read_bytes()
+        if not payload:
+            raise ValueError("El fichero está vacío.")
+
+        content_type, body = _build_multipart_body(
+            fields={
+                "service_origin": service_origin,
+                "service_origin_n1": service_origin_n1,
+                "service_origin_n2": service_origin_n2,
+            },
+            file_field="file",
+            file_name=source_path.name,
+            file_payload=payload,
+        )
+        request = urllib.request.Request(
+            url=f"http://127.0.0.1:{self.port}{endpoint}",
+            data=body,
+            headers={"Content-Type": content_type},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                raw_body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raw_body = exc.read().decode("utf-8", errors="replace")
+            try:
+                detail = json.loads(raw_body).get("detail") or raw_body
+            except Exception:
+                detail = raw_body or f"Upload failed with status {exc.code}"
+            raise RuntimeError(str(detail)) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError("No se pudo conectar con la API embebida para importar el fichero.") from exc
+
+        try:
+            return json.loads(raw_body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("La respuesta del import no se pudo interpretar correctamente.") from exc
+
+
 def _run_desktop(port: int) -> None:
     import webview
 
@@ -247,17 +396,20 @@ def _run_desktop(port: int) -> None:
         _wait_for_server_with_process(proc, port)
         icon_path = _logo_path()
         _set_macos_app_icon(icon_path)
+        bridge = DesktopBridge(port=port)
         window_kwargs: dict[str, Any] = {
             "title": "NPS Lens",
             "url": f"http://127.0.0.1:{port}",
             "width": 1440,
             "height": 920,
             "min_size": (1100, 700),
+            "js_api": bridge,
         }
         supports_icon = "icon" in inspect.signature(webview.create_window).parameters
         if icon_path and supports_icon:
             window_kwargs["icon"] = str(icon_path)
-        webview.create_window(**window_kwargs)
+        window = webview.create_window(**window_kwargs)
+        bridge.attach_window(window)
         webview.start(debug=False)
     finally:
         _terminate_process(proc)

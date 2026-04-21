@@ -21,6 +21,7 @@ import type {
   LinkingPayload,
   PreferencesPayload,
   ServiceOriginHierarchyPayload,
+  UploadSelectionPayload,
   UploadResult
 } from "./api";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
@@ -112,6 +113,17 @@ function formatNumber(value: number | null | undefined, digits = 1) {
     return "—";
   }
   return value.toFixed(digits);
+}
+
+function formatDateLabel(value: string | null | undefined, locale = "es-ES") {
+  if (!value) {
+    return "—";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+  return parsed.toLocaleDateString(locale);
 }
 
 function parseServiceOriginN2(value: string) {
@@ -541,7 +553,7 @@ export function App() {
     return () => window.clearTimeout(timeoutId);
   }, [preferencesPayload, serviceOrigin, serviceOriginN1]);
 
-  async function handleNpsUpload(payload: { file: File }) {
+  async function handleNpsUpload(payload: UploadSelectionPayload) {
     setIsMutating(true);
     setError(null);
     try {
@@ -565,7 +577,7 @@ export function App() {
     }
   }
 
-  async function handleHelixUpload(payload: { file: File }) {
+  async function handleHelixUpload(payload: UploadSelectionPayload) {
     setIsMutating(true);
     setError(null);
     try {
@@ -1147,11 +1159,11 @@ export function App() {
             </article>
             <article className="metric-card">
               <span>Última actualización NPS</span>
-              <strong>{npsDatasetStatus.updated_at ? new Date(npsDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+              <strong>{formatDateLabel(npsDatasetStatus.updated_at)}</strong>
             </article>
             <article className="metric-card">
               <span>Última actualización Helix</span>
-              <strong>{helixDatasetStatus.updated_at ? new Date(helixDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+              <strong>{formatDateLabel(helixDatasetStatus.updated_at)}</strong>
             </article>
           </div>
           <article className="note-card">

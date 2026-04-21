@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -489,6 +490,7 @@ class DashboardService:
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
         by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
+        links_df = cast(pd.DataFrame, core["links_df"])
         rationale_df = cast(pd.DataFrame, core["rationale_df"])
         rationale_summary = cast(object, core["rationale_summary"])
         lag_days = cast(pd.DataFrame, core["lag_days"])
@@ -742,12 +744,19 @@ class DashboardService:
     def _persist_report_copy(self, report: BusinessPptResult) -> Path:
         # Desktop/webview downloads cannot target an arbitrary folder directly, so the API
         # writes the canonical copy server-side into the configured downloads directory.
-        downloads_dir = Path(
+        preferred_dir = Path(
             normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
         )
-        saved_path = downloads_dir / report.file_name
-        saved_path.write_bytes(report.content)
-        return saved_path
+        fallback_dir = self.settings.data_dir / "reports"
+        for target_dir in [preferred_dir, fallback_dir]:
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                saved_path = target_dir / report.file_name
+                saved_path.write_bytes(report.content)
+                return saved_path
+            except OSError:
+                continue
+        raise OSError("No se pudo persistir la copia local del reporte generado.")
 
     def _build_business_report_md(
         self,
@@ -924,11 +933,16 @@ class DashboardService:
             meta = json.loads(stored.meta_path.read_text(encoding="utf-8"))
         except Exception:
             meta = {}
+        normalized_updated_at = self._normalize_timestamp(meta.get("updated_at_utc"))
+        if normalized_updated_at and normalized_updated_at != meta.get("updated_at_utc"):
+            meta["updated_at_utc"] = normalized_updated_at
+            with contextlib.suppress(Exception):
+                stored.meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return {
             "available": True,
             "rows": int(meta.get("rows", 0) or 0),
             "columns": int(meta.get("cols", 0) or 0),
-            "updated_at": meta.get("updated_at_utc"),
+            "updated_at": normalized_updated_at,
             "status": "active",
             "source": meta.get("source"),
         }
@@ -1096,7 +1110,6 @@ class DashboardService:
         elif not rationale_rank.empty:
             top_topic = str(rationale_rank.iloc[0]["nps_topic"])
         return {
-            "assignments_df": assignments_df,
             "links_df": links_df,
             "overall_weekly": overall_weekly,
             "by_topic_weekly": by_topic_weekly,
@@ -1253,6 +1266,23 @@ class DashboardService:
             {str(key): value for key, value in row.items()}
             for row in serialized.to_dict(orient="records")
         ]
+
+    @staticmethod
+    def _normalize_timestamp(value: object) -> Optional[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        candidates = [raw]
+        if raw.endswith("+00:00Z"):
+            candidates.append(raw.replace("+00:00Z", "Z"))
+        if raw.endswith("Z") and "+" in raw:
+            candidates.append(raw[:-1])
+        for candidate in candidates:
+            parsed = pd.to_datetime(candidate, errors="coerce", utc=True)
+            if pd.isna(parsed):
+                continue
+            return parsed.isoformat().replace("+00:00", "Z")
+        return None
 
     def _persist_upload_file(
         self,
