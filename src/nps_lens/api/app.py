@@ -361,6 +361,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         nps_group: str = "Todos",
         min_similarity: float = 0.25,
         max_days_apart: int = 10,
+        touchpoint_source: str = "",
         theme_mode: str = "light",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
@@ -376,6 +377,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             nps_group=nps_group,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
+            touchpoint_source=touchpoint_source,
             theme_mode=theme_mode,
         )
 

@@ -179,6 +179,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     context_payload = context_response.json()
     assert context_payload["helix_dataset"]["available"] is True
     assert context_payload["helix_dataset"]["rows"] == 2
+    assert pd.notna(pd.to_datetime(context_payload["helix_dataset"]["updated_at"], errors="coerce"))
 
     data_response = client.get(
         "/api/dashboard/data/helix",
@@ -211,6 +212,10 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
+    assert linking_payload["touchpoint_mode"]["value"] == "domain_touchpoint"
+    assert "situation" in linking_payload
+    assert "journeys" in linking_payload
+    assert "scenarios" in linking_payload
     assert linking_payload["journey_routes_table"] is not None
 
 

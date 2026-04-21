@@ -91,7 +91,7 @@ module = [
 ]
 ignore_errors = true
 [[tool.mypy.overrides]]
-module = [ "ruptures.*", "networkx.*", "statsmodels.*", "sklearn.*", "plotly.*",]
+module = [ "ruptures.*", "networkx.*", "statsmodels.*", "sklearn.*", "plotly.*", "webview.*",]
 ignore_missing_imports = true
 
 [tool.setuptools.package-dir]
