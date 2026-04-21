@@ -20,13 +20,13 @@ Salida:
 ---
 
 ## 2) Release automático en GitHub
-- Empuja un tag semver: `vX.Y.Z`
-- Se ejecuta `.github/workflows/release.yml`
-- Se crean binarios para:
+- Cada push a `master` ejecuta `.github/workflows/release.yml`
+- Ese workflow construye binarios para:
   - Linux
   - macOS
   - Windows
-- Se publica un **GitHub Release** con assets adjuntos.
+- Los artefactos quedan publicados en la propia ejecución de GitHub Actions
+- Si además el push corresponde a un tag semver `vX.Y.Z`, el mismo workflow publica un **GitHub Release** con los assets adjuntos.
 
 Secrets opcionales para firma/notarización macOS:
 - `MACOS_CODESIGN_IDENTITY`
