@@ -618,6 +618,15 @@ select {
   color: var(--color-text);
 }
 
+.multi-select-control {
+  min-height: 140px;
+  padding: 8px;
+}
+
+.multi-select-control option {
+  padding: 6px 8px;
+}
+
 input::placeholder {
   color: var(--color-text-muted);
 }

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import useSWR from "swr";
 
 import {
@@ -92,9 +92,10 @@ const DATA_TABS = [
 ];
 
 const LINKING_TABS = [
-  { id: "situation", label: "Situación del periodo" },
-  { id: "journeys", label: "Journeys de detracción" },
-  { id: "scenarios", label: "Escenarios causales" }
+  { id: "simulation", label: "Simulación del periodo" },
+  { id: "journeys", label: "Journeys rotos" },
+  { id: "scenarios", label: "Análisis de escenarios causales" },
+  { id: "deep-dive", label: "Data deep dive analysis" }
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
@@ -155,7 +156,9 @@ export function App() {
   const [insightTab, setInsightTab] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
   const [overviewTab, setOverviewTab] = useState("daily");
-  const [linkingTab, setLinkingTab] = useState("situation");
+  const [linkingTab, setLinkingTab] = useState("simulation");
+  const [deepDiveTopicFilter, setDeepDiveTopicFilter] = useState("Todos");
+  const [deepDiveSimilarityOrder, setDeepDiveSimilarityOrder] = useState<"desc" | "asc">("desc");
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -397,12 +400,50 @@ export function App() {
   ]);
 
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
-  const n2Options =
-    config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] ||
-    config?.service_origin_n2_options ||
-    [];
+  const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
   const causalMethodOptions = config?.causal_method_options || [];
   const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
+  const deepDiveTopicOptions = useMemo(() => {
+    const topics = new Set<string>();
+    (linking?.evidence_table || []).forEach((row) => {
+      const topic = String(row.nps_topic ?? "").trim();
+      if (topic) {
+        topics.add(topic);
+      }
+    });
+    return ["Todos", ...Array.from(topics).sort((left, right) => left.localeCompare(right, "es"))];
+  }, [linking?.evidence_table]);
+  const deepDiveRows = useMemo(() => {
+    const parseSimilarity = (value: unknown) => {
+      if (typeof value === "number") {
+        return Number.isFinite(value) ? value : Number.NaN;
+      }
+      const normalized = String(value ?? "")
+        .trim()
+        .replace(",", ".");
+      const parsed = Number.parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    };
+    const rows = [...(linking?.evidence_table || [])];
+    const filtered = deepDiveTopicFilter === "Todos"
+      ? rows
+      : rows.filter((row) => String(row.nps_topic ?? "").trim() === deepDiveTopicFilter);
+    filtered.sort((left, right) => {
+      const leftValue = parseSimilarity(left.similarity);
+      const rightValue = parseSimilarity(right.similarity);
+      if (Number.isNaN(leftValue) && Number.isNaN(rightValue)) {
+        return 0;
+      }
+      if (Number.isNaN(leftValue)) {
+        return 1;
+      }
+      if (Number.isNaN(rightValue)) {
+        return -1;
+      }
+      return deepDiveSimilarityOrder === "asc" ? leftValue - rightValue : rightValue - leftValue;
+    });
+    return filtered;
+  }, [deepDiveSimilarityOrder, deepDiveTopicFilter, linking?.evidence_table]);
 
   useEffect(() => {
     if (!n1Options.length) {
@@ -424,13 +465,22 @@ export function App() {
 
   useEffect(() => {
     if (!n2Options.length) {
+      if (serviceOriginN2) {
+        setServiceOriginN2("");
+      }
       return;
     }
     const nextSelectedValues = selectedN2Values.filter((value) => n2Options.includes(value));
     if (nextSelectedValues.length !== selectedN2Values.length) {
       setServiceOriginN2(serializeServiceOriginN2(nextSelectedValues));
     }
-  }, [n2Options, selectedN2Values]);
+  }, [n2Options, selectedN2Values, serviceOriginN2]);
+
+  useEffect(() => {
+    if (!deepDiveTopicOptions.includes(deepDiveTopicFilter)) {
+      setDeepDiveTopicFilter("Todos");
+    }
+  }, [deepDiveTopicFilter, deepDiveTopicOptions]);
 
   useEffect(() => {
     if (!causalMethodOptions.length) {
@@ -612,10 +662,8 @@ export function App() {
     };
   const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
 
-  function toggleServiceOriginN2(option: string) {
-    const nextValues = selectedN2Values.includes(option)
-      ? selectedN2Values.filter((value) => value !== option)
-      : [...selectedN2Values, option];
+  function handleServiceOriginN2Select(event: ChangeEvent<HTMLSelectElement>) {
+    const nextValues = Array.from(event.target.selectedOptions, (option) => option.value);
     setServiceOriginN2(serializeServiceOriginN2(nextValues));
   }
 
@@ -654,26 +702,30 @@ export function App() {
           </label>
           <label className="field-span-2">
             <span>Service Origin N2</span>
-            {n2Options.length ? (
-              <div className="choice-grid">
-                {n2Options.map((option) => (
-                  <button
-                    className={`choice-chip${selectedN2Values.includes(option) ? " is-selected" : ""}`}
-                    key={option}
-                    onClick={() => toggleServiceOriginN2(option)}
-                    type="button"
-                  >
+            <select
+              className="multi-select-control"
+              disabled={!n2Options.length}
+              multiple
+              onChange={handleServiceOriginN2Select}
+              value={selectedN2Values}
+            >
+              {n2Options.length ? (
+                n2Options.map((option) => (
+                  <option key={option} value={option}>
                     {option}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <input
-                onChange={(event) => setServiceOriginN2(event.target.value)}
-                placeholder="Opcional. Puedes escribir varios N2 separados por coma."
-                value={serviceOriginN2}
-              />
-            )}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>
+                  Sin N2 configurados para esta combinación
+                </option>
+              )}
+            </select>
+            <span className="field-hint">
+              {n2Options.length
+                ? "Pulsa Ctrl/Cmd para seleccionar varios N2."
+                : "Define N2 por combinación desde Configuración si necesitas habilitarlos."}
+            </span>
           </label>
         </div>
       </section>
@@ -1142,37 +1194,13 @@ export function App() {
 
         <NavigationTabs compact items={LINKING_TABS} onChange={setLinkingTab} value={linkingTab} />
 
-        {linkingTab === "situation" ? (
+        {linkingTab === "simulation" ? (
           <>
             <PlotFigure
               emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
               figure={linking.overview_figure}
               testId="linking-overview-figure"
             />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tópico</th>
-                    <th>Similarity</th>
-                    <th>Incidencia</th>
-                    <th>Evidencia Helix</th>
-                    <th>Comentario detractor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linking.evidence_table.map((row, index) => (
-                    <tr key={`evidence-${index}`}>
-                      <td>{String(row.nps_topic ?? "")}</td>
-                      <td>{String(row.similarity ?? "")}</td>
-                      <td>{String(row.incident_id ?? "")}</td>
-                      <td>{String(row.incident_summary ?? "")}</td>
-                      <td>{String(row.detractor_comment ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </>
         ) : null}
 
@@ -1252,6 +1280,69 @@ export function App() {
                       <td>{String(row.total_nps_impact ?? "")}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
+
+        {linkingTab === "deep-dive" ? (
+          <>
+            <div className="inline-actions">
+              <label className="inline-field">
+                <span>Tópico</span>
+                <select
+                  onChange={(event) => setDeepDiveTopicFilter(event.target.value)}
+                  value={deepDiveTopicFilter}
+                >
+                  {deepDiveTopicOptions.map((topic) => (
+                    <option key={topic} value={topic}>
+                      {topic}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="inline-field">
+                <span>Orden similarity</span>
+                <select
+                  onChange={(event) => setDeepDiveSimilarityOrder(event.target.value as "desc" | "asc")}
+                  value={deepDiveSimilarityOrder}
+                >
+                  <option value="desc">Mayor a menor</option>
+                  <option value="asc">Menor a mayor</option>
+                </select>
+              </label>
+            </div>
+            <div className="table-meta">
+              <span>Filas visibles: {deepDiveRows.length.toLocaleString("es-ES")}</span>
+            </div>
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Tópico</th>
+                    <th>Similarity</th>
+                    <th>Incidencia</th>
+                    <th>Evidencia Helix</th>
+                    <th>Comentario detractor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deepDiveRows.length ? (
+                    deepDiveRows.map((row, index) => (
+                      <tr key={`deep-dive-evidence-${index}`}>
+                        <td>{String(row.nps_topic ?? "")}</td>
+                        <td>{String(row.similarity ?? "")}</td>
+                        <td>{String(row.incident_id ?? "")}</td>
+                        <td>{String(row.incident_summary ?? "")}</td>
+                        <td>{String(row.detractor_comment ?? "")}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5}>No hay evidencia para el filtro de tópico seleccionado.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

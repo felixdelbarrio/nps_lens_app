@@ -450,111 +450,51 @@ class DashboardService:
 
         focus_group, focus_label = self._linking_focus_group(nps_group)
         if nps_slice.empty or helix_slice.empty:
-            return {
-                "available": False,
-                "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
-                "focus_group": focus_group,
-                "focus_label": focus_label,
-                "empty_state": (
+            return self._empty_linking_payload(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=nps_group,
+                focus_group=focus_group,
+                focus_label=focus_label,
+                empty_state=(
                     "No hay suficiente base cruzada para analizar incidencias frente a NPS en el "
                     "contexto actual. Carga Helix y revisa el periodo activo."
                 ),
-                "kpis": {},
-                "overview_figure": None,
-                "priority_figure": None,
-                "risk_recovery_figure": None,
-                "heatmap_figure": None,
-                "lag_figure": None,
-                "ranking_table": [],
-                "evidence_table": [],
-                "journey_routes_table": [],
-                "top_topic": "",
-            }
+            )
 
         focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
         if focus_df.empty:
-            return {
-                "available": False,
-                "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
-                "focus_group": focus_group,
-                "focus_label": focus_label,
-                "empty_state": (
+            return self._empty_linking_payload(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=nps_group,
+                focus_group=focus_group,
+                focus_label=focus_label,
+                empty_state=(
                     "El grupo focal seleccionado no tiene suficientes respuestas para construir "
                     "análisis causal con incidencias."
                 ),
-                "kpis": {},
-                "overview_figure": None,
-                "priority_figure": None,
-                "risk_recovery_figure": None,
-                "heatmap_figure": None,
-                "lag_figure": None,
-                "ranking_table": [],
-                "evidence_table": [],
-                "journey_routes_table": [],
-                "top_topic": "",
-            }
+            )
 
-        assignments_df, links_df = link_incidents_to_nps_topics(
-            focus_df,
-            helix_slice,
+        core = self._compute_linking_core(
+            nps_df=nps_slice,
+            helix_df=helix_slice,
+            focus_df=focus_df,
+            focus_group=focus_group,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
         )
-        overall_weekly, by_topic_weekly = weekly_aggregates(
-            nps_slice,
-            helix_slice,
-            assignments_df,
-            focus_group=focus_group,
-        )
-        overall_daily, by_topic_daily = daily_aggregates(
-            nps_slice,
-            helix_slice,
-            assignments_df,
-            focus_group=focus_group,
-        )
-        rationale_rank = causal_rank_by_topic(by_topic_weekly)
-        rationale_df = build_incident_nps_rationale(
-            by_topic_weekly,
-            focus_group=focus_group,
-            rank_df=rationale_rank,
-            min_topic_responses=80,
-            recovery_factor=0.65,
-        )
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
-        lag_days = (
-            estimate_best_lag_days_by_topic(
-                by_topic_daily,
-                max_lag_days=21,
-                min_points=30,
-            )
-            if can_use_daily_resample(
-                overall_daily,
-                min_days_with_responses=20,
-                min_coverage=0.45,
-            )
-            else pd.DataFrame()
-        )
-        routes = build_routes(focus_df, incidents_df=helix_slice)
-        routes_df = pd.DataFrame(
-            [
-                {
-                    "route_signature": route.route_signature,
-                    "n": route.n,
-                    "detractor_rate": route.detractor_rate,
-                    "score": route.score,
-                    "touchpoint": str(route.evidence.get("lever", "")),
-                    "subtouchpoint": str(route.evidence.get("sublever", "")),
-                    "topic": str(route.evidence.get("topic", "")),
-                }
-                for route in routes
-            ]
-        )
-
-        top_topic = ""
-        if not rationale_df.empty:
-            top_topic = str(rationale_df.iloc[0]["nps_topic"])
-        elif not rationale_rank.empty:
-            top_topic = str(rationale_rank.iloc[0]["nps_topic"])
+        overall_daily = cast(pd.DataFrame, core["overall_daily"])
+        overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
+        by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
+        rationale_df = cast(pd.DataFrame, core["rationale_df"])
+        rationale_summary = cast(object, core["rationale_summary"])
+        lag_days = cast(pd.DataFrame, core["lag_days"])
+        routes_df = cast(pd.DataFrame, core["routes_df"])
+        evidence_df = cast(pd.DataFrame, core["evidence_df"])
+        top_topic = str(core["top_topic"])
 
         return {
             "available": True,
@@ -599,9 +539,7 @@ class DashboardService:
                 )
             ),
             "ranking_table": self._serialize_rows(rationale_df.head(20)),
-            "evidence_table": self._serialize_rows(
-                self._build_linking_evidence_table(focus_df, helix_slice, links_df)
-            ),
+            "evidence_table": self._serialize_rows(evidence_df),
             "journey_routes_table": self._serialize_rows(routes_df.head(20)),
             "top_topic": top_topic,
         }
@@ -648,32 +586,26 @@ class DashboardService:
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
 
-        assignments_df, links_df = link_incidents_to_nps_topics(
-            focus_history,
-            helix_history,
+        core = self._compute_linking_core(
+            nps_df=history_df,
+            helix_df=helix_history,
+            focus_df=focus_history,
+            focus_group=focus_group,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
         )
+        links_df = cast(pd.DataFrame, core["links_df"])
         if links_df.empty:
             raise ValueError(
                 "No se encontraron vínculos defendibles entre Helix y VoC con los umbrales actuales."
             )
-
-        overall_weekly, by_topic_weekly = weekly_aggregates(
-            history_df,
-            helix_history,
-            assignments_df,
-            focus_group=focus_group,
-        )
-        overall_daily, by_topic_daily = daily_aggregates(
-            history_df,
-            helix_history,
-            assignments_df,
-            focus_group=focus_group,
-        )
+        overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
+        by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
+        overall_daily = cast(pd.DataFrame, core["overall_daily"])
+        by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
         overall_daily = self._attach_daily_nps_mean(overall_daily, history_df)
 
-        rationale_rank = causal_rank_by_topic(by_topic_weekly)
+        rationale_rank = cast(pd.DataFrame, core["rationale_rank"])
         lag_weeks = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
         changepoints = detect_detractor_changepoints_with_bootstrap(
             by_topic_weekly,
@@ -701,13 +633,8 @@ class DashboardService:
             raise ValueError(
                 "No hay señal suficiente para construir el racional causal con el contexto actual."
             )
-
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
-        lag_days = (
-            estimate_best_lag_days_by_topic(by_topic_daily, max_lag_days=21, min_points=30)
-            if can_use_daily_resample(overall_daily, min_days_with_responses=20, min_coverage=0.45)
-            else pd.DataFrame()
-        )
+        rationale_summary = cast(object, core["rationale_summary"])
+        lag_days = cast(pd.DataFrame, core["lag_days"])
 
         executive_journey_catalog = load_executive_journey_catalog(
             self.settings.knowledge_dir,
@@ -1051,6 +978,8 @@ class DashboardService:
         focus_df: pd.DataFrame,
         helix_df: pd.DataFrame,
         links_df: pd.DataFrame,
+        *,
+        max_rows: int = 25,
     ) -> pd.DataFrame:
         if links_df.empty:
             return pd.DataFrame()
@@ -1072,7 +1001,7 @@ class DashboardService:
             helix_copy.set_index("incident_id")["incident_summary"].astype(str).fillna("")
         )
 
-        evidence = links_df.copy().sort_values("similarity", ascending=False).head(25)
+        evidence = links_df.copy().sort_values("similarity", ascending=False).head(int(max_rows))
         evidence["detractor_comment"] = (
             evidence["nps_id"].astype(str).map(comment_map).fillna("").str.slice(0, 220)
         )
@@ -1089,6 +1018,127 @@ class DashboardService:
                 "detractor_comment",
             ]
         ].copy()
+
+    def _compute_linking_core(
+        self,
+        *,
+        nps_df: pd.DataFrame,
+        helix_df: pd.DataFrame,
+        focus_df: pd.DataFrame,
+        focus_group: str,
+        min_similarity: float,
+        max_days_apart: int,
+    ) -> dict[str, object]:
+        assignments_df, links_df = link_incidents_to_nps_topics(
+            focus_df,
+            helix_df,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+        )
+        overall_weekly, by_topic_weekly = weekly_aggregates(
+            nps_df,
+            helix_df,
+            assignments_df,
+            focus_group=focus_group,
+        )
+        overall_daily, by_topic_daily = daily_aggregates(
+            nps_df,
+            helix_df,
+            assignments_df,
+            focus_group=focus_group,
+        )
+        rationale_rank = causal_rank_by_topic(by_topic_weekly)
+        rationale_df = build_incident_nps_rationale(
+            by_topic_weekly,
+            focus_group=focus_group,
+            rank_df=rationale_rank,
+            min_topic_responses=80,
+            recovery_factor=0.65,
+        )
+        rationale_summary = summarize_incident_nps_rationale(rationale_df)
+        lag_days = (
+            estimate_best_lag_days_by_topic(
+                by_topic_daily,
+                max_lag_days=21,
+                min_points=30,
+            )
+            if can_use_daily_resample(
+                overall_daily,
+                min_days_with_responses=20,
+                min_coverage=0.45,
+            )
+            else pd.DataFrame()
+        )
+        routes = build_routes(focus_df, incidents_df=helix_df)
+        routes_df = pd.DataFrame(
+            [
+                {
+                    "route_signature": route.route_signature,
+                    "n": route.n,
+                    "detractor_rate": route.detractor_rate,
+                    "score": route.score,
+                    "touchpoint": str(route.evidence.get("lever", "")),
+                    "subtouchpoint": str(route.evidence.get("sublever", "")),
+                    "topic": str(route.evidence.get("topic", "")),
+                }
+                for route in routes
+            ]
+        )
+        evidence_df = self._build_linking_evidence_table(
+            focus_df,
+            helix_df,
+            links_df,
+            max_rows=300,
+        )
+        top_topic = ""
+        if not rationale_df.empty:
+            top_topic = str(rationale_df.iloc[0]["nps_topic"])
+        elif not rationale_rank.empty:
+            top_topic = str(rationale_rank.iloc[0]["nps_topic"])
+        return {
+            "assignments_df": assignments_df,
+            "links_df": links_df,
+            "overall_weekly": overall_weekly,
+            "by_topic_weekly": by_topic_weekly,
+            "overall_daily": overall_daily,
+            "by_topic_daily": by_topic_daily,
+            "rationale_rank": rationale_rank,
+            "rationale_df": rationale_df,
+            "rationale_summary": rationale_summary,
+            "lag_days": lag_days,
+            "routes_df": routes_df,
+            "evidence_df": evidence_df,
+            "top_topic": top_topic,
+        }
+
+    def _empty_linking_payload(
+        self,
+        *,
+        context: UploadContext,
+        pop_year: str,
+        pop_month: str,
+        nps_group: str,
+        focus_group: str,
+        focus_label: str,
+        empty_state: str,
+    ) -> dict[str, object]:
+        return {
+            "available": False,
+            "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
+            "focus_group": focus_group,
+            "focus_label": focus_label,
+            "empty_state": empty_state,
+            "kpis": {},
+            "overview_figure": None,
+            "priority_figure": None,
+            "risk_recovery_figure": None,
+            "heatmap_figure": None,
+            "lag_figure": None,
+            "ranking_table": [],
+            "evidence_table": [],
+            "journey_routes_table": [],
+            "top_topic": "",
+        }
 
     def _build_linking_overview_figure(
         self,
