@@ -22,6 +22,9 @@ class NpsService:
         self.repository = repository
         self.settings = settings
         self.logger = logging.getLogger(__name__)
+        repaired = self.repository.reconcile_processing_uploads()
+        if repaired:
+            self.logger.warning("Recovered stale processing uploads", extra={"count": repaired})
 
     def ingest_excel(
         self,
@@ -127,11 +130,49 @@ class NpsService:
         )
         self.repository.persist_upload_attempt(processing_attempt)
 
-        inserted_rows, updated_rows, duplicate_historical_rows = self.repository.upsert_records(
-            upload_id=upload_id,
-            uploaded_at=uploaded_at,
-            frame=result.df,
-        )
+        try:
+            inserted_rows, updated_rows, duplicate_historical_rows = self.repository.upsert_records(
+                upload_id=upload_id,
+                uploaded_at=uploaded_at,
+                frame=result.df,
+            )
+        except Exception as exc:
+            issues = list(result.issues) + [
+                ValidationIssue(
+                    level="ERROR",
+                    code="storage_error",
+                    message="La carga falló al persistir los registros en el repositorio local.",
+                    details={"error_type": type(exc).__name__, "error": str(exc)},
+                )
+            ]
+            attempt = UploadAttempt(
+                upload_id=upload_id,
+                filename=Path(filename).name,
+                file_hash=file_hash,
+                uploaded_at=uploaded_at,
+                parser_version=PARSER_VERSION,
+                context=context,
+                status="failed",
+                total_rows=raw_rows,
+                normalized_rows=normalized_rows,
+                inserted_rows=0,
+                updated_rows=0,
+                duplicate_in_file_rows=duplicate_in_file_rows,
+                duplicate_historical_rows=0,
+                extra_columns=extra_columns,
+                missing_optional_columns=missing_optional_columns,
+                issues=issues,
+            )
+            self.repository.persist_upload_attempt(attempt)
+            self.logger.exception(
+                "Upload failed during persistence",
+                extra={
+                    "upload_id": upload_id,
+                    "upload_filename": filename,
+                    "file_hash": file_hash,
+                },
+            )
+            return self._serialize_attempt(attempt)
 
         if updated_rows:
             result.issues.append(

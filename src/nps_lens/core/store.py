@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from hashlib import sha1
 from pathlib import Path
@@ -44,6 +45,10 @@ def _clear_dir_tree(path: Path) -> None:
             p.rmdir()
     with contextlib.suppress(Exception):
         path.rmdir()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @lru_cache(maxsize=16)
@@ -645,7 +650,7 @@ class DatasetStore:
             "rows": int(len(df_out)),
             "cols": int(len(df_out.columns)),
             "source": source,
-            "updated_at_utc": pd.Timestamp.utcnow().isoformat() + "Z",
+            "updated_at_utc": _utc_now_iso(),
             "jsonl_mtime_ns": int(stat.st_mtime_ns),
             "jsonl_size": int(stat.st_size),
             "parquet_dataset": {
@@ -806,7 +811,7 @@ class HelixIncidentStore:
             "rows": int(len(df_out)),
             "cols": int(len(df_out.columns)),
             "source": source,
-            "updated_at_utc": pd.Timestamp.utcnow().isoformat() + "Z",
+            "updated_at_utc": _utc_now_iso(),
             "jsonl_mtime_ns": int(stat.st_mtime_ns),
             "jsonl_size": int(stat.st_size),
             "parquet_dataset": {

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import useSWR from "swr";
 
 import {
@@ -21,10 +21,12 @@ import type {
   LinkingPayload,
   PreferencesPayload,
   ServiceOriginHierarchyPayload,
+  UploadSelectionPayload,
   UploadResult
 } from "./api";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
+import { LinkingWorkspace } from "./components/LinkingWorkspace";
 import { NavigationTabs } from "./components/NavigationTabs";
 import { PlotFigure } from "./components/PlotFigure";
 import { PrimaryNav } from "./components/PrimaryNav";
@@ -91,12 +93,6 @@ const DATA_TABS = [
   { id: "helix", label: "Helix" }
 ];
 
-const LINKING_TABS = [
-  { id: "situation", label: "Situación del periodo" },
-  { id: "journeys", label: "Journeys de detracción" },
-  { id: "scenarios", label: "Escenarios causales" }
-];
-
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
 
 function formatPercent(value: number | null | undefined) {
@@ -111,6 +107,17 @@ function formatNumber(value: number | null | undefined, digits = 1) {
     return "—";
   }
   return value.toFixed(digits);
+}
+
+function formatDateLabel(value: string | null | undefined, locale = "es-ES") {
+  if (!value) {
+    return "—";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+  return parsed.toLocaleDateString(locale);
 }
 
 function parseServiceOriginN2(value: string) {
@@ -277,6 +284,7 @@ export function App() {
           npsGroup,
           minSimilarity,
           maxDaysApart,
+          touchpointSource,
           themeMode
         ]
       : null;
@@ -295,6 +303,7 @@ export function App() {
       nps_group: npsGroup,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
+      touchpoint_source: touchpointSource,
       theme_mode: themeMode
     })
   );
@@ -397,13 +406,9 @@ export function App() {
   ]);
 
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
-  const n2Options =
-    config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] ||
-    config?.service_origin_n2_options ||
-    [];
+  const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
   const causalMethodOptions = config?.causal_method_options || [];
   const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
-
   useEffect(() => {
     if (!n1Options.length) {
       return;
@@ -424,13 +429,16 @@ export function App() {
 
   useEffect(() => {
     if (!n2Options.length) {
+      if (serviceOriginN2) {
+        setServiceOriginN2("");
+      }
       return;
     }
     const nextSelectedValues = selectedN2Values.filter((value) => n2Options.includes(value));
     if (nextSelectedValues.length !== selectedN2Values.length) {
       setServiceOriginN2(serializeServiceOriginN2(nextSelectedValues));
     }
-  }, [n2Options, selectedN2Values]);
+  }, [n2Options, selectedN2Values, serviceOriginN2]);
 
   useEffect(() => {
     if (!causalMethodOptions.length) {
@@ -491,7 +499,7 @@ export function App() {
     return () => window.clearTimeout(timeoutId);
   }, [preferencesPayload, serviceOrigin, serviceOriginN1]);
 
-  async function handleNpsUpload(payload: { file: File }) {
+  async function handleNpsUpload(payload: UploadSelectionPayload) {
     setIsMutating(true);
     setError(null);
     try {
@@ -515,7 +523,7 @@ export function App() {
     }
   }
 
-  async function handleHelixUpload(payload: { file: File }) {
+  async function handleHelixUpload(payload: UploadSelectionPayload) {
     setIsMutating(true);
     setError(null);
     try {
@@ -612,10 +620,8 @@ export function App() {
     };
   const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
 
-  function toggleServiceOriginN2(option: string) {
-    const nextValues = selectedN2Values.includes(option)
-      ? selectedN2Values.filter((value) => value !== option)
-      : [...selectedN2Values, option];
+  function handleServiceOriginN2Select(event: ChangeEvent<HTMLSelectElement>) {
+    const nextValues = Array.from(event.target.selectedOptions, (option) => option.value);
     setServiceOriginN2(serializeServiceOriginN2(nextValues));
   }
 
@@ -654,26 +660,30 @@ export function App() {
           </label>
           <label className="field-span-2">
             <span>Service Origin N2</span>
-            {n2Options.length ? (
-              <div className="choice-grid">
-                {n2Options.map((option) => (
-                  <button
-                    className={`choice-chip${selectedN2Values.includes(option) ? " is-selected" : ""}`}
-                    key={option}
-                    onClick={() => toggleServiceOriginN2(option)}
-                    type="button"
-                  >
+            <select
+              className="multi-select-control"
+              disabled={!n2Options.length}
+              multiple
+              onChange={handleServiceOriginN2Select}
+              value={selectedN2Values}
+            >
+              {n2Options.length ? (
+                n2Options.map((option) => (
+                  <option key={option} value={option}>
                     {option}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <input
-                onChange={(event) => setServiceOriginN2(event.target.value)}
-                placeholder="Opcional. Puedes escribir varios N2 separados por coma."
-                value={serviceOriginN2}
-              />
-            )}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>
+                  Sin N2 configurados para esta combinación
+                </option>
+              )}
+            </select>
+            <span className="field-hint">
+              {n2Options.length
+                ? "Pulsa Ctrl/Cmd para seleccionar varios N2."
+                : "Define N2 por combinación desde Configuración si necesitas habilitarlos."}
+            </span>
           </label>
         </div>
       </section>
@@ -1095,11 +1105,11 @@ export function App() {
             </article>
             <article className="metric-card">
               <span>Última actualización NPS</span>
-              <strong>{npsDatasetStatus.updated_at ? new Date(npsDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+              <strong>{formatDateLabel(npsDatasetStatus.updated_at)}</strong>
             </article>
             <article className="metric-card">
               <span>Última actualización Helix</span>
-              <strong>{helixDatasetStatus.updated_at ? new Date(helixDatasetStatus.updated_at).toLocaleDateString("es-ES") : "—"}</strong>
+              <strong>{formatDateLabel(helixDatasetStatus.updated_at)}</strong>
             </article>
           </div>
           <article className="note-card">
@@ -1113,151 +1123,7 @@ export function App() {
     }
 
     return (
-      <section className="surface-card stack-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Incidencias ↔ NPS</p>
-            <h2>Lectura causal operativa</h2>
-          </div>
-        </div>
-
-        <div className="metric-grid">
-          <article className="metric-card">
-            <span>Respuestas analizadas</span>
-            <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Incidencias del periodo</span>
-            <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
-          </article>
-          <article className="metric-card">
-            <span>NPS en riesgo</span>
-            <strong>{formatNumber(linking.kpis.nps_points_at_risk, 2)}</strong>
-          </article>
-          <article className="metric-card">
-            <span>NPS recuperable</span>
-            <strong>{formatNumber(linking.kpis.nps_points_recoverable, 2)}</strong>
-          </article>
-        </div>
-
-        <NavigationTabs compact items={LINKING_TABS} onChange={setLinkingTab} value={linkingTab} />
-
-        {linkingTab === "situation" ? (
-          <>
-            <PlotFigure
-              emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
-              figure={linking.overview_figure}
-              testId="linking-overview-figure"
-            />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tópico</th>
-                    <th>Similarity</th>
-                    <th>Incidencia</th>
-                    <th>Evidencia Helix</th>
-                    <th>Comentario detractor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linking.evidence_table.map((row, index) => (
-                    <tr key={`evidence-${index}`}>
-                      <td>{String(row.nps_topic ?? "")}</td>
-                      <td>{String(row.similarity ?? "")}</td>
-                      <td>{String(row.incident_id ?? "")}</td>
-                      <td>{String(row.incident_summary ?? "")}</td>
-                      <td>{String(row.detractor_comment ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : null}
-
-        {linkingTab === "journeys" ? (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Route signature</th>
-                  <th>n</th>
-                  <th>% detractor</th>
-                  <th>Score</th>
-                  <th>Touchpoint</th>
-                  <th>Subtouchpoint</th>
-                  <th>Topic</th>
-                </tr>
-              </thead>
-              <tbody>
-                {linking.journey_routes_table.map((row, index) => (
-                  <tr key={`route-${index}`}>
-                    <td>{String(row.route_signature ?? "")}</td>
-                    <td>{String(row.n ?? "")}</td>
-                    <td>{String(row.detractor_rate ?? "")}</td>
-                    <td>{String(row.score ?? "")}</td>
-                    <td>{String(row.touchpoint ?? "")}</td>
-                    <td>{String(row.subtouchpoint ?? "")}</td>
-                    <td>{String(row.topic ?? "")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {linkingTab === "scenarios" ? (
-          <>
-            <PlotFigure
-              emptyMessage="No hay suficientes tópicos para construir la matriz de prioridad."
-              figure={linking.priority_figure}
-              testId="linking-priority-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay suficientes señales para comparar riesgo y recuperación."
-              figure={linking.risk_recovery_figure}
-              testId="linking-risk-recovery-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay heatmap diario para el tópico líder."
-              figure={linking.heatmap_figure}
-              testId="linking-heatmap-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay lag diario defendible para el tópico líder."
-              figure={linking.lag_figure}
-              testId="linking-lag-figure"
-            />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tópico</th>
-                    <th>Incidencias</th>
-                    <th>Respuestas</th>
-                    <th>Prioridad</th>
-                    <th>Confianza</th>
-                    <th>Impacto total NPS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linking.ranking_table.map((row, index) => (
-                    <tr key={`rank-${index}`}>
-                      <td>{String(row.nps_topic ?? "")}</td>
-                      <td>{String(row.incidents ?? "")}</td>
-                      <td>{String(row.responses ?? "")}</td>
-                      <td>{String(row.priority ?? "")}</td>
-                      <td>{String(row.confidence ?? "")}</td>
-                      <td>{String(row.total_nps_impact ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : null}
-      </section>
+      <LinkingWorkspace linking={linking} onTabChange={setLinkingTab} tab={linkingTab} />
     );
   }
 

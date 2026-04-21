@@ -140,6 +140,10 @@ class LinkingResponse(BaseModel):
     focus_label: str = ""
     empty_state: str = ""
     kpis: dict[str, Any] = Field(default_factory=dict)
+    touchpoint_mode: dict[str, Any] = Field(default_factory=dict)
+    situation: dict[str, Any] = Field(default_factory=dict)
+    journeys: dict[str, Any] = Field(default_factory=dict)
+    scenarios: dict[str, Any] = Field(default_factory=dict)
     overview_figure: Optional[dict[str, Any]] = None
     priority_figure: Optional[dict[str, Any]] = None
     risk_recovery_figure: Optional[dict[str, Any]] = None

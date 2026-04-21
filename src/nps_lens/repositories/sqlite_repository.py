@@ -30,6 +30,7 @@ CORE_COLUMNS = {
     "_service_origin_n2_key",
     "_text_norm",
 }
+_SQLITE_IN_BATCH_SIZE = 900
 
 
 class SqliteNpsRepository:
@@ -225,6 +226,51 @@ class SqliteNpsRepository:
                     ],
                 )
 
+    def reconcile_processing_uploads(self) -> int:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT upload_id
+                FROM uploads
+                WHERE status = 'processing'
+                """
+            ).fetchall()
+            if not rows:
+                return 0
+            upload_ids = [str(row["upload_id"]) for row in rows]
+            connection.executemany(
+                """
+                UPDATE uploads
+                SET status = 'failed'
+                WHERE upload_id = ?
+                """,
+                [(upload_id,) for upload_id in upload_ids],
+            )
+            connection.executemany(
+                """
+                INSERT INTO upload_issues (
+                    upload_id,
+                    level,
+                    code,
+                    message,
+                    column_name,
+                    details_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        upload_id,
+                        "ERROR",
+                        "interrupted_upload",
+                        "La carga anterior quedó interrumpida antes de completarse. Se marcó como fallida al reabrir la aplicación.",
+                        None,
+                        json.dumps({}, ensure_ascii=False),
+                    )
+                    for upload_id in upload_ids
+                ],
+            )
+        return len(upload_ids)
+
     def upsert_records(
         self,
         *,
@@ -237,27 +283,32 @@ class SqliteNpsRepository:
             return 0, 0, 0
 
         business_keys = [str(row["_business_key"]) for row in rows]
-        placeholders = ",".join("?" for _ in business_keys)
         inserted = 0
         updated = 0
         duplicate_historical = 0
 
         with self._connect() as connection:
-            existing_rows = connection.execute(
-                f"""
-                SELECT business_key, record_fingerprint, times_seen
-                FROM records
-                WHERE business_key IN ({placeholders})
-                """,
-                business_keys,
-            ).fetchall()
-            existing: dict[str, dict[str, Any]] = {
-                str(row["business_key"]): {
-                    "record_fingerprint": str(row["record_fingerprint"]),
-                    "times_seen": int(row["times_seen"]),
-                }
-                for row in existing_rows
-            }
+            existing: dict[str, dict[str, Any]] = {}
+            for start in range(0, len(business_keys), _SQLITE_IN_BATCH_SIZE):
+                chunk = business_keys[start : start + _SQLITE_IN_BATCH_SIZE]
+                placeholders = ",".join("?" for _ in chunk)
+                existing_rows = connection.execute(
+                    f"""
+                    SELECT business_key, record_fingerprint, times_seen
+                    FROM records
+                    WHERE business_key IN ({placeholders})
+                    """,
+                    chunk,
+                ).fetchall()
+                existing.update(
+                    {
+                        str(row["business_key"]): {
+                            "record_fingerprint": str(row["record_fingerprint"]),
+                            "times_seen": int(row["times_seen"]),
+                        }
+                        for row in existing_rows
+                    }
+                )
 
             upload_events: list[tuple[str, str, int, str, str]] = []
             for row in rows:
