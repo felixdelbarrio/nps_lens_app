@@ -384,11 +384,14 @@ class DesktopBridge:
             ) from exc
 
         try:
-            return json.loads(raw_body)
+            parsed = json.loads(raw_body)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
                 "La respuesta del import no se pudo interpretar correctamente."
             ) from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("La respuesta del import no tiene el formato esperado.")
+        return {str(key): value for key, value in parsed.items()}
 
 
 def _run_desktop(port: int) -> None:

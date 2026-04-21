@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,7 @@ from nps_lens.analytics.incident_attribution import (
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
+    IncidentRationaleSummary,
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
 )
@@ -114,7 +115,7 @@ _COHORT_COLUMN_DIMENSIONS = {
 }
 
 
-def _unique_string_values(values: list[object]) -> list[str]:
+def _unique_string_values(values: Sequence[object]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -138,6 +139,24 @@ def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
     )
 
 
+def _series_or_default(
+    frame: pd.DataFrame, column: str, *, default: object = "", dtype: str | None = None
+) -> pd.Series:
+    series = frame.get(column)
+    if isinstance(series, pd.Series):
+        return series
+    fallback = pd.Series([default] * len(frame), index=frame.index)
+    if dtype is not None:
+        return fallback.astype(dtype)
+    return fallback
+
+
+def _numeric_series(frame: pd.DataFrame, column: str, *, default: float = 0.0) -> pd.Series:
+    return pd.to_numeric(_series_or_default(frame, column, default=default), errors="coerce").fillna(
+        default
+    )
+
+
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     if chain_df is None or chain_df.empty:
         return pd.DataFrame()
@@ -145,10 +164,16 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
     out = chain_df.copy().reset_index(drop=True)
 
     def _safe_int_label(value: object) -> int:
-        try:
-            return int(float(value))
-        except Exception:
-            return 0
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        if isinstance(value, (float, np.floating)):
+            return 0 if pd.isna(value) else int(value)
+        if isinstance(value, str):
+            try:
+                return int(float(value))
+            except ValueError:
+                return 0
+        return 0
 
     topic = (
         out.get("nps_topic", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
@@ -705,15 +730,13 @@ class DashboardService:
             by_topic_weekly=by_topic_weekly,
             by_topic_daily=by_topic_daily,
         )
-        broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
-        broken_journey_links_df = cast(pd.DataFrame, mode_payload["broken_journey_links_df"])
-        links_mode_df = cast(pd.DataFrame, mode_payload["links_mode_df"])
-        by_topic_weekly_mode = cast(pd.DataFrame, mode_payload["by_topic_weekly_mode"])
-        by_topic_daily_mode = cast(pd.DataFrame, mode_payload["by_topic_daily_mode"])
+        broken_journeys_df = mode_payload["broken_journeys_df"]
+        broken_journey_links_df = mode_payload["broken_journey_links_df"]
+        links_mode_df = mode_payload["links_mode_df"]
+        by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
+        by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
         trend_df = overall_daily if not overall_daily.empty else overall_weekly
-        average_focus = float(
-            pd.to_numeric(trend_df.get("focus_rate", 0.0), errors="coerce").fillna(0.0).mean()
-        )
+        average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
         show_all_groups = str(nps_group or "").strip().lower() == str(POP_ALL).lower()
 
         rank = causal_rank_by_topic(by_topic_weekly_mode)
@@ -767,13 +790,9 @@ class DashboardService:
                 rank2["factor"] = 1.0
                 rank2["confirmed"] = 0
                 rank2["rejected"] = 0
-            rank2["factor"] = pd.to_numeric(rank2.get("factor", 1.0), errors="coerce").fillna(1.0)
-            rank2["confirmed"] = (
-                pd.to_numeric(rank2.get("confirmed", 0), errors="coerce").fillna(0).astype(int)
-            )
-            rank2["rejected"] = (
-                pd.to_numeric(rank2.get("rejected", 0), errors="coerce").fillna(0).astype(int)
-            )
+            rank2["factor"] = _numeric_series(rank2, "factor", default=1.0)
+            rank2["confirmed"] = _numeric_series(rank2, "confirmed", default=0.0).astype(int)
+            rank2["rejected"] = _numeric_series(rank2, "rejected", default=0.0).astype(int)
             rank2["confidence_learned"] = (
                 pd.to_numeric(rank2["score"], errors="coerce").fillna(0.0)
                 * rank2["factor"].astype(float)
@@ -796,23 +815,21 @@ class DashboardService:
             formatted_rank["factor"] = (
                 pd.to_numeric(formatted_rank["factor"], errors="coerce").fillna(1.0).round(3)
             )
-            formatted_rank["corr"] = pd.to_numeric(
-                formatted_rank.get("corr"), errors="coerce"
-            ).round(3)
-            formatted_rank["max_cp_stability"] = pd.to_numeric(
-                formatted_rank.get("max_cp_stability"), errors="coerce"
+            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(3)
+            formatted_rank["max_cp_stability"] = _numeric_series(
+                formatted_rank, "max_cp_stability", default=np.nan
             ).round(3)
             formatted_rank["incidents_lead_changepoint_share"] = (
-                pd.to_numeric(
-                    formatted_rank.get("incidents_lead_changepoint_share"),
-                    errors="coerce",
+                _numeric_series(
+                    formatted_rank,
+                    "incidents_lead_changepoint_share",
+                    default=np.nan,
                 )
                 .mul(100.0)
                 .round(0)
             )
-            formatted_rank["best_lag_weeks"] = pd.to_numeric(
-                formatted_rank.get("best_lag_weeks"),
-                errors="coerce",
+            formatted_rank["best_lag_weeks"] = _numeric_series(
+                formatted_rank, "best_lag_weeks", default=np.nan
             )
             formatted_rank["changepoints"] = formatted_rank.get(
                 "changepoints",
@@ -1227,7 +1244,7 @@ class DashboardService:
             raise ValueError(
                 "No hay señal suficiente para construir el racional causal con el contexto actual."
             )
-        rationale_summary = cast(object, core["rationale_summary"])
+        rationale_summary = cast(IncidentRationaleSummary, core["rationale_summary"])
         lag_days = cast(pd.DataFrame, core["lag_days"])
 
         executive_journey_catalog = load_executive_journey_catalog(
@@ -1629,45 +1646,35 @@ class DashboardService:
                     if column not in {"action_lane", "owner_role", "nps_topic", "touchpoint"}
                     else ""
                 )
-        detail_df["detractor_probability"] = pd.to_numeric(
-            detail_df.get("detractor_probability"),
-            errors="coerce",
+        detail_df["detractor_probability"] = _numeric_series(
+            detail_df, "detractor_probability", default=np.nan
         ).round(3)
-        detail_df["priority"] = pd.to_numeric(detail_df.get("priority"), errors="coerce").round(3)
-        detail_df["confidence"] = pd.to_numeric(detail_df.get("confidence"), errors="coerce").round(
-            3
-        )
-        detail_df["nps_points_at_risk"] = pd.to_numeric(
-            detail_df.get("nps_points_at_risk"),
-            errors="coerce",
+        detail_df["priority"] = _numeric_series(detail_df, "priority", default=np.nan).round(3)
+        detail_df["confidence"] = _numeric_series(detail_df, "confidence", default=np.nan).round(3)
+        detail_df["nps_points_at_risk"] = _numeric_series(
+            detail_df, "nps_points_at_risk", default=np.nan
         ).round(2)
-        detail_df["nps_points_recoverable"] = pd.to_numeric(
-            detail_df.get("nps_points_recoverable"),
-            errors="coerce",
+        detail_df["nps_points_recoverable"] = _numeric_series(
+            detail_df, "nps_points_recoverable", default=np.nan
         ).round(2)
-        detail_df["nps_delta_expected"] = pd.to_numeric(
-            detail_df.get("nps_delta_expected"),
-            errors="coerce",
+        detail_df["nps_delta_expected"] = _numeric_series(
+            detail_df, "nps_delta_expected", default=np.nan
         ).round(2)
-        detail_df["total_nps_impact"] = pd.to_numeric(
-            detail_df.get("total_nps_impact"),
-            errors="coerce",
+        detail_df["total_nps_impact"] = _numeric_series(
+            detail_df, "total_nps_impact", default=np.nan
         ).round(2)
-        detail_df["causal_score"] = pd.to_numeric(
-            detail_df.get("causal_score"),
-            errors="coerce",
+        detail_df["causal_score"] = _numeric_series(
+            detail_df, "causal_score", default=np.nan
         ).round(3)
-        detail_df["delta_focus_rate_pp"] = pd.to_numeric(
-            detail_df.get("delta_focus_rate_pp"),
-            errors="coerce",
+        detail_df["delta_focus_rate_pp"] = _numeric_series(
+            detail_df, "delta_focus_rate_pp", default=np.nan
         ).round(2)
-        detail_df["incident_rate_per_100_responses"] = pd.to_numeric(
-            detail_df.get("incident_rate_per_100_responses"),
-            errors="coerce",
+        detail_df["incident_rate_per_100_responses"] = _numeric_series(
+            detail_df, "incident_rate_per_100_responses", default=np.nan
         ).round(2)
-        detail_df["incidents"] = pd.to_numeric(detail_df.get("incidents"), errors="coerce").round(0)
-        detail_df["responses"] = pd.to_numeric(detail_df.get("responses"), errors="coerce").round(0)
-        detail_df["eta_weeks"] = pd.to_numeric(detail_df.get("eta_weeks"), errors="coerce").round(1)
+        detail_df["incidents"] = _numeric_series(detail_df, "incidents", default=np.nan).round(0)
+        detail_df["responses"] = _numeric_series(detail_df, "responses", default=np.nan).round(0)
+        detail_df["eta_weeks"] = _numeric_series(detail_df, "eta_weeks", default=np.nan).round(1)
         return detail_df[show_cols].rename(
             columns={
                 "nps_topic": "Tópico NPS",
@@ -1719,8 +1726,8 @@ class DashboardService:
         g = g.dropna(subset=["week"])
         if g.empty:
             return None
-        g["focus_rate"] = pd.to_numeric(g.get("focus_rate"), errors="coerce").fillna(0.0)
-        g["incidents"] = pd.to_numeric(g.get("incidents"), errors="coerce").fillna(0.0)
+        g["focus_rate"] = _numeric_series(g, "focus_rate", default=0.0)
+        g["incidents"] = _numeric_series(g, "incidents", default=0.0)
         g["incidents_shifted"] = g["incidents"].shift(lag_weeks)
 
         cps = lag_row.get("changepoints", pd.Series([[]])).iloc[0]
@@ -2268,7 +2275,7 @@ class DashboardService:
             parsed = pd.to_datetime(candidate, errors="coerce", utc=True)
             if pd.isna(parsed):
                 continue
-            return parsed.isoformat().replace("+00:00", "Z")
+            return cast(pd.Timestamp, parsed).isoformat().replace("+00:00", "Z")
         return None
 
     def _persist_upload_file(
