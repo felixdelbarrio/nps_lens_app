@@ -6,7 +6,10 @@
 
 - `make setup` — crea `.venv` e instala dependencias
 - `make run` — Streamlit
-- `make ci` — ruff + black + mypy + pytest
+- `make lint` — ruff + black
+- `make typecheck` — mypy
+- `make test` — pytest + coverage
+- `make ci` — lint backend + frontend + E2E
 - `make platform CONFIG=...` — batch runner
 - `make build` — build PyInstaller (mac/linux)
 

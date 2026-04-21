@@ -124,7 +124,7 @@ make build
 - `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, LLM packs)
 - `tests/` → tests unitarios y de plataforma
 - `docs/` → documentación técnica y operativa
-- `.github/workflows/` → `test`, `typecheck`, `ci` y `release` multi-plataforma
+- `.github/workflows/` → `test`, `typecheck`, `ci`, `codeql` y `release` multi-plataforma
 
 ---
 

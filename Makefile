@@ -37,6 +37,7 @@ MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
 MACOS_INSTALL_TO_APPLICATIONS ?= 0
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
+PLAYWRIGHT_BROWSERS_PATH ?= $(ROOT)/$(FRONTEND_DIR)/.playwright-browsers
 
 PIP = $(VENV_BIN)/pip$(BIN_EXT)
 PY = $(VENV_BIN)/python$(BIN_EXT)
@@ -94,8 +95,8 @@ frontend-test:
 frontend-e2e:
 	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
 	@test -x "$(PLAYWRIGHT)" || $(MAKE) frontend-install
-	cd $(FRONTEND_DIR) && npx playwright install chromium
-	$(NPM) run e2e
+	cd $(FRONTEND_DIR) && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install chromium
+	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" $(NPM) run e2e
 
 build:
 	$(MAKE) python-build
@@ -233,4 +234,4 @@ ci:
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist
-	rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/playwright-report $(FRONTEND_DIR)/test-results $(FRONTEND_DIR)/.playwright-data
+	rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules $(FRONTEND_DIR)/playwright-report $(FRONTEND_DIR)/test-results $(FRONTEND_DIR)/.playwright-data $(FRONTEND_DIR)/.playwright-browsers
