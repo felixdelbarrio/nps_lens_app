@@ -142,12 +142,160 @@ const tablePayload = {
   has_more: false
 };
 
+const linkingPayloadAvailable = {
+  available: true,
+  context_pills: [
+    "Service origin: BBVA México",
+    "N1: ENTERPRISE WEB",
+    "N2: -",
+    "Año: Todos",
+    "Mes: Todos",
+    "Grupo: Todos"
+  ],
+  focus_group: "detractor",
+  focus_label: "% detractores",
+  empty_state: "",
+  touchpoint_mode: {
+    value: "executive_journeys",
+    label: "Journeys de detracción",
+    summary: "La lectura causal se reorganiza en journeys de comité.",
+    flow: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
+  },
+  kpis: {
+    responses: 26618,
+    incidents: 233,
+    average_focus_rate: 0.1524
+  },
+  situation: {
+    average_focus_rate: 0.1524,
+    ranking_table: [
+      {
+        "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
+        "Confidence (learned)": 0.133
+      }
+    ],
+    evidence_wall: [
+      {
+        similarity: 0.214,
+        "Comentario detractor": "Estamos a primero de mes y el edo de cuenta...",
+        "Incidencia (descripción)": "ACOTAMIENTO IRD INC000104258819",
+        incident_id: "INC000104258819"
+      }
+    ]
+  },
+  journeys: {
+    journeys_detected: 6,
+    linked_pairs: 34,
+    semantic_cohesion_mean: 0.91,
+    table: [
+      {
+        "Journey roto": "Uso / Edo de Cuenta",
+        "Links validados": 18
+      }
+    ]
+  },
+  scenarios: {
+    banner: {
+      kicker: "Narrativa causal",
+      title: "2 cadenas defendibles para detractores",
+      summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
+      metrics: [
+        { label: "Método causal", value: "Journeys de detracción" },
+        { label: "Incidencias con match", value: "20" },
+        { label: "Comentarios enlazados", value: "22" },
+        { label: "Links validados", value: "30" }
+      ]
+    },
+    pills: ["Solo cadena completa defendible", "2 tópicos linkados", "2 cadenas causales"],
+    cards: [
+      {
+        chain_key: "chain-1",
+        rank: 1,
+        title: "Operativa crítica fallida",
+        statement: "Operativa -> transferencias / pagos / firma -> error funcional o timeout.",
+        selection_label: "Transferencias / pagos / firma | Operativa crítica fallida | 12 INC | 12 VoC",
+        linked_incidents: 12,
+        linked_comments: 12,
+        linked_pairs: 16,
+        detractor_probability: 0.6,
+        nps_delta_expected: -0.0,
+        total_nps_impact: 0.0,
+        confidence: 0.16,
+        priority: 0.62,
+        nps_points_at_risk: 0.0,
+        nps_points_recoverable: 0.0,
+        owner_role: "VoC + Analitica",
+        flow_steps: [
+          "(12) Incidencias Helix",
+          "Transferencias / pagos / firma",
+          "Operativa / Error funcional / timeout",
+          "(12) Comentarios VoC",
+          "Riesgo NPS"
+        ],
+        incident_records: [
+          {
+            incident_id: "INC000104355468",
+            summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina..."
+          }
+        ],
+        comment_records: [
+          {
+            comment_id: "1",
+            date: "2026-03-26",
+            nps: "0",
+            group: "DETRACTOR",
+            palanca: "Transferencias",
+            subpalanca: "Pagos / firma",
+            comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
+          }
+        ],
+        detail_table: [
+          {
+            "Tópico NPS": "Operativa crítica fallida",
+            Prioridad: 0.62
+          }
+        ]
+      }
+    ]
+  },
+  overview_figure: null,
+  priority_figure: null,
+  risk_recovery_figure: null,
+  heatmap_figure: null,
+  lag_figure: null,
+  ranking_table: [],
+  evidence_table: [
+    {
+      nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
+      similarity: 0.339,
+      incident_id: "INC000104231684",
+      incident_summary: "ACOTAMIENTO IRD...",
+      detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
+    }
+  ],
+  journey_routes_table: [],
+  top_topic: "Pagos/ Transferencias > Faltan detalles de movimientos"
+};
+
 describe("App", () => {
   const createObjectUrl = vi.fn(() => "blob:report");
   const revokeObjectUrl = vi.fn();
   const anchorClick = vi.fn();
+  let currentLinkingPayload: Record<string, unknown>;
 
   beforeEach(() => {
+    currentLinkingPayload = {
+      available: false,
+      context_pills: [],
+      focus_group: "Todos",
+      focus_label: "Sin foco",
+      empty_state: "Sin base cruzada",
+      kpis: {},
+      ranking_table: [],
+      evidence_table: [],
+      journey_routes_table: [],
+      top_topic: ""
+    };
     vi.stubGlobal(
       "URL",
       Object.assign(URL, {
@@ -170,20 +318,7 @@ describe("App", () => {
           return new Response(JSON.stringify(dashboardPayload));
         }
         if (url.includes("/api/dashboard/linking")) {
-          return new Response(
-            JSON.stringify({
-              available: false,
-              context_pills: [],
-              focus_group: "Todos",
-              focus_label: "Sin foco",
-              empty_state: "Sin base cruzada",
-              kpis: {},
-              ranking_table: [],
-              evidence_table: [],
-              journey_routes_table: [],
-              top_topic: ""
-            })
-          );
+          return new Response(JSON.stringify(currentLinkingPayload));
         }
         if (url.includes("/api/dashboard/data/")) {
           return new Response(JSON.stringify(tablePayload));
@@ -266,5 +401,31 @@ describe("App", () => {
     );
     expect(createObjectUrl).toHaveBeenCalled();
     expect(anchorClick).toHaveBeenCalled();
+  });
+
+  it("renders the restored linking workspace with situation, journeys and causal chains", async () => {
+    const user = userEvent.setup();
+    currentLinkingPayload = linkingPayloadAvailable;
+
+    render(<App />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Producto sincronizado con histórico persistente/i)
+      ).toBeInTheDocument()
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
+    expect(screen.getByRole("heading", { name: "Timeline causal (diario)" })).toBeInTheDocument();
+    expect(screen.getByText("Ranking de hipótesis")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Journeys rotos" }));
+    expect(screen.getByText("Journeys rotos identificados")).toBeInTheDocument();
+    expect(screen.getByText("Uso / Edo de Cuenta")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
+    expect(screen.getByText("2 cadenas defendibles para detractores")).toBeInTheDocument();
+    expect(screen.getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
   });
 });

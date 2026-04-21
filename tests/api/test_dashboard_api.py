@@ -212,6 +212,10 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
+    assert linking_payload["touchpoint_mode"]["value"] == "domain_touchpoint"
+    assert "situation" in linking_payload
+    assert "journeys" in linking_payload
+    assert "scenarios" in linking_payload
     assert linking_payload["journey_routes_table"] is not None
 
 

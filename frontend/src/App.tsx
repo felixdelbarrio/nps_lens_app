@@ -26,6 +26,7 @@ import type {
 } from "./api";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
+import { LinkingWorkspace } from "./components/LinkingWorkspace";
 import { NavigationTabs } from "./components/NavigationTabs";
 import { PlotFigure } from "./components/PlotFigure";
 import { PrimaryNav } from "./components/PrimaryNav";
@@ -90,13 +91,6 @@ const OVERVIEW_TABS = [
 const DATA_TABS = [
   { id: "nps", label: "NPS" },
   { id: "helix", label: "Helix" }
-];
-
-const LINKING_TABS = [
-  { id: "simulation", label: "Simulación del periodo" },
-  { id: "journeys", label: "Journeys rotos" },
-  { id: "scenarios", label: "Análisis de escenarios causales" },
-  { id: "deep-dive", label: "Data deep dive analysis" }
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
@@ -168,9 +162,7 @@ export function App() {
   const [insightTab, setInsightTab] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
   const [overviewTab, setOverviewTab] = useState("daily");
-  const [linkingTab, setLinkingTab] = useState("simulation");
-  const [deepDiveTopicFilter, setDeepDiveTopicFilter] = useState("Todos");
-  const [deepDiveSimilarityOrder, setDeepDiveSimilarityOrder] = useState<"desc" | "asc">("desc");
+  const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -292,6 +284,7 @@ export function App() {
           npsGroup,
           minSimilarity,
           maxDaysApart,
+          touchpointSource,
           themeMode
         ]
       : null;
@@ -310,6 +303,7 @@ export function App() {
       nps_group: npsGroup,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
+      touchpoint_source: touchpointSource,
       theme_mode: themeMode
     })
   );
@@ -415,48 +409,6 @@ export function App() {
   const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
   const causalMethodOptions = config?.causal_method_options || [];
   const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
-  const deepDiveTopicOptions = useMemo(() => {
-    const topics = new Set<string>();
-    (linking?.evidence_table || []).forEach((row) => {
-      const topic = String(row.nps_topic ?? "").trim();
-      if (topic) {
-        topics.add(topic);
-      }
-    });
-    return ["Todos", ...Array.from(topics).sort((left, right) => left.localeCompare(right, "es"))];
-  }, [linking?.evidence_table]);
-  const deepDiveRows = useMemo(() => {
-    const parseSimilarity = (value: unknown) => {
-      if (typeof value === "number") {
-        return Number.isFinite(value) ? value : Number.NaN;
-      }
-      const normalized = String(value ?? "")
-        .trim()
-        .replace(",", ".");
-      const parsed = Number.parseFloat(normalized);
-      return Number.isFinite(parsed) ? parsed : Number.NaN;
-    };
-    const rows = [...(linking?.evidence_table || [])];
-    const filtered = deepDiveTopicFilter === "Todos"
-      ? rows
-      : rows.filter((row) => String(row.nps_topic ?? "").trim() === deepDiveTopicFilter);
-    filtered.sort((left, right) => {
-      const leftValue = parseSimilarity(left.similarity);
-      const rightValue = parseSimilarity(right.similarity);
-      if (Number.isNaN(leftValue) && Number.isNaN(rightValue)) {
-        return 0;
-      }
-      if (Number.isNaN(leftValue)) {
-        return 1;
-      }
-      if (Number.isNaN(rightValue)) {
-        return -1;
-      }
-      return deepDiveSimilarityOrder === "asc" ? leftValue - rightValue : rightValue - leftValue;
-    });
-    return filtered;
-  }, [deepDiveSimilarityOrder, deepDiveTopicFilter, linking?.evidence_table]);
-
   useEffect(() => {
     if (!n1Options.length) {
       return;
@@ -487,12 +439,6 @@ export function App() {
       setServiceOriginN2(serializeServiceOriginN2(nextSelectedValues));
     }
   }, [n2Options, selectedN2Values, serviceOriginN2]);
-
-  useEffect(() => {
-    if (!deepDiveTopicOptions.includes(deepDiveTopicFilter)) {
-      setDeepDiveTopicFilter("Todos");
-    }
-  }, [deepDiveTopicFilter, deepDiveTopicOptions]);
 
   useEffect(() => {
     if (!causalMethodOptions.length) {
@@ -1177,190 +1123,7 @@ export function App() {
     }
 
     return (
-      <section className="surface-card stack-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Incidencias ↔ NPS</p>
-            <h2>Lectura causal operativa</h2>
-          </div>
-        </div>
-
-        <div className="metric-grid">
-          <article className="metric-card">
-            <span>Respuestas analizadas</span>
-            <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Incidencias del periodo</span>
-            <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
-          </article>
-          <article className="metric-card">
-            <span>NPS en riesgo</span>
-            <strong>{formatNumber(linking.kpis.nps_points_at_risk, 2)}</strong>
-          </article>
-          <article className="metric-card">
-            <span>NPS recuperable</span>
-            <strong>{formatNumber(linking.kpis.nps_points_recoverable, 2)}</strong>
-          </article>
-        </div>
-
-        <NavigationTabs compact items={LINKING_TABS} onChange={setLinkingTab} value={linkingTab} />
-
-        {linkingTab === "simulation" ? (
-          <>
-            <PlotFigure
-              emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
-              figure={linking.overview_figure}
-              testId="linking-overview-figure"
-            />
-          </>
-        ) : null}
-
-        {linkingTab === "journeys" ? (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Route signature</th>
-                  <th>n</th>
-                  <th>% detractor</th>
-                  <th>Score</th>
-                  <th>Touchpoint</th>
-                  <th>Subtouchpoint</th>
-                  <th>Topic</th>
-                </tr>
-              </thead>
-              <tbody>
-                {linking.journey_routes_table.map((row, index) => (
-                  <tr key={`route-${index}`}>
-                    <td>{String(row.route_signature ?? "")}</td>
-                    <td>{String(row.n ?? "")}</td>
-                    <td>{String(row.detractor_rate ?? "")}</td>
-                    <td>{String(row.score ?? "")}</td>
-                    <td>{String(row.touchpoint ?? "")}</td>
-                    <td>{String(row.subtouchpoint ?? "")}</td>
-                    <td>{String(row.topic ?? "")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {linkingTab === "scenarios" ? (
-          <>
-            <PlotFigure
-              emptyMessage="No hay suficientes tópicos para construir la matriz de prioridad."
-              figure={linking.priority_figure}
-              testId="linking-priority-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay suficientes señales para comparar riesgo y recuperación."
-              figure={linking.risk_recovery_figure}
-              testId="linking-risk-recovery-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay heatmap diario para el tópico líder."
-              figure={linking.heatmap_figure}
-              testId="linking-heatmap-figure"
-            />
-            <PlotFigure
-              emptyMessage="No hay lag diario defendible para el tópico líder."
-              figure={linking.lag_figure}
-              testId="linking-lag-figure"
-            />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tópico</th>
-                    <th>Incidencias</th>
-                    <th>Respuestas</th>
-                    <th>Prioridad</th>
-                    <th>Confianza</th>
-                    <th>Impacto total NPS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linking.ranking_table.map((row, index) => (
-                    <tr key={`rank-${index}`}>
-                      <td>{String(row.nps_topic ?? "")}</td>
-                      <td>{String(row.incidents ?? "")}</td>
-                      <td>{String(row.responses ?? "")}</td>
-                      <td>{String(row.priority ?? "")}</td>
-                      <td>{String(row.confidence ?? "")}</td>
-                      <td>{String(row.total_nps_impact ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : null}
-
-        {linkingTab === "deep-dive" ? (
-          <>
-            <div className="inline-actions">
-              <label className="inline-field">
-                <span>Tópico</span>
-                <select
-                  onChange={(event) => setDeepDiveTopicFilter(event.target.value)}
-                  value={deepDiveTopicFilter}
-                >
-                  {deepDiveTopicOptions.map((topic) => (
-                    <option key={topic} value={topic}>
-                      {topic}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="inline-field">
-                <span>Orden similarity</span>
-                <select
-                  onChange={(event) => setDeepDiveSimilarityOrder(event.target.value as "desc" | "asc")}
-                  value={deepDiveSimilarityOrder}
-                >
-                  <option value="desc">Mayor a menor</option>
-                  <option value="asc">Menor a mayor</option>
-                </select>
-              </label>
-            </div>
-            <div className="table-meta">
-              <span>Filas visibles: {deepDiveRows.length.toLocaleString("es-ES")}</span>
-            </div>
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Tópico</th>
-                    <th>Similarity</th>
-                    <th>Incidencia</th>
-                    <th>Evidencia Helix</th>
-                    <th>Comentario detractor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deepDiveRows.length ? (
-                    deepDiveRows.map((row, index) => (
-                      <tr key={`deep-dive-evidence-${index}`}>
-                        <td>{String(row.nps_topic ?? "")}</td>
-                        <td>{String(row.similarity ?? "")}</td>
-                        <td>{String(row.incident_id ?? "")}</td>
-                        <td>{String(row.incident_summary ?? "")}</td>
-                        <td>{String(row.detractor_comment ?? "")}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5}>No hay evidencia para el filtro de tópico seleccionado.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : null}
-      </section>
+      <LinkingWorkspace linking={linking} onTabChange={setLinkingTab} tab={linkingTab} />
     );
   }
 

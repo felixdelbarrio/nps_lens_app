@@ -135,7 +135,11 @@ export type LinkingPayload = {
   focus_group: string;
   focus_label: string;
   empty_state: string;
-  kpis: Record<string, number>;
+  kpis: Record<string, number | null>;
+  touchpoint_mode?: Record<string, unknown>;
+  situation?: Record<string, unknown>;
+  journeys?: Record<string, unknown>;
+  scenarios?: Record<string, unknown>;
   overview_figure?: PlotlyFigureSpec | null;
   priority_figure?: PlotlyFigureSpec | null;
   risk_recovery_figure?: PlotlyFigureSpec | null;
@@ -334,6 +338,7 @@ export async function fetchLinkingDashboard(params: {
   nps_group: string;
   min_similarity: number;
   max_days_apart: number;
+  touchpoint_source: string;
   theme_mode: string;
 }): Promise<LinkingPayload> {
   return parseResponse<LinkingPayload>(await fetch(buildUrl("/api/dashboard/linking", params)));
