@@ -168,7 +168,9 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
             "linked_pairs": _safe_int_label(row.get("linked_pairs", 0)),
             "linked_incidents": _safe_int_label(row.get("linked_incidents", 0)),
             "linked_comments": _safe_int_label(row.get("linked_comments", 0)),
-            "incident_ids": _chain_record_ids(row.get("incident_records"), field_name="incident_id"),
+            "incident_ids": _chain_record_ids(
+                row.get("incident_records"), field_name="incident_id"
+            ),
             "comment_ids": _chain_record_ids(row.get("comment_records"), field_name="comment_id"),
         }
         base_keys.append(
@@ -794,12 +796,12 @@ class DashboardService:
             formatted_rank["factor"] = (
                 pd.to_numeric(formatted_rank["factor"], errors="coerce").fillna(1.0).round(3)
             )
-            formatted_rank["corr"] = (
-                pd.to_numeric(formatted_rank.get("corr"), errors="coerce").round(3)
-            )
-            formatted_rank["max_cp_stability"] = (
-                pd.to_numeric(formatted_rank.get("max_cp_stability"), errors="coerce").round(3)
-            )
+            formatted_rank["corr"] = pd.to_numeric(
+                formatted_rank.get("corr"), errors="coerce"
+            ).round(3)
+            formatted_rank["max_cp_stability"] = pd.to_numeric(
+                formatted_rank.get("max_cp_stability"), errors="coerce"
+            ).round(3)
             formatted_rank["incidents_lead_changepoint_share"] = (
                 pd.to_numeric(
                     formatted_rank.get("incidents_lead_changepoint_share"),
@@ -872,7 +874,9 @@ class DashboardService:
             max_rows=300,
         )
         evidence_wall_df = (
-            evidence_df[evidence_df["nps_topic"].astype(str).str.strip() == top_topic].head(50).copy()
+            evidence_df[evidence_df["nps_topic"].astype(str).str.strip() == top_topic]
+            .head(50)
+            .copy()
             if top_topic
             else evidence_df.head(50).copy()
         )
@@ -937,9 +941,11 @@ class DashboardService:
             chain_candidates_df.get("chain_key", pd.Series(dtype=str)).astype(str).tolist()
         )[:3]
         chain_cards_df = _cap_chain_evidence_rows(
-            _select_chain_rows(chain_candidates_df, default_chain_keys)
-            if default_chain_keys
-            else chain_candidates_df,
+            (
+                _select_chain_rows(chain_candidates_df, default_chain_keys)
+                if default_chain_keys
+                else chain_candidates_df
+            ),
             max_incident_examples=5,
             max_comment_examples=2,
         )
@@ -1108,7 +1114,9 @@ class DashboardService:
                     theme=theme,
                 )
             ),
-            "priority_figure": self._serialize_figure(chart_incident_priority_matrix(rationale_df, theme)),
+            "priority_figure": self._serialize_figure(
+                chart_incident_priority_matrix(rationale_df, theme)
+            ),
             "risk_recovery_figure": self._serialize_figure(
                 chart_incident_risk_recovery(rationale_df, theme)
             ),
@@ -1497,7 +1505,9 @@ class DashboardService:
             elif int(rank) == 3:
                 colors.append(pal["color.primary.bg.success"])
             else:
-                colors.append(pal.get("color.neutral.bg.01", pal.get("color.primary.bg.bar", "#CAD1D8")))
+                colors.append(
+                    pal.get("color.neutral.bg.01", pal.get("color.primary.bg.bar", "#CAD1D8"))
+                )
 
         fig = go.Figure()
         fig.add_trace(
@@ -1541,9 +1551,7 @@ class DashboardService:
             palanca = str(row.get("palanca", "") or "").strip()
             subpalanca = str(row.get("subpalanca", "") or "").strip()
             lever_label = " / ".join([value for value in [palanca, subpalanca] if value]).strip()
-            serialized_row = (
-                self._serialize_rows(active_df)[0] if not active_df.empty else {}
-            )
+            serialized_row = self._serialize_rows(active_df)[0] if not active_df.empty else {}
             serialized_row.update(
                 {
                     "rank": index,
@@ -1626,7 +1634,9 @@ class DashboardService:
             errors="coerce",
         ).round(3)
         detail_df["priority"] = pd.to_numeric(detail_df.get("priority"), errors="coerce").round(3)
-        detail_df["confidence"] = pd.to_numeric(detail_df.get("confidence"), errors="coerce").round(3)
+        detail_df["confidence"] = pd.to_numeric(detail_df.get("confidence"), errors="coerce").round(
+            3
+        )
         detail_df["nps_points_at_risk"] = pd.to_numeric(
             detail_df.get("nps_points_at_risk"),
             errors="coerce",
@@ -1855,7 +1865,9 @@ class DashboardService:
         if normalized_updated_at and normalized_updated_at != meta.get("updated_at_utc"):
             meta["updated_at_utc"] = normalized_updated_at
             with contextlib.suppress(Exception):
-                stored.meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                stored.meta_path.write_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
         return {
             "available": True,
             "rows": int(meta.get("rows", 0) or 0),
@@ -2138,7 +2150,9 @@ class DashboardService:
                 )
         else:
             if x_column == "date":
-                chart_df["focus_rate_smooth"] = chart_df["focus_rate"].rolling(7, min_periods=1).mean()
+                chart_df["focus_rate_smooth"] = (
+                    chart_df["focus_rate"].rolling(7, min_periods=1).mean()
+                )
                 fig.add_trace(
                     go.Scatter(
                         x=chart_df[x_column],

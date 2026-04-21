@@ -379,12 +379,16 @@ class DesktopBridge:
                 detail = raw_body or f"Upload failed with status {exc.code}"
             raise RuntimeError(str(detail)) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError("No se pudo conectar con la API embebida para importar el fichero.") from exc
+            raise RuntimeError(
+                "No se pudo conectar con la API embebida para importar el fichero."
+            ) from exc
 
         try:
             return json.loads(raw_body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("La respuesta del import no se pudo interpretar correctamente.") from exc
+            raise RuntimeError(
+                "La respuesta del import no se pudo interpretar correctamente."
+            ) from exc
 
 
 def _run_desktop(port: int) -> None:
