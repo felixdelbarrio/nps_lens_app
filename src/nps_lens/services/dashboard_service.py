@@ -55,6 +55,8 @@ from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.core.knowledge_cache import (
     load_entries as kc_load_entries,
+)
+from nps_lens.core.knowledge_cache import (
     score_adjustments as kc_score_adjustments,
 )
 from nps_lens.core.nps_math import filter_by_nps_group, focus_mask, grouped_focus_rates
