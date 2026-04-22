@@ -22,13 +22,6 @@ const SCENARIO_DETAIL_TABS = [
   { id: "lag", label: "Lag en días" }
 ];
 
-const TOPIC_COLORS = {
-  top1: "#c41212",
-  top2: "#f6c244",
-  top3: "#3f9c5a",
-  default: "#9ecbf5"
-};
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -127,61 +120,50 @@ function sortRowsByTopicPriority<T extends Record<string, unknown>>(
   });
 }
 
+function normalizeTopicLabel(value: unknown) {
+  return String(value ?? "")
+    .replace(/^TOP\s+\d+\s+·\s+/i, "")
+    .trim();
+}
+
+function filterArrayValue<T>(value: T, indexes: number[]): T {
+  return Array.isArray(value) ? (indexes.map((index) => value[index]) as T) : value;
+}
+
 function buildTopicsTrendingFigure(
-  rows: Array<Record<string, unknown>>,
-  topicOrder: string[],
+  baseFigure: PlotlyFigureSpec | null,
   selectedTopic: string
 ): PlotlyFigureSpec | null {
-  const filteredRows =
-    selectedTopic === "Todos"
-      ? rows
-      : rows.filter((row) => getTopicName(row) === selectedTopic);
-  if (!filteredRows.length) {
+  if (!baseFigure?.data?.length) {
+    return null;
+  }
+  if (selectedTopic === "Todos") {
+    return baseFigure;
+  }
+
+  const [firstTrace, ...restTraces] = baseFigure.data;
+  if (!firstTrace || typeof firstTrace !== "object" || firstTrace === null) {
+    return baseFigure;
+  }
+
+  const traceRecord = firstTrace as Record<string, unknown>;
+  const yValues = Array.isArray(traceRecord.y) ? traceRecord.y : [];
+  const matchingIndexes = yValues
+    .map((label, index) => ({ label: normalizeTopicLabel(label), index }))
+    .filter((item) => item.label === selectedTopic)
+    .map((item) => item.index);
+
+  if (!matchingIndexes.length) {
     return null;
   }
 
-  const topicRank = new Map(topicOrder.map((topic, index) => [topic, index + 1]));
-  const figureRows = filteredRows.slice(0, 15);
-  const plotRows = [...figureRows].reverse();
+  const filteredTrace = Object.fromEntries(
+    Object.entries(traceRecord).map(([key, value]) => [key, filterArrayValue(value, matchingIndexes)])
+  );
 
   return {
-    data: [
-      {
-        type: "bar",
-        orientation: "h",
-        x: plotRows.map((row) => getConfidenceLearned(row) ?? 0),
-        y: plotRows.map((row) => {
-          const topic = getTopicName(row);
-          const rank = topicRank.get(topic);
-          const label = topic.slice(0, 72);
-          return rank && rank <= 3 ? `TOP ${rank} · ${label}` : label;
-        }),
-        marker: {
-          color: plotRows.map((row) => {
-            const rank = topicRank.get(getTopicName(row));
-            if (rank === 1) {
-              return TOPIC_COLORS.top1;
-            }
-            if (rank === 2) {
-              return TOPIC_COLORS.top2;
-            }
-            if (rank === 3) {
-              return TOPIC_COLORS.top3;
-            }
-            return TOPIC_COLORS.default;
-          })
-        },
-        text: plotRows.map((row) => formatNumber(getConfidenceLearned(row) ?? 0, { fallback: "0" })),
-        textposition: "outside",
-        hovertemplate: "Tópico=%{y}<br>confidence learned=%{x:.2f}<extra></extra>"
-      }
-    ],
-    layout: {
-      height: Math.max(220, 140 + figureRows.length * 24),
-      margin: { l: 10, r: 10, t: 62, b: 10 },
-      xaxis: { range: [0, 1], title: "confidence learned" },
-      yaxis: { title: "Tópicos trending" }
-    }
+    ...baseFigure,
+    data: [filteredTrace, ...restTraces]
   };
 }
 
@@ -276,9 +258,10 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     return sortRowsByTopicPriority(baseRows, topicPriority, getSimilarity).slice(0, 50);
   }, [causalMapTopicFilter, evidenceRows, topicPriority]);
 
+  const baseTopicsTrendingFigure = asFigure(situation.topics_trending_figure);
   const causalMapTopicsTrendingFigure = useMemo(
-    () => buildTopicsTrendingFigure(causalMapRankingRows, topicPriority, causalMapTopicFilter),
-    [causalMapRankingRows, causalMapTopicFilter, topicPriority]
+    () => buildTopicsTrendingFigure(baseTopicsTrendingFigure, causalMapTopicFilter),
+    [baseTopicsTrendingFigure, causalMapTopicFilter]
   );
 
   const deepDiveTopicOptions = useMemo(() => {
