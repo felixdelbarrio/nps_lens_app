@@ -22,6 +22,13 @@ const SCENARIO_DETAIL_TABS = [
   { id: "lag", label: "Lag en días" }
 ];
 
+const TOPIC_COLORS = {
+  top1: "#c41212",
+  top2: "#f6c244",
+  top3: "#3f9c5a",
+  default: "#9ecbf5"
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -74,6 +81,110 @@ function formatSignedMetricValue(value: unknown, digits = 1) {
   return formatNumber(Number(numeric.toFixed(digits)), { signed: true });
 }
 
+function getTopicName(row: Record<string, unknown>) {
+  return asString(row["Tópico NPS"] ?? row.nps_topic ?? row.topic ?? row.label);
+}
+
+function getConfidenceLearned(row: Record<string, unknown>) {
+  return asNumber(
+    row["Confidence (learned)"] ??
+      row.confidence_learned ??
+      row.confidence ??
+      row.score
+  );
+}
+
+function getSimilarity(row: Record<string, unknown>) {
+  return asNumber(row.Similarity ?? row.similarity);
+}
+
+function sortRowsByTopicPriority<T extends Record<string, unknown>>(
+  rows: T[],
+  topicOrder: string[],
+  secondaryValue: (row: T) => number | null
+) {
+  const topicRank = new Map(topicOrder.map((topic, index) => [topic, index]));
+  return [...rows].sort((left, right) => {
+    const leftTopic = getTopicName(left);
+    const rightTopic = getTopicName(right);
+    const leftRank = topicRank.get(leftTopic) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = topicRank.get(rightTopic) ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    const leftSecondary = secondaryValue(left);
+    const rightSecondary = secondaryValue(right);
+    if (leftSecondary === null && rightSecondary === null) {
+      return 0;
+    }
+    if (leftSecondary === null) {
+      return 1;
+    }
+    if (rightSecondary === null) {
+      return -1;
+    }
+    return rightSecondary - leftSecondary;
+  });
+}
+
+function buildTopicsTrendingFigure(
+  rows: Array<Record<string, unknown>>,
+  topicOrder: string[],
+  selectedTopic: string
+): PlotlyFigureSpec | null {
+  const filteredRows =
+    selectedTopic === "Todos"
+      ? rows
+      : rows.filter((row) => getTopicName(row) === selectedTopic);
+  if (!filteredRows.length) {
+    return null;
+  }
+
+  const topicRank = new Map(topicOrder.map((topic, index) => [topic, index + 1]));
+  const figureRows = filteredRows.slice(0, 15);
+  const plotRows = [...figureRows].reverse();
+
+  return {
+    data: [
+      {
+        type: "bar",
+        orientation: "h",
+        x: plotRows.map((row) => getConfidenceLearned(row) ?? 0),
+        y: plotRows.map((row) => {
+          const topic = getTopicName(row);
+          const rank = topicRank.get(topic);
+          const label = topic.slice(0, 72);
+          return rank && rank <= 3 ? `TOP ${rank} · ${label}` : label;
+        }),
+        marker: {
+          color: plotRows.map((row) => {
+            const rank = topicRank.get(getTopicName(row));
+            if (rank === 1) {
+              return TOPIC_COLORS.top1;
+            }
+            if (rank === 2) {
+              return TOPIC_COLORS.top2;
+            }
+            if (rank === 3) {
+              return TOPIC_COLORS.top3;
+            }
+            return TOPIC_COLORS.default;
+          })
+        },
+        text: plotRows.map((row) => formatNumber(getConfidenceLearned(row) ?? 0, { fallback: "0" })),
+        textposition: "outside",
+        hovertemplate: "Tópico=%{y}<br>confidence learned=%{x:.2f}<extra></extra>"
+      }
+    ],
+    layout: {
+      height: Math.max(220, 140 + figureRows.length * 24),
+      margin: { l: 10, r: 10, t: 62, b: 10 },
+      xaxis: { range: [0, 1], title: "confidence learned" },
+      yaxis: { title: "Tópicos trending" }
+    }
+  };
+}
+
 function renderHelixCards(records: Array<Record<string, unknown>>) {
   if (!records.length) {
     return <p className="empty-state">Sin evidencia Helix visible.</p>;
@@ -123,6 +234,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const [activeChainIndex, setActiveChainIndex] = useState(0);
   const [scenarioDetailTab, setScenarioDetailTab] = useState("helix");
   const [scenarioEvidenceView, setScenarioEvidenceView] = useState<"cards" | "table">("cards");
+  const [causalMapTopicFilter, setCausalMapTopicFilter] = useState("Todos");
   const [deepDiveTopicFilter, setDeepDiveTopicFilter] = useState("Todos");
   const [deepDiveSimilarityOrder, setDeepDiveSimilarityOrder] = useState<"desc" | "asc">("desc");
 
@@ -134,7 +246,40 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const activeHelixRecords = asRows(activeCard?.incident_records);
   const activeVocRecords = asRows(activeCard?.comment_records);
   const detailTable = asRows(activeCard?.detail_table);
+  const rankingRows = asRows(situation.ranking_table ?? linking.ranking_table);
   const evidenceRows = linking.evidence_table || [];
+  const topicPriority = useMemo(() => {
+    const topics = rankingRows.map((row) => getTopicName(row)).filter(Boolean);
+    return Array.from(new Set(topics));
+  }, [rankingRows]);
+  const causalMapTopicOptions = useMemo(() => ["Todos", ...topicPriority], [topicPriority]);
+
+  useEffect(() => {
+    if (!causalMapTopicOptions.includes(causalMapTopicFilter)) {
+      setCausalMapTopicFilter("Todos");
+    }
+  }, [causalMapTopicFilter, causalMapTopicOptions]);
+
+  const causalMapRankingRows = useMemo(() => {
+    const filteredRows =
+      causalMapTopicFilter === "Todos"
+        ? rankingRows
+        : rankingRows.filter((row) => getTopicName(row) === causalMapTopicFilter);
+    return sortRowsByTopicPriority(filteredRows, topicPriority, getConfidenceLearned);
+  }, [causalMapTopicFilter, rankingRows, topicPriority]);
+
+  const causalMapEvidenceRows = useMemo(() => {
+    const baseRows =
+      causalMapTopicFilter === "Todos"
+        ? evidenceRows
+        : evidenceRows.filter((row) => getTopicName(row) === causalMapTopicFilter);
+    return sortRowsByTopicPriority(baseRows, topicPriority, getSimilarity).slice(0, 50);
+  }, [causalMapTopicFilter, evidenceRows, topicPriority]);
+
+  const causalMapTopicsTrendingFigure = useMemo(
+    () => buildTopicsTrendingFigure(causalMapRankingRows, topicPriority, causalMapTopicFilter),
+    [causalMapRankingRows, causalMapTopicFilter, topicPriority]
+  );
 
   const deepDiveTopicOptions = useMemo(() => {
     const topics = new Set<string>();
@@ -215,6 +360,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
         items={[
           { id: "situation", label: "Situación del periodo" },
           { id: "journeys", label: "Journeys rotos" },
+          { id: "causal-map", label: "Mapa causal priorizado" },
           { id: "scenarios", label: "Análisis de escenarios causales" },
           { id: "deep-dive", label: "Data deep dive analysis" }
         ]}
@@ -254,7 +400,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               <p className="secondary-copy">{asString(situation.timeline_note)}</p>
             ) : null}
           </section>
+        </div>
+      ) : null}
 
+      {tab === "causal-map" ? (
+        <div className="linking-stack">
           <div className="section-heading">
             <div>
               <h3>Mapa causal priorizado</h3>
@@ -286,6 +436,22 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </article>
           </div>
 
+          <div className="inline-actions">
+            <label className="inline-field">
+              <span>Tópico NPS</span>
+              <select
+                onChange={(event) => setCausalMapTopicFilter(event.target.value)}
+                value={causalMapTopicFilter}
+              >
+                {causalMapTopicOptions.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <section className="linking-panel">
             <div className="section-heading">
               <div>
@@ -294,7 +460,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <PlotFigure
               emptyMessage="No hay señal suficiente para construir tópicos trending."
-              figure={asFigure(situation.topics_trending_figure)}
+              figure={causalMapTopicsTrendingFigure ?? asFigure(situation.topics_trending_figure)}
               testId="linking-topics-trending"
             />
           </section>
@@ -307,7 +473,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <RecordTable
               emptyMessage="No hay suficiente señal para rankear tópicos en el periodo seleccionado."
-              rows={asRows(situation.ranking_table ?? linking.ranking_table)}
+              rows={causalMapRankingRows}
             />
           </section>
 
@@ -319,7 +485,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <RecordTable
               emptyMessage="No hay links validados para el tópico líder del periodo."
-              rows={asRows(situation.evidence_wall)}
+              rows={causalMapEvidenceRows}
             />
           </section>
         </div>

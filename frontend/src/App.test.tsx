@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -172,6 +173,10 @@ const linkingPayloadAvailable = {
       {
         "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
         "Confidence (learned)": 0.133
+      },
+      {
+        "Tópico NPS": "Operativa crítica fallida",
+        "Confidence (learned)": 0.111
       }
     ],
     evidence_wall: [
@@ -271,6 +276,13 @@ const linkingPayloadAvailable = {
       incident_id: "INC000104231684",
       incident_summary: "ACOTAMIENTO IRD...",
       detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
+    },
+    {
+      nps_topic: "Operativa crítica fallida",
+      similarity: 0.121,
+      incident_id: "INC000104355468",
+      incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
+      detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
     }
   ],
   journey_routes_table: [],
@@ -417,11 +429,25 @@ describe("App", () => {
 
     await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
     expect(screen.getByRole("heading", { name: "Timeline causal (diario)" })).toBeInTheDocument();
-    expect(screen.getByText("Ranking de hipótesis")).toBeInTheDocument();
+    expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys rotos" }));
     expect(screen.getByText("Journeys rotos identificados")).toBeInTheDocument();
     expect(screen.getByText("Uso / Edo de Cuenta")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Mapa causal priorizado" }));
+    expect(screen.getByText("Ranking de hipótesis")).toBeInTheDocument();
+    expect(screen.getByText("Evidence wall")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Tópico NPS" }), "Operativa crítica fallida");
+    const [rankingTable, evidenceTable] = screen.getAllByRole("table");
+    expect(within(rankingTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(
+      within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
+    ).not.toBeInTheDocument();
+    expect(within(evidenceTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(
+      within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
     expect(screen.getByText("2 cadenas defendibles para detractores")).toBeInTheDocument();
