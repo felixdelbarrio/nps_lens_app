@@ -519,10 +519,18 @@ def chart_daily_volume(
     agg = source[["day", "n"]].copy()
 
     th = chart_theme(theme)
-    import plotly.express as px  # lazy import
+    import plotly.graph_objects as go  # lazy import
 
-    fig = px.bar(agg, x="day", y="n", hover_data={"n": True})
-    fig.update_traces(marker_color=th.grid)
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=agg["day"],
+                y=agg["n"],
+                marker_color=th.grid,
+                hovertemplate="Día=%{x|%Y-%m-%d}<br>Respuestas=%{y}<extra></extra>",
+            )
+        ]
+    )
     fig.update_layout(xaxis_title="Día", yaxis_title="Respuestas (n)", showlegend=False)
     _layout_common(fig, th, height=220)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
@@ -1102,7 +1110,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
     if topics_df.empty:
         return None
     th = chart_theme(theme)
-    import plotly.express as px  # lazy import for faster cold-start
+    import plotly.graph_objects as go  # lazy import for faster cold-start
 
     d = topics_df.sort_values("n", ascending=False).head(top_k).copy()
 
@@ -1112,8 +1120,17 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
         return f"#{cid}: {', '.join(terms)}"
 
     d["label"] = d.apply(_topic_label, axis=1)
-    fig = px.bar(d, x="n", y="label", orientation="h")
-    fig.update_traces(marker_color=th.grid)
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=d["n"],
+                y=d["label"],
+                orientation="h",
+                marker_color=th.grid,
+                hovertemplate="%{y}<br>Volumen=%{x}<extra></extra>",
+            )
+        ]
+    )
     fig.update_layout(xaxis_title="Volumen (n comentarios)", yaxis_title="", showlegend=False)
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
