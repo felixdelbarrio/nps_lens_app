@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { LinkingPayload, PlotlyFigureSpec } from "../api";
+import { formatNumber, formatPercent } from "../utils/numberFormat";
 import { NavigationTabs } from "./NavigationTabs";
 import { PlotFigure } from "./PlotFigure";
 import { RecordTable } from "./RecordTable";
@@ -39,16 +40,11 @@ function asString(value: unknown, fallback = "") {
 }
 
 function asNumber(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  const normalized = String(value ?? "")
-    .trim()
-    .replace(",", ".");
-  if (!normalized) {
+  if (value === null || value === undefined) {
     return null;
   }
-  const parsed = Number.parseFloat(normalized);
+  const parsed =
+    typeof value === "string" ? Number.parseFloat(value.trim().replace(",", ".")) : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -63,18 +59,11 @@ function formatMetricValue(value: unknown, digits = 2) {
   if (numeric === null) {
     return "—";
   }
-  return numeric.toLocaleString("es-ES", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  });
+  return formatNumber(Number(numeric.toFixed(digits)));
 }
 
-function formatPercentValue(value: unknown, digits = 1) {
-  const numeric = asNumber(value);
-  if (numeric === null) {
-    return "—";
-  }
-  return `${(numeric * 100).toFixed(digits)}%`;
+function formatPercentValue(value: unknown) {
+  return formatPercent(value);
 }
 
 function formatSignedMetricValue(value: unknown, digits = 1) {
@@ -82,8 +71,100 @@ function formatSignedMetricValue(value: unknown, digits = 1) {
   if (numeric === null) {
     return "—";
   }
-  const sign = numeric > 0 ? "+" : "";
-  return `${sign}${numeric.toFixed(digits)}`;
+  return formatNumber(Number(numeric.toFixed(digits)), { signed: true });
+}
+
+function getTopicName(row: Record<string, unknown>) {
+  return asString(row["Tópico NPS"] ?? row.nps_topic ?? row.topic ?? row.label);
+}
+
+function getConfidenceLearned(row: Record<string, unknown>) {
+  return asNumber(
+    row["Confidence (learned)"] ??
+      row.confidence_learned ??
+      row.confidence ??
+      row.score
+  );
+}
+
+function getSimilarity(row: Record<string, unknown>) {
+  return asNumber(row.Similarity ?? row.similarity);
+}
+
+function sortRowsByTopicPriority<T extends Record<string, unknown>>(
+  rows: T[],
+  topicOrder: string[],
+  secondaryValue: (row: T) => number | null
+) {
+  const topicRank = new Map(topicOrder.map((topic, index) => [topic, index]));
+  return [...rows].sort((left, right) => {
+    const leftTopic = getTopicName(left);
+    const rightTopic = getTopicName(right);
+    const leftRank = topicRank.get(leftTopic) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = topicRank.get(rightTopic) ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    const leftSecondary = secondaryValue(left);
+    const rightSecondary = secondaryValue(right);
+    if (leftSecondary === null && rightSecondary === null) {
+      return 0;
+    }
+    if (leftSecondary === null) {
+      return 1;
+    }
+    if (rightSecondary === null) {
+      return -1;
+    }
+    return rightSecondary - leftSecondary;
+  });
+}
+
+function normalizeTopicLabel(value: unknown) {
+  return String(value ?? "")
+    .replace(/^TOP\s+\d+\s+·\s+/i, "")
+    .trim();
+}
+
+function filterArrayValue<T>(value: T, indexes: number[]): T {
+  return Array.isArray(value) ? (indexes.map((index) => value[index]) as T) : value;
+}
+
+function buildTopicsTrendingFigure(
+  baseFigure: PlotlyFigureSpec | null,
+  selectedTopic: string
+): PlotlyFigureSpec | null {
+  if (!baseFigure?.data?.length) {
+    return null;
+  }
+  if (selectedTopic === "Todos") {
+    return baseFigure;
+  }
+
+  const [firstTrace, ...restTraces] = baseFigure.data;
+  if (!firstTrace || typeof firstTrace !== "object" || firstTrace === null) {
+    return baseFigure;
+  }
+
+  const traceRecord = firstTrace as Record<string, unknown>;
+  const yValues = Array.isArray(traceRecord.y) ? traceRecord.y : [];
+  const matchingIndexes = yValues
+    .map((label, index) => ({ label: normalizeTopicLabel(label), index }))
+    .filter((item) => item.label === selectedTopic)
+    .map((item) => item.index);
+
+  if (!matchingIndexes.length) {
+    return null;
+  }
+
+  const filteredTrace = Object.fromEntries(
+    Object.entries(traceRecord).map(([key, value]) => [key, filterArrayValue(value, matchingIndexes)])
+  );
+
+  return {
+    ...baseFigure,
+    data: [filteredTrace, ...restTraces]
+  };
 }
 
 function renderHelixCards(records: Array<Record<string, unknown>>) {
@@ -135,6 +216,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const [activeChainIndex, setActiveChainIndex] = useState(0);
   const [scenarioDetailTab, setScenarioDetailTab] = useState("helix");
   const [scenarioEvidenceView, setScenarioEvidenceView] = useState<"cards" | "table">("cards");
+  const [causalMapTopicFilter, setCausalMapTopicFilter] = useState("Todos");
   const [deepDiveTopicFilter, setDeepDiveTopicFilter] = useState("Todos");
   const [deepDiveSimilarityOrder, setDeepDiveSimilarityOrder] = useState<"desc" | "asc">("desc");
 
@@ -146,7 +228,41 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const activeHelixRecords = asRows(activeCard?.incident_records);
   const activeVocRecords = asRows(activeCard?.comment_records);
   const detailTable = asRows(activeCard?.detail_table);
+  const rankingRows = asRows(situation.ranking_table ?? linking.ranking_table);
   const evidenceRows = linking.evidence_table || [];
+  const topicPriority = useMemo(() => {
+    const topics = rankingRows.map((row) => getTopicName(row)).filter(Boolean);
+    return Array.from(new Set(topics));
+  }, [rankingRows]);
+  const causalMapTopicOptions = useMemo(() => ["Todos", ...topicPriority], [topicPriority]);
+
+  useEffect(() => {
+    if (!causalMapTopicOptions.includes(causalMapTopicFilter)) {
+      setCausalMapTopicFilter("Todos");
+    }
+  }, [causalMapTopicFilter, causalMapTopicOptions]);
+
+  const causalMapRankingRows = useMemo(() => {
+    const filteredRows =
+      causalMapTopicFilter === "Todos"
+        ? rankingRows
+        : rankingRows.filter((row) => getTopicName(row) === causalMapTopicFilter);
+    return sortRowsByTopicPriority(filteredRows, topicPriority, getConfidenceLearned);
+  }, [causalMapTopicFilter, rankingRows, topicPriority]);
+
+  const causalMapEvidenceRows = useMemo(() => {
+    const baseRows =
+      causalMapTopicFilter === "Todos"
+        ? evidenceRows
+        : evidenceRows.filter((row) => getTopicName(row) === causalMapTopicFilter);
+    return sortRowsByTopicPriority(baseRows, topicPriority, getSimilarity).slice(0, 50);
+  }, [causalMapTopicFilter, evidenceRows, topicPriority]);
+
+  const baseTopicsTrendingFigure = asFigure(situation.topics_trending_figure);
+  const causalMapTopicsTrendingFigure = useMemo(
+    () => buildTopicsTrendingFigure(baseTopicsTrendingFigure, causalMapTopicFilter),
+    [baseTopicsTrendingFigure, causalMapTopicFilter]
+  );
 
   const deepDiveTopicOptions = useMemo(() => {
     const topics = new Set<string>();
@@ -227,6 +343,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
         items={[
           { id: "situation", label: "Situación del periodo" },
           { id: "journeys", label: "Journeys rotos" },
+          { id: "causal-map", label: "Mapa causal priorizado" },
           { id: "scenarios", label: "Análisis de escenarios causales" },
           { id: "deep-dive", label: "Data deep dive analysis" }
         ]}
@@ -239,15 +356,15 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
           <div className="metric-grid metric-grid-3">
             <article className="metric-card">
               <span>Respuestas analizadas</span>
-              <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(linking.kpis.responses || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Incidencias del periodo</span>
-              <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(linking.kpis.incidents || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>{`${linking.focus_label} medio`}</span>
-              <strong>{formatPercentValue(situation.average_focus_rate ?? linking.kpis.average_focus_rate, 2)}</strong>
+              <strong>{formatPercentValue(situation.average_focus_rate ?? linking.kpis.average_focus_rate)}</strong>
             </article>
           </div>
 
@@ -266,7 +383,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               <p className="secondary-copy">{asString(situation.timeline_note)}</p>
             ) : null}
           </section>
+        </div>
+      ) : null}
 
+      {tab === "causal-map" ? (
+        <div className="linking-stack">
           <div className="section-heading">
             <div>
               <h3>Mapa causal priorizado</h3>
@@ -298,6 +419,22 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </article>
           </div>
 
+          <div className="inline-actions">
+            <label className="inline-field">
+              <span>Tópico NPS</span>
+              <select
+                onChange={(event) => setCausalMapTopicFilter(event.target.value)}
+                value={causalMapTopicFilter}
+              >
+                {causalMapTopicOptions.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <section className="linking-panel">
             <div className="section-heading">
               <div>
@@ -306,7 +443,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <PlotFigure
               emptyMessage="No hay señal suficiente para construir tópicos trending."
-              figure={asFigure(situation.topics_trending_figure)}
+              figure={causalMapTopicsTrendingFigure ?? asFigure(situation.topics_trending_figure)}
               testId="linking-topics-trending"
             />
           </section>
@@ -319,7 +456,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <RecordTable
               emptyMessage="No hay suficiente señal para rankear tópicos en el periodo seleccionado."
-              rows={asRows(situation.ranking_table ?? linking.ranking_table)}
+              rows={causalMapRankingRows}
             />
           </section>
 
@@ -331,7 +468,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <RecordTable
               emptyMessage="No hay links validados para el tópico líder del periodo."
-              rows={asRows(situation.evidence_wall)}
+              rows={causalMapEvidenceRows}
             />
           </section>
         </div>
@@ -350,11 +487,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
           <div className="metric-grid metric-grid-3">
             <article className="metric-card">
               <span>Journeys detectados</span>
-              <strong>{Number(journeys.journeys_detected || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(journeys.journeys_detected || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Links validados</span>
-              <strong>{Number(journeys.linked_pairs || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(journeys.linked_pairs || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Cohesión media</span>
@@ -463,7 +600,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 <div className="spotlight-metrics">
                   <article className="spotlight-metric">
                     <span>Probabilidad foco</span>
-                    <strong>{formatPercentValue(activeCard.detractor_probability, 0)}</strong>
+                    <strong>{formatPercentValue(activeCard.detractor_probability)}</strong>
                   </article>
                   <article className="spotlight-metric">
                     <span>Delta NPS</span>
@@ -636,7 +773,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </label>
           </div>
           <div className="table-meta">
-            <span>Filas visibles: {deepDiveRows.length.toLocaleString("es-ES")}</span>
+            <span>Filas visibles: {formatNumber(deepDiveRows.length, { fallback: "0" })}</span>
           </div>
           <RecordTable
             emptyMessage="No hay evidencia para el filtro de tópico seleccionado."

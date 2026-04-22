@@ -30,6 +30,7 @@ import { LinkingWorkspace } from "./components/LinkingWorkspace";
 import { NavigationTabs } from "./components/NavigationTabs";
 import { PlotFigure } from "./components/PlotFigure";
 import { PrimaryNav } from "./components/PrimaryNav";
+import { RecordTable } from "./components/RecordTable";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
 import {
@@ -39,6 +40,7 @@ import {
   readStoredThemeMode,
   type ThemeMode
 } from "./theme";
+import { formatNumber, formatPercent } from "./utils/numberFormat";
 
 const MAIN_AREAS = [
   {
@@ -94,20 +96,20 @@ const DATA_TABS = [
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
-
-function formatPercent(value: number | null | undefined) {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatNumber(value: number | null | undefined, digits = 1) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-  return value.toFixed(digits);
-}
+const MONTH_LABELS_ES: Record<string, string> = {
+  "01": "Enero",
+  "02": "Febrero",
+  "03": "Marzo",
+  "04": "Abril",
+  "05": "Mayo",
+  "06": "Junio",
+  "07": "Julio",
+  "08": "Agosto",
+  "09": "Septiembre",
+  "10": "Octubre",
+  "11": "Noviembre",
+  "12": "Diciembre"
+};
 
 function formatDateLabel(value: string | null | undefined, locale = "es-ES") {
   if (!value) {
@@ -126,6 +128,20 @@ function parseServiceOriginN2(value: string) {
 
 function serializeServiceOriginN2(values: string[]) {
   return parseServiceOriginN2(values.join(", ")).join(", ");
+}
+
+function getLatestAvailableYear(years: string[]) {
+  const concreteYears = years.filter((year) => year !== "Todos");
+  return concreteYears[concreteYears.length - 1] || "Todos";
+}
+
+function getLatestAvailableMonth(months: string[]) {
+  const concreteMonths = months.filter((month) => month !== "Todos");
+  return concreteMonths[concreteMonths.length - 1] || "Todos";
+}
+
+function formatMonthOptionLabel(month: string) {
+  return MONTH_LABELS_ES[month] || month;
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string) {
@@ -200,11 +216,15 @@ export function App() {
       return;
     }
     didHydrate.current = true;
+    const latestYear = getLatestAvailableYear(config.available_years || []);
+    const latestMonth = getLatestAvailableMonth(
+      config.available_months_by_year[latestYear] || config.available_months_by_year.Todos || []
+    );
     setServiceOrigin(config.default_service_origin);
     setServiceOriginN1(config.default_service_origin_n1);
     setServiceOriginN2(config.default_service_origin_n2 || "");
-    setPopYear(config.preferences.pop_year || "Todos");
-    setPopMonth(config.preferences.pop_month || "Todos");
+    setPopYear(latestYear);
+    setPopMonth(latestMonth);
     setNpsGroup(config.preferences.nps_group_choice || "Todos");
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
     setDownloadsPath(config.preferences.downloads_path || "");
@@ -223,8 +243,9 @@ export function App() {
   }, [config, popYear]);
 
   useEffect(() => {
-    if (!monthOptions.includes(popMonth)) {
-      setPopMonth(monthOptions[0] || "Todos");
+    const latestMonth = getLatestAvailableMonth(monthOptions);
+    if (!monthOptions.includes(popMonth) || (popMonth === "Todos" && latestMonth !== "Todos")) {
+      setPopMonth(latestMonth);
     }
   }, [monthOptions, popMonth]);
 
@@ -423,7 +444,7 @@ export function App() {
       return;
     }
     if (!config.available_years.includes(popYear)) {
-      setPopYear(config.available_years[0] || "Todos");
+      setPopYear(getLatestAvailableYear(config.available_years));
     }
   }, [config, popYear]);
 
@@ -718,7 +739,7 @@ export function App() {
             <select onChange={(event) => setPopMonth(event.target.value)} value={popMonth}>
               {monthOptions.map((month) => (
                 <option key={month} value={month}>
-                  {month}
+                  {formatMonthOptionLabel(month)}
                 </option>
               ))}
             </select>
@@ -773,6 +794,13 @@ export function App() {
     }
 
     if (overviewTab === "topics") {
+      const topicRows = (dashboard?.overview.topics_table || []).map((row) => ({
+        Cluster: row.cluster_id ?? "",
+        n: row.n ?? "",
+        "Términos": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
+        Ejemplos: Array.isArray(row.examples) ? row.examples.join(" · ") : row.examples ?? ""
+      }));
+
       return (
         <section className="surface-card stack-panel">
           <PlotFigure
@@ -780,28 +808,7 @@ export function App() {
             figure={dashboard?.overview.topics_figure}
             testId="topics-figure"
           />
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Cluster</th>
-                  <th>n</th>
-                  <th>Términos</th>
-                  <th>Ejemplos</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(dashboard?.overview.topics_table || []).map((row, index) => (
-                  <tr key={`topic-${index}`}>
-                    <td>{String(row.cluster_id ?? "")}</td>
-                    <td>{String(row.n ?? "")}</td>
-                    <td>{Array.isArray(row.top_terms) ? row.top_terms.join(", ") : String(row.top_terms ?? "")}</td>
-                    <td>{Array.isArray(row.examples) ? row.examples.join(" · ") : String(row.examples ?? "")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <RecordTable emptyMessage="No hay temas disponibles." rows={topicRows} />
         </section>
       );
     }
@@ -856,11 +863,11 @@ export function App() {
           <div className="metric-grid">
             <article className="metric-card">
               <span>Muestras</span>
-              <strong>{dashboard?.kpis.samples?.toLocaleString("es-ES") || "0"}</strong>
+              <strong>{formatNumber(dashboard?.kpis.samples, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>NPS medio (0-10)</span>
-              <strong>{formatNumber(dashboard?.kpis.nps_average, 2)}</strong>
+              <strong>{formatNumber(dashboard?.kpis.nps_average)}</strong>
             </article>
             <article className="metric-card">
               <span>Detractores (≤6)</span>
@@ -884,6 +891,18 @@ export function App() {
 
         {npsTab === "comparison" ? (
           <section className="surface-card stack-panel">
+            {(() => {
+              const comparisonRows = (dashboard?.comparison.table || []).map((row) => ({
+                Valor: row.value ?? "",
+                "Δ NPS": row.delta_nps ?? "",
+                "NPS actual": row.nps_current ?? "",
+                "NPS base": row.nps_baseline ?? "",
+                "n actual": row.n_current ?? "",
+                "n base": row.n_baseline ?? ""
+              }));
+
+              return (
+                <>
             <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Comparativa</p>
@@ -901,40 +920,22 @@ export function App() {
               </label>
             </div>
             <div className="delta-strip">
-              <span>Δ NPS: {formatNumber(dashboard?.comparison.summary?.delta_nps, 2)}</span>
-              <span>Δ detractores: {formatNumber(dashboard?.comparison.summary?.delta_detr_pp, 1)} pp</span>
+              <span>Δ NPS: {formatNumber(dashboard?.comparison.summary?.delta_nps, { signed: true })}</span>
+              <span>
+                Δ detractores: {formatNumber(dashboard?.comparison.summary?.delta_detr_pp, { signed: true })} pp
+              </span>
+              <span>Base actual: {formatNumber(dashboard?.comparison.summary?.n_current, { fallback: "0" })}</span>
+              <span>Base histórica: {formatNumber(dashboard?.comparison.summary?.n_baseline, { fallback: "0" })}</span>
             </div>
             <PlotFigure
               emptyMessage="No hay suficiente histórico para comparar el periodo actual con la base."
               figure={dashboard?.comparison.figure}
               testId="comparison-figure"
             />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Valor</th>
-                    <th>Δ NPS</th>
-                    <th>NPS actual</th>
-                    <th>NPS base</th>
-                    <th>n actual</th>
-                    <th>n base</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(dashboard?.comparison.table || []).map((row, index) => (
-                    <tr key={`cmp-${index}`}>
-                      <td>{String(row.value ?? "")}</td>
-                      <td>{String(row.delta_nps ?? "")}</td>
-                      <td>{String(row.nps_current ?? "")}</td>
-                      <td>{String(row.nps_baseline ?? "")}</td>
-                      <td>{String(row.n_current ?? "")}</td>
-                      <td>{String(row.n_baseline ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RecordTable emptyMessage="No hay base comparativa disponible." rows={comparisonRows} />
+                </>
+              );
+            })()}
           </section>
         ) : null}
 
@@ -978,6 +979,16 @@ export function App() {
 
         {npsTab === "gaps" ? (
           <section className="surface-card stack-panel">
+            {(() => {
+              const gapRows = (dashboard?.gaps.table || []).map((row) => ({
+                Valor: row.value ?? "",
+                n: row.n ?? "",
+                NPS: row.nps ?? "",
+                Gap: row.gap_vs_overall ?? ""
+              }));
+
+              return (
+                <>
             <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Brechas</p>
@@ -999,33 +1010,26 @@ export function App() {
               figure={dashboard?.gaps.figure}
               testId="gaps-figure"
             />
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Valor</th>
-                    <th>n</th>
-                    <th>NPS</th>
-                    <th>Gap</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(dashboard?.gaps.table || []).map((row, index) => (
-                    <tr key={`gap-${index}`}>
-                      <td>{String(row.value ?? "")}</td>
-                      <td>{String(row.n ?? "")}</td>
-                      <td>{String(row.nps ?? "")}</td>
-                      <td>{String(row.gap_vs_overall ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RecordTable emptyMessage="No hay gaps disponibles." rows={gapRows} />
+                </>
+              );
+            })()}
           </section>
         ) : null}
 
         {npsTab === "opportunities" ? (
           <section className="surface-card stack-panel">
+            {(() => {
+              const opportunityRows = (dashboard?.opportunities.table || []).map((row) => ({
+                Etiqueta: row.label ?? `${row.dimension}=${row.value}`,
+                n: row.n ?? "",
+                "NPS actual": row.current_nps ?? "",
+                Uplift: row.potential_uplift ?? "",
+                Confianza: row.confidence ?? ""
+              }));
+
+              return (
+                <>
             <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Priorización</p>
@@ -1054,30 +1058,10 @@ export function App() {
                 ))}
               </ul>
             </article>
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Etiqueta</th>
-                    <th>n</th>
-                    <th>NPS actual</th>
-                    <th>Uplift</th>
-                    <th>Confianza</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(dashboard?.opportunities.table || []).map((row, index) => (
-                    <tr key={`opp-${index}`}>
-                      <td>{String(row.label ?? `${row.dimension}=${row.value}`)}</td>
-                      <td>{String(row.n ?? "")}</td>
-                      <td>{String(row.current_nps ?? "")}</td>
-                      <td>{String(row.potential_uplift ?? "")}</td>
-                      <td>{String(row.confidence ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RecordTable emptyMessage="No hay oportunidades disponibles." rows={opportunityRows} />
+                </>
+              );
+            })()}
           </section>
         ) : null}
       </>
@@ -1097,11 +1081,11 @@ export function App() {
           <div className="metric-grid">
             <article className="metric-card">
               <span>Dataset NPS</span>
-              <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+              <strong>{npsDatasetStatus.available ? formatNumber(npsDatasetStatus.rows) : "—"}</strong>
             </article>
             <article className="metric-card">
               <span>Dataset Helix</span>
-              <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+              <strong>{helixDatasetStatus.available ? formatNumber(helixDatasetStatus.rows) : "—"}</strong>
             </article>
             <article className="metric-card">
               <span>Última actualización NPS</span>
@@ -1165,19 +1149,19 @@ export function App() {
         <div className="metric-grid">
           <article className="metric-card">
             <span>Dataset NPS</span>
-            <strong>{npsDatasetStatus.available ? npsDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            <strong>{npsDatasetStatus.available ? formatNumber(npsDatasetStatus.rows) : "—"}</strong>
           </article>
           <article className="metric-card">
             <span>Dataset Helix</span>
-            <strong>{helixDatasetStatus.available ? helixDatasetStatus.rows.toLocaleString("es-ES") : "—"}</strong>
+            <strong>{helixDatasetStatus.available ? formatNumber(helixDatasetStatus.rows) : "—"}</strong>
           </article>
           <article className="metric-card">
             <span>Cargas registradas</span>
-            <strong>{uploads.length.toLocaleString("es-ES")}</strong>
+            <strong>{formatNumber(uploads.length, { fallback: "0" })}</strong>
           </article>
           <article className="metric-card">
             <span>Último detalle seleccionado</span>
-            <strong>{selectedUpload ? selectedDuplicateCount.toLocaleString("es-ES") : "—"}</strong>
+            <strong>{selectedUpload ? formatNumber(selectedDuplicateCount) : "—"}</strong>
           </article>
         </div>
 
@@ -1263,15 +1247,15 @@ export function App() {
                     </div>
                     <div>
                       <dt>Insertados</dt>
-                      <dd>{selectedUpload.inserted_rows.toLocaleString("es-ES")}</dd>
+                      <dd>{formatNumber(selectedUpload.inserted_rows)}</dd>
                     </div>
                     <div>
                       <dt>Actualizados</dt>
-                      <dd>{selectedUpload.updated_rows.toLocaleString("es-ES")}</dd>
+                      <dd>{formatNumber(selectedUpload.updated_rows)}</dd>
                     </div>
                     <div>
                       <dt>Duplicados prevenidos</dt>
-                      <dd>{selectedDuplicateCount.toLocaleString("es-ES")}</dd>
+                      <dd>{formatNumber(selectedDuplicateCount)}</dd>
                     </div>
                     <div>
                       <dt>Timestamp</dt>
@@ -1331,30 +1315,16 @@ export function App() {
 
         <section className="surface-card stack-panel">
           <div className="table-meta">
-            <span>Filas: {datasetTable?.total_rows?.toLocaleString("es-ES") || "0"}</span>
+            <span>Filas: {formatNumber(datasetTable?.total_rows, { fallback: "0" })}</span>
             <span>Columnas: {datasetTable?.columns.length || 0}</span>
           </div>
 
-          <div className="table-shell">
-            <table className="data-table" data-testid="data-table">
-              <thead>
-                <tr>
-                  {(datasetTable?.columns || []).map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(datasetTable?.rows || []).map((row, index) => (
-                  <tr key={`row-${index}`}>
-                    {(datasetTable?.columns || []).map((column) => (
-                      <td key={`${index}-${column}`}>{String(row[column] ?? "")}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <RecordTable
+            columns={datasetTable?.columns || []}
+            emptyMessage="No hay filas disponibles para este dataset."
+            rows={datasetTable?.rows || []}
+            testId="data-table"
+          />
 
           <div className="pager">
             <button

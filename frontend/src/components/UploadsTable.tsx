@@ -1,6 +1,7 @@
 import { useDeferredValue } from "react";
 
 import type { UploadResult } from "../api";
+import { formatNumber } from "../utils/numberFormat";
 
 type UploadsTableProps = {
   uploads: UploadResult[];
@@ -72,9 +73,9 @@ export function UploadsTable({
                     <span>{upload.service_origin_n1}</span>
                   </td>
                   <td>{upload.status}</td>
-                  <td>{upload.inserted_rows.toLocaleString("es-ES")}</td>
-                  <td>{upload.updated_rows.toLocaleString("es-ES")}</td>
-                  <td>{duplicateCount.toLocaleString("es-ES")}</td>
+                  <td>{formatNumber(upload.inserted_rows, { fallback: "0" })}</td>
+                  <td>{formatNumber(upload.updated_rows, { fallback: "0" })}</td>
+                  <td>{formatNumber(duplicateCount, { fallback: "0" })}</td>
                   <td>{new Date(upload.uploaded_at).toLocaleString("es-ES")}</td>
                   <td>
                     <button
