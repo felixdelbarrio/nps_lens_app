@@ -9,6 +9,7 @@ import {
   type UploadResult,
   type UploadSelectionPayload
 } from "../api";
+import { formatNumber } from "../utils/numberFormat";
 import { IssueList } from "./IssueList";
 
 type UploadFeedback = Pick<UploadResult, "status" | "filename" | "issues"> | HelixUploadResult | null;
@@ -109,7 +110,9 @@ export function DatasetUploadCard({
           {datasetStatus.available ? "Dataset activo" : "Sin dataset"}
         </span>
         <span className="dataset-status-copy">
-          {datasetStatus.available ? `${datasetStatus.rows.toLocaleString("es-ES")} filas` : "Pendiente de importar"}
+          {datasetStatus.available
+            ? `${formatNumber(datasetStatus.rows, { fallback: "0" })} filas`
+            : "Pendiente de importar"}
         </span>
       </div>
 

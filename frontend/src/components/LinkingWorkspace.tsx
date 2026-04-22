@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { LinkingPayload, PlotlyFigureSpec } from "../api";
+import { formatNumber, formatPercent } from "../utils/numberFormat";
 import { NavigationTabs } from "./NavigationTabs";
 import { PlotFigure } from "./PlotFigure";
 import { RecordTable } from "./RecordTable";
@@ -39,16 +40,11 @@ function asString(value: unknown, fallback = "") {
 }
 
 function asNumber(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  const normalized = String(value ?? "")
-    .trim()
-    .replace(",", ".");
-  if (!normalized) {
+  if (value === null || value === undefined) {
     return null;
   }
-  const parsed = Number.parseFloat(normalized);
+  const parsed =
+    typeof value === "string" ? Number.parseFloat(value.trim().replace(",", ".")) : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -63,18 +59,11 @@ function formatMetricValue(value: unknown, digits = 2) {
   if (numeric === null) {
     return "—";
   }
-  return numeric.toLocaleString("es-ES", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  });
+  return formatNumber(Number(numeric.toFixed(digits)));
 }
 
-function formatPercentValue(value: unknown, digits = 1) {
-  const numeric = asNumber(value);
-  if (numeric === null) {
-    return "—";
-  }
-  return `${(numeric * 100).toFixed(digits)}%`;
+function formatPercentValue(value: unknown) {
+  return formatPercent(value);
 }
 
 function formatSignedMetricValue(value: unknown, digits = 1) {
@@ -82,8 +71,7 @@ function formatSignedMetricValue(value: unknown, digits = 1) {
   if (numeric === null) {
     return "—";
   }
-  const sign = numeric > 0 ? "+" : "";
-  return `${sign}${numeric.toFixed(digits)}`;
+  return formatNumber(Number(numeric.toFixed(digits)), { signed: true });
 }
 
 function renderHelixCards(records: Array<Record<string, unknown>>) {
@@ -239,15 +227,15 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
           <div className="metric-grid metric-grid-3">
             <article className="metric-card">
               <span>Respuestas analizadas</span>
-              <strong>{Number(linking.kpis.responses || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(linking.kpis.responses || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Incidencias del periodo</span>
-              <strong>{Number(linking.kpis.incidents || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(linking.kpis.incidents || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>{`${linking.focus_label} medio`}</span>
-              <strong>{formatPercentValue(situation.average_focus_rate ?? linking.kpis.average_focus_rate, 2)}</strong>
+              <strong>{formatPercentValue(situation.average_focus_rate ?? linking.kpis.average_focus_rate)}</strong>
             </article>
           </div>
 
@@ -350,11 +338,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
           <div className="metric-grid metric-grid-3">
             <article className="metric-card">
               <span>Journeys detectados</span>
-              <strong>{Number(journeys.journeys_detected || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(journeys.journeys_detected || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Links validados</span>
-              <strong>{Number(journeys.linked_pairs || 0).toLocaleString("es-ES")}</strong>
+              <strong>{formatNumber(journeys.linked_pairs || 0, { fallback: "0" })}</strong>
             </article>
             <article className="metric-card">
               <span>Cohesión media</span>
@@ -463,7 +451,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 <div className="spotlight-metrics">
                   <article className="spotlight-metric">
                     <span>Probabilidad foco</span>
-                    <strong>{formatPercentValue(activeCard.detractor_probability, 0)}</strong>
+                    <strong>{formatPercentValue(activeCard.detractor_probability)}</strong>
                   </article>
                   <article className="spotlight-metric">
                     <span>Delta NPS</span>
@@ -636,7 +624,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </label>
           </div>
           <div className="table-meta">
-            <span>Filas visibles: {deepDiveRows.length.toLocaleString("es-ES")}</span>
+            <span>Filas visibles: {formatNumber(deepDiveRows.length, { fallback: "0" })}</span>
           </div>
           <RecordTable
             emptyMessage="No hay evidencia para el filtro de tópico seleccionado."
