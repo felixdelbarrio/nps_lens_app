@@ -213,25 +213,26 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         return None
 
     th = chart_theme(theme)
-    import plotly.express as px  # lazy import for faster cold-start
+    import plotly.graph_objects as go  # lazy import for faster cold-start
 
     tmp["period"] = tmp["Fecha"].dt.to_period(freq).dt.start_time
     agg = tmp.groupby("period", as_index=False).agg(n=("NPS", "size"), nps=("NPS", "mean"))
-    fig = px.line(
-        agg,
-        x="period",
-        y="nps",
-        markers=True,
-        hover_data={"n": True, "nps": ":.2f"},
-    )
     marker_colors = _nps_score_colors(theme, agg["nps"])
-    fig.update_traces(
-        line=dict(width=3, color=th.accent),
-        marker=dict(
-            size=8,
-            color=marker_colors,
-            line=dict(color=th.paper_bg, width=1),
-        ),
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=agg["period"],
+            y=agg["nps"],
+            mode="lines+markers",
+            line=dict(width=3, color=th.accent),
+            marker=dict(
+                size=8,
+                color=marker_colors,
+                line=dict(color=th.paper_bg, width=1),
+            ),
+            customdata=agg["n"],
+            hovertemplate="Periodo=%{x}<br>NPS=%{y:.2f}<br>Muestras=%{customdata}<extra></extra>",
+        )
     )
     fig.update_layout(
         yaxis_title="NPS (media del score 0-10)",
@@ -649,6 +650,77 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
         ),
     )
     _layout_common(fig, th, height=max(320, 56 * len(tmp) + 80))
+    return apply_plotly_template(fig, theme)
+
+
+def chart_causal_entity_bar(
+    summary_df: pd.DataFrame,
+    theme: Theme,
+    *,
+    entity_label: str,
+    top_k: int = 10,
+):
+    """Horizontal ranking for the active causal entity summary."""
+
+    if summary_df.empty:
+        return None
+
+    tmp = summary_df.copy()
+    for column in [
+        "entity_label",
+        "touchpoint",
+        "palanca",
+        "subpalanca",
+        "anchor_topic",
+    ]:
+        if column not in tmp.columns:
+            tmp[column] = ""
+    tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
+    tmp["nps_points_at_risk"] = pd.to_numeric(
+        tmp.get("nps_points_at_risk"), errors="coerce"
+    ).fillna(0.0)
+    tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
+    tmp = tmp.sort_values(
+        ["linked_pairs", "nps_points_at_risk", "avg_nps"],
+        ascending=[False, False, True],
+    ).head(int(top_k))
+    if tmp.empty:
+        return None
+
+    th = chart_theme(theme)
+    import plotly.express as px
+
+    plot_df = tmp.iloc[::-1].copy()
+    plot_df["entity_label"] = plot_df["entity_label"].astype(str)
+    fig = px.bar(
+        plot_df,
+        x="linked_pairs",
+        y="entity_label",
+        orientation="h",
+        color="nps_points_at_risk",
+        color_continuous_scale=_colorscale_rgy(theme),
+        text="linked_pairs",
+        hover_data={
+            "touchpoint": True,
+            "palanca": True,
+            "subpalanca": True,
+            "anchor_topic": True,
+            "avg_nps": ":.2f",
+            "nps_points_at_risk": ":.2f",
+        },
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        xaxis_title="Links validados Helix↔VoC",
+        yaxis_title=entity_label,
+        coloraxis=dict(
+            colorbar=dict(
+                title="NPS en riesgo",
+                tickfont=dict(size=10),
+            )
+        ),
+    )
+    _layout_common(fig, th, height=max(320, 56 * len(plot_df) + 80))
     return apply_plotly_template(fig, theme)
 
 

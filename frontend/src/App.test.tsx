@@ -156,53 +156,157 @@ const linkingPayloadAvailable = {
   focus_group: "detractor",
   focus_label: "% detractores",
   empty_state: "",
-  touchpoint_mode: {
+  causal_method: {
     value: "executive_journeys",
     label: "Journeys de detracción",
     summary: "La lectura causal se reorganiza en journeys de comité.",
     flow: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
   },
+  navigation: [
+    { id: "situation", label: "Situación del periodo" },
+    { id: "entity-summary", label: "Journeys de detracción" },
+    { id: "scenarios", label: "Análisis de escenarios causales" },
+    { id: "nps-deep-dive", label: "NPS deep dive" }
+  ],
   kpis: {
     responses: 26618,
     incidents: 233,
+    linked_pairs: 34,
     average_focus_rate: 0.1524
   },
   situation: {
-    average_focus_rate: 0.1524,
-    ranking_table: [
+    title: "Situación del periodo",
+    subtitle: "Cruce diario entre incidencias y NPS con lectura causal organizada por journeys de detracción.",
+    kpis: [
+      { label: "Respuestas analizadas", value: "26618" },
+      { label: "Incidencias del periodo", value: "233" },
       {
-        "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
-        "Confidence (learned)": 0.133
+        label: "Método causal",
+        value: "Journeys de detracción",
+        hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
       },
-      {
-        "Tópico NPS": "Operativa crítica fallida",
-        "Confidence (learned)": 0.111
-      }
+      { label: "% detractores medio", value: "15.2%" }
     ],
-    evidence_wall: [
+    metadata: [
       {
-        similarity: 0.214,
-        "Comentario detractor": "Estamos a primero de mes y el edo de cuenta...",
-        "Incidencia (descripción)": "ACOTAMIENTO IRD INC000104258819",
-        incident_id: "INC000104258819"
-      }
-    ]
+        label: "Flujo causal",
+        value: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
+      },
+      { label: "Foco analítico", value: "Journeys de detracción" }
+    ],
+    figure_title: "Timeline causal (diario)",
+    figure: null,
+    note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité."
   },
-  journeys: {
-    journeys_detected: 6,
-    linked_pairs: 34,
-    semantic_cohesion_mean: 0.91,
+  entity_summary: {
+    title: "Journeys de detracción",
+    subtitle: "Cada fila resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS.",
+    kpis: [
+      { label: "Journeys de detracción", value: "6" },
+      { label: "Touchpoints cubiertos", value: "4" },
+      { label: "Links validados", value: "34" }
+    ],
+    figure_title: "Journeys de detracción con mayor evidencia validada",
+    figure: null,
+    table_title: "Detalle de journeys de detracción",
+    empty_state: "No hay journeys de detracción defendibles con evidencia suficiente en esta ventana.",
     table: [
       {
-        "Journey roto": "Uso / Edo de Cuenta",
+        "Journey de detracción": "Uso / Edo de Cuenta",
+        "Touchpoint del catálogo": "Consulta",
         "Links validados": 18
       }
     ]
   },
+  deep_dive: {
+    title: "NPS deep dive",
+    subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
+    kpis: [
+      { label: "NPS en riesgo", value: "3.90 pts" },
+      { label: "NPS recuperable", value: "2.40 pts" },
+      { label: "Concentración top-3", value: "74.0%" },
+      { label: "Tiempo de reacción", value: "1.2 semanas" }
+    ],
+    topic_filter: {
+      label: "Tópico",
+      options: [
+        "Todos",
+        "Pagos/ Transferencias > Faltan detalles de movimientos",
+        "Operativa crítica fallida"
+      ],
+      default: "Pagos/ Transferencias > Faltan detalles de movimientos"
+    },
+    tabs: [
+      { id: "ranking", label: "Ranking de hipótesis" },
+      { id: "evidence", label: "Evidence wall" },
+      { id: "analysis", label: "Data deepdive analysis" }
+    ],
+    trending: {
+      title: "NPS tópicos trending",
+      figure: null,
+      empty_state: "No hay señal suficiente para construir tópicos trending."
+    },
+    ranking: {
+      title: "Ranking de hipótesis",
+      rows: [
+        {
+          "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
+          "Confidence (learned)": 0.133
+        },
+        {
+          "Tópico NPS": "Operativa crítica fallida",
+          "Confidence (learned)": 0.111
+        }
+      ],
+      empty_state: ""
+    },
+    evidence: {
+      title: "Evidence wall",
+      rows: [
+        {
+          nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
+          similarity: 0.339,
+          incident_id: "INC000104231684",
+          incident_summary: "ACOTAMIENTO IRD...",
+          detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
+        },
+        {
+          nps_topic: "Operativa crítica fallida",
+          similarity: 0.121,
+          incident_id: "INC000104355468",
+          incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
+          detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
+        }
+      ],
+      empty_state: ""
+    },
+    analysis: {
+      title: "Data deepdive analysis",
+      rows: [
+        {
+          nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
+          similarity: 0.339,
+          incident_id: "INC000104231684",
+          incident_summary: "ACOTAMIENTO IRD...",
+          detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
+        },
+        {
+          nps_topic: "Operativa crítica fallida",
+          similarity: 0.121,
+          incident_id: "INC000104355468",
+          incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
+          detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
+        }
+      ],
+      empty_state: ""
+    }
+  },
   scenarios: {
+    title: "Análisis de escenarios causales",
+    subtitle: "Escenarios priorizados bajo la lectura causal journeys de detracción.",
     banner: {
       kicker: "Narrativa causal",
-      title: "2 cadenas defendibles para detractores",
+      title: "2 journeys de detracción defendibles para detractores",
       summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
       metrics: [
         { label: "Método causal", value: "Journeys de detracción" },
@@ -231,11 +335,24 @@ const linkingPayloadAvailable = {
         nps_points_recoverable: 0.0,
         owner_role: "VoC + Analitica",
         flow_steps: [
-          "(12) Incidencias Helix",
-          "Transferencias / pagos / firma",
-          "Operativa / Error funcional / timeout",
-          "(12) Comentarios VoC",
+          "(12) Incidencias + comentarios",
+          "Uso / Edo de Cuenta",
+          "Consulta / Operativa / Error funcional",
           "Riesgo NPS"
+        ],
+        spotlight_metrics: [
+          { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
+          { label: "Tópico NPS ancla", value: "Operativa crítica fallida" },
+          { label: "Touchpoint afectado", value: "Consulta" },
+          { label: "Prob. detractores", value: "60.0%" },
+          { label: "Delta NPS", value: "-0.0" },
+          { label: "Impacto total", value: "0.00 pts" },
+          { label: "Confianza", value: "0.16" },
+          { label: "Links validados", value: "16" },
+          { label: "Prioridad", value: "0.62" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
+          { label: "Owner", value: "VoC + Analitica" }
         ],
         incident_records: [
           {
@@ -259,34 +376,15 @@ const linkingPayloadAvailable = {
             "Tópico NPS": "Operativa crítica fallida",
             Prioridad: 0.62
           }
-        ]
+        ],
+        matrix_figure: null,
+        risk_recovery_figure: null,
+        heatmap_figure: null,
+        changepoints_figure: null,
+        lag_figure: null
       }
     ]
-  },
-  overview_figure: null,
-  priority_figure: null,
-  risk_recovery_figure: null,
-  heatmap_figure: null,
-  lag_figure: null,
-  ranking_table: [],
-  evidence_table: [
-    {
-      nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
-      similarity: 0.339,
-      incident_id: "INC000104231684",
-      incident_summary: "ACOTAMIENTO IRD...",
-      detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
-    },
-    {
-      nps_topic: "Operativa crítica fallida",
-      similarity: 0.121,
-      incident_id: "INC000104355468",
-      incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
-      detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
-    }
-  ],
-  journey_routes_table: [],
-  top_topic: "Pagos/ Transferencias > Faltan detalles de movimientos"
+  }
 };
 
 describe("App", () => {
@@ -420,7 +518,7 @@ describe("App", () => {
     expect(anchorClick).toHaveBeenCalled();
   });
 
-  it("renders the restored linking workspace with situation, journeys and causal chains", async () => {
+  it("renders the restored linking workspace with method-driven summary, deep dive and scenarios", async () => {
     const user = userEvent.setup();
     currentLinkingPayload = linkingPayloadAvailable;
 
@@ -436,27 +534,34 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Timeline causal (diario)" })).toBeInTheDocument();
     expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Journeys rotos" }));
-    expect(screen.getByText("Journeys rotos identificados")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
+    expect(screen.getByText("Detalle de journeys de detracción")).toBeInTheDocument();
     expect(screen.getByText("Uso / Edo de Cuenta")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Mapa causal priorizado" }));
-    expect(screen.getByText("Ranking de hipótesis")).toBeInTheDocument();
-    expect(screen.getByText("Evidence wall")).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Tópico NPS" }), "Operativa crítica fallida");
-    const [rankingTable, evidenceTable] = screen.getAllByRole("table");
+    await user.click(screen.getByRole("tab", { name: "NPS deep dive" }));
+    expect(screen.getAllByText("Ranking de hipótesis").length).toBeGreaterThan(0);
+    expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Tópico" }), "Operativa crítica fallida");
+    const rankingTable = screen.getByRole("table");
     expect(within(rankingTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
     expect(
       within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Evidence wall" }));
+    const evidenceTable = screen.getByRole("table");
     expect(within(evidenceTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
     expect(
       within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("tab", { name: "Data deepdive analysis" }));
+    const analysisTable = screen.getByRole("table");
+    expect(within(analysisTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+
     await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
-    expect(screen.getByText("2 cadenas defendibles para detractores")).toBeInTheDocument();
-    expect(screen.getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument();
+    expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
   });
 });

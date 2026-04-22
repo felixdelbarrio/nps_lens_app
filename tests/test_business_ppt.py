@@ -353,6 +353,13 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
+        touchpoint_source="domain_touchpoint",
+        entity_summary_df=payload["attribution"],
+        entity_summary_kpis=[
+            {"label": "Subpalancas activas", "value": "1"},
+            {"label": "Confianza media", "value": "0.82"},
+            {"label": "Links validados", "value": "5"},
+        ],
     )
 
     assert out.content
@@ -387,8 +394,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("4. Dónde duele según el tipo de cliente" in t for t in texts)
     assert any("5. Casos más alejados del promedio" in t for t in texts)
     assert any("6. Oportunidades a priorizar" in t for t in texts)
-    assert any("7. Cuando la operación afecta a la experiencia" in t for t in texts)
-    assert any("8. Experiencias afectadas del periodo" in t for t in texts)
+    assert any("7. Situación del periodo" in t for t in texts)
+    assert any("8. Touchpoints afectados por Subpalanca" in t for t in texts)
     assert any("9.1 Análisis causal" in t for t in texts)
     assert not any("10.1 Matriz visual" in t for t in texts)
     assert not any("11.1 Señal temporal" in t for t in texts)
@@ -468,6 +475,12 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        entity_summary_df=attribution,
+        entity_summary_kpis=[
+            {"label": "Journeys de detracción", "value": "1"},
+            {"label": "Touchpoints cubiertos", "value": "1"},
+            {"label": "Links validados", "value": "5"},
+        ],
         broken_journeys_df=payload["broken_journeys"],
     )
 
@@ -479,8 +492,8 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Experiencias afectadas del periodo" in t for t in texts)
-    assert any("Catálogo ejecutivo de journeys" in t for t in texts)
+    assert any("8. Journeys de detracción" in t for t in texts)
+    assert any("Journey de detracción: Acceso bloqueado" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
@@ -525,6 +538,12 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+        entity_summary_df=attribution,
+        entity_summary_kpis=[
+            {"label": "Journeys rotos", "value": "1"},
+            {"label": "Touchpoints detectados", "value": "1"},
+            {"label": "Links validados", "value": "5"},
+        ],
         broken_journeys_df=payload["broken_journeys"],
     )
 
@@ -536,7 +555,8 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Cruce semántico incidencias-comentarios" in t for t in texts)
+    assert any("8. Journeys rotos" in t for t in texts)
+    assert any("Journey roto: Acceso / Login" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -790,8 +810,8 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                     texts.append(paragraph.text or "")
 
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
-    assert any("8. Experiencias afectadas del periodo" in t for t in texts)
-    assert not any("9.1 Caso causal" in t for t in texts)
+    assert any("8. Touchpoints afectados por Subpalanca" in t for t in texts)
+    assert not any("9.1 Análisis causal" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:

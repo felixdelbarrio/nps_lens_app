@@ -20,19 +20,12 @@ from nps_lens.analytics.hotspot_metrics import (
     select_best_business_axis_for_hotspots,
 )
 from nps_lens.analytics.incident_attribution import (
-    TOUCHPOINT_MODE_BANNER_LABELS,
-    TOUCHPOINT_MODE_FLOWS,
-    TOUCHPOINT_MODE_MENU_LABELS,
-    TOUCHPOINT_MODE_OPTIONS,
-    TOUCHPOINT_MODE_SUMMARIES,
-    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
-    TOUCHPOINT_SOURCE_DOMAIN,
     build_broken_journey_catalog,
-    build_broken_journey_topic_map,
+    build_causal_topic_map,
     build_incident_attribution_chains,
     load_executive_journey_catalog,
-    remap_links_to_journeys,
-    remap_topic_timeseries_to_journeys,
+    remap_links_to_causal_entities,
+    remap_topic_timeseries_to_causal_entities,
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
@@ -62,6 +55,16 @@ from nps_lens.core.knowledge_cache import (
 from nps_lens.core.nps_math import filter_by_nps_group, focus_mask, grouped_focus_rates
 from nps_lens.core.store import DatasetContext, HelixIncidentStore
 from nps_lens.design.tokens import DesignTokens, cp_level_color, palette
+from nps_lens.domain.causal_methods import (
+    TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
+    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
+    TOUCHPOINT_SOURCE_DOMAIN,
+    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+    TOUCHPOINT_SOURCE_PALANCA,
+    causal_method_options,
+    get_causal_method_spec,
+    linking_navigation,
+)
 from nps_lens.domain.models import UploadContext
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -75,9 +78,9 @@ from nps_lens.ui.business import (
     slice_by_window,
 )
 from nps_lens.ui.charts import (
-    chart_broken_journeys_bar,
     chart_case_incident_heatmap,
     chart_case_lag_days,
+    chart_causal_entity_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
@@ -371,15 +374,7 @@ class DashboardService:
             "available_years": years,
             "available_months_by_year": months_by_year,
             "nps_groups": _DEFAULT_NPS_GROUPS,
-            "causal_method_options": [
-                {
-                    "value": option,
-                    "label": TOUCHPOINT_MODE_MENU_LABELS[option],
-                    "summary": TOUCHPOINT_MODE_SUMMARIES[option],
-                    "flow": TOUCHPOINT_MODE_FLOWS[option],
-                }
-                for option in TOUCHPOINT_MODE_OPTIONS
-            ],
+            "causal_method_options": causal_method_options(),
             "preferences": preferences,
             "nps_dataset": nps_dataset,
             "helix_dataset": helix_dataset,
@@ -697,6 +692,7 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
+        method_spec = get_causal_method_spec(active_touchpoint_source)
         focus_name = self._focus_name(focus_group)
         core = self._compute_linking_core(
             nps_df=nps_slice,
@@ -723,6 +719,7 @@ class DashboardService:
             helix_df=helix_slice,
             by_topic_weekly=by_topic_weekly,
             by_topic_daily=by_topic_daily,
+            executive_journey_catalog=executive_journey_catalog,
         )
         broken_journeys_df = mode_payload["broken_journeys_df"]
         broken_journey_links_df = mode_payload["broken_journey_links_df"]
@@ -886,54 +883,6 @@ class DashboardService:
             links_mode_df,
             max_rows=300,
         )
-        evidence_wall_df = (
-            evidence_df[evidence_df["nps_topic"].astype(str).str.strip() == top_topic]
-            .head(50)
-            .copy()
-            if top_topic
-            else evidence_df.head(50).copy()
-        )
-        if evidence_wall_df.empty and not evidence_df.empty:
-            evidence_wall_df = evidence_df.head(50).copy()
-
-        broken_journeys_view = pd.DataFrame()
-        if not broken_journeys_df.empty:
-            broken_journeys_view = broken_journeys_df.rename(
-                columns={
-                    "journey_label": "Journey roto",
-                    "touchpoint": "Touchpoint detectado",
-                    "palanca": "Palanca dominante",
-                    "subpalanca": "Subpalanca dominante",
-                    "helix_source_service_n2": "Helix Source Service N2",
-                    "journey_keywords": "Keywords",
-                    "linked_pairs": "Links validados",
-                    "linked_incidents": "Incidencias",
-                    "linked_comments": "Comentarios VoC",
-                    "avg_similarity": "Similaridad media",
-                    "avg_nps": "NPS medio",
-                    "semantic_cohesion": "Cohesión semántica",
-                    "journey_confidence_label": "Confianza",
-                    "journey_impact_label": "Impacto",
-                }
-            )[
-                [
-                    "Journey roto",
-                    "Touchpoint detectado",
-                    "Palanca dominante",
-                    "Subpalanca dominante",
-                    "Helix Source Service N2",
-                    "Keywords",
-                    "Links validados",
-                    "Incidencias",
-                    "Comentarios VoC",
-                    "NPS medio",
-                    "Similaridad media",
-                    "Cohesión semántica",
-                    "Confianza",
-                    "Impacto",
-                ]
-            ].copy()
-
         chain_candidates_df = build_incident_attribution_chains(
             links_mode_df,
             focus_df,
@@ -971,34 +920,81 @@ class DashboardService:
             theme=theme,
             theme_mode=theme_mode,
             focus_name=focus_name,
+            touchpoint_source=active_touchpoint_source,
         )
+        entity_summary_df = self._build_entity_summary_df(
+            chain_candidates_df,
+            touchpoint_source=active_touchpoint_source,
+        )
+        entity_summary_chart_df = chain_candidates_df.copy()
+        if not entity_summary_chart_df.empty:
+            entity_summary_chart_df["entity_label"] = (
+                _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
+            )
         median_lag_weeks = pd.to_numeric(
             pd.Series([rationale_summary.median_lag_weeks]),
             errors="coerce",
         ).iloc[0]
         median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
 
+        timeline_figure = self._serialize_figure(
+            self._build_linking_overview_figure(
+                trend_df,
+                nps_df=nps_slice,
+                focus_label=focus_label,
+                focus_name=focus_name,
+                show_all_groups=show_all_groups,
+                theme=theme,
+            )
+        )
+        situation_notes = [method_spec.situation_note]
+        if not show_all_groups and not overall_daily.empty:
+            situation_notes.append(
+                "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
+            )
+
+        ranking_rows = self._serialize_rows(rank_view.head(20))
+        topic_options = [
+            "Todos",
+            *_unique_string_values(_series_or_default(rank2, "nps_topic").astype(str).tolist()),
+        ]
+        evidence_sorted_df = evidence_df.copy()
+        if not evidence_sorted_df.empty:
+            topic_rank = {
+                topic: index
+                for index, topic in enumerate(
+                    _unique_string_values(
+                        _series_or_default(rank2, "nps_topic").astype(str).tolist()
+                    )
+                )
+            }
+            evidence_sorted_df["__topic_order"] = evidence_sorted_df.get(
+                "nps_topic",
+                pd.Series([""] * len(evidence_sorted_df), index=evidence_sorted_df.index),
+            ).map(lambda topic: topic_rank.get(str(topic).strip(), len(topic_rank)))
+            evidence_sorted_df["similarity"] = pd.to_numeric(
+                _series_or_default(evidence_sorted_df, "similarity", default=0.0),
+                errors="coerce",
+            ).fillna(0.0)
+            evidence_sorted_df = evidence_sorted_df.sort_values(
+                ["__topic_order", "similarity"],
+                ascending=[True, False],
+            ).drop(columns="__topic_order")
+
+        deep_dive_rows = self._serialize_rows(evidence_sorted_df)
         return {
             "available": True,
             "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
             "focus_group": focus_group,
             "focus_label": focus_label,
             "empty_state": "",
-            "touchpoint_mode": {
-                "value": active_touchpoint_source,
-                "label": TOUCHPOINT_MODE_BANNER_LABELS.get(
-                    active_touchpoint_source,
-                    active_touchpoint_source,
-                ),
-                "summary": TOUCHPOINT_MODE_SUMMARIES.get(
-                    active_touchpoint_source,
-                    "Lectura causal activa.",
-                ),
-                "flow": TOUCHPOINT_MODE_FLOWS.get(
-                    active_touchpoint_source,
-                    "Incidencias -> Touchpoint -> Comentario -> NPS",
-                ),
+            "causal_method": {
+                "value": method_spec.value,
+                "label": method_spec.label,
+                "summary": method_spec.summary,
+                "flow": method_spec.flow,
             },
+            "navigation": linking_navigation(method_spec),
             "kpis": {
                 "responses": int(len(nps_slice)),
                 "focus_responses": int(len(focus_df)),
@@ -1013,87 +1009,71 @@ class DashboardService:
                 "median_lag_weeks": median_lag_value,
             },
             "situation": {
-                "timeline_figure": self._serialize_figure(
-                    self._build_linking_overview_figure(
-                        trend_df,
-                        nps_df=nps_slice,
-                        focus_label=focus_label,
-                        focus_name=focus_name,
-                        show_all_groups=show_all_groups,
-                        theme=theme,
-                    )
-                ),
-                "timeline_note": (
-                    "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
-                    if not show_all_groups and not overall_daily.empty
-                    else ""
-                ),
-                "topics_trending_figure": self._serialize_figure(
-                    self._build_topics_trending_figure(rank2, theme)
-                ),
-                "ranking_table": self._serialize_rows(rank_view.head(15)),
-                "evidence_wall": self._serialize_rows(evidence_wall_df),
-                "top_topic": top_topic,
-                "average_focus_rate": average_focus,
-                "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
-                "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
-                "top3_incident_share": float(rationale_summary.top3_incident_share),
-                "median_lag_weeks": median_lag_value,
+                "title": "Situación del periodo",
+                "subtitle": method_spec.situation_subtitle,
+                "kpis": [
+                    {"label": "Respuestas analizadas", "value": str(int(len(nps_slice)))},
+                    {"label": "Incidencias del periodo", "value": str(int(len(helix_slice)))},
+                    {
+                        "label": "Método causal",
+                        "value": method_spec.label,
+                        "hint": method_spec.flow,
+                    },
+                    {"label": f"{focus_label} medio", "value": f"{average_focus*100.0:.1f}%"},
+                ],
+                "metadata": [
+                    {"label": "Flujo causal", "value": method_spec.flow},
+                    {"label": "Foco analítico", "value": method_spec.navigation_label},
+                ],
+                "figure_title": "Timeline causal (diario)",
+                "figure": timeline_figure,
+                "note": " ".join([note for note in situation_notes if note]),
             },
-            "journeys": {
-                "journeys_detected": int(len(broken_journeys_df)),
-                "linked_pairs": int(
-                    pd.to_numeric(
-                        broken_journeys_df.get("linked_pairs", pd.Series(dtype=float)),
-                        errors="coerce",
-                    )
-                    .fillna(0)
-                    .sum()
+            "entity_summary": {
+                "title": method_spec.navigation_title,
+                "subtitle": method_spec.navigation_subtitle,
+                "kpis": self._build_entity_summary_kpis(
+                    chain_candidates_df,
+                    touchpoint_source=active_touchpoint_source,
                 ),
-                "semantic_cohesion_mean": float(
-                    pd.to_numeric(
-                        broken_journeys_df.get("semantic_cohesion", pd.Series(dtype=float)),
-                        errors="coerce",
-                    )
-                    .fillna(0.0)
-                    .mean()
-                ),
+                "figure_title": method_spec.chart_title,
                 "figure": self._serialize_figure(
-                    chart_broken_journeys_bar(
-                        broken_journeys_df,
+                    chart_causal_entity_bar(
+                        entity_summary_chart_df,
                         theme=theme,
-                        top_k=min(10, len(broken_journeys_df)),
+                        entity_label=method_spec.entity_singular,
+                        top_k=(
+                            min(10, len(entity_summary_chart_df))
+                            if not entity_summary_chart_df.empty
+                            else 10
+                        ),
                     )
                 ),
-                "table": self._serialize_rows(broken_journeys_view),
+                "table_title": method_spec.table_title,
+                "table": self._serialize_rows(entity_summary_df),
+                "empty_state": method_spec.table_empty_message,
             },
             "scenarios": {
+                "title": "Análisis de escenarios causales",
+                "subtitle": (
+                    f"Escenarios priorizados bajo la lectura causal {method_spec.label.lower()}."
+                ),
                 "banner": {
                     "kicker": "Narrativa causal",
                     "title": (
-                        f"{len(chain_candidates_df)} cadenas defendibles para {focus_name}"
+                        f"{len(chain_candidates_df)} {method_spec.entity_plural.lower()} defendibles para {focus_name}"
                         if not chain_candidates_df.empty
-                        else "Sin cadenas defendibles en esta ventana"
+                        else "Sin escenarios defendibles en esta ventana"
                     ),
                     "summary": (
-                        f"{TOUCHPOINT_MODE_SUMMARIES.get(active_touchpoint_source, 'Lectura causal activa.')} "
-                        f"La política Helix↔VoC está fijada en similitud ≥ {float(min_similarity):.2f}, "
-                        f"top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
+                        f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
+                        f"{float(min_similarity):.2f}, top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
                     ),
                     "metrics": [
                         {
                             "label": "Método causal",
-                            "value": TOUCHPOINT_MODE_BANNER_LABELS.get(
-                                active_touchpoint_source,
-                                active_touchpoint_source,
-                            ),
-                            "hint": (
-                                "Flujo del método causal: "
-                                + TOUCHPOINT_MODE_FLOWS.get(
-                                    active_touchpoint_source,
-                                    "Incidencias -> Touchpoint -> Comentario -> NPS",
-                                )
-                            ),
+                            "value": method_spec.label,
+                            "hint": "Flujo del método causal: " + method_spec.flow,
                         },
                         {
                             "label": "Incidencias con match",
@@ -1111,44 +1091,70 @@ class DashboardService:
                 },
                 "pills": [
                     "Solo cadena completa defendible",
-                    f"{int(chain_candidates_summary['topics_total'])} tópicos linkados",
-                    f"{int(chain_candidates_summary['chains_total'])} cadenas causales",
+                    f"{int(chain_candidates_summary['topics_total'])} focos causales activos",
+                    f"{int(chain_candidates_summary['chains_total'])} escenarios priorizados",
                 ],
                 "cards": scenario_cards,
                 "default_chain_keys": default_chain_keys,
             },
-            "overview_figure": self._serialize_figure(
-                self._build_linking_overview_figure(
-                    trend_df,
-                    nps_df=nps_slice,
-                    focus_label=focus_label,
-                    focus_name=focus_name,
-                    show_all_groups=show_all_groups,
-                    theme=theme,
-                )
-            ),
-            "priority_figure": self._serialize_figure(
-                chart_incident_priority_matrix(rationale_df, theme)
-            ),
-            "risk_recovery_figure": self._serialize_figure(
-                chart_incident_risk_recovery(rationale_df, theme)
-            ),
-            "heatmap_figure": self._serialize_figure(
-                chart_case_incident_heatmap(by_topic_daily_mode, theme, topic=top_topic)
-            ),
-            "lag_figure": self._serialize_figure(
-                chart_case_lag_days(
-                    by_topic_daily_mode,
-                    lag_days_mode,
-                    theme,
-                    topic=top_topic,
-                    focus_name=focus_name,
-                )
-            ),
-            "ranking_table": self._serialize_rows(rank_view.head(20)),
-            "evidence_table": self._serialize_rows(evidence_df),
-            "journey_routes_table": self._serialize_rows(broken_journeys_view),
-            "top_topic": top_topic,
+            "deep_dive": {
+                "title": "NPS deep dive",
+                "subtitle": method_spec.deep_dive_subtitle,
+                "kpis": [
+                    {
+                        "label": "NPS en riesgo",
+                        "value": f"{float(rationale_summary.nps_points_at_risk):.2f} pts",
+                    },
+                    {
+                        "label": "NPS recuperable",
+                        "value": f"{float(rationale_summary.nps_points_recoverable):.2f} pts",
+                    },
+                    {
+                        "label": "Concentración top-3",
+                        "value": f"{float(rationale_summary.top3_incident_share)*100.0:.1f}%",
+                    },
+                    {
+                        "label": "Tiempo de reacción",
+                        "value": (
+                            f"{float(median_lag_value):.1f} semanas"
+                            if median_lag_value is not None
+                            else "n/d"
+                        ),
+                    },
+                ],
+                "topic_filter": {
+                    "label": "Tópico",
+                    "options": topic_options,
+                    "default": top_topic or "Todos",
+                },
+                "tabs": [
+                    {"id": "ranking", "label": "Ranking de hipótesis"},
+                    {"id": "evidence", "label": "Evidence wall"},
+                    {"id": "analysis", "label": "Data deepdive analysis"},
+                ],
+                "trending": {
+                    "title": "NPS tópicos trending",
+                    "figure": self._serialize_figure(
+                        self._build_topics_trending_figure(rank2, theme)
+                    ),
+                    "empty_state": "No hay señal suficiente para construir tópicos trending.",
+                },
+                "ranking": {
+                    "title": "Ranking de hipótesis",
+                    "rows": ranking_rows,
+                    "empty_state": "No hay suficiente señal para rankear focos causales en el periodo seleccionado.",
+                },
+                "evidence": {
+                    "title": "Evidence wall",
+                    "rows": deep_dive_rows,
+                    "empty_state": "No hay evidencia validada para el foco seleccionado.",
+                },
+                "analysis": {
+                    "title": "Data deepdive analysis",
+                    "rows": deep_dive_rows,
+                    "empty_state": "No hay filas de detalle para el foco seleccionado.",
+                },
+            },
         }
 
     def generate_ppt_report(
@@ -1224,6 +1230,11 @@ class DashboardService:
             helix_df=helix_current,
             by_topic_weekly=by_topic_weekly,
             by_topic_daily=by_topic_daily,
+            executive_journey_catalog=load_executive_journey_catalog(
+                self.settings.knowledge_dir,
+                service_origin=context.service_origin,
+                service_origin_n1=context.service_origin_n1,
+            ),
         )
         broken_journeys_df = mode_payload["broken_journeys_df"]
         broken_journey_links_df = mode_payload["broken_journey_links_df"]
@@ -1314,7 +1325,7 @@ class DashboardService:
             service_origin=context.service_origin,
             service_origin_n1=context.service_origin_n1,
         )
-        attribution_df = build_incident_attribution_chains(
+        attribution_all_df = build_incident_attribution_chains(
             links_mode_df,
             focus_current,
             helix_current,
@@ -1328,8 +1339,12 @@ class DashboardService:
             journey_links_df=broken_journey_links_df,
             executive_journey_catalog=executive_journey_catalog,
         )
-        attribution_df = self._select_top_chain_rows(attribution_df)
-        attribution_summary = summarize_attribution_chains(attribution_df)
+        entity_summary_kpis = self._build_entity_summary_kpis(
+            attribution_all_df,
+            touchpoint_source=active_touchpoint_source,
+        )
+        attribution_summary = summarize_attribution_chains(attribution_all_df)
+        attribution_df = self._select_top_chain_rows(attribution_all_df)
 
         business_story_md = self._build_business_report_md(
             current_df=current_df,
@@ -1406,6 +1421,8 @@ class DashboardService:
             incident_timeline_df=incident_timeline_df,
             hotspot_focus_note=hotspot_focus_note,
             touchpoint_source=active_touchpoint_source,
+            entity_summary_df=attribution_all_df,
+            entity_summary_kpis=entity_summary_kpis,
             executive_journey_catalog=executive_journey_catalog,
             broken_journeys_df=broken_journeys_df,
         )
@@ -1527,31 +1544,39 @@ class DashboardService:
         helix_df: pd.DataFrame,
         by_topic_weekly: pd.DataFrame,
         by_topic_daily: pd.DataFrame,
+        executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     ) -> dict[str, pd.DataFrame]:
         broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(
             links_df,
             focus_df,
             helix_df,
         )
-        broken_journey_topic_map_df = build_broken_journey_topic_map(broken_journey_links_df)
         links_mode_df = links_df.copy()
         by_topic_weekly_mode = by_topic_weekly.copy()
         by_topic_daily_mode = by_topic_daily.copy()
-
-        if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-            links_mode_df = remap_links_to_journeys(links_df, broken_journey_links_df)
-            by_topic_weekly_mode = remap_topic_timeseries_to_journeys(
+        causal_topic_map_df = build_causal_topic_map(
+            links_df,
+            focus_df,
+            helix_df,
+            touchpoint_source=touchpoint_source,
+            journey_links_df=broken_journey_links_df,
+            executive_journey_catalog=executive_journey_catalog,
+        )
+        if not causal_topic_map_df.empty:
+            links_mode_df = remap_links_to_causal_entities(links_df, causal_topic_map_df)
+            by_topic_weekly_mode = remap_topic_timeseries_to_causal_entities(
                 by_topic_weekly,
-                broken_journey_topic_map_df,
+                causal_topic_map_df,
             )
-            by_topic_daily_mode = remap_topic_timeseries_to_journeys(
+            by_topic_daily_mode = remap_topic_timeseries_to_causal_entities(
                 by_topic_daily,
-                broken_journey_topic_map_df,
+                causal_topic_map_df,
             )
 
         return {
             "broken_journeys_df": broken_journeys_df,
             "broken_journey_links_df": broken_journey_links_df,
+            "causal_topic_map_df": causal_topic_map_df,
             "links_mode_df": links_mode_df,
             "by_topic_weekly_mode": by_topic_weekly_mode,
             "by_topic_daily_mode": by_topic_daily_mode,
@@ -1613,6 +1638,263 @@ class DashboardService:
         )
         return apply_plotly_theme(fig, theme)
 
+    @staticmethod
+    def _build_entity_summary_df(
+        chain_df: pd.DataFrame,
+        *,
+        touchpoint_source: str,
+    ) -> pd.DataFrame:
+        if chain_df is None or chain_df.empty:
+            return pd.DataFrame()
+
+        source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+        summary_df = chain_df.copy()
+        summary_df["entity_label"] = (
+            _series_or_default(summary_df, "nps_topic").astype(str).str.strip()
+        )
+        summary_df["anchor_topic"] = (
+            _series_or_default(summary_df, "anchor_topic").astype(str).str.strip()
+        )
+        summary_df["touchpoint"] = (
+            _series_or_default(summary_df, "touchpoint").astype(str).str.strip()
+        )
+        summary_df["palanca"] = _series_or_default(summary_df, "palanca").astype(str).str.strip()
+        summary_df["subpalanca"] = (
+            _series_or_default(summary_df, "subpalanca").astype(str).str.strip()
+        )
+        summary_df["helix_source_service_n2"] = (
+            _series_or_default(summary_df, "helix_source_service_n2").astype(str).str.strip()
+        )
+        summary_df["linked_pairs"] = _numeric_series(
+            summary_df, "linked_pairs", default=0.0
+        ).astype(int)
+        summary_df["linked_incidents"] = _numeric_series(
+            summary_df, "linked_incidents", default=0.0
+        ).astype(int)
+        summary_df["linked_comments"] = _numeric_series(
+            summary_df, "linked_comments", default=0.0
+        ).astype(int)
+        summary_df["avg_nps"] = _numeric_series(summary_df, "avg_nps", default=np.nan).round(2)
+        summary_df["confidence"] = _numeric_series(summary_df, "confidence", default=np.nan).round(
+            3
+        )
+        summary_df["nps_points_at_risk"] = _numeric_series(
+            summary_df, "nps_points_at_risk", default=0.0
+        ).round(2)
+        summary_df = summary_df.sort_values(
+            ["priority", "linked_pairs", "nps_points_at_risk"],
+            ascending=[False, False, False],
+        ).reset_index(drop=True)
+
+        if source == TOUCHPOINT_SOURCE_PALANCA:
+            return summary_df[
+                [
+                    "entity_label",
+                    "touchpoint",
+                    "anchor_topic",
+                    "linked_incidents",
+                    "linked_comments",
+                    "linked_pairs",
+                    "avg_nps",
+                    "nps_points_at_risk",
+                    "confidence",
+                    "palanca",
+                    "subpalanca",
+                ]
+            ].rename(
+                columns={
+                    "entity_label": "Palanca",
+                    "touchpoint": "Touchpoint afectado dominante",
+                    "anchor_topic": "Tópico NPS ancla",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "linked_pairs": "Links validados",
+                    "avg_nps": "NPS medio",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "confidence": "Confianza",
+                    "palanca": "palanca",
+                    "subpalanca": "subpalanca",
+                }
+            )
+
+        if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
+            return summary_df[
+                [
+                    "entity_label",
+                    "touchpoint",
+                    "palanca",
+                    "subpalanca",
+                    "anchor_topic",
+                    "linked_incidents",
+                    "linked_comments",
+                    "linked_pairs",
+                    "avg_nps",
+                    "nps_points_at_risk",
+                    "confidence",
+                ]
+            ].rename(
+                columns={
+                    "entity_label": "Source Service N2 de Hélix",
+                    "touchpoint": "Touchpoint relacionado",
+                    "palanca": "Palanca dominante",
+                    "subpalanca": "Subpalanca dominante",
+                    "anchor_topic": "Tópico NPS ancla",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "linked_pairs": "Links validados",
+                    "avg_nps": "NPS medio",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "confidence": "Confianza",
+                }
+            )
+
+        if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+            return summary_df[
+                [
+                    "entity_label",
+                    "touchpoint",
+                    "palanca",
+                    "subpalanca",
+                    "anchor_topic",
+                    "linked_incidents",
+                    "linked_comments",
+                    "linked_pairs",
+                    "avg_nps",
+                    "nps_points_at_risk",
+                    "confidence",
+                ]
+            ].rename(
+                columns={
+                    "entity_label": "Journey roto",
+                    "touchpoint": "Touchpoint detectado",
+                    "palanca": "Palanca dominante",
+                    "subpalanca": "Subpalanca dominante",
+                    "anchor_topic": "Tópico NPS ancla",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "linked_pairs": "Links validados",
+                    "avg_nps": "NPS medio",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "confidence": "Confianza",
+                }
+            )
+
+        if source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+            return summary_df[
+                [
+                    "entity_label",
+                    "touchpoint",
+                    "palanca",
+                    "subpalanca",
+                    "anchor_topic",
+                    "linked_incidents",
+                    "linked_comments",
+                    "linked_pairs",
+                    "avg_nps",
+                    "nps_points_at_risk",
+                    "confidence",
+                ]
+            ].rename(
+                columns={
+                    "entity_label": "Journey de detracción",
+                    "touchpoint": "Touchpoint del catálogo",
+                    "palanca": "Palanca",
+                    "subpalanca": "Subpalanca",
+                    "anchor_topic": "Tópico NPS ancla",
+                    "linked_incidents": "Incidencias",
+                    "linked_comments": "Comentarios VoC",
+                    "linked_pairs": "Links validados",
+                    "avg_nps": "NPS medio",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "confidence": "Confianza",
+                }
+            )
+
+        return summary_df[
+            [
+                "entity_label",
+                "palanca",
+                "anchor_topic",
+                "linked_incidents",
+                "linked_comments",
+                "linked_pairs",
+                "avg_nps",
+                "nps_points_at_risk",
+                "confidence",
+            ]
+        ].rename(
+            columns={
+                "entity_label": "Subpalanca",
+                "palanca": "Palanca dominante",
+                "anchor_topic": "Tópico NPS ancla",
+                "linked_incidents": "Incidencias",
+                "linked_comments": "Comentarios VoC",
+                "linked_pairs": "Links validados",
+                "avg_nps": "NPS medio",
+                "nps_points_at_risk": "NPS en riesgo (pts)",
+                "confidence": "Confianza",
+            }
+        )
+
+    @staticmethod
+    def _build_entity_summary_kpis(
+        chain_df: pd.DataFrame,
+        *,
+        touchpoint_source: str,
+    ) -> list[dict[str, str]]:
+        if chain_df is None or chain_df.empty:
+            return []
+
+        source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+        entities_total = int(
+            chain_df.get("nps_topic", pd.Series(dtype=str)).astype(str).str.strip().ne("").sum()
+        )
+        touchpoints_total = int(
+            chain_df.get("touchpoint", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
+        )
+        incidents_total = int(
+            _numeric_series(chain_df, "linked_incidents", default=0.0).fillna(0.0).sum()
+        )
+        links_total = int(_numeric_series(chain_df, "linked_pairs", default=0.0).fillna(0.0).sum())
+        confidence_mean = float(
+            _numeric_series(chain_df, "confidence", default=0.0).fillna(0.0).mean()
+        )
+
+        if source == TOUCHPOINT_SOURCE_PALANCA:
+            return [
+                {"label": "Palancas activas", "value": str(entities_total)},
+                {"label": "Touchpoints afectados", "value": str(touchpoints_total)},
+                {"label": "Links validados", "value": str(links_total)},
+            ]
+        if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+            return [
+                {"label": "Journeys rotos", "value": str(entities_total)},
+                {"label": "Touchpoints detectados", "value": str(touchpoints_total)},
+                {"label": "Links validados", "value": str(links_total)},
+            ]
+        if source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+            return [
+                {"label": "Journeys de detracción", "value": str(entities_total)},
+                {"label": "Touchpoints cubiertos", "value": str(touchpoints_total)},
+                {"label": "Links validados", "value": str(links_total)},
+            ]
+        if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
+            return [
+                {"label": "Source Service N2 activos", "value": str(entities_total)},
+                {"label": "Incidencias con match", "value": str(incidents_total)},
+                {"label": "Links validados", "value": str(links_total)},
+            ]
+        return [
+            {"label": "Subpalancas activas", "value": str(entities_total)},
+            {"label": "Confianza media", "value": f"{confidence_mean:.2f}"},
+            {"label": "Links validados", "value": str(links_total)},
+        ]
+
     def _build_linking_scenario_cards(
         self,
         chain_df: pd.DataFrame,
@@ -1624,29 +1906,132 @@ class DashboardService:
         theme: Theme,
         theme_mode: str,
         focus_name: str,
+        touchpoint_source: str,
     ) -> list[dict[str, object]]:
         if chain_df is None or chain_df.empty:
             return []
 
+        source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+        method_spec = get_causal_method_spec(source)
+
+        def _metric_number(value: object) -> Optional[float]:
+            parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+            return float(parsed) if pd.notna(parsed) else None
+
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
             active_df = pd.DataFrame([row]).copy()
-            topic = str(row.get("nps_topic", "") or "").strip()
+            title = str(row.get("nps_topic", "") or "").strip()
+            topic = title
+            anchor_topic = str(row.get("anchor_topic", "") or title).strip()
             palanca = str(row.get("palanca", "") or "").strip()
             subpalanca = str(row.get("subpalanca", "") or "").strip()
-            lever_label = " / ".join([value for value in [palanca, subpalanca] if value]).strip()
+            touchpoint = str(row.get("touchpoint", "") or "").strip()
+            source_service_n2 = str(row.get("helix_source_service_n2", "") or "").strip()
             serialized_row = self._serialize_rows(active_df)[0] if not active_df.empty else {}
+            if source == TOUCHPOINT_SOURCE_PALANCA:
+                flow_steps = [
+                    f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias Helix",
+                    touchpoint or "Touchpoint afectado",
+                    title or "Palanca",
+                    f"({int(float(row.get('linked_comments', 0) or 0))}) Comentarios VoC",
+                    "NPS",
+                ]
+            elif source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
+                flow_steps = [
+                    f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias Helix",
+                    source_service_n2 or title or "Source Service N2",
+                    f"({int(float(row.get('linked_comments', 0) or 0))}) Comentarios VoC",
+                    "NPS",
+                ]
+            elif source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+                flow_steps = [
+                    f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias + comentarios",
+                    title or "Journey roto",
+                    touchpoint or "Touchpoint detectado",
+                    "NPS",
+                ]
+            elif source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
+                flow_steps = [
+                    f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias + comentarios",
+                    title or "Journey de detracción",
+                    " / ".join([value for value in [touchpoint, palanca, subpalanca] if value])
+                    or "Touchpoint / Palanca / Subpalanca",
+                    "NPS",
+                ]
+            else:
+                flow_steps = [
+                    f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias Helix",
+                    touchpoint or title or "Touchpoint afectado",
+                    title or "Subpalanca",
+                    f"({int(float(row.get('linked_comments', 0) or 0))}) Comentarios VoC",
+                    "NPS",
+                ]
             serialized_row.update(
                 {
                     "rank": index,
-                    "title": topic,
+                    "title": title,
                     "statement": str(row.get("chain_story", "") or "").strip(),
-                    "flow_steps": [
-                        f"({int(float(row.get('linked_incidents', 0) or 0))}) Incidencias Helix",
-                        str(row.get("touchpoint", "") or "").strip() or "Touchpoint",
-                        lever_label or "Palanca / subpalanca",
-                        f"({int(float(row.get('linked_comments', 0) or 0))}) Comentarios VoC",
-                        "Riesgo NPS",
+                    "flow_steps": flow_steps,
+                    "spotlight_metrics": [
+                        {"label": method_spec.entity_singular, "value": title or "n/d"},
+                        {"label": "Tópico NPS ancla", "value": anchor_topic or "n/d"},
+                        {
+                            "label": (
+                                "Source Service N2"
+                                if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2
+                                else "Touchpoint afectado"
+                            ),
+                            "value": (
+                                source_service_n2
+                                if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2
+                                else touchpoint or "n/d"
+                            ),
+                        },
+                        {
+                            "label": f"Prob. {focus_name}",
+                            "value": (
+                                f"{float(_metric_number(row.get('detractor_probability')) or 0.0)*100.0:.1f}%"
+                                if _metric_number(row.get("detractor_probability")) is not None
+                                else "n/d"
+                            ),
+                        },
+                        {
+                            "label": "Delta NPS",
+                            "value": (
+                                f"{float(_metric_number(row.get('nps_delta_expected')) or 0.0):+.1f}"
+                                if _metric_number(row.get("nps_delta_expected")) is not None
+                                else "n/d"
+                            ),
+                        },
+                        {
+                            "label": "Impacto total",
+                            "value": f"{float(_metric_number(row.get('total_nps_impact')) or 0.0):.2f} pts",
+                        },
+                        {
+                            "label": "Confianza",
+                            "value": f"{float(_metric_number(row.get('confidence')) or 0.0):.2f}",
+                        },
+                        {
+                            "label": "Links validados",
+                            "value": str(int(float(row.get("linked_pairs", 0) or 0))),
+                        },
+                        {
+                            "label": "Prioridad",
+                            "value": f"{float(_metric_number(row.get('priority')) or 0.0):.2f}",
+                        },
+                        {
+                            "label": "NPS en riesgo",
+                            "value": f"{float(_metric_number(row.get('nps_points_at_risk')) or 0.0):.2f} pts",
+                        },
+                        {
+                            "label": "NPS recuperable",
+                            "value": f"{float(_metric_number(row.get('nps_points_recoverable')) or 0.0):.2f} pts",
+                        },
+                        {
+                            "label": "Owner",
+                            "value": str(row.get("owner_role", "") or "").strip() or "n/d",
+                        },
                     ],
                     "matrix_figure": self._serialize_figure(
                         chart_incident_priority_matrix(active_df, theme=theme, top_k=1)
@@ -1655,7 +2040,11 @@ class DashboardService:
                         chart_incident_risk_recovery(active_df, theme=theme, top_k=1)
                     ),
                     "detail_table": self._serialize_rows(
-                        self._build_linking_detail_table(active_df, focus_name=focus_name)
+                        self._build_linking_detail_table(
+                            active_df,
+                            focus_name=focus_name,
+                            touchpoint_source=source,
+                        )
                     ),
                     "heatmap_figure": self._serialize_figure(
                         chart_case_incident_heatmap(by_topic_daily, theme, topic=topic)
@@ -1685,9 +2074,15 @@ class DashboardService:
         return cards
 
     @staticmethod
-    def _build_linking_detail_table(active_df: pd.DataFrame, *, focus_name: str) -> pd.DataFrame:
+    def _build_linking_detail_table(
+        active_df: pd.DataFrame,
+        *,
+        focus_name: str,
+        touchpoint_source: str,
+    ) -> pd.DataFrame:
         show_cols = [
             "nps_topic",
+            "anchor_topic",
             "touchpoint",
             "priority",
             "confidence",
@@ -1705,12 +2100,26 @@ class DashboardService:
             "owner_role",
             "eta_weeks",
         ]
+        source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
+        entity_label = get_causal_method_spec(source).entity_singular
+        touchpoint_label = (
+            "Source Service N2"
+            if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2
+            else "Touchpoint afectado"
+        )
         detail_df = active_df.copy()
         for column in show_cols:
             if column not in detail_df.columns:
                 detail_df[column] = (
                     np.nan
-                    if column not in {"action_lane", "owner_role", "nps_topic", "touchpoint"}
+                    if column
+                    not in {
+                        "action_lane",
+                        "owner_role",
+                        "nps_topic",
+                        "anchor_topic",
+                        "touchpoint",
+                    }
                     else ""
                 )
         detail_df["detractor_probability"] = _numeric_series(
@@ -1744,8 +2153,9 @@ class DashboardService:
         detail_df["eta_weeks"] = _numeric_series(detail_df, "eta_weeks", default=np.nan).round(1)
         return detail_df[show_cols].rename(
             columns={
-                "nps_topic": "Tópico NPS",
-                "touchpoint": "Ahora",
+                "nps_topic": entity_label,
+                "anchor_topic": "Tópico NPS ancla",
+                "touchpoint": touchpoint_label,
                 "priority": "Prioridad",
                 "confidence": "Confianza",
                 "nps_points_at_risk": "NPS en riesgo (pts)",
@@ -2130,19 +2540,12 @@ class DashboardService:
             "focus_label": focus_label,
             "empty_state": empty_state,
             "kpis": {},
-            "touchpoint_mode": {},
+            "causal_method": {},
+            "navigation": [],
             "situation": {},
-            "journeys": {},
+            "entity_summary": {},
             "scenarios": {},
-            "overview_figure": None,
-            "priority_figure": None,
-            "risk_recovery_figure": None,
-            "heatmap_figure": None,
-            "lag_figure": None,
-            "ranking_table": [],
-            "evidence_table": [],
-            "journey_routes_table": [],
-            "top_topic": "",
+            "deep_dive": {},
         }
 
     def _build_linking_overview_figure(
