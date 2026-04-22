@@ -1426,7 +1426,9 @@ def _apply_ppt_figure_theme(
     return fig
 
 
-def _pillow_color(value: object, default: str = "#42526E") -> tuple[int, int, int]:  # pragma: no cover
+def _pillow_color(
+    value: object, default: str = "#42526E"
+) -> tuple[int, int, int]:  # pragma: no cover
     try:
         from PIL import ImageColor
     except Exception:
@@ -1503,7 +1505,9 @@ def _plotly_title_text(value: object, default: str = "") -> str:  # pragma: no c
     return raw if raw and raw != "None" else default
 
 
-def _nice_ticks(min_value: float, max_value: float, *, target: int = 5) -> list[float]:  # pragma: no cover
+def _nice_ticks(
+    min_value: float, max_value: float, *, target: int = 5
+) -> list[float]:  # pragma: no cover
     if not np.isfinite(min_value) or not np.isfinite(max_value):
         return [0.0, 1.0]
     if math.isclose(min_value, max_value):
@@ -1543,7 +1547,9 @@ def _format_tick_value(value: float) -> str:  # pragma: no cover
     return f"{value:.1f}"
 
 
-def _plotly_colorscale_color(colorscale: object, ratio: float) -> tuple[int, int, int]:  # pragma: no cover
+def _plotly_colorscale_color(
+    colorscale: object, ratio: float
+) -> tuple[int, int, int]:  # pragma: no cover
     with contextlib.suppress(Exception):
         from plotly.colors import sample_colorscale
 
@@ -1562,12 +1568,16 @@ def _plotly_colorscale_color(colorscale: object, ratio: float) -> tuple[int, int
     return _pillow_color("#" + BBVA_COLORS["sky"])
 
 
-def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[int, int, int]]:  # pragma: no cover
+def _plotly_bar_colors(
+    trace: object, count: int, layout: object
+) -> list[tuple[int, int, int]]:  # pragma: no cover
     marker = getattr(trace, "marker", None)
     color = getattr(marker, "color", None)
     if isinstance(color, (list, tuple, np.ndarray, pd.Series)):
         values = list(color)
-        if values and all(isinstance(item, (int, float, np.integer, np.floating)) for item in values):
+        if values and all(
+            isinstance(item, (int, float, np.integer, np.floating)) for item in values
+        ):
             numeric = pd.to_numeric(pd.Series(values), errors="coerce")
             vmin = float(numeric.min()) if not numeric.dropna().empty else 0.0
             vmax = float(numeric.max()) if not numeric.dropna().empty else 1.0
@@ -1576,9 +1586,11 @@ def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[
                 getattr(layout, "coloraxis", None), "colorscale", None
             )
             return [
-                _plotly_colorscale_color(colorscale, (float(value) - vmin) / span)
-                if np.isfinite(float(value))
-                else _pillow_color("#" + BBVA_COLORS["line"])
+                (
+                    _plotly_colorscale_color(colorscale, (float(value) - vmin) / span)
+                    if np.isfinite(float(value))
+                    else _pillow_color("#" + BBVA_COLORS["line"])
+                )
                 for value in numeric.fillna(vmin).tolist()
             ]
         return [_pillow_color(item) for item in values[:count]] + [
@@ -1587,7 +1599,9 @@ def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[
     return [_pillow_color(color or "#" + BBVA_COLORS["sky"])] * count
 
 
-def _pillow_render_heatmap(fig: go.Figure, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
+def _pillow_render_heatmap(
+    fig: go.Figure, width: int, height: int
+) -> Optional[bytes]:  # pragma: no cover
     try:
         from PIL import Image, ImageDraw
     except Exception:
@@ -1714,7 +1728,9 @@ def _pillow_render_heatmap(fig: go.Figure, width: int, height: int) -> Optional[
     return output.getvalue()
 
 
-def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
+def _pillow_render_xy(
+    fig: go.Figure, width: int, height: int
+) -> Optional[bytes]:  # pragma: no cover
     try:
         from PIL import Image, ImageDraw
     except Exception:
@@ -1724,7 +1740,9 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
         return None
 
     trace_types = {
-        str(getattr(trace, "type", "") or "").strip().lower() for trace in fig.data if trace is not None
+        str(getattr(trace, "type", "") or "").strip().lower()
+        for trace in fig.data
+        if trace is not None
     }
     horizontal = bool(
         trace_types == {"bar"}
@@ -1740,7 +1758,8 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     legend_items = [
         trace
         for trace in fig.data
-        if bool(getattr(trace, "showlegend", True)) and str(getattr(trace, "name", "") or "").strip()
+        if bool(getattr(trace, "showlegend", True))
+        and str(getattr(trace, "name", "") or "").strip()
     ]
     legend_y = 14
     legend_x = 18
@@ -1784,11 +1803,15 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     )
 
     if horizontal:
-        trace = next((item for item in fig.data if str(getattr(item, "type", "")).lower() == "bar"), None)
+        trace = next(
+            (item for item in fig.data if str(getattr(item, "type", "")).lower() == "bar"), None
+        )
         if trace is None:
             return None
         categories = [str(value).replace("<br>", " ") for value in list(getattr(trace, "y", []))]
-        values = pd.to_numeric(pd.Series(list(getattr(trace, "x", []))), errors="coerce").fillna(0.0)
+        values = pd.to_numeric(pd.Series(list(getattr(trace, "x", []))), errors="coerce").fillna(
+            0.0
+        )
         if values.empty:
             return None
         min_value = min(float(values.min()), 0.0)
@@ -1800,10 +1823,19 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
 
         for tick in ticks:
             x = plot_left + int(((tick - min_value) / span) * (plot_right - plot_left))
-            draw.line([(x, plot_top), (x, plot_bottom)], fill=_pillow_color("#" + BBVA_COLORS["line"]), width=1)
+            draw.line(
+                [(x, plot_top), (x, plot_bottom)],
+                fill=_pillow_color("#" + BBVA_COLORS["line"]),
+                width=1,
+            )
             label = _format_tick_value(tick)
             tw, _ = _pillow_text_size(draw, label, axis_font)
-            draw.text((x - tw // 2, plot_bottom + 12), label, fill=_pillow_color("#" + BBVA_COLORS["muted"]), font=axis_font)
+            draw.text(
+                (x - tw // 2, plot_bottom + 12),
+                label,
+                fill=_pillow_color("#" + BBVA_COLORS["muted"]),
+                font=axis_font,
+            )
 
         row_h = max((plot_bottom - plot_top) // max(len(categories), 1), 1)
         for idx, (category, value) in enumerate(zip(categories, values.tolist())):
@@ -1823,7 +1855,11 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
             draw.rounded_rectangle(
                 [(x0, center_y - max(row_h // 4, 6)), (x1, center_y + max(row_h // 4, 6))],
                 radius=8,
-                fill=bar_colors[idx] if idx < len(bar_colors) else _pillow_color("#" + BBVA_COLORS["sky"]),
+                fill=(
+                    bar_colors[idx]
+                    if idx < len(bar_colors)
+                    else _pillow_color("#" + BBVA_COLORS["sky"])
+                ),
             )
             value_label = _format_tick_value(float(value))
             draw.text(
@@ -1832,7 +1868,11 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
                 fill=_pillow_color("#" + BBVA_COLORS["ink"]),
                 font=axis_font,
             )
-        draw.line([(zero_x, plot_top), (zero_x, plot_bottom)], fill=_pillow_color("#" + BBVA_COLORS["muted"]), width=2)
+        draw.line(
+            [(zero_x, plot_top), (zero_x, plot_bottom)],
+            fill=_pillow_color("#" + BBVA_COLORS["muted"]),
+            width=2,
+        )
     else:
         category_values: list[object] = []
         for trace in fig.data:
@@ -1854,15 +1894,22 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
         stacked_primary: dict[object, float] = {value: 0.0 for value in category_values}
         for trace in fig.data:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
-            series = pd.to_numeric(pd.Series(list(getattr(trace, "y", []))), errors="coerce").fillna(0.0)
+            series = pd.to_numeric(
+                pd.Series(list(getattr(trace, "y", []))), errors="coerce"
+            ).fillna(0.0)
             axis_key = "right" if str(getattr(trace, "yaxis", "y")) == "y2" else "left"
             if axis_key == "right":
                 right_values.extend(series.tolist())
             else:
-                if trace_type == "bar" and str(getattr(fig.layout, "barmode", "") or "").lower() == "stack":
+                if (
+                    trace_type == "bar"
+                    and str(getattr(fig.layout, "barmode", "") or "").lower() == "stack"
+                ):
                     x_trace = list(getattr(trace, "x", []))
                     for x_value, y_value in zip(x_trace, series.tolist()):
-                        stacked_primary[x_value] = stacked_primary.get(x_value, 0.0) + float(y_value)
+                        stacked_primary[x_value] = stacked_primary.get(x_value, 0.0) + float(
+                            y_value
+                        )
                 else:
                     left_values.extend(series.tolist())
         if stacked_primary:
@@ -1882,20 +1929,36 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
 
         for tick in _nice_ticks(left_min, left_max, target=5):
             y = left_y(tick)
-            draw.line([(plot_left, y), (plot_right, y)], fill=_pillow_color("#" + BBVA_COLORS["line"]), width=1)
+            draw.line(
+                [(plot_left, y), (plot_right, y)],
+                fill=_pillow_color("#" + BBVA_COLORS["line"]),
+                width=1,
+            )
             label = _format_tick_value(tick)
             tw, _ = _pillow_text_size(draw, label, axis_font)
-            draw.text((plot_left - tw - 10, y - 8), label, fill=_pillow_color("#" + BBVA_COLORS["muted"]), font=axis_font)
+            draw.text(
+                (plot_left - tw - 10, y - 8),
+                label,
+                fill=_pillow_color("#" + BBVA_COLORS["muted"]),
+                font=axis_font,
+            )
         if right_axis_present:
             for tick in _nice_ticks(right_min, right_max, target=5):
                 y = right_y(tick)
                 label = _format_tick_value(tick)
-                draw.text((plot_right + 10, y - 8), label, fill=_pillow_color("#" + BBVA_COLORS["muted"]), font=axis_font)
+                draw.text(
+                    (plot_right + 10, y - 8),
+                    label,
+                    fill=_pillow_color("#" + BBVA_COLORS["muted"]),
+                    font=axis_font,
+                )
 
         if right_axis_present:
             draw.text(
                 (plot_right + 8, plot_top - 24),
-                _plotly_title_text(getattr(getattr(fig.layout, "yaxis2", None), "title", None), "Incidencias"),
+                _plotly_title_text(
+                    getattr(getattr(fig.layout, "yaxis2", None), "title", None), "Incidencias"
+                ),
                 fill=_pillow_color("#" + BBVA_COLORS["ink"]),
                 font=axis_font,
             )
@@ -1911,11 +1974,16 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
         for trace in fig.data:
             trace_type = str(getattr(trace, "type", "") or "").strip().lower()
             x_trace = list(getattr(trace, "x", []))
-            y_trace = pd.to_numeric(pd.Series(list(getattr(trace, "y", []))), errors="coerce").fillna(0.0)
+            y_trace = pd.to_numeric(
+                pd.Series(list(getattr(trace, "y", []))), errors="coerce"
+            ).fillna(0.0)
             axis_key = "right" if str(getattr(trace, "yaxis", "y")) == "y2" else "left"
             if trace_type == "bar":
                 bar_colors = _plotly_bar_colors(trace, len(y_trace), fig.layout)
-                stacked = str(getattr(fig.layout, "barmode", "") or "").lower() == "stack" and axis_key == "left"
+                stacked = (
+                    str(getattr(fig.layout, "barmode", "") or "").lower() == "stack"
+                    and axis_key == "left"
+                )
                 for idx, (x_value, y_value) in enumerate(zip(x_trace, y_trace.tolist())):
                     x = x_positions.get(x_value)
                     if x is None:
@@ -1926,12 +1994,20 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
                         y1 = left_y(baseline)
                         stacked_cache[(axis_key, x_value)] = baseline + float(y_value)
                     else:
-                        y0 = right_y(float(y_value)) if axis_key == "right" else left_y(float(y_value))
+                        y0 = (
+                            right_y(float(y_value))
+                            if axis_key == "right"
+                            else left_y(float(y_value))
+                        )
                         y1 = right_y(0.0) if axis_key == "right" else left_y(0.0)
                     draw.rounded_rectangle(
                         [(x - bar_width // 2, min(y0, y1)), (x + bar_width // 2, max(y0, y1))],
                         radius=6,
-                        fill=bar_colors[idx] if idx < len(bar_colors) else _pillow_color("#" + BBVA_COLORS["sky"]),
+                        fill=(
+                            bar_colors[idx]
+                            if idx < len(bar_colors)
+                            else _pillow_color("#" + BBVA_COLORS["sky"])
+                        ),
                     )
             elif trace_type == "scatter":
                 points: list[tuple[int, int]] = []
@@ -1979,12 +2055,16 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     return output.getvalue()
 
 
-def _pillow_chart_png(fig: go.Figure, *, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
+def _pillow_chart_png(
+    fig: go.Figure, *, width: int, height: int
+) -> Optional[bytes]:  # pragma: no cover
     try:
         themed = _apply_ppt_figure_theme(go.Figure(fig))
     except Exception:
         themed = fig
-    if any(str(getattr(trace, "type", "") or "").strip().lower() == "heatmap" for trace in themed.data):
+    if any(
+        str(getattr(trace, "type", "") or "").strip().lower() == "heatmap" for trace in themed.data
+    ):
         return _pillow_render_heatmap(themed, width, height)
     return _pillow_render_xy(themed, width, height)
 

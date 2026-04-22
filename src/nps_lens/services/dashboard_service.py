@@ -1280,12 +1280,12 @@ class DashboardService:
                 ranking_df["confirmed"] = 0
                 ranking_df["rejected"] = 0
             ranking_df["factor"] = _numeric_series(ranking_df, "factor", default=1.0)
-            ranking_df["confirmed"] = _numeric_series(
-                ranking_df, "confirmed", default=0.0
-            ).astype(int)
-            ranking_df["rejected"] = _numeric_series(
-                ranking_df, "rejected", default=0.0
-            ).astype(int)
+            ranking_df["confirmed"] = _numeric_series(ranking_df, "confirmed", default=0.0).astype(
+                int
+            )
+            ranking_df["rejected"] = _numeric_series(ranking_df, "rejected", default=0.0).astype(
+                int
+            )
             ranking_df["confidence_learned"] = (
                 pd.to_numeric(ranking_df["score"], errors="coerce").fillna(0.0)
                 * ranking_df["factor"].astype(float)
