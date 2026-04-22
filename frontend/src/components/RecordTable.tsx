@@ -1,30 +1,18 @@
+import { formatDisplayValue } from "../utils/numberFormat";
+
 type RecordTableProps = {
   rows: Array<Record<string, unknown>>;
   emptyMessage: string;
   testId?: string;
+  columns?: string[];
 };
 
-function formatCellValue(value: unknown) {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === "object" && item !== null ? JSON.stringify(item) : String(item)))
-      .join(", ");
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
-
-export function RecordTable({ rows, emptyMessage, testId }: RecordTableProps) {
+export function RecordTable({ rows, emptyMessage, testId, columns: providedColumns }: RecordTableProps) {
   if (!rows.length) {
     return <p className="empty-state">{emptyMessage}</p>;
   }
 
-  const columns = Object.keys(rows[0] || {});
+  const columns = providedColumns?.length ? providedColumns : Object.keys(rows[0] || {});
 
   return (
     <div className="table-shell">
@@ -40,7 +28,7 @@ export function RecordTable({ rows, emptyMessage, testId }: RecordTableProps) {
           {rows.map((row, rowIndex) => (
             <tr key={`record-row-${rowIndex}`}>
               {columns.map((column) => (
-                <td key={`${rowIndex}-${column}`}>{formatCellValue(row[column])}</td>
+                <td key={`${rowIndex}-${column}`}>{formatDisplayValue(row[column], column)}</td>
               ))}
             </tr>
           ))}
