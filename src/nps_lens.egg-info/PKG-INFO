@@ -42,13 +42,13 @@ Requires-Dist: Pillow<12.0,>=10.0; extra == "build"
 
 # NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
 
+`develop`
 [![CI](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml?query=branch%3Adevelop)
-[![Type Check](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/type-check.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/type-check.yml?query=branch%3Adevelop)
+[![Typecheck](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml?query=branch%3Adevelop)
 [![Test](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml?query=branch%3Adevelop)
-[![Build Linux](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-linux.yml/badge.svg?branch=develop&event=workflow_dispatch)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-linux.yml?query=branch%3Adevelop)
-[![Build macOS](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-mac.yml/badge.svg?branch=develop&event=workflow_dispatch)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-mac.yml?query=branch%3Adevelop)
-[![Build Windows](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-windows.yml/badge.svg?branch=develop&event=workflow_dispatch)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/build-windows.yml?query=branch%3Adevelop)
-[![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml)
+
+`master`
+[![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg?branch=master&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml?query=branch%3Amaster)
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
@@ -124,6 +124,16 @@ make run
 make ci
 ```
 
+### Ejecutar typecheck local
+```bash
+make typecheck
+```
+
+### Ejecutar lint local
+```bash
+make lint
+```
+
 ### Ejecutar en modo plataforma (batch)
 ```bash
 make platform CONFIG=configs/batch.json
@@ -156,7 +166,7 @@ make build
 - `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, LLM packs)
 - `tests/` → tests unitarios y de plataforma
 - `docs/` → documentación técnica y operativa
-- `.github/workflows/` → CI, typecheck, test, builds y release
+- `.github/workflows/` → `test`, `typecheck`, `ci`, `codeql` y `release` multi-plataforma
 
 ---
 
