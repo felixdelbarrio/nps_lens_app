@@ -15,8 +15,6 @@ import pandas as pd
 from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.hotspot_metrics import (
     align_hotspot_evidence_to_axis,
-    build_hotspot_evidence,
-    build_hotspot_timeline,
     select_best_business_axis_for_hotspots,
 )
 from nps_lens.analytics.incident_attribution import (
@@ -95,7 +93,6 @@ from nps_lens.ui.charts import (
 )
 from nps_lens.ui.narratives import (
     build_executive_story,
-    build_ppt_8slide_script,
     compare_periods,
     executive_summary,
     explain_opportunities,
@@ -152,6 +149,30 @@ def _numeric_series(frame: pd.DataFrame, column: str, *, default: float = 0.0) -
     return pd.to_numeric(
         _series_or_default(frame, column, default=default), errors="coerce"
     ).fillna(default)
+
+
+def _text_series(frame: pd.DataFrame, column: str, *, default: str = "") -> pd.Series[Any]:
+    return _series_or_default(frame, column, default=default).astype(str).fillna("").str.strip()
+
+
+def _coalesce_text_columns(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    default: str = "",
+) -> pd.Series[Any]:
+    output = pd.Series([default] * len(frame), index=frame.index, dtype=object)
+    for column in columns:
+        if column not in frame.columns:
+            continue
+        candidate = _text_series(frame, column, default=default)
+        output = output.where(output.astype(str).str.strip().ne(""), candidate)
+    return output.astype(str).fillna("").str.strip()
+
+
+def _http_url_series(values: pd.Series[Any]) -> pd.Series[Any]:
+    series = values.astype(str).fillna("").str.strip()
+    return series.where(series.str.match(r"^https?://", case=False, na=False), "")
 
 
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
@@ -476,12 +497,15 @@ class DashboardService:
                 "cohorts": {},
                 "gaps": {},
                 "opportunities": {},
-                "report_markdown": "",
                 "empty_state": "No hay datos cargados para el contexto y filtros seleccionados.",
             }
 
         summary = executive_summary(current_df)
         topics_df = self._topics_df(current_df)
+        if not topics_df.empty:
+            topics_df = topics_df.sort_values(
+                ["n", "cluster_id"], ascending=[False, True]
+            ).reset_index(drop=True)
         topics_bullets = explain_topics(topics_df, max_items=5)
 
         comparison_payload: dict[str, object] = {}
@@ -498,6 +522,11 @@ class DashboardService:
                 dimension=comparison_dimension,
                 min_n=min_n_cross,
             )
+            if not delta_df.empty:
+                delta_df = delta_df.sort_values(
+                    ["delta_nps", "n_current", "n_baseline"],
+                    ascending=[False, False, False],
+                ).reset_index(drop=True)
             comparison_payload = {
                 "summary": {
                     "label_current": comparison_story.label_current,
@@ -517,7 +546,9 @@ class DashboardService:
             [stat.__dict__ for stat in driver_table(current_df, gap_dimension)]
         )
         if not gap_stats.empty:
-            gap_stats = gap_stats.sort_values("gap_vs_overall", ascending=True)
+            gap_stats = gap_stats.sort_values(
+                ["gap_vs_overall", "n"], ascending=[True, False]
+            ).reset_index(drop=True)
 
         opportunities = rank_opportunities(
             current_df,
@@ -531,13 +562,6 @@ class DashboardService:
                 axis=1,
             )
         opportunity_bullets = explain_opportunities(opportunities_df, max_items=5)
-
-        report_markdown = build_executive_story(
-            summary,
-            comparison=comparison_story,
-            top_opportunities=opportunity_bullets,
-            top_topics=topics_bullets,
-        )
 
         return {
             "context_label": context_label,
@@ -597,7 +621,6 @@ class DashboardService:
                 "min_n": min_n,
                 "min_n_cross": min_n_cross,
             },
-            "report_markdown": report_markdown,
             "empty_state": "",
         }
 
@@ -613,7 +636,7 @@ class DashboardService:
         limit: int = 100,
     ) -> dict[str, object]:
         if dataset_kind == "helix":
-            frame = self._load_helix_df(context)
+            frame = self._enrich_helix_links(self._load_helix_df(context))
             frame = self._apply_population_filters(frame, pop_year, pop_month)
         else:
             frame = self.repository.load_records_df(context)
@@ -622,12 +645,17 @@ class DashboardService:
 
         total_rows = int(len(frame))
         slice_df = frame.iloc[offset : offset + limit].copy()
+        visible_columns = [
+            str(column)
+            for column in frame.columns.tolist()
+            if not str(column).strip().lower().endswith(("__href", "__hyperlink"))
+        ]
         return {
             "dataset_kind": dataset_kind,
             "total_rows": total_rows,
             "offset": offset,
             "limit": limit,
-            "columns": [str(column) for column in frame.columns.tolist()],
+            "columns": visible_columns,
             "rows": self._serialize_rows(slice_df),
             "has_more": offset + len(slice_df) < total_rows,
         }
@@ -730,164 +758,47 @@ class DashboardService:
         average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
         show_all_groups = str(nps_group or "").strip().lower() == str(POP_ALL).lower()
 
-        rank = causal_rank_by_topic(by_topic_weekly_mode)
-        cp_by_topic = detect_detractor_changepoints_with_bootstrap(
-            by_topic_weekly_mode,
-            pen=6.0,
-            n_boot=200,
-            block_size=2,
-            tol_periods=1,
-        )
-        lag_by_topic = estimate_best_lag_by_topic(by_topic_weekly_mode, max_lag_weeks=6)
-        lead_share = incidents_lead_changepoints_flag(
-            by_topic_weekly_mode,
-            cp_by_topic,
-            window_weeks=4,
-        )
-        lag_days_mode = (
-            estimate_best_lag_days_by_topic(
-                by_topic_daily_mode,
-                max_lag_days=21,
-                min_points=30,
-            )
-            if can_use_daily_resample(
-                overall_daily,
-                min_days_with_responses=20,
-                min_coverage=0.45,
-            )
-            else pd.DataFrame()
-        )
-
-        kc_entries = kc_load_entries(self.settings.knowledge_dir)
-        kc_adj = kc_score_adjustments(
-            kc_entries,
-            context.service_origin,
-            context.service_origin_n1,
-            context.service_origin_n2,
-        )
-
-        rank2 = pd.DataFrame()
-        rank_view = pd.DataFrame()
-        top_topic = ""
-        if not rank.empty:
-            rank2 = (
-                rank.merge(cp_by_topic, on="nps_topic", how="left")
-                .merge(lag_by_topic, on="nps_topic", how="left")
-                .merge(lead_share, on="nps_topic", how="left")
-            )
-            if not kc_adj.empty:
-                rank2 = rank2.merge(kc_adj, on="nps_topic", how="left")
-            else:
-                rank2["factor"] = 1.0
-                rank2["confirmed"] = 0
-                rank2["rejected"] = 0
-            rank2["factor"] = _numeric_series(rank2, "factor", default=1.0)
-            rank2["confirmed"] = _numeric_series(rank2, "confirmed", default=0.0).astype(int)
-            rank2["rejected"] = _numeric_series(rank2, "rejected", default=0.0).astype(int)
-            rank2["confidence_learned"] = (
-                pd.to_numeric(rank2["score"], errors="coerce").fillna(0.0)
-                * rank2["factor"].astype(float)
-            ).clip(0.0, 1.0)
-            rank2 = rank2.sort_values(
-                ["confidence_learned", "incidents", "responses"],
-                ascending=False,
-            ).reset_index(drop=True)
-            top_topic = str(rank2.iloc[0]["nps_topic"])
-
-            formatted_rank = rank2.copy()
-            formatted_rank["confidence_learned"] = (
-                pd.to_numeric(formatted_rank["confidence_learned"], errors="coerce")
-                .fillna(0.0)
-                .round(3)
-            )
-            formatted_rank["score"] = (
-                pd.to_numeric(formatted_rank["score"], errors="coerce").fillna(0.0).round(3)
-            )
-            formatted_rank["factor"] = (
-                pd.to_numeric(formatted_rank["factor"], errors="coerce").fillna(1.0).round(3)
-            )
-            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(
-                3
-            )
-            formatted_rank["max_cp_stability"] = _numeric_series(
-                formatted_rank, "max_cp_stability", default=np.nan
-            ).round(3)
-            formatted_rank["incidents_lead_changepoint_share"] = (
-                _numeric_series(
-                    formatted_rank,
-                    "incidents_lead_changepoint_share",
-                    default=np.nan,
-                )
-                .mul(100.0)
-                .round(0)
-            )
-            formatted_rank["best_lag_weeks"] = _numeric_series(
-                formatted_rank, "best_lag_weeks", default=np.nan
-            )
-            formatted_rank["changepoints"] = formatted_rank.get(
-                "changepoints",
-                pd.Series([[]] * len(formatted_rank), index=formatted_rank.index),
-            ).map(
-                lambda value: (
-                    "[" + ", ".join([str(item) for item in value]) + "]"
-                    if isinstance(value, list) and value
-                    else "[]"
-                )
-            )
-            rank_view = formatted_rank[
-                [
-                    "nps_topic",
-                    "confidence_learned",
-                    "score",
-                    "factor",
-                    "confirmed",
-                    "rejected",
-                    "best_lag_weeks",
-                    "corr",
-                    "incidents_lead_changepoint_share",
-                    "max_cp_level",
-                    "max_cp_stability",
-                    "changepoints",
-                    "incidents",
-                ]
-            ].rename(
-                columns={
-                    "nps_topic": "Tópico NPS",
-                    "confidence_learned": "Confidence (learned)",
-                    "score": "Confidence (raw)",
-                    "factor": "Learning factor",
-                    "confirmed": "✓ Confirmed",
-                    "rejected": "✗ Rejected",
-                    "best_lag_weeks": "Lag (semanas)",
-                    "corr": "Corr@Lag",
-                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
-                    "max_cp_level": "CP Significance",
-                    "max_cp_stability": "CP Stability",
-                    "changepoints": "Changepoints",
-                    "incidents": "Incidencias (asignadas)",
-                }
-            )
-
-        rationale_rank = rank2 if not rank2.empty else rank
-        rationale_df = build_incident_nps_rationale(
-            by_topic_weekly_mode,
+        canonical_bundle = self._build_rationale_bundle(
+            by_topic_weekly=by_topic_weekly,
+            by_topic_daily=by_topic_daily,
+            overall_daily=overall_daily,
             focus_group=focus_group,
-            rank_df=rationale_rank,
-            min_topic_responses=80,
-            recovery_factor=0.65,
+            context=context,
         )
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
+        mode_bundle = self._build_rationale_bundle(
+            by_topic_weekly=by_topic_weekly_mode,
+            by_topic_daily=by_topic_daily_mode,
+            overall_daily=overall_daily,
+            focus_group=focus_group,
+            context=context,
+        )
+        canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
+        canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
+        canonical_rationale_summary = cast(Any, canonical_bundle["rationale_summary"])
+        mode_ranking_df = cast(pd.DataFrame, mode_bundle["ranking_df"])
+        mode_rank_source_df = (
+            mode_ranking_df
+            if not mode_ranking_df.empty
+            else cast(pd.DataFrame, mode_bundle["rank_df"])
+        )
+        mode_rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
+        mode_lag_days_df = cast(pd.DataFrame, mode_bundle["lag_days_df"])
         evidence_df = self._build_linking_evidence_table(
             focus_df,
             helix_slice,
-            links_mode_df,
+            links_df,
             max_rows=300,
+        )
+        evidence_df = self._attach_incident_link_column(
+            evidence_df,
+            helix_df=helix_slice,
+            incident_column="incident_id",
         )
         chain_candidates_df = build_incident_attribution_chains(
             links_mode_df,
             focus_df,
             helix_slice,
-            rationale_df=rationale_df,
+            rationale_df=mode_rationale_df,
             top_k=0,
             max_incident_examples=5,
             max_comment_examples=2,
@@ -898,6 +809,10 @@ class DashboardService:
             executive_journey_catalog=executive_journey_catalog,
         )
         chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
+        chain_candidates_df = self._inject_incident_record_urls(
+            chain_candidates_df,
+            helix_df=helix_slice,
+        )
         chain_candidates_summary = summarize_attribution_chains(chain_candidates_df)
         default_chain_keys = _unique_string_values(
             chain_candidates_df.get("chain_key", pd.Series(dtype=str)).astype(str).tolist()
@@ -915,8 +830,8 @@ class DashboardService:
             chain_cards_df,
             by_topic_weekly=by_topic_weekly_mode,
             by_topic_daily=by_topic_daily_mode,
-            lag_days=lag_days_mode,
-            rank_df=rationale_rank,
+            lag_days=mode_lag_days_df,
+            rank_df=mode_rank_source_df,
             theme=theme,
             theme_mode=theme_mode,
             focus_name=focus_name,
@@ -932,7 +847,7 @@ class DashboardService:
                 _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
             )
         median_lag_weeks = pd.to_numeric(
-            pd.Series([rationale_summary.median_lag_weeks]),
+            pd.Series([canonical_rationale_summary.median_lag_weeks]),
             errors="coerce",
         ).iloc[0]
         median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
@@ -953,18 +868,15 @@ class DashboardService:
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
 
-        ranking_rows = self._serialize_rows(rank_view.head(20))
-        topic_options = [
-            "Todos",
-            *_unique_string_values(_series_or_default(rank2, "nps_topic").astype(str).tolist()),
-        ]
+        ranking_rows = self._serialize_rows(canonical_ranking_view_df.head(20))
+        topic_options = cast(list[str], canonical_bundle["topic_options"])
         evidence_sorted_df = evidence_df.copy()
         if not evidence_sorted_df.empty:
             topic_rank = {
                 topic: index
                 for index, topic in enumerate(
                     _unique_string_values(
-                        _series_or_default(rank2, "nps_topic").astype(str).tolist()
+                        _series_or_default(canonical_ranking_df, "nps_topic").astype(str).tolist()
                     )
                 )
             }
@@ -1000,11 +912,11 @@ class DashboardService:
                 "focus_responses": int(len(focus_df)),
                 "incidents": int(len(helix_slice)),
                 "linked_pairs": int(len(links_mode_df)),
-                "topics_analyzed": int(rationale_summary.topics_analyzed),
-                "nps_points_at_risk": float(rationale_summary.nps_points_at_risk),
-                "nps_points_recoverable": float(rationale_summary.nps_points_recoverable),
-                "top3_incident_share": float(rationale_summary.top3_incident_share),
-                "confidence_mean": float(rationale_summary.confidence_mean),
+                "topics_analyzed": int(canonical_rationale_summary.topics_analyzed),
+                "nps_points_at_risk": float(canonical_rationale_summary.nps_points_at_risk),
+                "nps_points_recoverable": float(canonical_rationale_summary.nps_points_recoverable),
+                "top3_incident_share": float(canonical_rationale_summary.top3_incident_share),
+                "confidence_mean": float(canonical_rationale_summary.confidence_mean),
                 "average_focus_rate": average_focus,
                 "median_lag_weeks": median_lag_value,
             },
@@ -1098,20 +1010,27 @@ class DashboardService:
                 "default_chain_keys": default_chain_keys,
             },
             "deep_dive": {
-                "title": "NPS deep dive",
-                "subtitle": method_spec.deep_dive_subtitle,
+                "title": "Análisis de Tópicos de NPS afectados",
+                "subtitle": (
+                    "Lectura transversal de tópicos NPS afectados, estable e independiente "
+                    "del método causal seleccionado."
+                ),
                 "kpis": [
                     {
                         "label": "NPS en riesgo",
-                        "value": f"{float(rationale_summary.nps_points_at_risk):.2f} pts",
+                        "value": f"{float(canonical_rationale_summary.nps_points_at_risk):.2f} pts",
                     },
                     {
                         "label": "NPS recuperable",
-                        "value": f"{float(rationale_summary.nps_points_recoverable):.2f} pts",
+                        "value": (
+                            f"{float(canonical_rationale_summary.nps_points_recoverable):.2f} pts"
+                        ),
                     },
                     {
                         "label": "Concentración top-3",
-                        "value": f"{float(rationale_summary.top3_incident_share)*100.0:.1f}%",
+                        "value": (
+                            f"{float(canonical_rationale_summary.top3_incident_share)*100.0:.1f}%"
+                        ),
                     },
                     {
                         "label": "Tiempo de reacción",
@@ -1125,17 +1044,16 @@ class DashboardService:
                 "topic_filter": {
                     "label": "Tópico",
                     "options": topic_options,
-                    "default": top_topic or "Todos",
+                    "default": "Todos",
                 },
                 "tabs": [
                     {"id": "ranking", "label": "Ranking de hipótesis"},
                     {"id": "evidence", "label": "Evidence wall"},
-                    {"id": "analysis", "label": "Data deepdive analysis"},
                 ],
                 "trending": {
                     "title": "NPS tópicos trending",
                     "figure": self._serialize_figure(
-                        self._build_topics_trending_figure(rank2, theme)
+                        self._build_topics_trending_figure(canonical_ranking_df, theme)
                     ),
                     "empty_state": "No hay señal suficiente para construir tópicos trending.",
                 },
@@ -1148,11 +1066,6 @@ class DashboardService:
                     "title": "Evidence wall",
                     "rows": deep_dive_rows,
                     "empty_state": "No hay evidencia validada para el foco seleccionado.",
-                },
-                "analysis": {
-                    "title": "Data deepdive analysis",
-                    "rows": deep_dive_rows,
-                    "empty_state": "No hay filas de detalle para el foco seleccionado.",
                 },
             },
         }
@@ -1223,6 +1136,11 @@ class DashboardService:
         by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
         overall_daily = self._attach_daily_nps_mean(overall_daily, current_df)
 
+        executive_journey_catalog = load_executive_journey_catalog(
+            self.settings.knowledge_dir,
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+        )
         mode_payload = self._build_touchpoint_mode_payload(
             touchpoint_source=active_touchpoint_source,
             links_df=links_df,
@@ -1230,11 +1148,7 @@ class DashboardService:
             helix_df=helix_current,
             by_topic_weekly=by_topic_weekly,
             by_topic_daily=by_topic_daily,
-            executive_journey_catalog=load_executive_journey_catalog(
-                self.settings.knowledge_dir,
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-            ),
+            executive_journey_catalog=executive_journey_catalog,
         )
         broken_journeys_df = mode_payload["broken_journeys_df"]
         broken_journey_links_df = mode_payload["broken_journey_links_df"]
@@ -1242,89 +1156,26 @@ class DashboardService:
         by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
         by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
 
-        rank = causal_rank_by_topic(by_topic_weekly_mode)
-        changepoints = detect_detractor_changepoints_with_bootstrap(
-            by_topic_weekly_mode,
-            pen=6.0,
-            n_boot=200,
-            block_size=2,
-            tol_periods=1,
-        )
-        lag_weeks = estimate_best_lag_by_topic(by_topic_weekly_mode, max_lag_weeks=6)
-        lead_share = incidents_lead_changepoints_flag(
-            by_topic_weekly_mode,
-            changepoints,
-            window_weeks=4,
-        )
-        lag_days = (
-            estimate_best_lag_days_by_topic(
-                by_topic_daily_mode,
-                max_lag_days=21,
-                min_points=30,
-            )
-            if can_use_daily_resample(
-                overall_daily,
-                min_days_with_responses=20,
-                min_coverage=0.45,
-            )
-            else pd.DataFrame()
-        )
-
-        kc_entries = kc_load_entries(self.settings.knowledge_dir)
-        kc_adj = kc_score_adjustments(
-            kc_entries,
-            context.service_origin,
-            context.service_origin_n1,
-            context.service_origin_n2,
-        )
-        ranking_df = pd.DataFrame()
-        if not rank.empty:
-            ranking_df = (
-                rank.merge(changepoints, on="nps_topic", how="left")
-                .merge(lag_weeks, on="nps_topic", how="left")
-                .merge(lead_share, on="nps_topic", how="left")
-            )
-            if not kc_adj.empty:
-                ranking_df = ranking_df.merge(kc_adj, on="nps_topic", how="left")
-            else:
-                ranking_df["factor"] = 1.0
-                ranking_df["confirmed"] = 0
-                ranking_df["rejected"] = 0
-            ranking_df["factor"] = _numeric_series(ranking_df, "factor", default=1.0)
-            ranking_df["confirmed"] = _numeric_series(ranking_df, "confirmed", default=0.0).astype(
-                int
-            )
-            ranking_df["rejected"] = _numeric_series(ranking_df, "rejected", default=0.0).astype(
-                int
-            )
-            ranking_df["confidence_learned"] = (
-                pd.to_numeric(ranking_df["score"], errors="coerce").fillna(0.0)
-                * ranking_df["factor"].astype(float)
-            ).clip(0.0, 1.0)
-            ranking_df = ranking_df.sort_values(
-                ["confidence_learned", "incidents", "responses"],
-                ascending=False,
-            ).reset_index(drop=True)
-
-        rationale_rank = ranking_df if not ranking_df.empty else rank
-        rationale_df = build_incident_nps_rationale(
-            by_topic_weekly_mode,
+        canonical_bundle = self._build_rationale_bundle(
+            by_topic_weekly=by_topic_weekly,
+            by_topic_daily=by_topic_daily,
+            overall_daily=overall_daily,
             focus_group=focus_group,
-            rank_df=rationale_rank,
-            min_topic_responses=80,
-            recovery_factor=0.65,
+            context=context,
         )
+        mode_bundle = self._build_rationale_bundle(
+            by_topic_weekly=by_topic_weekly_mode,
+            by_topic_daily=by_topic_daily_mode,
+            overall_daily=overall_daily,
+            focus_group=focus_group,
+            context=context,
+        )
+        rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
         if rationale_df.empty:
             raise ValueError(
                 "No hay señal suficiente para construir el racional causal con el contexto actual."
             )
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
-
-        executive_journey_catalog = load_executive_journey_catalog(
-            self.settings.knowledge_dir,
-            service_origin=context.service_origin,
-            service_origin_n1=context.service_origin_n1,
-        )
+        rationale_summary = cast(Any, canonical_bundle["rationale_summary"])
         attribution_all_df = build_incident_attribution_chains(
             links_mode_df,
             focus_current,
@@ -1339,11 +1190,14 @@ class DashboardService:
             journey_links_df=broken_journey_links_df,
             executive_journey_catalog=executive_journey_catalog,
         )
+        attribution_all_df = self._inject_incident_record_urls(
+            attribution_all_df,
+            helix_df=helix_current,
+        )
         entity_summary_kpis = self._build_entity_summary_kpis(
             attribution_all_df,
             touchpoint_source=active_touchpoint_source,
         )
-        attribution_summary = summarize_attribution_chains(attribution_all_df)
         attribution_df = self._select_top_chain_rows(attribution_all_df)
 
         business_story_md = self._build_business_report_md(
@@ -1352,42 +1206,6 @@ class DashboardService:
             pop_year=pop_year,
             pop_month=pop_month,
             min_n=min_n,
-        )
-        ppt_8slides_md = build_ppt_8slide_script(
-            rationale_summary,
-            rationale_df,
-            attribution_df=attribution_df,
-            attribution_summary=attribution_summary,
-            touchpoint_source=active_touchpoint_source,
-            service_origin=context.service_origin,
-            service_origin_n1=context.service_origin_n1,
-            focus_name=focus_name,
-            period_label=self._period_label(current_df),
-            top_k=6,
-        )
-
-        incident_evidence_df = build_hotspot_evidence(
-            links_mode_df,
-            focus_current,
-            helix_current,
-            system_date=pd.Timestamp.now().date(),
-            max_hotspots=10,
-            min_validated_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-        )
-        incident_evidence_df, hotspot_focus_note = self._align_evidence_to_best_axis(
-            current_df,
-            helix_current,
-            incident_evidence_df,
-        )
-        incident_timeline_df = build_hotspot_timeline(
-            links_mode_df,
-            focus_current,
-            helix_current,
-            incident_evidence_df=incident_evidence_df,
-            max_hotspots=10,
-            min_validated_similarity=min_similarity,
-            max_days_apart=max_days_apart,
         )
 
         period_start, period_end = self._period_bounds(current_df)
@@ -1407,19 +1225,10 @@ class DashboardService:
             top3_incident_share=float(rationale_summary.top3_incident_share),
             median_lag_weeks=float(rationale_summary.median_lag_weeks),
             story_md=business_story_md,
-            script_8slides_md=ppt_8slides_md,
+            script_8slides_md="",
             attribution_df=attribution_df,
-            ranking_df=ranking_df,
-            by_topic_daily=by_topic_daily_mode,
-            lag_days_by_topic=lag_days,
-            by_topic_weekly=by_topic_weekly_mode,
-            lag_weeks_by_topic=lag_weeks,
             selected_nps_df=current_df,
             comparison_nps_df=history_df,
-            incident_evidence_df=incident_evidence_df,
-            changepoints_by_topic=changepoints,
-            incident_timeline_df=incident_timeline_df,
-            hotspot_focus_note=hotspot_focus_note,
             touchpoint_source=active_touchpoint_source,
             entity_summary_df=attribution_all_df,
             entity_summary_kpis=entity_summary_kpis,
@@ -1582,6 +1391,314 @@ class DashboardService:
             "by_topic_daily_mode": by_topic_daily_mode,
         }
 
+    def _helix_base_url(self) -> str:
+        return str(self.settings.ui_defaults().get("helix_base_url", "") or "").strip()
+
+    def _enrich_helix_links(self, frame: pd.DataFrame) -> pd.DataFrame:
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
+
+        out = frame.copy()
+        base_url = self._helix_base_url()
+        generic_url = _http_url_series(
+            _coalesce_text_columns(
+                out,
+                [
+                    "Incident URL",
+                    "Incident Link",
+                    "Record URL",
+                    "Record Link",
+                    "Document URL",
+                    "Document Link",
+                    "URL",
+                    "Link",
+                    "Href",
+                ],
+            )
+        )
+        record_id = _coalesce_text_columns(out, ["Record ID", "workItemId", "InstanceId"])
+        constructed_url = (
+            record_id.map(
+                lambda value: f"{base_url}{value}" if base_url and str(value).strip() else ""
+            )
+            .astype(str)
+            .fillna("")
+            .str.strip()
+        )
+        for incident_column in ["Incident Number", "ID de la Incidencia", "id"]:
+            if incident_column not in out.columns:
+                continue
+            direct_url = _http_url_series(
+                _coalesce_text_columns(
+                    out,
+                    [f"{incident_column}__href", f"{incident_column}__hyperlink"],
+                )
+            )
+            resolved_url = direct_url.where(direct_url.ne(""), generic_url)
+            out[f"{incident_column}__href"] = (
+                resolved_url.where(resolved_url.ne(""), constructed_url)
+                .astype(str)
+                .fillna("")
+                .str.strip()
+            )
+        return out
+
+    def _build_helix_incident_url_lookup(self, helix_df: pd.DataFrame) -> dict[str, str]:
+        if helix_df is None or helix_df.empty:
+            return {}
+        enriched = self._enrich_helix_links(helix_df)
+        incident_id = _coalesce_text_columns(
+            enriched, ["Incident Number", "ID de la Incidencia", "id"]
+        )
+        incident_url = _coalesce_text_columns(
+            enriched,
+            [
+                "Incident Number__href",
+                "ID de la Incidencia__href",
+                "id__href",
+                "Incident Number__hyperlink",
+                "ID de la Incidencia__hyperlink",
+                "id__hyperlink",
+            ],
+        )
+        lookup: dict[str, str] = {}
+        for inc_id, url in zip(incident_id.tolist(), incident_url.tolist()):
+            key = str(inc_id or "").strip()
+            href = str(url or "").strip()
+            if not key or not href or key in lookup:
+                continue
+            lookup[key] = href
+        return lookup
+
+    def _attach_incident_link_column(
+        self,
+        frame: pd.DataFrame,
+        *,
+        helix_df: pd.DataFrame,
+        incident_column: str = "incident_id",
+    ) -> pd.DataFrame:
+        if frame is None or frame.empty or incident_column not in frame.columns:
+            return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
+        lookup = self._build_helix_incident_url_lookup(helix_df)
+        if not lookup:
+            return frame.copy()
+        out = frame.copy()
+        out[f"{incident_column}__href"] = _text_series(out, incident_column).map(
+            lambda value: lookup.get(str(value).strip(), "")
+        )
+        return out
+
+    def _inject_incident_record_urls(
+        self,
+        chain_df: pd.DataFrame,
+        *,
+        helix_df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if chain_df is None or chain_df.empty:
+            return pd.DataFrame(columns=list(chain_df.columns) if chain_df is not None else [])
+        lookup = self._build_helix_incident_url_lookup(helix_df)
+        if not lookup:
+            return chain_df.copy()
+
+        out = chain_df.copy()
+        incident_records = out.get("incident_records", pd.Series([[]] * len(out), index=out.index))
+        normalized_records: list[list[dict[str, str]]] = []
+        for value in incident_records.tolist():
+            records: list[dict[str, str]] = []
+            source_records = value if isinstance(value, list) else []
+            for entry in source_records:
+                if not isinstance(entry, dict):
+                    continue
+                incident_id = str(entry.get("incident_id", "") or "").strip()
+                current_url = str(entry.get("url", "") or "").strip()
+                records.append(
+                    {str(key): str(item or "").strip() for key, item in entry.items()}
+                    | {"url": current_url or lookup.get(incident_id, "")}
+                )
+            normalized_records.append(records)
+        out["incident_records"] = normalized_records
+        return out
+
+    def _build_rationale_bundle(
+        self,
+        *,
+        by_topic_weekly: pd.DataFrame,
+        by_topic_daily: pd.DataFrame,
+        overall_daily: pd.DataFrame,
+        focus_group: str,
+        context: UploadContext,
+    ) -> dict[str, object]:
+        rank = causal_rank_by_topic(by_topic_weekly)
+        changepoints_df = detect_detractor_changepoints_with_bootstrap(
+            by_topic_weekly,
+            pen=6.0,
+            n_boot=200,
+            block_size=2,
+            tol_periods=1,
+        )
+        lag_weeks_df = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
+        lead_share_df = incidents_lead_changepoints_flag(
+            by_topic_weekly,
+            changepoints_df,
+            window_weeks=4,
+        )
+        lag_days_df = (
+            estimate_best_lag_days_by_topic(
+                by_topic_daily,
+                max_lag_days=21,
+                min_points=30,
+            )
+            if can_use_daily_resample(
+                overall_daily,
+                min_days_with_responses=20,
+                min_coverage=0.45,
+            )
+            else pd.DataFrame()
+        )
+
+        kc_entries = kc_load_entries(self.settings.knowledge_dir)
+        kc_adj = kc_score_adjustments(
+            kc_entries,
+            context.service_origin,
+            context.service_origin_n1,
+            context.service_origin_n2,
+        )
+
+        ranking_df = pd.DataFrame()
+        ranking_view_df = pd.DataFrame()
+        top_topic = ""
+        if not rank.empty:
+            ranking_df = (
+                rank.merge(changepoints_df, on="nps_topic", how="left")
+                .merge(lag_weeks_df, on="nps_topic", how="left")
+                .merge(lead_share_df, on="nps_topic", how="left")
+            )
+            if not kc_adj.empty:
+                ranking_df = ranking_df.merge(kc_adj, on="nps_topic", how="left")
+            else:
+                ranking_df["factor"] = 1.0
+                ranking_df["confirmed"] = 0
+                ranking_df["rejected"] = 0
+            ranking_df["factor"] = _numeric_series(ranking_df, "factor", default=1.0)
+            ranking_df["confirmed"] = _numeric_series(ranking_df, "confirmed", default=0.0).astype(
+                int
+            )
+            ranking_df["rejected"] = _numeric_series(ranking_df, "rejected", default=0.0).astype(
+                int
+            )
+            ranking_df["confidence_learned"] = (
+                pd.to_numeric(ranking_df["score"], errors="coerce").fillna(0.0)
+                * ranking_df["factor"].astype(float)
+            ).clip(0.0, 1.0)
+            ranking_df = ranking_df.sort_values(
+                ["confidence_learned", "incidents", "responses"],
+                ascending=False,
+            ).reset_index(drop=True)
+            top_topic = str(ranking_df.iloc[0]["nps_topic"])
+
+            formatted_rank = ranking_df.copy()
+            formatted_rank["confidence_learned"] = (
+                pd.to_numeric(formatted_rank["confidence_learned"], errors="coerce")
+                .fillna(0.0)
+                .round(3)
+            )
+            formatted_rank["score"] = (
+                pd.to_numeric(formatted_rank["score"], errors="coerce").fillna(0.0).round(3)
+            )
+            formatted_rank["factor"] = (
+                pd.to_numeric(formatted_rank["factor"], errors="coerce").fillna(1.0).round(3)
+            )
+            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(
+                3
+            )
+            formatted_rank["max_cp_stability"] = _numeric_series(
+                formatted_rank, "max_cp_stability", default=np.nan
+            ).round(3)
+            formatted_rank["incidents_lead_changepoint_share"] = (
+                _numeric_series(
+                    formatted_rank,
+                    "incidents_lead_changepoint_share",
+                    default=np.nan,
+                )
+                .mul(100.0)
+                .round(0)
+            )
+            formatted_rank["best_lag_weeks"] = _numeric_series(
+                formatted_rank, "best_lag_weeks", default=np.nan
+            )
+            formatted_rank["changepoints"] = formatted_rank.get(
+                "changepoints",
+                pd.Series([[]] * len(formatted_rank), index=formatted_rank.index),
+            ).map(
+                lambda value: (
+                    "[" + ", ".join([str(item) for item in value]) + "]"
+                    if isinstance(value, list) and value
+                    else "[]"
+                )
+            )
+            ranking_view_df = formatted_rank[
+                [
+                    "nps_topic",
+                    "confidence_learned",
+                    "score",
+                    "factor",
+                    "confirmed",
+                    "rejected",
+                    "best_lag_weeks",
+                    "corr",
+                    "incidents_lead_changepoint_share",
+                    "max_cp_level",
+                    "max_cp_stability",
+                    "changepoints",
+                    "incidents",
+                ]
+            ].rename(
+                columns={
+                    "nps_topic": "Tópico NPS",
+                    "confidence_learned": "Confidence (learned)",
+                    "score": "Confidence (raw)",
+                    "factor": "Learning factor",
+                    "confirmed": "✓ Confirmed",
+                    "rejected": "✗ Rejected",
+                    "best_lag_weeks": "Lag (semanas)",
+                    "corr": "Corr@Lag",
+                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
+                    "max_cp_level": "CP Significance",
+                    "max_cp_stability": "CP Stability",
+                    "changepoints": "Changepoints",
+                    "incidents": "Incidencias (asignadas)",
+                }
+            )
+
+        rationale_rank = ranking_df if not ranking_df.empty else rank
+        rationale_df = build_incident_nps_rationale(
+            by_topic_weekly,
+            focus_group=focus_group,
+            rank_df=rationale_rank,
+            min_topic_responses=80,
+            recovery_factor=0.65,
+        )
+        rationale_summary = summarize_incident_nps_rationale(rationale_df)
+        topic_options = [
+            "Todos",
+            *_unique_string_values(
+                _series_or_default(ranking_df, "nps_topic").astype(str).tolist()
+            ),
+        ]
+        return {
+            "rank_df": rank,
+            "changepoints_df": changepoints_df,
+            "lag_weeks_df": lag_weeks_df,
+            "lead_share_df": lead_share_df,
+            "lag_days_df": lag_days_df,
+            "ranking_df": ranking_df,
+            "ranking_view_df": ranking_view_df,
+            "rationale_df": rationale_df,
+            "rationale_summary": rationale_summary,
+            "top_topic": top_topic,
+            "topic_options": topic_options,
+        }
+
     @staticmethod
     def _build_topics_trending_figure(rank_df: pd.DataFrame, theme: Theme) -> object:
         if rank_df is None or rank_df.empty or "confidence_learned" not in rank_df.columns:
@@ -1682,8 +1799,8 @@ class DashboardService:
             summary_df, "nps_points_at_risk", default=0.0
         ).round(2)
         summary_df = summary_df.sort_values(
-            ["priority", "linked_pairs", "nps_points_at_risk"],
-            ascending=[False, False, False],
+            ["linked_pairs", "nps_points_at_risk", "avg_nps", "entity_label"],
+            ascending=[False, False, True, True],
         ).reset_index(drop=True)
 
         if source == TOUCHPOINT_SOURCE_PALANCA:
@@ -1691,6 +1808,7 @@ class DashboardService:
                 [
                     "entity_label",
                     "touchpoint",
+                    "subpalanca",
                     "anchor_topic",
                     "linked_incidents",
                     "linked_comments",
@@ -1698,13 +1816,12 @@ class DashboardService:
                     "avg_nps",
                     "nps_points_at_risk",
                     "confidence",
-                    "palanca",
-                    "subpalanca",
                 ]
             ].rename(
                 columns={
                     "entity_label": "Palanca",
                     "touchpoint": "Touchpoint afectado dominante",
+                    "subpalanca": "Subpalanca dominante",
                     "anchor_topic": "Tópico NPS ancla",
                     "linked_incidents": "Incidencias",
                     "linked_comments": "Comentarios VoC",
@@ -1712,8 +1829,6 @@ class DashboardService:
                     "avg_nps": "NPS medio",
                     "nps_points_at_risk": "NPS en riesgo (pts)",
                     "confidence": "Confianza",
-                    "palanca": "palanca",
-                    "subpalanca": "subpalanca",
                 }
             )
 
@@ -1847,7 +1962,12 @@ class DashboardService:
 
         source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
         entities_total = int(
-            chain_df.get("nps_topic", pd.Series(dtype=str)).astype(str).str.strip().ne("").sum()
+            chain_df.get("nps_topic", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .dropna()
+            .nunique()
         )
         touchpoints_total = int(
             chain_df.get("touchpoint", pd.Series(dtype=str))

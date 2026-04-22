@@ -17,6 +17,8 @@ type SettingsSheetProps = {
   setThemeMode: (value: ThemeMode) => void;
   downloadsPath: string;
   setDownloadsPath: (value: string) => void;
+  helixBaseUrl: string;
+  setHelixBaseUrl: (value: string) => void;
   touchpointSource: string;
   setTouchpointSource: (value: string) => void;
   minSimilarity: number;
@@ -50,6 +52,8 @@ export function SettingsSheet({
   setThemeMode,
   downloadsPath,
   setDownloadsPath,
+  helixBaseUrl,
+  setHelixBaseUrl,
   touchpointSource,
   setTouchpointSource,
   minSimilarity,
@@ -165,6 +169,28 @@ export function SettingsSheet({
                     />
                     <small className="field-hint">
                       Si introduces una ruta relativa, se resolverá sobre tu directorio de usuario.
+                    </small>
+                  </label>
+                </div>
+              </article>
+
+              <article className="settings-subsection">
+                <div className="settings-subsection-copy">
+                  <h4>Ruta base de Helix</h4>
+                  <p className="secondary-copy">
+                    Se usa para abrir incidencias desde tablas, escenarios causales y evidencia enlazada.
+                  </p>
+                </div>
+                <div className="field-grid">
+                  <label className="field-span-2">
+                    <span>Ruta base de Helix</span>
+                    <input
+                      onChange={(event) => setHelixBaseUrl(event.target.value)}
+                      placeholder="https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
+                      value={helixBaseUrl}
+                    />
+                    <small className="field-hint">
+                      La aplicación añadirá automáticamente el `Record ID` de la incidencia al final de esta ruta.
                     </small>
                   </label>
                 </div>

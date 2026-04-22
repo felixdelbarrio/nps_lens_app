@@ -317,7 +317,13 @@ def _weekday_letter_es(ts: pd.Timestamp) -> str:
     return letters[int(ts.weekday())]
 
 
-def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> None:
+def _apply_day_ticks(
+    fig,
+    days: list[pd.Timestamp],
+    *,
+    max_ticks: int = 21,
+    side: str = "bottom",
+) -> None:
     """Apply business-friendly day ticks: weekday letter + date.
 
     We avoid clutter by subsampling if there are too many days.
@@ -326,15 +332,28 @@ def _apply_day_ticks(fig, days: list[pd.Timestamp], *, max_ticks: int = 21) -> N
     if not days:
         return
 
-    step = max(1, int(len(days) / max_ticks))
-    tick_days = days[::step]
+    ordered_days: list[pd.Timestamp] = []
+    seen: set[pd.Timestamp] = set()
+    for raw_day in days:
+        day = pd.Timestamp(raw_day).normalize()
+        if day in seen:
+            continue
+        ordered_days.append(day)
+        seen.add(day)
+    if not ordered_days:
+        return
+
+    step = max(1, int(np.ceil(len(ordered_days) / max(max_ticks, 1))))
+    tick_days = ordered_days[::step]
     ticktext = [f"{_weekday_letter_es(d)}<br>{d.strftime('%d/%m')}" for d in tick_days]
+    tick_position = "outside top" if str(side).lower() == "top" else "outside bottom"
     fig.update_xaxes(
         tickmode="array",
         tickvals=tick_days,
         ticktext=ticktext,
         tickangle=0,
-        ticklabelposition="outside",
+        ticklabelposition=tick_position,
+        side=side,
         automargin=True,
     )
 
@@ -411,7 +430,12 @@ def chart_daily_kpis(
     fig.update_xaxes(title_text="Día")
     fig.update_yaxes(title_text="NPS clásico (pp)", secondary_y=False, rangemode="tozero")
     fig.update_yaxes(title_text="% detractores", secondary_y=True, ticksuffix="%")
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
+    _apply_day_ticks(
+        fig,
+        [pd.Timestamp(d) for d in agg["day"].tolist()],
+        max_ticks=16,
+        side="top",
+    )
     return apply_plotly_template(fig, theme)
 
 
@@ -533,7 +557,12 @@ def chart_daily_volume(
     )
     fig.update_layout(xaxis_title="Día", yaxis_title="Respuestas (n)", showlegend=False)
     _layout_common(fig, th, height=220)
-    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=21)
+    _apply_day_ticks(
+        fig,
+        [pd.Timestamp(d) for d in agg["day"].tolist()],
+        max_ticks=14,
+        side="top",
+    )
     return apply_plotly_template(fig, theme)
 
 
@@ -547,22 +576,25 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
 
-    d = driver_df.head(top_k).copy()
+    d = driver_df.copy()
     if "gap_vs_overall" not in d.columns:
         raise ValueError("driver_df must include gap_vs_overall")
+    d = d.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(top_k).copy()
+    plot_df = d.iloc[::-1].copy()
     fig = px.bar(
-        d,
+        plot_df,
         x="gap_vs_overall",
         y="value",
         orientation="h",
         hover_data={"n": True, "nps": ":.2f", "gap_vs_overall": ":.2f"},
     )
-    fig.update_traces(marker_color=_diverging_colors(theme, d["gap_vs_overall"]))
+    fig.update_traces(marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]))
     fig.update_layout(
         xaxis_title="Diferencia vs NPS global (puntos)",
         yaxis_title="",
         showlegend=False,
     )
+    fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 
@@ -657,6 +689,7 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
             ),
         ),
     )
+    fig.update_yaxes(categoryorder="array", categoryarray=tmp["journey_label"].tolist())
     _layout_common(fig, th, height=max(320, 56 * len(tmp) + 80))
     return apply_plotly_template(fig, theme)
 
@@ -728,6 +761,7 @@ def chart_causal_entity_bar(
             )
         ),
     )
+    fig.update_yaxes(categoryorder="array", categoryarray=plot_df["entity_label"].tolist())
     _layout_common(fig, th, height=max(320, 56 * len(plot_df) + 80))
     return apply_plotly_template(fig, theme)
 
@@ -1112,7 +1146,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
     th = chart_theme(theme)
     import plotly.graph_objects as go  # lazy import for faster cold-start
 
-    d = topics_df.sort_values("n", ascending=False).head(top_k).copy()
+    d = topics_df.sort_values(["n", "cluster_id"], ascending=[False, True]).head(top_k).copy()
 
     def _topic_label(row: pd.Series) -> str:
         terms = list(row["top_terms"])[:3]
@@ -1120,11 +1154,12 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
         return f"#{cid}: {', '.join(terms)}"
 
     d["label"] = d.apply(_topic_label, axis=1)
+    plot_df = d.iloc[::-1].copy()
     fig = go.Figure(
         data=[
             go.Bar(
-                x=d["n"],
-                y=d["label"],
+                x=plot_df["n"],
+                y=plot_df["label"],
                 orientation="h",
                 marker_color=th.grid,
                 hovertemplate="%{y}<br>Volumen=%{x}<extra></extra>",
@@ -1132,6 +1167,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
         ]
     )
     fig.update_layout(xaxis_title="Volumen (n comentarios)", yaxis_title="", showlegend=False)
+    fig.update_yaxes(categoryorder="array", categoryarray=plot_df["label"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 
@@ -1143,9 +1179,15 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
 
-    d = delta_df.head(top_k).copy()
+    d = (
+        delta_df.copy()
+        .sort_values(["delta_nps", "n_current", "n_baseline"], ascending=[False, False, False])
+        .head(top_k)
+        .copy()
+    )
+    plot_df = d.iloc[::-1].copy()
     fig = px.bar(
-        d,
+        plot_df,
         x="delta_nps",
         y="value",
         orientation="h",
@@ -1156,8 +1198,9 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
             "nps_baseline": ":.2f",
         },
     )
-    fig.update_traces(marker_color=_diverging_colors(theme, d["delta_nps"]))
+    fig.update_traces(marker_color=_diverging_colors(theme, plot_df["delta_nps"]))
     fig.update_layout(xaxis_title="Delta NPS (actual - base)", yaxis_title="", showlegend=False)
+    fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 

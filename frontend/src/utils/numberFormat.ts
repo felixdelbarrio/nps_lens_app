@@ -14,13 +14,20 @@ const PERCENT_FORMATTER = new Intl.NumberFormat(LOCALE, {
   maximumFractionDigits: 2,
   style: "percent"
 });
+const FIXED_TWO_DECIMAL_FORMATTER = new Intl.NumberFormat(LOCALE, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 
 const PERCENT_COLUMN_PATTERN =
   /%|percent|percentage|porcentaje|share|ratio|rate|prob(?:ability|\.)?/i;
 const NON_PERCENT_COLUMN_PATTERN =
   /\bpp\b|por 100|per 100|score|confidence|confianza|similaridad|cohesi|corr|lag|eta|pts?\b/i;
+const SIGNED_COLUMN_PATTERN = /\bgap\b|diferencia|difference/i;
 const PLAIN_NUMERIC_PATTERN = /^[+-]?\d+(?:[.,]\d+)?$/;
 const PERCENT_VALUE_PATTERN = /^([+-]?\d+(?:[.,]\d+)?)\s*%$/;
+const NUMERIC_WITH_UNIT_PATTERN =
+  /^([+-]?\d+(?:[.,]\d+)?)(\s*(?:pp|pts?|puntos|semanas?|d[ií]as?|links?|incidencias?|comentarios(?:\s+voc)?|respuestas|validados?))$/i;
 const PERCENT_TOKENS = [
   "percent",
   "percentage",
@@ -136,6 +143,30 @@ function formatPercentString(value: string) {
   return formatPercent(numeric / 100);
 }
 
+function shouldDisplaySigned(columnName?: string) {
+  if (!columnName) {
+    return false;
+  }
+  const normalizedColumnName = normalizeColumnName(columnName);
+  return SIGNED_COLUMN_PATTERN.test(normalizedColumnName);
+}
+
+function formatNumericUnitString(value: string, columnName?: string) {
+  const match = value.trim().match(NUMERIC_WITH_UNIT_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const numeric = coerceFiniteNumber(match[1]);
+  if (numeric === null) {
+    return null;
+  }
+  const suffix = match[2].replace(/\s+/g, " ").trim();
+  const formatted = shouldDisplaySigned(columnName) || match[1].trim().startsWith("+")
+    ? SIGNED_NUMBER_FORMATTER.format(numeric)
+    : NUMBER_FORMATTER.format(numeric);
+  return `${formatted} ${suffix}`.trim();
+}
+
 export function formatDisplayValue(value: unknown, columnName?: string): string {
   if (value === null || value === undefined) {
     return "";
@@ -151,12 +182,23 @@ export function formatDisplayValue(value: unknown, columnName?: string): string 
     if (formattedPercent) {
       return formattedPercent;
     }
+    const formattedUnit = formatNumericUnitString(value, columnName);
+    if (formattedUnit) {
+      return formattedUnit;
+    }
   }
   if (isPercentColumn(columnName)) {
     return formatPercent(value, { fallback: String(value) });
   }
-  if (coerceFiniteNumber(value) !== null) {
-    return formatNumber(value);
+  const numeric = coerceFiniteNumber(value);
+  if (numeric !== null) {
+    if (shouldDisplaySigned(columnName) || String(value).trim().startsWith("+")) {
+      return formatNumber(numeric, { signed: true });
+    }
+    if (typeof value === "string" && value.includes(".") && !String(value).includes("%")) {
+      return FIXED_TWO_DECIMAL_FORMATTER.format(numeric);
+    }
+    return formatNumber(numeric);
   }
   return String(value);
 }

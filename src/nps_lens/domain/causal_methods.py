@@ -216,5 +216,5 @@ def linking_navigation(spec: CausalMethodSpec) -> list[dict[str, str]]:
         {"id": "situation", "label": "Situación del periodo"},
         {"id": "entity-summary", "label": spec.navigation_label},
         {"id": "scenarios", "label": "Análisis de escenarios causales"},
-        {"id": "nps-deep-dive", "label": "NPS deep dive"},
+        {"id": "nps-deep-dive", "label": "Análisis de Tópicos de NPS afectados"},
     ]

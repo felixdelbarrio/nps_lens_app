@@ -40,6 +40,7 @@ const contextPayload = {
     nps_group_choice: "Todos",
     theme_mode: "light",
     downloads_path: "/Users/test/Downloads",
+    helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
     touchpoint_source: "domain_touchpoint",
     min_similarity: 0.25,
     max_days_apart: 10,
@@ -126,7 +127,6 @@ const dashboardPayload = {
     min_n: 200,
     min_n_cross: 30
   },
-  report_markdown: "# Informe de negocio",
   empty_state: ""
 };
 
@@ -166,7 +166,7 @@ const linkingPayloadAvailable = {
     { id: "situation", label: "Situación del periodo" },
     { id: "entity-summary", label: "Journeys de detracción" },
     { id: "scenarios", label: "Análisis de escenarios causales" },
-    { id: "nps-deep-dive", label: "NPS deep dive" }
+    { id: "nps-deep-dive", label: "Análisis de Tópicos de NPS afectados" }
   ],
   kpis: {
     responses: 26618,
@@ -219,7 +219,7 @@ const linkingPayloadAvailable = {
     ]
   },
   deep_dive: {
-    title: "NPS deep dive",
+    title: "Análisis de Tópicos de NPS afectados",
     subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
     kpis: [
       { label: "NPS en riesgo", value: "3.90 pts" },
@@ -234,12 +234,11 @@ const linkingPayloadAvailable = {
         "Pagos/ Transferencias > Faltan detalles de movimientos",
         "Operativa crítica fallida"
       ],
-      default: "Pagos/ Transferencias > Faltan detalles de movimientos"
+      default: "Todos"
     },
     tabs: [
       { id: "ranking", label: "Ranking de hipótesis" },
-      { id: "evidence", label: "Evidence wall" },
-      { id: "analysis", label: "Data deepdive analysis" }
+      { id: "evidence", label: "Evidence wall" }
     ],
     trending: {
       title: "NPS tópicos trending",
@@ -267,6 +266,8 @@ const linkingPayloadAvailable = {
           nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
           similarity: 0.339,
           incident_id: "INC000104231684",
+          incident_id__href:
+            "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU4",
           incident_summary: "ACOTAMIENTO IRD...",
           detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
         },
@@ -274,26 +275,8 @@ const linkingPayloadAvailable = {
           nps_topic: "Operativa crítica fallida",
           similarity: 0.121,
           incident_id: "INC000104355468",
-          incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
-          detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
-        }
-      ],
-      empty_state: ""
-    },
-    analysis: {
-      title: "Data deepdive analysis",
-      rows: [
-        {
-          nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
-          similarity: 0.339,
-          incident_id: "INC000104231684",
-          incident_summary: "ACOTAMIENTO IRD...",
-          detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
-        },
-        {
-          nps_topic: "Operativa crítica fallida",
-          similarity: 0.121,
-          incident_id: "INC000104355468",
+          incident_id__href:
+            "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5",
           incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
           detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
         }
@@ -357,7 +340,8 @@ const linkingPayloadAvailable = {
         incident_records: [
           {
             incident_id: "INC000104355468",
-            summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina..."
+            summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
+            url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
           }
         ],
         comment_records: [
@@ -540,10 +524,16 @@ describe("App", () => {
     expect(screen.getByText("Detalle de journeys de detracción")).toBeInTheDocument();
     expect(screen.getByText("Uso / Edo de Cuenta")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "NPS deep dive" }));
+    await user.click(
+      screen.getByRole("tab", { name: "Análisis de Tópicos de NPS afectados" })
+    );
     expect(screen.getAllByText("Ranking de hipótesis").length).toBeGreaterThan(0);
     expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Tópico" }), "Operativa crítica fallida");
+    expect(screen.getByRole("combobox", { name: "Tópico" })).toHaveValue("Todos");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Tópico" }),
+      "Operativa crítica fallida"
+    );
     const rankingTable = screen.getByRole("table");
     expect(within(rankingTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
     expect(
@@ -556,14 +546,25 @@ describe("App", () => {
     expect(
       within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Data deepdive analysis" }));
-    const analysisTable = screen.getByRole("table");
-    expect(within(analysisTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          href: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
+        })
+      ])
+    );
 
     await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
     expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument();
     expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tabla" })).toHaveClass("is-active");
+    expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          href: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
+        })
+      ])
+    );
   });
 });

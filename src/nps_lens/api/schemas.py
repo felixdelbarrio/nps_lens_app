@@ -80,6 +80,7 @@ class PreferencesResponse(BaseModel):
     nps_group_choice: str = "Todos"
     theme_mode: str = "light"
     downloads_path: str = ""
+    helix_base_url: str = ""
     touchpoint_source: str = "domain_touchpoint"
     min_similarity: float = 0.25
     max_days_apart: int = 10
@@ -129,7 +130,6 @@ class DashboardResponse(BaseModel):
     gaps: dict[str, Any] = Field(default_factory=dict)
     opportunities: dict[str, Any] = Field(default_factory=dict)
     controls: dict[str, Any] = Field(default_factory=dict)
-    report_markdown: str = ""
     empty_state: str = ""
 
 
