@@ -96,6 +96,20 @@ const DATA_TABS = [
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
+const MONTH_LABELS_ES: Record<string, string> = {
+  "01": "Enero",
+  "02": "Febrero",
+  "03": "Marzo",
+  "04": "Abril",
+  "05": "Mayo",
+  "06": "Junio",
+  "07": "Julio",
+  "08": "Agosto",
+  "09": "Septiembre",
+  "10": "Octubre",
+  "11": "Noviembre",
+  "12": "Diciembre"
+};
 
 function formatDateLabel(value: string | null | undefined, locale = "es-ES") {
   if (!value) {
@@ -114,6 +128,20 @@ function parseServiceOriginN2(value: string) {
 
 function serializeServiceOriginN2(values: string[]) {
   return parseServiceOriginN2(values.join(", ")).join(", ");
+}
+
+function getLatestAvailableYear(years: string[]) {
+  const concreteYears = years.filter((year) => year !== "Todos");
+  return concreteYears[concreteYears.length - 1] || "Todos";
+}
+
+function getLatestAvailableMonth(months: string[]) {
+  const concreteMonths = months.filter((month) => month !== "Todos");
+  return concreteMonths[concreteMonths.length - 1] || "Todos";
+}
+
+function formatMonthOptionLabel(month: string) {
+  return MONTH_LABELS_ES[month] || month;
 }
 
 function triggerBlobDownload(blob: Blob, fileName: string) {
@@ -188,11 +216,15 @@ export function App() {
       return;
     }
     didHydrate.current = true;
+    const latestYear = getLatestAvailableYear(config.available_years || []);
+    const latestMonth = getLatestAvailableMonth(
+      config.available_months_by_year[latestYear] || config.available_months_by_year.Todos || []
+    );
     setServiceOrigin(config.default_service_origin);
     setServiceOriginN1(config.default_service_origin_n1);
     setServiceOriginN2(config.default_service_origin_n2 || "");
-    setPopYear(config.preferences.pop_year || "Todos");
-    setPopMonth(config.preferences.pop_month || "Todos");
+    setPopYear(latestYear);
+    setPopMonth(latestMonth);
     setNpsGroup(config.preferences.nps_group_choice || "Todos");
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
     setDownloadsPath(config.preferences.downloads_path || "");
@@ -211,8 +243,9 @@ export function App() {
   }, [config, popYear]);
 
   useEffect(() => {
-    if (!monthOptions.includes(popMonth)) {
-      setPopMonth(monthOptions[0] || "Todos");
+    const latestMonth = getLatestAvailableMonth(monthOptions);
+    if (!monthOptions.includes(popMonth) || (popMonth === "Todos" && latestMonth !== "Todos")) {
+      setPopMonth(latestMonth);
     }
   }, [monthOptions, popMonth]);
 
@@ -411,7 +444,7 @@ export function App() {
       return;
     }
     if (!config.available_years.includes(popYear)) {
-      setPopYear(config.available_years[0] || "Todos");
+      setPopYear(getLatestAvailableYear(config.available_years));
     }
   }, [config, popYear]);
 
@@ -706,7 +739,7 @@ export function App() {
             <select onChange={(event) => setPopMonth(event.target.value)} value={popMonth}>
               {monthOptions.map((month) => (
                 <option key={month} value={month}>
-                  {month}
+                  {formatMonthOptionLabel(month)}
                 </option>
               ))}
             </select>

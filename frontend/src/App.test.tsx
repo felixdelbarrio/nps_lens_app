@@ -372,6 +372,11 @@ describe("App", () => {
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Recorte analítico/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Año" })).toHaveValue("2026");
+    expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("03");
+    expect(
+      screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
+    ).toHaveTextContent("Marzo");
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     expect(screen.queryByRole("heading", { name: /Recorte analítico/i })).not.toBeInTheDocument();
