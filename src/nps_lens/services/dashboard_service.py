@@ -36,7 +36,6 @@ from nps_lens.analytics.incident_attribution import (
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
-    IncidentRationaleSummary,
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
 )
@@ -1179,11 +1178,16 @@ class DashboardService:
             raise ValueError(
                 "El periodo filtrado no tiene respuestas NPS. Ajusta año, mes o grupo antes de generar la PPT."
             )
+        helix_current = self._apply_population_filters(helix_history.copy(), pop_year, pop_month)
+        if helix_current.empty:
+            raise ValueError(
+                "El periodo filtrado no tiene incidencias Helix. Ajusta año o mes para generar una PPT alineada con la vista causal."
+            )
 
         focus_group, _ = self._linking_focus_group(nps_group)
         focus_name = self._focus_name(focus_group)
-        focus_history = history_df.loc[focus_mask(history_df, focus_group=focus_group)].copy()
-        if focus_history.empty:
+        focus_current = current_df.loc[focus_mask(current_df, focus_group=focus_group)].copy()
+        if focus_current.empty:
             raise ValueError(
                 "El grupo focal seleccionado no tiene suficientes respuestas para construir el racional causal."
             )
@@ -1195,9 +1199,9 @@ class DashboardService:
         ).strip()
 
         core = self._compute_linking_core(
-            nps_df=history_df,
-            helix_df=helix_history,
-            focus_df=focus_history,
+            nps_df=current_df,
+            helix_df=helix_current,
+            focus_df=focus_current,
             focus_group=focus_group,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
@@ -1211,29 +1215,91 @@ class DashboardService:
         by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
-        overall_daily = self._attach_daily_nps_mean(overall_daily, history_df)
+        overall_daily = self._attach_daily_nps_mean(overall_daily, current_df)
 
-        rationale_rank = cast(pd.DataFrame, core["rationale_rank"])
-        lag_weeks = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
+        mode_payload = self._build_touchpoint_mode_payload(
+            touchpoint_source=active_touchpoint_source,
+            links_df=links_df,
+            focus_df=focus_current,
+            helix_df=helix_current,
+            by_topic_weekly=by_topic_weekly,
+            by_topic_daily=by_topic_daily,
+        )
+        broken_journeys_df = mode_payload["broken_journeys_df"]
+        broken_journey_links_df = mode_payload["broken_journey_links_df"]
+        links_mode_df = mode_payload["links_mode_df"]
+        by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
+        by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
+
+        rank = causal_rank_by_topic(by_topic_weekly_mode)
         changepoints = detect_detractor_changepoints_with_bootstrap(
-            by_topic_weekly,
+            by_topic_weekly_mode,
             pen=6.0,
             n_boot=200,
             block_size=2,
             tol_periods=1,
         )
-        ranking_df = (
-            rationale_rank.merge(changepoints, on="nps_topic", how="left").merge(
-                lag_weeks, on="nps_topic", how="left"
+        lag_weeks = estimate_best_lag_by_topic(by_topic_weekly_mode, max_lag_weeks=6)
+        lead_share = incidents_lead_changepoints_flag(
+            by_topic_weekly_mode,
+            changepoints,
+            window_weeks=4,
+        )
+        lag_days = (
+            estimate_best_lag_days_by_topic(
+                by_topic_daily_mode,
+                max_lag_days=21,
+                min_points=30,
             )
-            if not rationale_rank.empty
-            else rationale_rank
+            if can_use_daily_resample(
+                overall_daily,
+                min_days_with_responses=20,
+                min_coverage=0.45,
+            )
+            else pd.DataFrame()
         )
 
+        kc_entries = kc_load_entries(self.settings.knowledge_dir)
+        kc_adj = kc_score_adjustments(
+            kc_entries,
+            context.service_origin,
+            context.service_origin_n1,
+            context.service_origin_n2,
+        )
+        ranking_df = pd.DataFrame()
+        if not rank.empty:
+            ranking_df = (
+                rank.merge(changepoints, on="nps_topic", how="left")
+                .merge(lag_weeks, on="nps_topic", how="left")
+                .merge(lead_share, on="nps_topic", how="left")
+            )
+            if not kc_adj.empty:
+                ranking_df = ranking_df.merge(kc_adj, on="nps_topic", how="left")
+            else:
+                ranking_df["factor"] = 1.0
+                ranking_df["confirmed"] = 0
+                ranking_df["rejected"] = 0
+            ranking_df["factor"] = _numeric_series(ranking_df, "factor", default=1.0)
+            ranking_df["confirmed"] = _numeric_series(ranking_df, "confirmed", default=0.0).astype(
+                int
+            )
+            ranking_df["rejected"] = _numeric_series(ranking_df, "rejected", default=0.0).astype(
+                int
+            )
+            ranking_df["confidence_learned"] = (
+                pd.to_numeric(ranking_df["score"], errors="coerce").fillna(0.0)
+                * ranking_df["factor"].astype(float)
+            ).clip(0.0, 1.0)
+            ranking_df = ranking_df.sort_values(
+                ["confidence_learned", "incidents", "responses"],
+                ascending=False,
+            ).reset_index(drop=True)
+
+        rationale_rank = ranking_df if not ranking_df.empty else rank
         rationale_df = build_incident_nps_rationale(
-            by_topic_weekly,
+            by_topic_weekly_mode,
             focus_group=focus_group,
-            rank_df=ranking_df if not ranking_df.empty else rationale_rank,
+            rank_df=rationale_rank,
             min_topic_responses=80,
             recovery_factor=0.65,
         )
@@ -1241,8 +1307,7 @@ class DashboardService:
             raise ValueError(
                 "No hay señal suficiente para construir el racional causal con el contexto actual."
             )
-        rationale_summary = cast(IncidentRationaleSummary, core["rationale_summary"])
-        lag_days = cast(pd.DataFrame, core["lag_days"])
+        rationale_summary = summarize_incident_nps_rationale(rationale_df)
 
         executive_journey_catalog = load_executive_journey_catalog(
             self.settings.knowledge_dir,
@@ -1250,15 +1315,17 @@ class DashboardService:
             service_origin_n1=context.service_origin_n1,
         )
         attribution_df = build_incident_attribution_chains(
-            links_df,
-            focus_history,
-            helix_history,
+            links_mode_df,
+            focus_current,
+            helix_current,
             rationale_df=rationale_df,
             top_k=0,
             max_incident_examples=5,
             max_comment_examples=2,
             min_links_per_topic=1,
             touchpoint_source=active_touchpoint_source,
+            journey_catalog_df=broken_journeys_df,
+            journey_links_df=broken_journey_links_df,
             executive_journey_catalog=executive_journey_catalog,
         )
         attribution_df = self._select_top_chain_rows(attribution_df)
@@ -1280,35 +1347,35 @@ class DashboardService:
             service_origin=context.service_origin,
             service_origin_n1=context.service_origin_n1,
             focus_name=focus_name,
-            period_label=self._period_label(history_df),
+            period_label=self._period_label(current_df),
             top_k=6,
         )
 
         incident_evidence_df = build_hotspot_evidence(
-            links_df,
-            focus_history,
-            helix_history,
+            links_mode_df,
+            focus_current,
+            helix_current,
             system_date=pd.Timestamp.now().date(),
             max_hotspots=10,
             min_validated_similarity=min_similarity,
             max_days_apart=max_days_apart,
         )
         incident_evidence_df, hotspot_focus_note = self._align_evidence_to_best_axis(
-            history_df,
-            helix_history,
+            current_df,
+            helix_current,
             incident_evidence_df,
         )
         incident_timeline_df = build_hotspot_timeline(
-            links_df,
-            focus_history,
-            helix_history,
+            links_mode_df,
+            focus_current,
+            helix_current,
             incident_evidence_df=incident_evidence_df,
             max_hotspots=10,
             min_validated_similarity=min_similarity,
             max_days_apart=max_days_apart,
         )
 
-        period_start, period_end = self._period_bounds(history_df)
+        period_start, period_end = self._period_bounds(current_df)
         overall_series = overall_daily if not overall_daily.empty else overall_weekly
 
         report = generate_business_review_ppt(
@@ -1328,16 +1395,19 @@ class DashboardService:
             script_8slides_md=ppt_8slides_md,
             attribution_df=attribution_df,
             ranking_df=ranking_df,
-            by_topic_daily=by_topic_daily,
+            by_topic_daily=by_topic_daily_mode,
             lag_days_by_topic=lag_days,
-            by_topic_weekly=by_topic_weekly,
+            by_topic_weekly=by_topic_weekly_mode,
             lag_weeks_by_topic=lag_weeks,
+            selected_nps_df=current_df,
+            comparison_nps_df=history_df,
             incident_evidence_df=incident_evidence_df,
             changepoints_by_topic=changepoints,
             incident_timeline_df=incident_timeline_df,
             hotspot_focus_note=hotspot_focus_note,
             touchpoint_source=active_touchpoint_source,
             executive_journey_catalog=executive_journey_catalog,
+            broken_journeys_df=broken_journeys_df,
         )
         saved_path = self._persist_report_copy(report)
         return BusinessPptResult(
