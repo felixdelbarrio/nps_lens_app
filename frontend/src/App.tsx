@@ -164,6 +164,7 @@ export function App() {
   const [npsGroup, setNpsGroup] = useState("Todos");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
+  const [helixBaseUrl, setHelixBaseUrl] = useState("");
   const [touchpointSource, setTouchpointSource] = useState("domain_touchpoint");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
@@ -228,6 +229,7 @@ export function App() {
     setNpsGroup(config.preferences.nps_group_choice || "Todos");
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
     setDownloadsPath(config.preferences.downloads_path || "");
+    setHelixBaseUrl(config.preferences.helix_base_url || "");
     setTouchpointSource(config.preferences.touchpoint_source || "domain_touchpoint");
     setMinSimilarity(config.preferences.min_similarity ?? 0.25);
     setMaxDaysApart(config.preferences.max_days_apart ?? 10);
@@ -485,6 +487,7 @@ export function App() {
       nps_group_choice: npsGroup,
       theme_mode: themeMode,
       downloads_path: downloadsPath,
+      helix_base_url: helixBaseUrl,
       touchpoint_source: touchpointSource,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
@@ -497,6 +500,7 @@ export function App() {
       minNCross,
       minSimilarity,
       downloadsPath,
+      helixBaseUrl,
       npsGroup,
       popMonth,
       popYear,
@@ -779,16 +783,12 @@ export function App() {
 
     if (overviewTab === "weekly") {
       return (
-        <section className="surface-card stack-panel">
+        <section className="surface-card">
           <PlotFigure
             emptyMessage="No hay suficientes datos para construir una tendencia."
             figure={dashboard?.overview.weekly_trend_figure}
             testId="weekly-trend-figure"
           />
-          <article className="note-card">
-            <p className="eyebrow">Informe de negocio</p>
-            <pre className="report-markdown inline-report">{dashboard?.report_markdown || "Sin informe disponible."}</pre>
-          </article>
         </section>
       );
     }
@@ -1423,6 +1423,7 @@ export function App() {
         activeTab={settingsTab}
         causalMethodOptions={causalMethodOptions}
         downloadsPath={downloadsPath}
+        helixBaseUrl={helixBaseUrl}
         hierarchySaving={isSavingHierarchy}
         minN={minN}
         minNCross={minNCross}
@@ -1436,6 +1437,7 @@ export function App() {
         serviceOriginN2Map={config?.service_origin_n2_map || {}}
         serviceOrigins={config?.service_origins || []}
         setDownloadsPath={setDownloadsPath}
+        setHelixBaseUrl={setHelixBaseUrl}
         setMinN={setMinN}
         setMinNCross={setMinNCross}
         setMinSimilarity={setMinSimilarity}

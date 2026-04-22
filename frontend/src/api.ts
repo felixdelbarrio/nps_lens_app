@@ -125,7 +125,6 @@ export type DashboardPayload = {
     min_n: number;
     min_n_cross: number;
   };
-  report_markdown: string;
   empty_state: string;
 };
 
@@ -227,6 +226,7 @@ export type PreferencesPayload = {
   nps_group_choice: string;
   theme_mode: "light" | "dark";
   downloads_path: string;
+  helix_base_url: string;
   touchpoint_source: string;
   min_similarity: number;
   max_days_apart: number;

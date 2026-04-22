@@ -11,6 +11,7 @@ from dotenv import load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
 DEFAULT_UI_TOUCHPOINT_SOURCE = "domain_touchpoint"
+DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
 DEFAULT_UI_MIN_SIMILARITY = 0.25
 DEFAULT_UI_MAX_DAYS_APART = 10
 DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
@@ -29,6 +30,7 @@ UI_PREF_ENV_KEYS = {
     "nps_group_choice": "NPS_LENS_UI_NPS_GROUP",
     "theme_mode": "NPS_LENS_UI_THEME_MODE",
     "downloads_path": "NPS_LENS_UI_DOWNLOADS_PATH",
+    "helix_base_url": "NPS_LENS_UI_HELIX_BASE_URL",
     "touchpoint_source": "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
@@ -209,11 +211,25 @@ def normalize_downloads_path(value: object, *, create: bool = False) -> str:
     return str(candidate)
 
 
+def normalize_helix_base_url(value: object) -> str:
+    raw = str(value or "").strip() or DEFAULT_UI_HELIX_BASE_URL
+    if not raw.lower().startswith(("https://", "http://")):
+        raise ValueError("La ruta base de Helix debe comenzar por http:// o https://.")
+    return raw.rstrip("/") + "/"
+
+
 def safe_normalize_downloads_path(value: object, fallback: object) -> str:
     try:
         return normalize_downloads_path(value)
     except (OSError, ValueError):
         return normalize_downloads_path(fallback)
+
+
+def safe_normalize_helix_base_url(value: object, fallback: object) -> str:
+    try:
+        return normalize_helix_base_url(value)
+    except ValueError:
+        return normalize_helix_base_url(fallback)
 
 
 def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
@@ -227,9 +243,12 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
         env_key = UI_PREF_ENV_KEYS.get(str(name))
         if not env_key:
             continue
-        value = (
-            normalize_downloads_path(raw_value) if str(name) == "downloads_path" else str(raw_value)
-        )
+        if str(name) == "downloads_path":
+            value = normalize_downloads_path(raw_value)
+        elif str(name) == "helix_base_url":
+            value = normalize_helix_base_url(raw_value)
+        else:
+            value = str(raw_value)
         os.environ[env_key] = value
         set_key(str(dotenv_path), env_key, value, quote_mode="auto")
 
@@ -282,6 +301,7 @@ class Settings:
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
     default_touchpoint_source: str = DEFAULT_UI_TOUCHPOINT_SOURCE
     default_downloads_path: str = field(default_factory=default_downloads_path)
+    default_helix_base_url: str = DEFAULT_UI_HELIX_BASE_URL
     default_min_similarity: float = DEFAULT_UI_MIN_SIMILARITY
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
     default_min_n_opportunities: int = DEFAULT_UI_MIN_N_OPPORTUNITIES
@@ -374,6 +394,10 @@ class Settings:
             os.getenv("NPS_LENS_UI_DOWNLOADS_PATH", default_downloads_path()),
             default_downloads_path(),
         )
+        default_helix_base_url = safe_normalize_helix_base_url(
+            os.getenv("NPS_LENS_UI_HELIX_BASE_URL", DEFAULT_UI_HELIX_BASE_URL),
+            DEFAULT_UI_HELIX_BASE_URL,
+        )
         default_min_similarity = min(
             max(
                 _to_float(
@@ -434,6 +458,7 @@ class Settings:
             default_theme_mode=default_theme_mode,
             default_touchpoint_source=default_touchpoint_source,
             default_downloads_path=default_downloads_dir,
+            default_helix_base_url=default_helix_base_url,
             default_min_similarity=default_min_similarity,
             default_max_days_apart=default_max_days_apart,
             default_min_n_opportunities=default_min_n_opportunities,
@@ -473,6 +498,10 @@ class Settings:
         downloads_path = safe_normalize_downloads_path(
             ui_pref("downloads_path", self.default_downloads_path),
             self.default_downloads_path,
+        )
+        helix_base_url = safe_normalize_helix_base_url(
+            ui_pref("helix_base_url", self.default_helix_base_url),
+            self.default_helix_base_url,
         )
         min_similarity = min(
             max(
@@ -522,6 +551,7 @@ class Settings:
             or DEFAULT_UI_NPS_GROUP,
             "theme_mode": theme_mode,
             "downloads_path": downloads_path,
+            "helix_base_url": helix_base_url,
             "touchpoint_source": touchpoint_source,
             "min_similarity": min_similarity,
             "max_days_apart": max_days_apart,

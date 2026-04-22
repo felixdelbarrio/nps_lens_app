@@ -727,8 +727,8 @@ def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
 def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> None:
     assert executive_ppt._fmt_pct_or_nd(0.25) == "25%"
     assert executive_ppt._fmt_pct_or_nd(float("nan")) == "n/d"
-    assert executive_ppt._fmt_signed_or_nd(-2.34, decimals=1) == "-2.3"
-    assert executive_ppt._fmt_num_or_nd(7.891, decimals=1) == "7.9"
+    assert executive_ppt._fmt_signed_or_nd(-2.34, decimals=1) == "-2,3"
+    assert executive_ppt._fmt_num_or_nd(7.891, decimals=1) == "7,9"
     assert executive_ppt._clip("abcdefgh", 5) == "abcd…"
     assert executive_ppt._wrap_label("", width=6, max_lines=2) == ""
     assert executive_ppt._wrap_label("uno dos tres cuatro cinco seis", width=6, max_lines=2) != ""

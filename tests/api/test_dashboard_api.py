@@ -86,6 +86,7 @@ def _build_helix_fixture(path: Path) -> Path:
             "BBVA_SourceServiceN2": ["", "", ""],
             "CreatedDate": ["2026-03-01", "2026-03-03", "2026-03-04"],
             "Incident Number": ["INC-1", "INC-2", "INC-3"],
+            "Record ID": ["RID-1", "RID-2", "RID-3"],
             "Detailed Description": [
                 "Cliente no puede acceder al portal",
                 "Fallo en autenticacion web",
@@ -116,6 +117,10 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert context_payload["nps_dataset"]["available"] is True
     assert context_payload["nps_dataset"]["rows"] == upload["inserted_rows"]
     assert "Downloads" in context_payload["preferences"]["downloads_path"]
+    assert (
+        context_payload["preferences"]["helix_base_url"]
+        == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
+    )
     assert any(
         option["value"] == "executive_journeys"
         for option in context_payload["causal_method_options"]
@@ -143,7 +148,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         "Canal",
         "UsuarioDecisión",
     ]
-    assert dashboard_payload["report_markdown"]
+    assert "report_markdown" not in dashboard_payload
 
     data_response = client.get(
         "/api/dashboard/data/nps",
@@ -219,8 +224,21 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     data_payload = data_response.json()
     assert data_payload["dataset_kind"] == "helix"
     assert data_payload["total_rows"] == 2
-    assert "Incident Number" in data_payload["columns"]
+    assert data_payload["columns"][:8] == [
+        "BBVA_SourceServiceCompany",
+        "BBVA_SourceServiceN1",
+        "BBVA_SourceServiceN2",
+        "CreatedDate",
+        "Incident Number",
+        "Record ID",
+        "Detailed Description",
+        "Short Description",
+    ]
     assert data_payload["rows"][0]["BBVA_SourceServiceN1"] == "Senda"
+    assert (
+        data_payload["rows"][0]["Incident Number__href"]
+        == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/RID-1"
+    )
 
     linking_response = client.get(
         "/api/dashboard/linking",
@@ -243,7 +261,13 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert "entity_summary" in linking_payload
     assert "scenarios" in linking_payload
     assert "deep_dive" in linking_payload
-    assert linking_payload["deep_dive"]["tabs"][2]["label"] == "Data deepdive analysis"
+    assert linking_payload["navigation"][3]["label"] == "Análisis de Tópicos de NPS afectados"
+    assert linking_payload["deep_dive"]["title"] == "Análisis de Tópicos de NPS afectados"
+    assert linking_payload["deep_dive"]["topic_filter"]["default"] == "Todos"
+    assert [tab["label"] for tab in linking_payload["deep_dive"]["tabs"]] == [
+        "Ranking de hipótesis",
+        "Evidence wall",
+    ]
 
 
 def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) -> None:

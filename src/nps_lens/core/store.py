@@ -779,7 +779,6 @@ class HelixIncidentStore:
         data_path, meta_path, parquet_dir = self._paths_for(ctx)
 
         df_out = df.copy()
-        df_out = df_out.reindex(sorted(df_out.columns), axis=1)
 
         if "Fecha" in df_out.columns:
             df_out["Fecha"] = pd.to_datetime(df_out["Fecha"], errors="coerce")
