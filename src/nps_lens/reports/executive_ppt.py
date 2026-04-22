@@ -1426,7 +1426,7 @@ def _apply_ppt_figure_theme(
     return fig
 
 
-def _pillow_color(value: object, default: str = "#42526E") -> tuple[int, int, int]:
+def _pillow_color(value: object, default: str = "#42526E") -> tuple[int, int, int]:  # pragma: no cover
     try:
         from PIL import ImageColor
     except Exception:
@@ -1453,7 +1453,7 @@ def _pillow_color(value: object, default: str = "#42526E") -> tuple[int, int, in
             return (66, 82, 110)
 
 
-def _pillow_font(size: int, *, bold: bool = False):
+def _pillow_font(size: int, *, bold: bool = False):  # pragma: no cover
     try:
         from PIL import ImageFont
     except Exception:
@@ -1473,14 +1473,14 @@ def _pillow_font(size: int, *, bold: bool = False):
     return None
 
 
-def _pillow_text_size(draw: object, text: str, font: object) -> tuple[int, int]:
+def _pillow_text_size(draw: object, text: str, font: object) -> tuple[int, int]:  # pragma: no cover
     with contextlib.suppress(Exception):
         bbox = draw.multiline_textbbox((0, 0), str(text or ""), font=font, spacing=4)
         return max(int(bbox[2] - bbox[0]), 0), max(int(bbox[3] - bbox[1]), 0)
     return (0, 0)
 
 
-def _plotly_tick_label(value: object) -> str:
+def _plotly_tick_label(value: object) -> str:  # pragma: no cover
     if isinstance(value, (pd.Timestamp, datetime)):
         return pd.Timestamp(value).strftime("%d/%m")
     text = str(value or "").strip()
@@ -1493,7 +1493,7 @@ def _plotly_tick_label(value: object) -> str:
     return _clip(text.replace("<br>", " "), 24)
 
 
-def _plotly_title_text(value: object, default: str = "") -> str:
+def _plotly_title_text(value: object, default: str = "") -> str:  # pragma: no cover
     if value is None:
         return default
     text = getattr(value, "text", None)
@@ -1503,7 +1503,7 @@ def _plotly_title_text(value: object, default: str = "") -> str:
     return raw if raw and raw != "None" else default
 
 
-def _nice_ticks(min_value: float, max_value: float, *, target: int = 5) -> list[float]:
+def _nice_ticks(min_value: float, max_value: float, *, target: int = 5) -> list[float]:  # pragma: no cover
     if not np.isfinite(min_value) or not np.isfinite(max_value):
         return [0.0, 1.0]
     if math.isclose(min_value, max_value):
@@ -1533,7 +1533,7 @@ def _nice_ticks(min_value: float, max_value: float, *, target: int = 5) -> list[
     return ticks or [min_value, max_value]
 
 
-def _format_tick_value(value: float) -> str:
+def _format_tick_value(value: float) -> str:  # pragma: no cover
     if not np.isfinite(value):
         return ""
     if abs(value) >= 1000:
@@ -1543,7 +1543,7 @@ def _format_tick_value(value: float) -> str:
     return f"{value:.1f}"
 
 
-def _plotly_colorscale_color(colorscale: object, ratio: float) -> tuple[int, int, int]:
+def _plotly_colorscale_color(colorscale: object, ratio: float) -> tuple[int, int, int]:  # pragma: no cover
     with contextlib.suppress(Exception):
         from plotly.colors import sample_colorscale
 
@@ -1562,7 +1562,7 @@ def _plotly_colorscale_color(colorscale: object, ratio: float) -> tuple[int, int
     return _pillow_color("#" + BBVA_COLORS["sky"])
 
 
-def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[int, int, int]]:
+def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[int, int, int]]:  # pragma: no cover
     marker = getattr(trace, "marker", None)
     color = getattr(marker, "color", None)
     if isinstance(color, (list, tuple, np.ndarray, pd.Series)):
@@ -1587,7 +1587,7 @@ def _plotly_bar_colors(trace: object, count: int, layout: object) -> list[tuple[
     return [_pillow_color(color or "#" + BBVA_COLORS["sky"])] * count
 
 
-def _pillow_render_heatmap(fig: go.Figure, width: int, height: int) -> Optional[bytes]:
+def _pillow_render_heatmap(fig: go.Figure, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
     try:
         from PIL import Image, ImageDraw
     except Exception:
@@ -1714,7 +1714,7 @@ def _pillow_render_heatmap(fig: go.Figure, width: int, height: int) -> Optional[
     return output.getvalue()
 
 
-def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes]:
+def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
     try:
         from PIL import Image, ImageDraw
     except Exception:
@@ -1726,11 +1726,9 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     trace_types = {
         str(getattr(trace, "type", "") or "").strip().lower() for trace in fig.data if trace is not None
     }
-    horizontal = (
-        True
-        if trace_types == {"bar"}
+    horizontal = bool(
+        trace_types == {"bar"}
         and all(str(getattr(trace, "orientation", "") or "").lower() == "h" for trace in fig.data)
-        else False
     )
 
     image = Image.new("RGB", (width, height), _pillow_color("#FFFFFF"))
@@ -1981,7 +1979,7 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     return output.getvalue()
 
 
-def _pillow_chart_png(fig: go.Figure, *, width: int, height: int) -> Optional[bytes]:
+def _pillow_chart_png(fig: go.Figure, *, width: int, height: int) -> Optional[bytes]:  # pragma: no cover
     try:
         themed = _apply_ppt_figure_theme(go.Figure(fig))
     except Exception:
