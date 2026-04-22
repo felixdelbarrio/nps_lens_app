@@ -237,11 +237,13 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["touchpoint_mode"]["value"] == "domain_touchpoint"
+    assert linking_payload["causal_method"]["value"] == "domain_touchpoint"
+    assert linking_payload["navigation"][1]["label"] == "Touchpoints afectados por Subpalanca"
     assert "situation" in linking_payload
-    assert "journeys" in linking_payload
+    assert "entity_summary" in linking_payload
     assert "scenarios" in linking_payload
-    assert linking_payload["journey_routes_table"] is not None
+    assert "deep_dive" in linking_payload
+    assert linking_payload["deep_dive"]["tabs"][2]["label"] == "Data deepdive analysis"
 
 
 def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) -> None:

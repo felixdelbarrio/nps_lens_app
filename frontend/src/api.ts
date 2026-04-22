@@ -135,20 +135,13 @@ export type LinkingPayload = {
   focus_group: string;
   focus_label: string;
   empty_state: string;
+  causal_method?: Record<string, unknown>;
+  navigation?: Array<Record<string, unknown>>;
   kpis: Record<string, number | null>;
-  touchpoint_mode?: Record<string, unknown>;
   situation?: Record<string, unknown>;
-  journeys?: Record<string, unknown>;
+  entity_summary?: Record<string, unknown>;
   scenarios?: Record<string, unknown>;
-  overview_figure?: PlotlyFigureSpec | null;
-  priority_figure?: PlotlyFigureSpec | null;
-  risk_recovery_figure?: PlotlyFigureSpec | null;
-  heatmap_figure?: PlotlyFigureSpec | null;
-  lag_figure?: PlotlyFigureSpec | null;
-  ranking_table: Array<Record<string, unknown>>;
-  evidence_table: Array<Record<string, unknown>>;
-  journey_routes_table: Array<Record<string, unknown>>;
-  top_topic: string;
+  deep_dive?: Record<string, unknown>;
 };
 
 export type DatasetTable = {

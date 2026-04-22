@@ -156,7 +156,8 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     )
 
     assert len(out) == 1
-    assert out.iloc[0]["nps_topic"] == "Acceso > Login"
+    assert out.iloc[0]["nps_topic"] == "Login"
+    assert out.iloc[0]["anchor_topic"] == "Acceso > Login"
     assert out.iloc[0]["touchpoint"] == "Login"
     assert out.iloc[0]["linked_pairs"] == 5
     assert out.iloc[0]["linked_incidents"] == 5
@@ -179,6 +180,7 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     }
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "2 comentarios VoC" in out.iloc[0]["chain_story"]
+    assert "subpalanca Login" in out.iloc[0]["chain_story"]
     assert out.iloc[0]["action_lane"] == "Fix estructural"
     assert out.iloc[0]["owner_role"] == "Producto + Tecnologia"
 
