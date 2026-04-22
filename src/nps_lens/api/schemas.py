@@ -139,17 +139,10 @@ class LinkingResponse(BaseModel):
     focus_group: str = ""
     focus_label: str = ""
     empty_state: str = ""
+    causal_method: dict[str, Any] = Field(default_factory=dict)
+    navigation: list[dict[str, Any]] = Field(default_factory=list)
     kpis: dict[str, Any] = Field(default_factory=dict)
-    touchpoint_mode: dict[str, Any] = Field(default_factory=dict)
     situation: dict[str, Any] = Field(default_factory=dict)
-    journeys: dict[str, Any] = Field(default_factory=dict)
+    entity_summary: dict[str, Any] = Field(default_factory=dict)
     scenarios: dict[str, Any] = Field(default_factory=dict)
-    overview_figure: Optional[dict[str, Any]] = None
-    priority_figure: Optional[dict[str, Any]] = None
-    risk_recovery_figure: Optional[dict[str, Any]] = None
-    heatmap_figure: Optional[dict[str, Any]] = None
-    lag_figure: Optional[dict[str, Any]] = None
-    ranking_table: list[dict[str, Any]] = Field(default_factory=list)
-    evidence_table: list[dict[str, Any]] = Field(default_factory=list)
-    journey_routes_table: list[dict[str, Any]] = Field(default_factory=list)
-    top_topic: str = ""
+    deep_dive: dict[str, Any] = Field(default_factory=dict)

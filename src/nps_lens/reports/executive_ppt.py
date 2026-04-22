@@ -48,6 +48,7 @@ from nps_lens.design.tokens import (
     plotly_continuous_scale,
     plotly_risk_scale,
 )
+from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.reports.ppt_template import (
     CorporatePresentationTheme,
     build_presentation,
@@ -56,7 +57,7 @@ from nps_lens.reports.ppt_template import (
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
     _compact_axis_label,
-    chart_broken_journeys_bar,
+    chart_causal_entity_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
     chart_daily_mix_business,
@@ -5601,9 +5602,11 @@ def _add_causal_timeline_slide(
     nps_points_at_risk: float,
     nps_points_recoverable: float,
     top3_incident_share: float,
+    touchpoint_source: str,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    method_spec = get_causal_method_spec(touchpoint_source)
     incidents_total = int(
         pd.to_numeric(overall_daily.get("incidents", 0.0), errors="coerce").fillna(0.0).sum()
     )
@@ -5620,8 +5623,8 @@ def _add_causal_timeline_slide(
     )
     _add_header(
         slide,
-        title="7. Cuando la operación afecta a la experiencia",
-        subtitle=period_label,
+        title="7. Situación del periodo",
+        subtitle=f"{method_spec.situation_subtitle} · {period_label}",
     )
     _panel(
         slide,
@@ -5659,10 +5662,7 @@ def _add_causal_timeline_slide(
     text_p = text_tf.paragraphs[0]
     text_p.alignment = PP_ALIGN.LEFT
     text_r = text_p.add_run()
-    text_r.text = (
-        "Las incidencias degradan momentos críticos del journey, lo que genera experiencias "
-        "negativas que se reflejan en los comentarios y finalmente en el NPS."
-    )
+    text_r.text = method_spec.situation_note
     text_r.font.name = BBVA_FONT_BODY
     text_r.font.size = Pt(12.0)
     text_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
@@ -5713,15 +5713,23 @@ def _add_journeys_summary_slide(
     *,
     period_label: str,
     touchpoint_source: str,
-    journey_df: pd.DataFrame,
+    entity_summary_df: pd.DataFrame,
+    entity_summary_kpis: list[dict[str, str]],
 ) -> None:
-    def _journeys_summary_figure(journeys: pd.DataFrame) -> Optional[go.Figure]:
-        fig = chart_broken_journeys_bar(
-            journeys,
+    method_spec = get_causal_method_spec(touchpoint_source)
+
+    def _summary_figure(summary_df: pd.DataFrame) -> Optional[go.Figure]:
+        plot_df = summary_df.copy() if summary_df is not None else pd.DataFrame()
+        if plot_df.empty:
+            return None
+        plot_df["entity_label"] = plot_df.get("nps_topic", "").astype(str).str.strip()
+        fig = chart_causal_entity_bar(
+            plot_df,
             get_theme("light"),
-            top_k=min(10, len(journeys)) if not journeys.empty else 10,
+            entity_label=method_spec.entity_singular,
+            top_k=min(10, len(plot_df)) if not plot_df.empty else 10,
         )
-        if fig is None or journeys.empty:
+        if fig is None or plot_df.empty:
             return fig
 
         y_values = [
@@ -5774,9 +5782,9 @@ def _add_journeys_summary_slide(
         )
         fig.update_coloraxes(
             colorbar=dict(
-                title=dict(text="NPS medio", side="right", font=dict(size=15)),
+                title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
                 tickmode="array",
-                tickvals=[0, 2, 6, 8, 10],
+                tickvals=[0, 1, 2, 3, 4],
                 tickfont=dict(size=14),
                 len=0.82,
                 y=0.5,
@@ -5789,78 +5797,33 @@ def _add_journeys_summary_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="8. Experiencias afectadas del periodo",
-        subtitle=f"Resumen ejecutivo de casos donde incidencias y comentarios apuntan a la misma fricción · {period_label}",
+        title=f"8. {method_spec.navigation_title}",
+        subtitle=f"{method_spec.navigation_subtitle} · {period_label}",
     )
-    mode_label = ""
-    if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-        mode_label = "Catálogo ejecutivo de journeys"
-    elif str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-        mode_label = "Cruce semántico incidencias-comentarios"
-    if mode_label:
-        mode_box = slide.shapes.add_textbox(Inches(0.68), Inches(1.18), Inches(4.0), Inches(0.18))
-        mode_tf = mode_box.text_frame
-        _configure_text_frame(mode_tf)
-        mode_tf.clear()
-        mode_p = mode_tf.paragraphs[0]
-        mode_p.alignment = PP_ALIGN.LEFT
-        mode_r = mode_p.add_run()
-        mode_r.text = mode_label
-        mode_r.font.name = BBVA_FONT_BODY
-        mode_r.font.size = Pt(8.5)
-        mode_r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
-    journeys_df = journey_df.copy() if journey_df is not None else pd.DataFrame()
-    linked_pairs_series = (
-        pd.to_numeric(journeys_df["linked_pairs"], errors="coerce")
-        if "linked_pairs" in journeys_df.columns
-        else pd.Series(dtype=float)
-    )
-    cohesion_series = (
-        pd.to_numeric(journeys_df["semantic_cohesion"], errors="coerce")
-        if "semantic_cohesion" in journeys_df.columns
-        else pd.Series(dtype=float)
-    )
-    linked_pairs_total = int(linked_pairs_series.fillna(0).sum())
-    mean_cohesion = float(cohesion_series.fillna(0.0).mean())
-    _add_stat_card(
-        slide,
-        left=0.66,
-        top=1.48,
-        width=3.78,
-        height=1.10,
-        label="Journeys detectados",
-        value=str(int(len(journeys_df))),
-        accent=BBVA_COLORS["blue"],
-    )
-    _add_stat_card(
-        slide,
-        left=4.62,
-        top=1.48,
-        width=3.78,
-        height=1.10,
-        label="Links validados",
-        value=str(linked_pairs_total),
-        accent=BBVA_COLORS["orange"],
-    )
-    _add_stat_card(
-        slide,
-        left=8.58,
-        top=1.48,
-        width=3.78,
-        height=1.10,
-        label="Cohesión media",
-        value=f"{mean_cohesion:.2f}",
-        accent=BBVA_COLORS["green"],
-    )
+    for index, metric in enumerate(entity_summary_kpis[:3]):
+        _add_stat_card(
+            slide,
+            left=0.66 + index * 3.96,
+            top=1.48,
+            width=3.78,
+            height=1.10,
+            label=str(metric.get("label", "")).strip(),
+            value=str(metric.get("value", "")).strip(),
+            accent=(
+                BBVA_COLORS["blue"]
+                if index == 0
+                else BBVA_COLORS["orange"] if index == 1 else BBVA_COLORS["green"]
+            ),
+        )
     _panel(slide, left=0.66, top=2.88, width=12.02, height=4.02, title="")
     _figure_in_panel(
         slide,
-        figure=_journeys_summary_figure(journeys_df),
+        figure=_summary_figure(entity_summary_df),
         left=0.84,
         top=3.10,
         width=11.66,
         height=3.56,
-        empty_note="No he identificado journeys rotos defendibles en esta ventana.",
+        empty_note=method_spec.table_empty_message,
         target_ppi=170,
     )
 
@@ -5875,20 +5838,25 @@ def _add_chain_scenario_slide(
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    method_spec = get_causal_method_spec(str(chain_row.get("presentation_mode", "") or "").strip())
     title = _clip(chain_row.get("nps_topic", f"Cadena {idx}"), 70)
     linked_incidents = int(_safe_int(chain_row.get("linked_incidents", 0), default=0))
     linked_comments = int(_safe_int(chain_row.get("linked_comments", 0), default=0))
     touchpoint = _clip(chain_row.get("touchpoint", "Touchpoint"), 36)
+    anchor_topic = _clip(chain_row.get("anchor_topic", ""), 52)
     owner_role = _clip(chain_row.get("owner_role", "n/d"), 24)
     focus_label = _focus_risk_label(focus_name)
     _add_header(
         slide,
         title=f"9.{idx} Análisis causal",
-        subtitle=f"{title} · {touchpoint} · {period_label}",
+        subtitle=f"{method_spec.entity_singular}: {title} · {period_label}",
     )
     chain_statement = (
         f"{linked_incidents} incidencias de Helix y {linked_comments} comentarios de cliente "
-        f"convergen en '{title}' y explican riesgo de {focus_label}. Equipo: {owner_role}."
+        f"convergen en '{title}' bajo la lectura causal {method_spec.label}. "
+        f"Touchpoint: {touchpoint}. "
+        f"{f'Tópico NPS ancla: {anchor_topic}. ' if anchor_topic else ''}"
+        f"Riesgo de {focus_label}. Equipo: {owner_role}."
     )
     banner = _panel(
         slide,
@@ -6023,6 +5991,8 @@ def generate_business_review_ppt(
     incident_timeline_df: Optional[pd.DataFrame] = None,
     hotspot_focus_note: str = "",
     touchpoint_source: str = "",
+    entity_summary_df: Optional[pd.DataFrame] = None,
+    entity_summary_kpis: Optional[list[dict[str, str]]] = None,
     executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     broken_journeys_df: Optional[pd.DataFrame] = None,
 ) -> BusinessPptResult:
@@ -6097,8 +6067,8 @@ def generate_business_review_ppt(
     subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
     opportunities_df = _opportunities_table(selected_raw, dimension="Palanca", min_n=200)
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
-    broken_journeys = (
-        broken_journeys_df.copy() if broken_journeys_df is not None else pd.DataFrame()
+    causal_entity_summary = (
+        entity_summary_df.copy() if entity_summary_df is not None else pd.DataFrame()
     )
 
     _add_cover_slide(
@@ -6163,12 +6133,14 @@ def generate_business_review_ppt(
         nps_points_at_risk=nps_points_at_risk,
         nps_points_recoverable=nps_points_recoverable,
         top3_incident_share=top3_incident_share,
+        touchpoint_source=touchpoint_source,
     )
     _add_journeys_summary_slide(
         prs,
         period_label=period_label,
         touchpoint_source=touchpoint_source,
-        journey_df=broken_journeys,
+        entity_summary_df=causal_entity_summary,
+        entity_summary_kpis=list(entity_summary_kpis or []),
     )
     if chains is not None and not chains.empty:
         for idx, (_, chain_row) in enumerate(chains.head(3).iterrows(), start=1):
