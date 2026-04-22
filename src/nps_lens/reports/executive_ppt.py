@@ -1726,14 +1726,15 @@ def _pillow_render_xy(fig: go.Figure, width: int, height: int) -> Optional[bytes
     trace_types = {
         str(getattr(trace, "type", "") or "").strip().lower() for trace in fig.data if trace is not None
     }
-    if trace_types == {"bar"} and all(str(getattr(trace, "orientation", "") or "").lower() == "h" for trace in fig.data):
-        horizontal = True
-    else:
-        horizontal = False
+    horizontal = (
+        True
+        if trace_types == {"bar"}
+        and all(str(getattr(trace, "orientation", "") or "").lower() == "h" for trace in fig.data)
+        else False
+    )
 
     image = Image.new("RGB", (width, height), _pillow_color("#FFFFFF"))
     draw = ImageDraw.Draw(image)
-    title_font = _pillow_font(max(height // 36, 18), bold=True)
     axis_font = _pillow_font(max(height // 44, 14))
     tick_font = _pillow_font(max(height // 48, 12))
     legend_font = _pillow_font(max(height // 50, 11))

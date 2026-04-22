@@ -36,7 +36,6 @@ from nps_lens.analytics.incident_attribution import (
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import (
-    IncidentRationaleSummary,
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
 )
