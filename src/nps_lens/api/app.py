@@ -29,6 +29,7 @@ from nps_lens.settings import (
     Settings,
     load_runtime_dotenv,
     normalize_downloads_path,
+    normalize_helix_base_url,
     persist_service_origin_hierarchy,
     persist_ui_prefs,
 )
@@ -243,6 +244,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             next_values["downloads_path"] = normalize_downloads_path(
                 next_values.get("downloads_path")
+            )
+            next_values["helix_base_url"] = normalize_helix_base_url(
+                next_values.get("helix_base_url")
             )
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -142,19 +142,36 @@ def _safe_int(v: object, default: int = 0) -> int:
     return int(i)
 
 
-def _fmt_pct_or_nd(v: object) -> str:
+def _fmt_locale_number(
+    value: object,
+    *,
+    decimals: int = 0,
+    signed: bool = False,
+    default: str = "n/d",
+) -> str:
+    f = _safe_float(value, default=float("nan"))
+    if not np.isfinite(f):
+        return default
+    precision = max(int(decimals), 0)
+    rendered = f"{f:+,.{precision}f}" if signed else f"{f:,.{precision}f}"
+    return rendered.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def _fmt_count_or_nd(v: object) -> str:
+    return _fmt_locale_number(v, decimals=0)
+
+
+def _fmt_pct_or_nd(v: object, decimals: int = 0) -> str:
     f = _safe_float(v, default=float("nan"))
-    return "n/d" if not np.isfinite(f) else f"{f*100:.0f}%"
+    return "n/d" if not np.isfinite(f) else f"{_fmt_locale_number(f * 100.0, decimals=decimals)}%"
 
 
 def _fmt_signed_or_nd(v: object, decimals: int = 1) -> str:
-    f = _safe_float(v, default=float("nan"))
-    return "n/d" if not np.isfinite(f) else f"{f:+.{int(decimals)}f}"
+    return _fmt_locale_number(v, decimals=decimals, signed=True)
 
 
 def _fmt_num_or_nd(v: object, decimals: int = 2) -> str:
-    f = _safe_float(v, default=float("nan"))
-    return "n/d" if not np.isfinite(f) else f"{f:.{int(decimals)}f}"
+    return _fmt_locale_number(v, decimals=decimals)
 
 
 def _clip(txt: object, max_len: int) -> str:
@@ -981,7 +998,7 @@ def _delta_bars_fig(change_df: pd.DataFrame, *, metric: str, x_title: str) -> Op
             y=d["axis_label"],
             orientation="h",
             marker=dict(color=d["color"].tolist()),
-            text=[f"{v:+.1f}" for v in d[metric].tolist()],
+            text=[_fmt_signed_or_nd(v, decimals=1) for v in d[metric].tolist()],
             textposition="outside",
             cliponaxis=False,
             showlegend=False,
@@ -1040,7 +1057,7 @@ def _gap_vs_overall_fig(gap_df: pd.DataFrame) -> Optional[go.Figure]:
             y=d["axis_label"],
             orientation="h",
             marker=dict(color="#" + BBVA_COLORS["red"]),
-            text=[f"{v:+.1f}" for v in d["gap_vs_overall"].tolist()],
+            text=[_fmt_signed_or_nd(v, decimals=1) for v in d["gap_vs_overall"].tolist()],
             textposition="outside",
             cliponaxis=False,
         )
@@ -1542,10 +1559,10 @@ def _format_tick_value(value: float) -> str:  # pragma: no cover
     if not np.isfinite(value):
         return ""
     if abs(value) >= 1000:
-        return f"{value:,.0f}".replace(",", ".")
+        return _fmt_count_or_nd(value)
     if math.isclose(value, round(value), abs_tol=1e-9):
         return f"{int(round(value))}"
-    return f"{value:.1f}"
+    return _fmt_num_or_nd(value, decimals=1)
 
 
 def _plotly_colorscale_color(
@@ -2706,12 +2723,15 @@ def _cover_summary_lines(overview: dict[str, object], story_md: str) -> list[str
     if np.isfinite(classic_delta) and abs(classic_delta) >= 0.1:
         direction = "sube" if classic_delta > 0 else "cae"
         lines.append(
-            f"Del inicio al cierre del periodo, el NPS clásico {direction} {abs(classic_delta):.1f} puntos."
+            "Del inicio al cierre del periodo, el NPS clásico "
+            f"{direction} {_fmt_num_or_nd(abs(classic_delta), decimals=1)} puntos."
         )
     if np.isfinite(detractor_delta_pp) and abs(detractor_delta_pp) >= 0.1:
         direction = "sube" if detractor_delta_pp > 0 else "baja"
         lines.append(
-            f"El peso detractor {direction} {abs(detractor_delta_pp):.1f} puntos porcentuales en la ventana analizada."
+            "El peso detractor "
+            f"{direction} {_fmt_num_or_nd(abs(detractor_delta_pp), decimals=1)} puntos porcentuales "
+            "en la ventana analizada."
         )
 
     for _, bullets in _parse_story_sections(story_md):
@@ -3227,7 +3247,7 @@ def _chain_priority_summary(  # pragma: no cover - legacy helper for compatibili
     if owner:
         parts_bottom.append(f"Owner {owner}")
     if np.isfinite(eta_weeks):
-        parts_bottom.append(f"ETA {eta_weeks:.1f} semanas")
+        parts_bottom.append(f"ETA {_fmt_num_or_nd(eta_weeks, decimals=1)} semanas")
     return [
         " · ".join(parts_top),
         " · ".join(parts_bottom),
@@ -4858,7 +4878,7 @@ def _add_cover_slide(
         width=2.3,
         height=1.58,
         label="Comentarios",
-        value=f"{int(_safe_int(overview.get('comments', 0))):,}".replace(",", "."),
+        value=_fmt_count_or_nd(overview.get("comments", 0)),
         accent=BBVA_COLORS["blue"],
         hint="Base útil del periodo",
     )
@@ -5008,7 +5028,7 @@ def _add_deep_dive_slide(
     table_rows = [
         [
             str(row.cluster_id),
-            f"{int(row.n):,}".replace(",", "."),
+            _fmt_count_or_nd(row.n),
             str(row.top_terms_txt),
             str(row.example_txt),
         ]
@@ -5030,7 +5050,7 @@ def _add_deep_dive_slide(
     )
 
     bullet_lines = [
-        f"{row.label}: {int(row.n):,} comentarios.".replace(",", ".")
+        f"{row.label}: {_fmt_count_or_nd(row.n)} comentarios."
         for _, row in text_topics_df.head(3).iterrows()
     ] or ["No se han detectado temas con masa crítica suficiente."]
     _add_bullet_lines(
@@ -5433,7 +5453,8 @@ def _add_gap_slide(
     )
 
     palanca_lines = [
-        f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
+        f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
+        f"NPS {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(palanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -5459,7 +5480,8 @@ def _add_gap_slide(
         target_ppi=174,
     )
     subpalanca_lines = [
-        f"{idx + 1}. {_clip(row.value, 30)} · n={int(row.n)} · NPS {_fmt_num_or_nd(row.nps)} · gap {float(row.gap_vs_overall):+.1f}"
+        f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
+        f"NPS {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(subpalanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -5501,7 +5523,10 @@ def _add_opportunity_slide(
         left_margin = 248 if max_len >= 26 else 220 if max_len >= 20 else 188
 
         uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
-        text_values = [f"+{value:.1f}" if np.isfinite(value) else "" for value in uplift.tolist()]
+        text_values = [
+            _fmt_signed_or_nd(value, decimals=1) if np.isfinite(value) else ""
+            for value in uplift.tolist()
+        ]
         with contextlib.suppress(Exception):
             fig.data[0].text = text_values
         with contextlib.suppress(Exception):
@@ -5673,7 +5698,7 @@ def _add_causal_timeline_slide(
         width=1.60,
         height=1.12,
         label="Incidencias",
-        value=f"{incidents_total:,}",
+        value=_fmt_count_or_nd(incidents_total),
         accent=BBVA_COLORS["blue"],
     )
     _add_stat_card(
@@ -5683,7 +5708,7 @@ def _add_causal_timeline_slide(
         width=1.60,
         height=1.12,
         label="% detractores",
-        value=f"{detractor_avg*100.0:.2f}%",
+        value=_fmt_pct_or_nd(detractor_avg, decimals=1),
         accent=BBVA_COLORS["red"],
     )
     _add_stat_card(
@@ -5693,7 +5718,7 @@ def _add_causal_timeline_slide(
         width=1.60,
         height=1.12,
         label="NPS en riesgo",
-        value=f"{nps_points_at_risk:.2f} pts",
+        value=f"{_fmt_num_or_nd(nps_points_at_risk)} pts",
         accent=BBVA_COLORS["orange"],
     )
     _add_stat_card(
@@ -5703,7 +5728,7 @@ def _add_causal_timeline_slide(
         width=1.60,
         height=1.12,
         label="NPS recuperable",
-        value=f"{nps_points_recoverable:.2f} pts",
+        value=f"{_fmt_num_or_nd(nps_points_recoverable)} pts",
         accent=BBVA_COLORS["green"],
     )
 

@@ -828,6 +828,17 @@ input::placeholder {
   font-weight: 500;
 }
 
+.table-link {
+  color: var(--color-brand);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-brand-strong) 35%, transparent);
+}
+
+.table-link:hover {
+  border-bottom-color: var(--color-brand-strong);
+}
+
 .pager {
   display: flex;
   justify-content: space-between;
@@ -1134,6 +1145,19 @@ input::placeholder {
   font-size: clamp(32px, 3.4vw, 48px);
 }
 
+.spotlight-card-wow {
+  gap: var(--space-5);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-brand-soft) 68%, transparent), transparent 42%),
+    linear-gradient(135deg, color-mix(in srgb, var(--color-brand-soft) 26%, transparent), transparent 34%),
+    var(--color-surface);
+}
+
+.spotlight-copy {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .hero-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1206,6 +1230,10 @@ input::placeholder {
   gap: var(--space-3);
 }
 
+.spotlight-metrics-compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .spotlight-metric {
   display: grid;
   gap: 6px;
@@ -1220,6 +1248,64 @@ input::placeholder {
   line-height: 28px;
   font-weight: 500;
   color: var(--color-brand);
+}
+
+.scenario-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
+  gap: var(--space-4);
+}
+
+.scenario-fact-sheet {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-element);
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-brand-soft) 18%, var(--color-surface) 82%);
+}
+
+.scenario-fact-sheet h4 {
+  margin: 0;
+  color: var(--color-brand);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.scenario-fact-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scenario-fact-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+.scenario-fact-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.scenario-fact-row dt {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.scenario-fact-row dd {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+  line-height: 22px;
 }
 
 .evidence-toolbar {
@@ -1249,6 +1335,10 @@ input::placeholder {
 .evidence-view-toggle button.is-active {
   background: var(--color-brand-soft);
   border-color: var(--color-brand-strong);
+}
+
+.evidence-pill-link {
+  text-decoration: none;
 }
 
 .evidence-card-grid {
@@ -1297,6 +1387,7 @@ input::placeholder {
   }
 
   .scenario-nav,
+  .scenario-overview-grid,
   .figure-split {
     grid-template-columns: 1fr;
   }
@@ -1344,6 +1435,10 @@ input::placeholder {
   }
 
   .spotlight-head {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-fact-row {
     grid-template-columns: 1fr;
   }
 }

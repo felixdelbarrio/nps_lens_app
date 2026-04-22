@@ -12,7 +12,29 @@ export function RecordTable({ rows, emptyMessage, testId, columns: providedColum
     return <p className="empty-state">{emptyMessage}</p>;
   }
 
-  const columns = providedColumns?.length ? providedColumns : Object.keys(rows[0] || {});
+  const columns = (providedColumns?.length ? providedColumns : Object.keys(rows[0] || {})).filter(
+    (column) => !column.endsWith("__href") && !column.endsWith("__hyperlink")
+  );
+
+  function renderCell(row: Record<string, unknown>, column: string, rowIndex: number) {
+    const hrefCandidate = row[`${column}__href`] ?? row[`${column}__hyperlink`];
+    const href = typeof hrefCandidate === "string" ? hrefCandidate.trim() : "";
+    const label = formatDisplayValue(row[column], column);
+    if (!href || !label) {
+      return label;
+    }
+    return (
+      <a
+        className="table-link"
+        href={href}
+        key={`${rowIndex}-${column}-link`}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {label}
+      </a>
+    );
+  }
 
   return (
     <div className="table-shell">
@@ -28,7 +50,7 @@ export function RecordTable({ rows, emptyMessage, testId, columns: providedColum
           {rows.map((row, rowIndex) => (
             <tr key={`record-row-${rowIndex}`}>
               {columns.map((column) => (
-                <td key={`${rowIndex}-${column}`}>{formatDisplayValue(row[column], column)}</td>
+                <td key={`${rowIndex}-${column}`}>{renderCell(row, column, rowIndex)}</td>
               ))}
             </tr>
           ))}
