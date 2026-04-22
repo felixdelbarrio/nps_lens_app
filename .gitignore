@@ -100,9 +100,16 @@ packs/*
 logs/
 tmp/
 temp/
+
+# -----------------------------
+# Frontend generated artifacts
+# -----------------------------
 frontend/node_modules/
 frontend/dist/
+frontend/.playwright-browsers/
 frontend/.playwright-data/
 frontend/playwright-report/
 frontend/test-results/
 frontend/*.tsbuildinfo
+.playwright-browsers/
+tmp-ppt-test/

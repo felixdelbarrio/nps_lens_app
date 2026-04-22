@@ -227,7 +227,8 @@ test:
 
 ci:
 	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
-	$(MAKE) lint
+	$(RUFF) check --no-fix .
+	$(BLACK) --check .
 	$(MAKE) frontend-test
 	$(MAKE) frontend-build
 	$(MAKE) frontend-e2e
