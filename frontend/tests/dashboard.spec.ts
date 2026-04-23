@@ -29,7 +29,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.goto("/");
   await expect(
     page.getByRole("heading", {
-      name: /Analisis del NPS Térmico y causalidad con incidencias de clientes/i
+      name: /NPS Lens/i
     })
   ).toBeVisible();
 
@@ -45,8 +45,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("selected-issues-list")).toContainText("extra_columns_detected");
 
   await page.getByRole("button", { name: /Insights/i }).click();
+  await page.getByRole("button", { name: /Abrir configuración global/i }).click();
+  await page.getByRole("tab", { name: "Ajustes avanzados" }).click();
   await page.getByTestId("reprocess-button").click();
   await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados");
+  await page.getByRole("button", { name: /Cerrar configuración/i }).click();
 
   await page.getByRole("button", { name: /Datos/i }).click();
   await expect(page.getByTestId("data-table")).toContainText("Browser");

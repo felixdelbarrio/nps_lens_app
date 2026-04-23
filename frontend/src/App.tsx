@@ -33,6 +33,7 @@ import { PrimaryNav } from "./components/PrimaryNav";
 import { RecordTable } from "./components/RecordTable";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
+import { Icon } from "./components/Icon";
 import {
   applyDocumentTheme,
   normalizeThemeMode,
@@ -430,6 +431,7 @@ export function App() {
 
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
   const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
+  const hasConfiguredN2 = n2Options.length > 0;
   const causalMethodOptions = config?.causal_method_options || [];
   const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
   useEffect(() => {
@@ -658,13 +660,13 @@ export function App() {
             <p className="eyebrow">Service Container</p>
             <h2>Service Origin</h2>
             <p className="secondary-copy">
-              El contexto activo vive en el lateral para acompañar Insights, Ingesta y Datos sin duplicidades.
+              Contexto activo para Insights, Ingesta y Datos
             </p>
           </div>
         </div>
         <div className="field-grid single-column">
           <label>
-            <span>Service Origin BUUG</span>
+            <span>BUUG</span>
             <select onChange={(event) => setServiceOrigin(event.target.value)} value={serviceOrigin}>
               {(config?.service_origins || []).map((origin) => (
                 <option key={origin} value={origin}>
@@ -674,7 +676,7 @@ export function App() {
             </select>
           </label>
           <label>
-            <span>Service Origin N1</span>
+            <span>N1</span>
             <select onChange={(event) => setServiceOriginN1(event.target.value)} value={serviceOriginN1}>
               {n1Options.map((option) => (
                 <option key={option} value={option}>
@@ -683,33 +685,24 @@ export function App() {
               ))}
             </select>
           </label>
-          <label className="field-span-2">
-            <span>Service Origin N2</span>
-            <select
-              className="multi-select-control"
-              disabled={!n2Options.length}
-              multiple
-              onChange={handleServiceOriginN2Select}
-              value={selectedN2Values}
-            >
-              {n2Options.length ? (
-                n2Options.map((option) => (
+          {hasConfiguredN2 ? (
+            <label className="field-span-2">
+              <span>N2</span>
+              <select
+                className="multi-select-control"
+                multiple
+                onChange={handleServiceOriginN2Select}
+                value={selectedN2Values}
+              >
+                {n2Options.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
-                ))
-              ) : (
-                <option value="" disabled>
-                  Sin N2 configurados para esta combinación
-                </option>
-              )}
-            </select>
-            <span className="field-hint">
-              {n2Options.length
-                ? "Pulsa Ctrl/Cmd para seleccionar varios N2."
-                : "Define N2 por combinación desde Configuración si necesitas habilitarlos."}
-            </span>
-          </label>
+                ))}
+              </select>
+              <span className="field-hint">Pulsa Ctrl/Cmd para seleccionar varios N2.</span>
+            </label>
+          ) : null}
         </div>
       </section>
     );
@@ -721,9 +714,9 @@ export function App() {
         <div className="section-heading">
           <div>
             <p className="eyebrow">Filters</p>
-            <h2>Recorte analítico</h2>
+            <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Año, mes y grupo NPS se aplican antes del área core para mantener un flujo de lectura estable.
+              Transversales para Insights, Reportes y Datos
             </p>
           </div>
         </div>
@@ -847,17 +840,12 @@ export function App() {
         <section className="surface-card stack-panel">
           <div className="section-heading section-heading-inline">
             <div>
-              <p className="eyebrow">Resumen ejecutivo</p>
+              <p className="eyebrow">ÁMBITO DE ANÁLISIS</p>
               <h2>{dashboard?.context_label || "Periodo seleccionado"}</h2>
+              <p className="secondary-copy">
+                Permite centrarse exclusivamente en NPS Térmico como aplicar causalidad al mismo analizandolo junto a incidencias de cliente
+              </p>
             </div>
-            <button
-              className="secondary-button"
-              data-testid="reprocess-button"
-              onClick={() => void handleReprocess()}
-              type="button"
-            >
-              {isMutating ? "Reprocesando..." : "Reprocesar agregados"}
-            </button>
           </div>
 
           <div className="metric-grid">
@@ -1357,10 +1345,10 @@ export function App() {
       <main className="app-shell">
         <aside className="app-sidebar">
           <div className="brand-card">
-            <p className="eyebrow">BBVA Experience</p>
-            <h1>Analisis del NPS Térmico y causalidad con incidencias de clientes.</h1>
+            <p className="eyebrow">BBVA</p>
+            <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Producto desacoplado con navegación más clara, ingesta estructurada y sistema visual consistente.
+              Análisis del NPS Térmico y causalidad con incidencias de clientes.
             </p>
           </div>
 
@@ -1375,6 +1363,24 @@ export function App() {
 
         <section className="workspace">
           <header className="topbar">
+            <div className="topbar-actions topbar-actions-floating">
+              <button
+                aria-label="Generar reporte en PowerPoint"
+                className="icon-button topbar-icon-button"
+                onClick={() => void handleDownloadReport()}
+                type="button"
+              >
+                <Icon name="presentation" />
+              </button>
+              <button
+                aria-label="Abrir configuración global"
+                className="icon-button topbar-icon-button"
+                onClick={() => setSettingsOpen(true)}
+                type="button"
+              >
+                <Icon name="settings" />
+              </button>
+            </div>
             <div className="topbar-copy">
               <p className="eyebrow">NPS Lens</p>
               <h2>Orquestación operativa</h2>
@@ -1384,17 +1390,6 @@ export function App() {
               <span className={`status-chip${isMutating || isGeneratingReport ? " is-busy" : ""}`}>
                 {isMutating || isGeneratingReport ? "Sincronizando" : "Operativo"}
               </span>
-              <button className="secondary-button" onClick={() => void handleDownloadReport()} type="button">
-                {isGeneratingReport ? "Generando reporte..." : "Reporte"}
-              </button>
-              <button
-                aria-label="Abrir configuración global"
-                className="secondary-button"
-                onClick={() => setSettingsOpen(true)}
-                type="button"
-              >
-                Configuración
-              </button>
             </div>
           </header>
 
@@ -1425,6 +1420,7 @@ export function App() {
         downloadsPath={downloadsPath}
         helixBaseUrl={helixBaseUrl}
         hierarchySaving={isSavingHierarchy}
+        onReprocess={handleReprocess}
         minN={minN}
         minNCross={minNCross}
         minSimilarity={minSimilarity}
@@ -1436,6 +1432,7 @@ export function App() {
         serviceOriginN1Map={config?.service_origin_n1_map || {}}
         serviceOriginN2Map={config?.service_origin_n2_map || {}}
         serviceOrigins={config?.service_origins || []}
+        reprocessPending={isMutating}
         setDownloadsPath={setDownloadsPath}
         setHelixBaseUrl={setHelixBaseUrl}
         setMinN={setMinN}
