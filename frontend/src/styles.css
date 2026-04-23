@@ -282,8 +282,25 @@ textarea:focus-visible {
 
 .brand-card {
   background:
-    linear-gradient(135deg, var(--color-hero-start), transparent 58%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-brand-soft) 88%, transparent), transparent 46%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-hero-start) 78%, white 22%), transparent 64%),
     linear-gradient(180deg, var(--color-surface), var(--color-surface));
+  position: relative;
+  overflow: hidden;
+  gap: var(--space-3);
+}
+
+.brand-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -36px -44px auto;
+  width: 132px;
+  height: 132px;
+  border-radius: 28px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 14%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-brand-soft) 72%, white 28%), transparent);
+  transform: rotate(18deg);
+  pointer-events: none;
 }
 
 .topbar h2,
@@ -394,14 +411,18 @@ ul {
 }
 
 .topbar {
+  position: relative;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: var(--space-6);
-  padding: var(--space-5) var(--space-6);
+  padding: 72px var(--space-6) var(--space-5);
   border-radius: var(--radius-container);
   border: 1px solid var(--color-border);
-  background: var(--color-surface);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-brand-soft) 68%, transparent), transparent 38%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-brand-soft) 22%, transparent), transparent 32%),
+    var(--color-surface);
 }
 
 .topbar-copy {
@@ -418,6 +439,26 @@ ul {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-3);
+}
+
+.topbar-actions-floating {
+  position: absolute;
+  top: var(--space-5);
+  right: var(--space-6);
+  z-index: 1;
+}
+
+.topbar-icon-button {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-brand-strong) 12%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 84%, white 16%);
+}
+
+.topbar-icon-button .bbva-icon {
+  width: 22px;
+  height: 22px;
 }
 
 .status-chip {
@@ -997,6 +1038,11 @@ input::placeholder {
   gap: var(--space-3);
 }
 
+.settings-subsection-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .settings-subsection {
   padding: var(--space-4);
   border-radius: var(--radius-element);
@@ -1254,6 +1300,12 @@ input::placeholder {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
   gap: var(--space-4);
+}
+
+.scenario-evidence-stack {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
 }
 
 .scenario-fact-sheet {

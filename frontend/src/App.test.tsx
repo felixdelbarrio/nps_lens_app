@@ -449,11 +449,12 @@ describe("App", () => {
       ).toBeInTheDocument()
     );
 
-    expect(screen.getByRole("heading", { name: /Analisis del NPS Térmico/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /NPS Lens/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Recorte analítico/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "N2" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Año" })).toHaveValue("2026");
       expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("03");
@@ -463,7 +464,7 @@ describe("App", () => {
     ).toHaveTextContent("Marzo");
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
-    expect(screen.queryByRole("heading", { name: /Recorte analítico/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Histórico" }));
     expect(screen.getByText("Histórico de cargas")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Ver issues" }));
@@ -491,7 +492,7 @@ describe("App", () => {
       ).toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("button", { name: /^Reporte$/i }));
+    await user.click(screen.getByRole("button", { name: /Generar reporte en PowerPoint/i }));
 
     await waitFor(() =>
       expect(
@@ -558,6 +559,8 @@ describe("App", () => {
     expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument();
     expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Comentarios enlazados" })).toBeInTheDocument();
+    expect(screen.queryByText(/Los IDs abren la incidencia original en Helix/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tabla" })).toHaveClass("is-active");
     expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(
       expect.arrayContaining([

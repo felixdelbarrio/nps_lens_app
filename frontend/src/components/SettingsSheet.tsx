@@ -35,6 +35,8 @@ type SettingsSheetProps = {
   serviceOriginN2Map: Record<string, Record<string, string[]>>;
   hierarchySaving: boolean;
   onSaveHierarchy: (payload: ServiceOriginHierarchyPayload) => Promise<void>;
+  onReprocess: () => Promise<void>;
+  reprocessPending: boolean;
 };
 
 const SETTINGS_TABS = [
@@ -69,7 +71,9 @@ export function SettingsSheet({
   serviceOriginN1Map,
   serviceOriginN2Map,
   hierarchySaving,
-  onSaveHierarchy
+  onSaveHierarchy,
+  onReprocess,
+  reprocessPending
 }: SettingsSheetProps) {
   useEffect(() => {
     if (!open) {
@@ -289,6 +293,16 @@ export function SettingsSheet({
                       value={minNCross}
                     />
                   </label>
+                </div>
+                <div className="settings-subsection-actions">
+                  <button
+                    className="secondary-button"
+                    data-testid="reprocess-button"
+                    onClick={() => void onReprocess()}
+                    type="button"
+                  >
+                    {reprocessPending ? "Reprocesando..." : "Reprocesar agregados"}
+                  </button>
                 </div>
               </article>
             </div>
