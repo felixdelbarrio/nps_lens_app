@@ -197,7 +197,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const banner = asRecord(scenarios.banner);
   const scenarioCards = asRows(scenarios.cards);
   const bannerMetrics = asRows(banner.metrics);
-  const contextPills = linking.context_pills || [];
   const navigationItems = useMemo(() => {
     const items = asRows(linking.navigation).map((item) => ({
       id: asString(item.id),
@@ -325,16 +324,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
         </div>
       </div>
 
-      {contextPills.length ? (
-        <div className="context-pill-row">
-          {contextPills.map((pill) => (
-            <span className="context-pill" key={pill}>
-              {pill}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
       <NavigationTabs compact items={navigationItems} onChange={onTabChange} value={tab} />
 
       {tab === "situation" ? (
@@ -451,14 +440,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
           </section>
 
-          <div className="context-pill-row">
-            {((scenarios.pills as unknown[]) || []).map((pill, index) => (
-              <span className="context-pill" key={`scenario-pill-${index}`}>
-                {asString(pill)}
-              </span>
-            ))}
-          </div>
-
           {!activeCard ? (
             <p className="empty-state">
               Hay impacto estadístico, pero no se encontraron escenarios defendibles con link explícito entre Helix y VoC para mostrar.
@@ -533,37 +514,54 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     </dl>
                   </article>
 
-                  <article className="scenario-fact-sheet">
-                    <h4>Incidencias enlazadas</h4>
-                    <div className="evidence-pill-row">
-                      {activeHelixRecords.length ? (
-                        activeHelixRecords.slice(0, 6).map((record, index) => {
-                          const incidentId = asString(record.incident_id, `INC-${index + 1}`);
-                          const href = asString(record.url);
-                          return href ? (
-                            <a
-                              className="evidence-pill evidence-pill-link"
-                              href={href}
-                              key={`${incidentId}-${index}`}
-                              rel="noreferrer"
-                              target="_blank"
+                  <div className="scenario-evidence-stack">
+                    <article className="scenario-fact-sheet">
+                      <h4>Incidencias enlazadas</h4>
+                      <div className="evidence-pill-row">
+                        {activeHelixRecords.length ? (
+                          activeHelixRecords.slice(0, 6).map((record, index) => {
+                            const incidentId = asString(record.incident_id, `INC-${index + 1}`);
+                            const href = asString(record.url);
+                            return href ? (
+                              <a
+                                className="evidence-pill evidence-pill-link"
+                                href={href}
+                                key={`${incidentId}-${index}`}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {incidentId}
+                              </a>
+                            ) : (
+                              <span className="evidence-pill" key={`${incidentId}-${index}`}>
+                                {incidentId}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="secondary-copy">Sin incidencias visibles para este escenario.</span>
+                        )}
+                      </div>
+                    </article>
+
+                    <article className="scenario-fact-sheet">
+                      <h4>Comentarios enlazados</h4>
+                      <div className="evidence-pill-row">
+                        {activeVocRecords.length ? (
+                          activeVocRecords.slice(0, 6).map((record, index) => (
+                            <span
+                              className="evidence-pill"
+                              key={`${asString(record.comment_id, `VOC-${index + 1}`)}-${index}`}
                             >
-                              {incidentId}
-                            </a>
-                          ) : (
-                            <span className="evidence-pill" key={`${incidentId}-${index}`}>
-                              {incidentId}
+                              {asString(record.comment_id, `VOC-${index + 1}`)}
                             </span>
-                          );
-                        })
-                      ) : (
-                        <span className="secondary-copy">Sin incidencias visibles para este escenario.</span>
-                      )}
-                    </div>
-                    <p className="secondary-copy">
-                      Los IDs abren la incidencia original en Helix con la `Record ID` enlazada.
-                    </p>
-                  </article>
+                          ))
+                        ) : (
+                          <span className="secondary-copy">Sin comentarios visibles para este escenario.</span>
+                        )}
+                      </div>
+                    </article>
+                  </div>
                 </div>
 
                 <div className="spotlight-metrics spotlight-metrics-compact">

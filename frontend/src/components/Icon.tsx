@@ -4,6 +4,7 @@ type IconName =
   | "filter"
   | "history"
   | "home"
+  | "presentation"
   | "search"
   | "settings"
   | "upload"
