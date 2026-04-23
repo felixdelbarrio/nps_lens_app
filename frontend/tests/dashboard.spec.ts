@@ -49,6 +49,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("tab", { name: "Ajustes avanzados" }).click();
   await page.getByTestId("reprocess-button").click();
   await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados");
+  await page.getByRole("button", { name: /Cerrar configuración/i }).click();
 
   await page.getByRole("button", { name: /Datos/i }).click();
   await expect(page.getByTestId("data-table")).toContainText("Browser");
