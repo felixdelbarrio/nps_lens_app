@@ -581,6 +581,15 @@ ul {
   font-size: var(--font-size-caption);
 }
 
+.insight-nav-strip {
+  display: flex;
+  align-items: center;
+}
+
+.insight-nav-strip .nav-tabs {
+  width: 100%;
+}
+
 .metric-grid,
 .kpi-grid {
   display: grid;
@@ -1059,16 +1068,6 @@ input::placeholder {
   font-size: 16px;
   line-height: 24px;
   font-weight: 500;
-}
-
-.area-core-card .nav-tabs {
-  display: grid;
-  grid-template-columns: 1fr;
-}
-
-.area-core-card .nav-tabs button {
-  width: 100%;
-  text-align: left;
 }
 
 .report-markdown {

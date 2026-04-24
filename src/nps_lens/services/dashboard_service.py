@@ -918,6 +918,9 @@ class DashboardService:
         median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
         topic_filter_options = _topic_filter_options(affected_topics)
         active_topic_count = max(len(topic_filter_options) - 1, 0)
+        topic_filter_method_label = method_spec.label.lower()
+        if topic_filter_method_label.startswith("por "):
+            topic_filter_method_label = topic_filter_method_label[4:]
 
         timeline_figure = self._serialize_figure(
             self._build_linking_overview_figure(
@@ -999,37 +1002,17 @@ class DashboardService:
                         f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
                         f"{float(min_similarity):.2f}, top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
                     ),
-                    "metrics": [
-                        {
-                            "label": "Método causal",
-                            "value": method_spec.label,
-                            "hint": "Flujo del método causal: " + method_spec.flow,
-                        },
-                        {
-                            "label": "Respuestas analizadas",
-                            "value": str(int(len(nps_slice))),
-                        },
-                        {
-                            "label": "Incidencias del periodo",
-                            "value": str(int(len(helix_slice))),
-                        },
-                        {
-                            "label": f"{focus_label} medio",
-                            "value": f"{average_focus*100.0:.1f}%",
-                        },
-                        {
-                            "label": "Incidencias con match",
-                            "value": str(chain_candidates_summary["linked_incidents_total"]),
-                        },
-                        {
-                            "label": "Comentarios enlazados",
-                            "value": str(chain_candidates_summary["linked_comments_total"]),
-                        },
-                        {
-                            "label": "Links validados",
-                            "value": str(chain_candidates_summary["linked_pairs_total"]),
-                        },
-                    ],
+                    "metrics": self._build_situation_narrative_metrics(
+                        method_label=method_spec.label,
+                        method_flow=method_spec.flow,
+                        responses_total=len(nps_slice),
+                        comments_total=chain_candidates_summary["linked_comments_total"],
+                        incidents_total=len(helix_slice),
+                        linked_incidents_total=chain_candidates_summary["linked_incidents_total"],
+                        linked_pairs_total=chain_candidates_summary["linked_pairs_total"],
+                        focus_label=focus_label,
+                        average_focus_rate=average_focus,
+                    ),
                 },
                 "metadata": [
                     {"label": "Flujo causal", "value": method_spec.flow},
@@ -1103,9 +1086,9 @@ class DashboardService:
                     "options": topic_filter_options,
                     "default": "Todos",
                     "hint": (
-                        f"{active_topic_count} tópico afectado por {method_spec.label.lower()}."
+                        f"{active_topic_count} tópico afectado por {topic_filter_method_label}."
                         if active_topic_count == 1
-                        else f"{active_topic_count} tópicos afectados por {method_spec.label.lower()}."
+                        else f"{active_topic_count} tópicos afectados por {topic_filter_method_label}."
                     ),
                 },
                 "tabs": [
@@ -1414,6 +1397,51 @@ class DashboardService:
         if focus_group == "passive":
             return "neutros"
         return "detractores"
+
+    @staticmethod
+    def _build_situation_narrative_metrics(
+        *,
+        method_label: str,
+        method_flow: str,
+        responses_total: int,
+        comments_total: int,
+        incidents_total: int,
+        linked_incidents_total: int,
+        linked_pairs_total: int,
+        focus_label: str,
+        average_focus_rate: float,
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "label": "Método causal",
+                "value": method_label,
+                "hint": "Flujo del método causal: " + method_flow,
+            },
+            {
+                "label": "Respuestas analizadas",
+                "value": str(int(responses_total)),
+            },
+            {
+                "label": "Comentarios enlazados",
+                "value": str(int(comments_total)),
+            },
+            {
+                "label": "Incidencias del periodo",
+                "value": str(int(incidents_total)),
+            },
+            {
+                "label": "Incidencias con match",
+                "value": str(int(linked_incidents_total)),
+            },
+            {
+                "label": "Links validados",
+                "value": str(int(linked_pairs_total)),
+            },
+            {
+                "label": f"{focus_label} medio",
+                "value": f"{float(average_focus_rate) * 100.0:.1f}%",
+            },
+        ]
 
     @staticmethod
     def _build_touchpoint_mode_payload(

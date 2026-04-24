@@ -779,27 +779,6 @@ export function App() {
     );
   }
 
-  function renderAreaCoreCard() {
-    if (mainArea !== "insights") {
-      return null;
-    }
-
-    return (
-      <section className="surface-card context-strip-card area-core-card">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Área core</p>
-            <h2>Insights operativos</h2>
-            <p className="secondary-copy">
-              La navegación principal de Insights se fija antes de abrir filtros y vistas de detalle.
-            </p>
-          </div>
-        </div>
-        <NavigationTabs compact items={INSIGHT_TABS} onChange={setInsightTab} value={insightTab} />
-      </section>
-    );
-  }
-
   function renderOverviewTab() {
     if (dashboard?.empty_state) {
       return <p className="empty-state">{dashboard.empty_state}</p>;
@@ -1409,8 +1388,6 @@ export function App() {
             </p>
           </div>
 
-          {renderAreaCoreCard()}
-
           {renderServiceContainer()}
 
           <PrimaryNav
@@ -1457,6 +1434,12 @@ export function App() {
               <strong>Fallo operativo</strong>
               <p>{error}</p>
             </section>
+          ) : null}
+
+          {mainArea === "insights" ? (
+            <div className="insight-nav-strip">
+              <NavigationTabs compact items={INSIGHT_TABS} onChange={setInsightTab} value={insightTab} />
+            </div>
           ) : null}
 
           {mainArea !== "ingest" ? renderFiltersContainer() : null}

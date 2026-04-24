@@ -274,6 +274,8 @@ def test_build_incident_attribution_chains_can_aggregate_to_executive_journeys()
 
     assert len(out) == 2
     assert set(out["nps_topic"].tolist()) == {"Acceso bloqueado", "Operativa crítica fallida"}
+    assert set(out["anchor_topic"].tolist()) == {"Acceso > Login", "Operativa > Pagos"}
+    assert all(isinstance(value, list) and value for value in out["source_topics"].tolist())
     assert set(out["presentation_mode"].tolist()) == {TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS}
 
 
@@ -788,3 +790,4 @@ def test_broken_journey_remap_reuses_detected_clusters_in_timeseries_and_chains(
     assert set(weekly_mode["nps_topic"].tolist()) == {"Acceso / Login", "Operativa / Pagos"}
     assert set(chains["presentation_mode"].tolist()) == {TOUCHPOINT_SOURCE_BROKEN_JOURNEYS}
     assert set(chains["nps_topic"].tolist()) == {"Acceso / Login", "Operativa / Pagos"}
+    assert set(chains["anchor_topic"].tolist()) == {"Acceso > Login", "Operativa > Pagos"}
