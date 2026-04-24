@@ -54,6 +54,14 @@ function displayValue(value: unknown, label?: string) {
   return formatted || asString(value, "—");
 }
 
+function normalizeComparableValue(value: unknown) {
+  return asString(value).toLocaleLowerCase();
+}
+
+function linkedCountHeading(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function getTopicName(row: Record<string, unknown>) {
   return asString(row["Tópico NPS"] ?? row.nps_topic ?? row.topic ?? row.label);
 }
@@ -154,24 +162,58 @@ function renderVocCards(records: Array<Record<string, unknown>>) {
 
 function buildScenarioIdentityRows(
   activeCard: Record<string, unknown>,
-  methodLabel: string
+  methodLabel: string,
+  methodValue: string
 ): Array<{ label: string; value: string }> {
-  const touchpointValue =
-    asString(activeCard.helix_source_service_n2) || asString(activeCard.touchpoint) || "n/d";
+  const rows: Array<{ label: string; value: string }> = [];
+  const seenValues = new Set<string>();
+  const appendRow = (label: string, value: unknown) => {
+    const text = asString(value);
+    const comparable = normalizeComparableValue(text);
+    if (!text || text === "n/d" || text === "—" || seenValues.has(comparable)) {
+      return;
+    }
+    rows.push({ label, value: text });
+    seenValues.add(comparable);
+  };
 
-  return [
-    { label: methodLabel || "Escenario causal", value: asString(activeCard.title, "n/d") },
-    { label: "Tópico NPS ancla", value: asString(activeCard.anchor_topic, "n/d") },
-    {
-      label: asString(activeCard.helix_source_service_n2) ? "Source Service N2" : "Touchpoint afectado",
-      value: touchpointValue
-    },
-    { label: "Palanca", value: asString(activeCard.palanca, "n/d") },
-    { label: "Subpalanca", value: asString(activeCard.subpalanca, "n/d") },
-    { label: "Owner", value: asString(activeCard.owner_role, "n/d") },
-    { label: "Lane de acción", value: asString(activeCard.action_lane, "n/d") },
-    { label: "ETA", value: displayValue(activeCard.eta_weeks, "ETA (semanas)") }
-  ].filter((item) => item.value && item.value !== "n/d");
+  const title = asString(activeCard.title, "n/d");
+  const anchorTopic = asString(activeCard.anchor_topic);
+  const touchpoint = asString(activeCard.touchpoint);
+  const sourceServiceN2 = asString(activeCard.helix_source_service_n2);
+  const palanca = asString(activeCard.palanca);
+  const subpalanca = asString(activeCard.subpalanca);
+
+  appendRow(methodLabel || "Escenario causal", title);
+  if (anchorTopic && normalizeComparableValue(anchorTopic) !== normalizeComparableValue(title)) {
+    appendRow("Tópico NPS ancla", anchorTopic);
+  }
+
+  if (methodValue === "bbva_source_service_n2") {
+    if (sourceServiceN2 && normalizeComparableValue(sourceServiceN2) !== normalizeComparableValue(title)) {
+      appendRow("Source Service N2", sourceServiceN2);
+    }
+  } else {
+    appendRow(methodValue === "broken_journeys" ? "Touchpoint detectado" : "Touchpoint afectado", touchpoint);
+    if (methodValue !== "palanca_touchpoint") {
+      appendRow("Palanca", palanca);
+    }
+    if (methodValue !== "domain_touchpoint") {
+      appendRow("Subpalanca", subpalanca);
+    }
+    if (
+      sourceServiceN2 &&
+      methodValue === "executive_journeys" &&
+      normalizeComparableValue(sourceServiceN2) !== normalizeComparableValue(touchpoint)
+    ) {
+      appendRow("Source Service N2", sourceServiceN2);
+    }
+  }
+
+  appendRow("Owner (rol)", asString(activeCard.owner_role, "n/d"));
+  appendRow("Lane de acción", asString(activeCard.action_lane, "n/d"));
+  appendRow("ETA (semanas)", displayValue(activeCard.eta_weeks, "ETA (semanas)"));
+  return rows;
 }
 
 function buildScenarioMetricRows(
@@ -181,9 +223,11 @@ function buildScenarioMetricRows(
     "Palanca",
     "Subpalanca",
     "Touchpoint afectado",
+    "Touchpoint detectado",
     "Source Service N2",
     "Tópico NPS ancla",
-    "Owner"
+    "Owner",
+    "Owner (rol)"
   ]);
   return spotlightMetrics.filter((metric) => !hiddenLabels.has(asString(metric.label)));
 }
@@ -272,8 +316,8 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     [spotlightMetrics]
   );
   const scenarioIdentityRows = useMemo(
-    () => buildScenarioIdentityRows(activeCard || {}, asString(method.label)),
-    [activeCard, method.label]
+    () => buildScenarioIdentityRows(activeCard || {}, asString(method.label), asString(method.value)),
+    [activeCard, method.label, method.value]
   );
   const rankingRows = asRows(asRecord(deepDive.ranking).rows);
   const evidenceRows = asRows(asRecord(deepDive.evidence).rows);
@@ -355,18 +399,19 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
           ) : null}
 
-          <section className="linking-panel">
-            <div className="section-heading">
-              <div>
-                <h3>{asString(situation.figure_title, "Timeline causal (diario)")}</h3>
-              </div>
+          <section className="hero-banner">
+            <p className="eyebrow">{asString(banner.kicker, "Narrativa causal")}</p>
+            <h3>{asString(banner.title, "Sin escenarios defendibles en esta ventana")}</h3>
+            <p className="secondary-copy">{asString(banner.summary)}</p>
+            <div className="hero-metrics">
+              {bannerMetrics.map((metric, index) => (
+                <article className="hero-metric-card" key={`banner-metric-${index}`}>
+                  <span>{asString(metric.label)}</span>
+                  <strong>{displayValue(metric.value, asString(metric.label))}</strong>
+                  {asString(metric.hint) ? <p>{asString(metric.hint)}</p> : null}
+                </article>
+              ))}
             </div>
-            <PlotFigure
-              emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
-              figure={asFigure(situation.figure)}
-              testId="linking-overview-figure"
-            />
-            {asString(situation.note) ? <p className="secondary-copy">{asString(situation.note)}</p> : null}
           </section>
         </div>
       ) : null}
@@ -425,33 +470,12 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
           </div>
 
-          <section className="hero-banner">
-            <p className="eyebrow">{asString(banner.kicker, "Narrativa causal")}</p>
-            <h3>{asString(banner.title, "Sin escenarios defendibles en esta ventana")}</h3>
-            <p className="secondary-copy">{asString(banner.summary)}</p>
-            <div className="hero-metrics">
-              {bannerMetrics.map((metric, index) => (
-                <article className="hero-metric-card" key={`banner-metric-${index}`}>
-                  <span>{asString(metric.label)}</span>
-                  <strong>{displayValue(metric.value, asString(metric.label))}</strong>
-                  {asString(metric.hint) ? <p>{asString(metric.hint)}</p> : null}
-                </article>
-              ))}
-            </div>
-          </section>
-
           {!activeCard ? (
             <p className="empty-state">
               Hay impacto estadístico, pero no se encontraron escenarios defendibles con link explícito entre Helix y VoC para mostrar.
             </p>
           ) : (
             <>
-              <div className="section-heading">
-                <div>
-                  <h3>Escenario activo</h3>
-                </div>
-              </div>
-
               <div className="scenario-nav">
                 <button
                   className="secondary-button"
@@ -516,7 +540,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
                   <div className="scenario-evidence-stack">
                     <article className="scenario-fact-sheet">
-                      <h4>Incidencias enlazadas</h4>
+                      <h4>{linkedCountHeading(activeHelixRecords.length, "incidencia enlazada", "incidencias enlazadas")}</h4>
                       <div className="evidence-pill-row">
                         {activeHelixRecords.length ? (
                           activeHelixRecords.slice(0, 6).map((record, index) => {
@@ -545,7 +569,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     </article>
 
                     <article className="scenario-fact-sheet">
-                      <h4>Comentarios enlazados</h4>
+                      <h4>{linkedCountHeading(activeVocRecords.length, "comentario enlazado", "comentarios enlazados")}</h4>
                       <div className="evidence-pill-row">
                         {activeVocRecords.length ? (
                           activeVocRecords.slice(0, 6).map((record, index) => (

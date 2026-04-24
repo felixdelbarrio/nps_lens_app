@@ -631,7 +631,7 @@ def build_ppt_8slide_script(
             lines.append(
                 (
                     f"- P1 {str(r.get('nps_topic',''))}: lane={str(r.get('action_lane',''))}, "
-                    f"owner={str(r.get('owner_role',''))}, ETA={int(r.get('eta_weeks',0) or 0)} semanas."
+                    f"owner={str(r.get('owner_role',''))}, ETA (semanas)={int(r.get('eta_weeks',0) or 0)}."
                 )
             )
     lines.append("")
