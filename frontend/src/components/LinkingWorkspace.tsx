@@ -431,14 +431,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
           ) : null}
 
-          <section className="linking-panel">
-            <PlotFigure
-              emptyMessage="No hay suficiente base cruzada para construir el timeline causal."
-              figure={asFigure(situation.figure)}
-              testId="linking-situation-figure"
-            />
-            {asString(situation.note) ? <p className="secondary-copy">{asString(situation.note)}</p> : null}
-          </section>
+          {asString(situation.note) ? (
+            <article className="note-card">
+              <p className="secondary-copy">{asString(situation.note)}</p>
+            </article>
+          ) : null}
         </div>
       ) : null}
 

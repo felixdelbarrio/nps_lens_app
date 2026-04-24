@@ -187,11 +187,11 @@ const linkingPayloadAvailable = {
           hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
         },
         { label: "Respuestas analizadas", value: "26618" },
-        { label: "Incidencias del periodo", value: "233" },
-        { label: "% detractores medio", value: "15.2%" },
-        { label: "Incidencias con match", value: "20" },
         { label: "Comentarios enlazados", value: "22" },
-        { label: "Links validados", value: "30" }
+        { label: "Incidencias del periodo", value: "233" },
+        { label: "Incidencias con match", value: "20" },
+        { label: "Links validados", value: "30" },
+        { label: "% detractores medio", value: "15.2%" }
       ]
     },
     metadata: [
@@ -241,7 +241,10 @@ const linkingPayloadAvailable = {
           value: "Pagos/ Transferencias > Faltan detalles de movimientos",
           label: "Pagos/ Transferencias > Faltan detalles de movimientos"
         },
-        { value: "Operativa crítica fallida", label: "Operativa crítica fallida" }
+        {
+          value: "Consulta > Estado de cuenta / comprobantes",
+          label: "Consulta > Estado de cuenta / comprobantes"
+        }
       ],
       default: "Todos",
       hint: "2 tópicos afectados por journeys de detracción."
@@ -263,7 +266,7 @@ const linkingPayloadAvailable = {
           "Confidence (learned)": 0.133
         },
         {
-          "Tópico NPS": "Operativa crítica fallida",
+          "Tópico NPS": "Consulta > Estado de cuenta / comprobantes",
           "Confidence (learned)": 0.111
         }
       ],
@@ -282,7 +285,7 @@ const linkingPayloadAvailable = {
           detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
         },
         {
-          nps_topic: "Operativa crítica fallida",
+          nps_topic: "Consulta > Estado de cuenta / comprobantes",
           similarity: 0.121,
           incident_id: "INC000104355468",
           incident_id__href:
@@ -323,7 +326,10 @@ const linkingPayloadAvailable = {
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
-          { label: "Tópico NPS ancla", value: "Operativa crítica fallida" },
+          {
+            label: "Tópico NPS ancla",
+            value: "Pagos/ Transferencias > Faltan detalles de movimientos"
+          },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "60.0%" },
           { label: "Delta NPS", value: "-0.0" },
@@ -390,7 +396,7 @@ const linkingPayloadAvailable = {
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
-          { label: "Tópico NPS ancla", value: "Fricción en consulta de saldos" },
+          { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "52.0%" },
           { label: "Delta NPS", value: "-0.0" },
@@ -528,6 +534,7 @@ describe("App", () => {
       screen.getByRole("tab", { name: "Evolución promotores vs detractores" })
     ).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
     expect(screen.queryByRole("listbox", { name: "N2" })).not.toBeInTheDocument();
@@ -599,8 +606,21 @@ describe("App", () => {
     );
     expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
+    const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
+    const incidentsMetric = screen.getByText("Incidencias del periodo");
+    const linksMetric = screen.getByText("Links validados");
+    const focusMetric = screen.getByText("% detractores medio");
+    expect(
+      Boolean(linkedCommentsMetric.compareDocumentPosition(incidentsMetric) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ).toBe(true);
+    expect(
+      Boolean(linksMetric.compareDocumentPosition(focusMetric) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ).toBe(true);
     expect(screen.getByText(/Flujo causal:/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Timeline causal (diario)" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
@@ -615,17 +635,19 @@ describe("App", () => {
     expect(screen.getByRole("combobox", { name: /Tópico NPS afectado/i })).toHaveValue("Todos");
     await user.selectOptions(
       screen.getByRole("combobox", { name: /Tópico NPS afectado/i }),
-      "Operativa crítica fallida"
+      "Consulta > Estado de cuenta / comprobantes"
     );
     const rankingTable = screen.getByRole("table");
-    expect(within(rankingTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(within(rankingTable).getByText("Consulta > Estado de cuenta / comprobantes")).toBeInTheDocument();
     expect(
       within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Evidence wall" }));
     const evidenceTable = screen.getByRole("table");
-    expect(within(evidenceTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(
+      within(evidenceTable).getByText("Consulta > Estado de cuenta / comprobantes")
+    ).toBeInTheDocument();
     expect(
       within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
