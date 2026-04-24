@@ -3247,7 +3247,7 @@ def _chain_priority_summary(  # pragma: no cover - legacy helper for compatibili
     if owner:
         parts_bottom.append(f"Owner {owner}")
     if np.isfinite(eta_weeks):
-        parts_bottom.append(f"ETA {_fmt_num_or_nd(eta_weeks, decimals=1)} semanas")
+        parts_bottom.append(f"ETA (semanas) {_fmt_num_or_nd(eta_weeks, decimals=1)}")
     return [
         " · ".join(parts_top),
         " · ".join(parts_bottom),

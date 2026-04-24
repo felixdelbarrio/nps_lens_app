@@ -13,6 +13,12 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.helix_operational_metrics import (
+    HelixOperationalBenchmark,
+    build_helix_operational_benchmark,
+    enrich_chain_with_operational_metrics,
+    enrich_rationale_with_operational_metrics,
+)
 from nps_lens.analytics.hotspot_metrics import (
     align_hotspot_evidence_to_axis,
     select_best_business_axis_for_hotspots,
@@ -242,26 +248,6 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
         )
     ]
     return out
-
-
-def _select_chain_rows(chain_df: pd.DataFrame, selected_keys: list[str]) -> pd.DataFrame:
-    if chain_df is None or chain_df.empty:
-        return pd.DataFrame()
-    ordered_keys = _unique_string_values(selected_keys)
-    if not ordered_keys:
-        return chain_df.head(0).copy()
-
-    selected = chain_df[chain_df["chain_key"].astype(str).isin(ordered_keys)].copy()
-    if selected.empty:
-        return selected
-
-    selected["__order"] = pd.Categorical(
-        selected["chain_key"].astype(str),
-        categories=ordered_keys,
-        ordered=True,
-    )
-    selected = selected.sort_values("__order").drop(columns="__order").reset_index(drop=True)
-    return selected
 
 
 def _cap_chain_evidence_rows(
@@ -679,11 +665,8 @@ class DashboardService:
             pop_year,
             pop_month,
         )
-        helix_slice = self._apply_population_filters(
-            self._load_helix_df(context),
-            pop_year,
-            pop_month,
-        )
+        helix_history = self._load_helix_df(context)
+        helix_slice = self._apply_population_filters(helix_history, pop_year, pop_month)
 
         focus_group, focus_label = self._linking_focus_group(nps_group)
         if nps_slice.empty or helix_slice.empty:
@@ -722,6 +705,7 @@ class DashboardService:
         ).strip()
         method_spec = get_causal_method_spec(active_touchpoint_source)
         focus_name = self._focus_name(focus_group)
+        operational_benchmark = build_helix_operational_benchmark(helix_history)
         core = self._compute_linking_core(
             nps_df=nps_slice,
             helix_df=helix_slice,
@@ -764,6 +748,8 @@ class DashboardService:
             overall_daily=overall_daily,
             focus_group=focus_group,
             context=context,
+            links_df=links_df,
+            operational_benchmark=operational_benchmark,
         )
         mode_bundle = self._build_rationale_bundle(
             by_topic_weekly=by_topic_weekly_mode,
@@ -771,6 +757,8 @@ class DashboardService:
             overall_daily=overall_daily,
             focus_group=focus_group,
             context=context,
+            links_df=links_mode_df,
+            operational_benchmark=operational_benchmark,
         )
         canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
         canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
@@ -808,21 +796,18 @@ class DashboardService:
             journey_links_df=broken_journey_links_df,
             executive_journey_catalog=executive_journey_catalog,
         )
+        chain_candidates_df = enrich_chain_with_operational_metrics(
+            chain_candidates_df,
+            benchmark=operational_benchmark,
+        )
         chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
         chain_candidates_df = self._inject_incident_record_urls(
             chain_candidates_df,
             helix_df=helix_slice,
         )
         chain_candidates_summary = summarize_attribution_chains(chain_candidates_df)
-        default_chain_keys = _unique_string_values(
-            chain_candidates_df.get("chain_key", pd.Series(dtype=str)).astype(str).tolist()
-        )[:3]
         chain_cards_df = _cap_chain_evidence_rows(
-            (
-                _select_chain_rows(chain_candidates_df, default_chain_keys)
-                if default_chain_keys
-                else chain_candidates_df
-            ),
+            chain_candidates_df,
             max_incident_examples=5,
             max_comment_examples=2,
         )
@@ -860,6 +845,7 @@ class DashboardService:
                 focus_name=focus_name,
                 show_all_groups=show_all_groups,
                 theme=theme,
+                include_incidents=False,
             )
         )
         situation_notes = [method_spec.situation_note]
@@ -973,8 +959,8 @@ class DashboardService:
                 "banner": {
                     "kicker": "Narrativa causal",
                     "title": (
-                        f"{len(chain_candidates_df)} {method_spec.entity_plural.lower()} defendibles para {focus_name}"
-                        if not chain_candidates_df.empty
+                        f"{len(scenario_cards)} {method_spec.entity_plural.lower()} defendibles para {focus_name}"
+                        if scenario_cards
                         else "Sin escenarios defendibles en esta ventana"
                     ),
                     "summary": (
@@ -1007,7 +993,6 @@ class DashboardService:
                     f"{int(chain_candidates_summary['chains_total'])} escenarios priorizados",
                 ],
                 "cards": scenario_cards,
-                "default_chain_keys": default_chain_keys,
             },
             "deep_dive": {
                 "title": "Análisis de Tópicos de NPS afectados",
@@ -1116,6 +1101,7 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
+        operational_benchmark = build_helix_operational_benchmark(helix_history)
 
         core = self._compute_linking_core(
             nps_df=current_df,
@@ -1162,6 +1148,8 @@ class DashboardService:
             overall_daily=overall_daily,
             focus_group=focus_group,
             context=context,
+            links_df=links_df,
+            operational_benchmark=operational_benchmark,
         )
         mode_bundle = self._build_rationale_bundle(
             by_topic_weekly=by_topic_weekly_mode,
@@ -1169,6 +1157,8 @@ class DashboardService:
             overall_daily=overall_daily,
             focus_group=focus_group,
             context=context,
+            links_df=links_mode_df,
+            operational_benchmark=operational_benchmark,
         )
         rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
         if rationale_df.empty:
@@ -1189,6 +1179,10 @@ class DashboardService:
             journey_catalog_df=broken_journeys_df,
             journey_links_df=broken_journey_links_df,
             executive_journey_catalog=executive_journey_catalog,
+        )
+        attribution_all_df = enrich_chain_with_operational_metrics(
+            attribution_all_df,
+            benchmark=operational_benchmark,
         )
         attribution_all_df = self._inject_incident_record_urls(
             attribution_all_df,
@@ -1527,6 +1521,8 @@ class DashboardService:
         overall_daily: pd.DataFrame,
         focus_group: str,
         context: UploadContext,
+        links_df: pd.DataFrame,
+        operational_benchmark: HelixOperationalBenchmark,
     ) -> dict[str, object]:
         rank = causal_rank_by_topic(by_topic_weekly)
         changepoints_df = detect_detractor_changepoints_with_bootstrap(
@@ -1677,6 +1673,11 @@ class DashboardService:
             rank_df=rationale_rank,
             min_topic_responses=80,
             recovery_factor=0.65,
+        )
+        rationale_df = enrich_rationale_with_operational_metrics(
+            rationale_df,
+            links_df=links_df,
+            benchmark=operational_benchmark,
         )
         rationale_summary = summarize_incident_nps_rationale(rationale_df)
         topic_options = [
@@ -2149,7 +2150,7 @@ class DashboardService:
                             "value": f"{float(_metric_number(row.get('nps_points_recoverable')) or 0.0):.2f} pts",
                         },
                         {
-                            "label": "Owner",
+                            "label": "Owner (rol)",
                             "value": str(row.get("owner_role", "") or "").strip() or "n/d",
                         },
                     ],
@@ -2603,6 +2604,11 @@ class DashboardService:
             min_topic_responses=80,
             recovery_factor=0.65,
         )
+        rationale_df = enrich_rationale_with_operational_metrics(
+            rationale_df,
+            links_df=links_df,
+            benchmark=build_helix_operational_benchmark(helix_df),
+        )
         rationale_summary = summarize_incident_nps_rationale(rationale_df)
         lag_days = (
             estimate_best_lag_days_by_topic(
@@ -2677,6 +2683,7 @@ class DashboardService:
         focus_name: str,
         show_all_groups: bool,
         theme: Theme,
+        include_incidents: bool = True,
     ) -> object:
         if trend_df.empty:
             return None
@@ -2782,36 +2789,40 @@ class DashboardService:
                         hovertemplate=f"{focus_label}: %{{y:.1%}}<extra></extra>",
                     )
                 )
-        fig.add_trace(
-            go.Bar(
-                x=chart_df[x_column],
-                y=chart_df["incidents"],
-                name="Incidencias",
-                yaxis="y2",
-                opacity=0.72,
-                marker=dict(color=theme.accent),
-                hovertemplate="Incidencias: %{y:.0f}<extra></extra>",
-            )
-        )
-        fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=62, b=10),
-            paper_bgcolor=theme.chart_paper,
-            plot_bgcolor=theme.chart_plot,
-            font=dict(color=theme.text),
-            legend=dict(orientation="h"),
-            yaxis=dict(
+        layout_kwargs: dict[str, object] = {
+            "height": 380,
+            "margin": dict(l=10, r=10, t=62, b=10),
+            "paper_bgcolor": theme.chart_paper,
+            "plot_bgcolor": theme.chart_plot,
+            "font": dict(color=theme.text),
+            "legend": dict(orientation="h"),
+            "yaxis": dict(
                 title="Tasa por grupo" if show_all_groups else focus_label,
                 tickformat=".0%",
                 gridcolor=theme.chart_grid,
             ),
-            yaxis2=dict(
+            "xaxis": dict(gridcolor=theme.chart_grid),
+        }
+        if include_incidents:
+            fig.add_trace(
+                go.Bar(
+                    x=chart_df[x_column],
+                    y=chart_df["incidents"],
+                    name="Incidencias",
+                    yaxis="y2",
+                    opacity=0.72,
+                    marker=dict(color=theme.accent),
+                    hovertemplate="Incidencias: %{y:.0f}<extra></extra>",
+                )
+            )
+            layout_kwargs["yaxis2"] = dict(
                 title="Incidencias",
                 overlaying="y",
                 side="right",
                 showgrid=False,
-            ),
-            xaxis=dict(gridcolor=theme.chart_grid),
+            )
+        fig.update_layout(
+            **layout_kwargs,
         )
         return apply_plotly_theme(fig, theme)
 
