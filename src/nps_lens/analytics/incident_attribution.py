@@ -1048,6 +1048,18 @@ def _source_topics_for_group(grp: pd.DataFrame) -> list[str]:
     return topic_counts["__source_topic"].astype(str).tolist()
 
 
+def _resolved_source_topic_series(frame: pd.DataFrame) -> pd.Series:
+    source_topic = frame.get("source_nps_topic", pd.Series([""] * len(frame), index=frame.index))
+    resolved_source_topic = source_topic.astype(str).fillna("").str.strip()
+    fallback_topic = (
+        frame.get("nps_topic", pd.Series([""] * len(frame), index=frame.index))
+        .astype(str)
+        .fillna("")
+        .str.strip()
+    )
+    return resolved_source_topic.where(resolved_source_topic.ne(""), fallback_topic)
+
+
 def _chain_story_for_source(
     *,
     touchpoint_source: str,
@@ -1698,7 +1710,7 @@ def build_incident_attribution_chains(
     )
     if enriched.empty:
         return _empty_chain_df()
-    enriched["source_nps_topic"] = enriched["nps_topic"].astype(str).fillna("").str.strip()
+    enriched["source_nps_topic"] = _resolved_source_topic_series(enriched)
     is_broken_mode = (
         str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
         == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
@@ -1750,7 +1762,7 @@ def build_incident_attribution_chains(
         active_executive_catalog = executive_journey_catalog or _default_executive_journey_catalog()
         journey_matches = [
             _executive_journey_match(
-                nps_topic=topic,
+                nps_topic=source_topic,
                 touchpoint=tp,
                 palanca=pal,
                 subpalanca=sub,
@@ -1759,8 +1771,8 @@ def build_incident_attribution_chains(
                 comment_txt=comment,
                 catalog=active_executive_catalog,
             )
-            for topic, tp, pal, sub, inc_topic, inc_summary, comment in zip(
-                enriched["nps_topic"],
+            for source_topic, tp, pal, sub, inc_topic, inc_summary, comment in zip(
+                enriched["source_nps_topic"],
                 enriched["touchpoint"],
                 enriched["palanca"],
                 enriched["subpalanca"],

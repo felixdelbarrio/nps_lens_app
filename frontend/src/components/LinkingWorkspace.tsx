@@ -12,6 +12,11 @@ type LinkingWorkspaceProps = {
   onTabChange: (value: string) => void;
 };
 
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
 const SCENARIO_DETAIL_TABS = [
   { id: "helix", label: "Evidencia Helix" },
   { id: "voc", label: "Voz del cliente" },
@@ -39,8 +44,27 @@ function asString(value: unknown, fallback = "") {
   return text || fallback;
 }
 
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
+function asSelectOptions(value: unknown): SelectOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      if (typeof item === "string") {
+        return { value: item, label: item };
+      }
+      if (item && typeof item === "object") {
+        const option = item as Record<string, unknown>;
+        const optionValue = asString(option.value);
+        const optionLabel = asString(option.label, optionValue);
+        if (!optionValue || !optionLabel) {
+          return null;
+        }
+        return { value: optionValue, label: optionLabel };
+      }
+      return null;
+    })
+    .filter((item): item is SelectOption => Boolean(item));
 }
 
 function asFigure(value: unknown): PlotlyFigureSpec | null {
@@ -235,12 +259,12 @@ function buildScenarioMetricRows(
 export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspaceProps) {
   const method = asRecord(linking.causal_method);
   const situation = asRecord(linking.situation);
+  const narrative = asRecord(situation.narrative);
   const entitySummary = asRecord(linking.entity_summary);
   const scenarios = asRecord(linking.scenarios);
   const deepDive = asRecord(linking.deep_dive);
-  const banner = asRecord(scenarios.banner);
   const scenarioCards = asRows(scenarios.cards);
-  const bannerMetrics = asRows(banner.metrics);
+  const narrativeMetrics = asRows(narrative.metrics);
   const navigationItems = useMemo(() => {
     const items = asRows(linking.navigation).map((item) => ({
       id: asString(item.id),
@@ -255,7 +279,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
           { id: "nps-deep-dive", label: "Análisis de Tópicos de NPS afectados" }
         ];
   }, [linking.navigation]);
-  const situationKpis = asRows(situation.kpis);
   const situationMetadata = asRows(situation.metadata);
   const entitySummaryKpis = asRows(entitySummary.kpis);
   const entitySummaryRows = asRows(entitySummary.table);
@@ -264,7 +287,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     label: asString(item.label)
   }));
   const deepDiveTopicFilterSpec = asRecord(deepDive.topic_filter);
-  const deepDiveTopicOptions = asStringArray(deepDiveTopicFilterSpec.options);
+  const deepDiveTopicOptions = useMemo(
+    () => asSelectOptions(deepDiveTopicFilterSpec.options),
+    [deepDiveTopicFilterSpec.options]
+  );
+  const deepDiveTopicOptionValues = deepDiveTopicOptions.map((option) => option.value);
   const [activeChainIndex, setActiveChainIndex] = useState(0);
   const [scenarioDetailTab, setScenarioDetailTab] = useState("helix");
   const [scenarioEvidenceView, setScenarioEvidenceView] = useState<"table" | "cards">("table");
@@ -297,14 +324,14 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   }, [linking.focus_group, method.value, tab]);
 
   useEffect(() => {
-    if (!deepDiveTopicOptions.length) {
+    if (!deepDiveTopicOptionValues.length) {
       setDeepDiveTopicFilter("Todos");
       return;
     }
-    if (!deepDiveTopicOptions.includes(deepDiveTopicFilter)) {
+    if (!deepDiveTopicOptionValues.includes(deepDiveTopicFilter)) {
       setDeepDiveTopicFilter("Todos");
     }
-  }, [deepDiveTopicFilter, deepDiveTopicOptions]);
+  }, [deepDiveTopicFilter, deepDiveTopicOptionValues]);
 
   const activeCard = scenarioCards[activeChainIndex] || null;
   const activeHelixRecords = asRows(activeCard?.incident_records);
@@ -372,25 +399,30 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
       {tab === "situation" ? (
         <div className="linking-stack">
-          <div className="section-heading">
-            <div>
-              <h3>{asString(situation.title, "Situación del periodo")}</h3>
-              <p className="secondary-copy">{asString(situation.subtitle)}</p>
+          <section className="hero-banner hero-banner-wow">
+            <p className="eyebrow">{asString(narrative.kicker, "Narrativa causal")}</p>
+            <h3>{asString(narrative.title, "Sin escenarios defendibles en esta ventana")}</h3>
+            <p className="secondary-copy">{asString(narrative.summary)}</p>
+            <div className="hero-metrics hero-metrics-wow">
+              {narrativeMetrics.map((metric, index) => {
+                const label = asString(metric.label);
+                const isLeadMetric = label === "Método causal";
+                return (
+                  <article
+                    className={`hero-metric-card${isLeadMetric ? " hero-metric-card-lead" : ""}`}
+                    key={`narrative-metric-${index}`}
+                  >
+                    <span>{label}</span>
+                    <strong>{displayValue(metric.value, label)}</strong>
+                    {asString(metric.hint) ? <p>{asString(metric.hint)}</p> : null}
+                  </article>
+                );
+              })}
             </div>
-          </div>
-
-          <div className="metric-grid">
-            {situationKpis.map((metric, index) => (
-              <article className="metric-card" key={`situation-metric-${index}`}>
-                <span>{asString(metric.label)}</span>
-                <strong>{displayValue(metric.value, asString(metric.label))}</strong>
-                {asString(metric.hint) ? <p>{asString(metric.hint)}</p> : null}
-              </article>
-            ))}
-          </div>
+          </section>
 
           {situationMetadata.length ? (
-            <div className="context-pill-row">
+            <div className="context-pill-row narrative-pill-row">
               {situationMetadata.map((item, index) => (
                 <span className="context-pill" key={`situation-meta-${index}`}>
                   <strong>{asString(item.label)}:</strong> {asString(item.value)}
@@ -399,20 +431,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
           ) : null}
 
-          <section className="hero-banner">
-            <p className="eyebrow">{asString(banner.kicker, "Narrativa causal")}</p>
-            <h3>{asString(banner.title, "Sin escenarios defendibles en esta ventana")}</h3>
-            <p className="secondary-copy">{asString(banner.summary)}</p>
-            <div className="hero-metrics">
-              {bannerMetrics.map((metric, index) => (
-                <article className="hero-metric-card" key={`banner-metric-${index}`}>
-                  <span>{asString(metric.label)}</span>
-                  <strong>{displayValue(metric.value, asString(metric.label))}</strong>
-                  {asString(metric.hint) ? <p>{asString(metric.hint)}</p> : null}
-                </article>
-              ))}
-            </div>
-          </section>
+          {asString(situation.note) ? (
+            <article className="note-card">
+              <p className="secondary-copy">{asString(situation.note)}</p>
+            </article>
+          ) : null}
         </div>
       ) : null}
 
@@ -733,11 +756,14 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 value={deepDiveTopicFilter}
               >
                 {deepDiveTopicOptions.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
+                  <option key={topic.value} value={topic.value}>
+                    {topic.label}
                   </option>
                 ))}
               </select>
+              {asString(deepDiveTopicFilterSpec.hint) ? (
+                <span className="field-hint">{asString(deepDiveTopicFilterSpec.hint)}</span>
+              ) : null}
             </label>
           </div>
 
@@ -752,7 +778,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 asRecord(deepDive.trending).empty_state,
                 "No hay señal suficiente para construir tópicos trending."
               )}
-              figure={filteredTrendingFigure ?? baseTrendingFigure}
+              figure={filteredTrendingFigure}
               testId="linking-topics-trending"
             />
           </section>

@@ -10,7 +10,7 @@ from typing import Mapping, Optional
 from dotenv import load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
-DEFAULT_UI_TOUCHPOINT_SOURCE = "domain_touchpoint"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
 DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
 DEFAULT_UI_MIN_SIMILARITY = 0.25
 DEFAULT_UI_MAX_DAYS_APART = 10

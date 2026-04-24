@@ -42,7 +42,7 @@ const contextPayload = {
     theme_mode: "light",
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
-    touchpoint_source: "domain_touchpoint",
+    touchpoint_source: "executive_journeys",
     min_similarity: 0.25,
     max_days_apart: 10,
     min_n_opportunities: 200,
@@ -176,18 +176,24 @@ const linkingPayloadAvailable = {
     average_focus_rate: 0.1524
   },
   situation: {
-    title: "Situación del periodo",
-    subtitle: "Cruce diario entre incidencias y NPS con lectura causal organizada por journeys de detracción.",
-    kpis: [
-      { label: "Respuestas analizadas", value: "26618" },
-      { label: "Incidencias del periodo", value: "233" },
-      {
-        label: "Método causal",
-        value: "Journeys de detracción",
-        hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
-      },
-      { label: "% detractores medio", value: "15.2%" }
-    ],
+    narrative: {
+      kicker: "Narrativa causal",
+      title: "2 journeys de detracción defendibles para detractores",
+      summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
+      metrics: [
+        {
+          label: "Método causal",
+          value: "Journeys de detracción",
+          hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
+        },
+        { label: "Respuestas analizadas", value: "26618" },
+        { label: "Comentarios enlazados", value: "22" },
+        { label: "Incidencias del periodo", value: "233" },
+        { label: "Incidencias con match", value: "20" },
+        { label: "Links validados", value: "30" },
+        { label: "% detractores medio", value: "15.2%" }
+      ]
+    },
     metadata: [
       {
         label: "Flujo causal",
@@ -195,7 +201,6 @@ const linkingPayloadAvailable = {
       },
       { label: "Foco analítico", value: "Journeys de detracción" }
     ],
-    figure_title: "Timeline causal (diario)",
     figure: null,
     note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité."
   },
@@ -229,13 +234,20 @@ const linkingPayloadAvailable = {
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
     topic_filter: {
-      label: "Tópico",
+      label: "Tópico NPS afectado",
       options: [
-        "Todos",
-        "Pagos/ Transferencias > Faltan detalles de movimientos",
-        "Operativa crítica fallida"
+        { value: "Todos", label: "Todos (2 tópicos afectados)" },
+        {
+          value: "Pagos/ Transferencias > Faltan detalles de movimientos",
+          label: "Pagos/ Transferencias > Faltan detalles de movimientos"
+        },
+        {
+          value: "Consulta > Estado de cuenta / comprobantes",
+          label: "Consulta > Estado de cuenta / comprobantes"
+        }
       ],
-      default: "Todos"
+      default: "Todos",
+      hint: "2 tópicos afectados por journeys de detracción."
     },
     tabs: [
       { id: "ranking", label: "Ranking de hipótesis" },
@@ -254,7 +266,7 @@ const linkingPayloadAvailable = {
           "Confidence (learned)": 0.133
         },
         {
-          "Tópico NPS": "Operativa crítica fallida",
+          "Tópico NPS": "Consulta > Estado de cuenta / comprobantes",
           "Confidence (learned)": 0.111
         }
       ],
@@ -273,7 +285,7 @@ const linkingPayloadAvailable = {
           detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
         },
         {
-          nps_topic: "Operativa crítica fallida",
+          nps_topic: "Consulta > Estado de cuenta / comprobantes",
           similarity: 0.121,
           incident_id: "INC000104355468",
           incident_id__href:
@@ -288,18 +300,6 @@ const linkingPayloadAvailable = {
   scenarios: {
     title: "Análisis de escenarios causales",
     subtitle: "Escenarios priorizados bajo la lectura causal journeys de detracción.",
-    banner: {
-      kicker: "Narrativa causal",
-      title: "2 journeys de detracción defendibles para detractores",
-      summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
-      metrics: [
-        { label: "Método causal", value: "Journeys de detracción" },
-        { label: "Incidencias con match", value: "20" },
-        { label: "Comentarios enlazados", value: "22" },
-        { label: "Links validados", value: "30" }
-      ]
-    },
-    pills: ["Solo cadena completa defendible", "2 tópicos linkados", "2 cadenas causales"],
     cards: [
       {
         chain_key: "chain-1",
@@ -326,7 +326,10 @@ const linkingPayloadAvailable = {
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
-          { label: "Tópico NPS ancla", value: "Operativa crítica fallida" },
+          {
+            label: "Tópico NPS ancla",
+            value: "Pagos/ Transferencias > Faltan detalles de movimientos"
+          },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "60.0%" },
           { label: "Delta NPS", value: "-0.0" },
@@ -393,7 +396,7 @@ const linkingPayloadAvailable = {
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
-          { label: "Tópico NPS ancla", value: "Fricción en consulta de saldos" },
+          { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "52.0%" },
           { label: "Delta NPS", value: "-0.0" },
@@ -531,6 +534,7 @@ describe("App", () => {
       screen.getByRole("tab", { name: "Evolución promotores vs detractores" })
     ).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
     expect(screen.queryByRole("listbox", { name: "N2" })).not.toBeInTheDocument();
@@ -600,7 +604,23 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );
+    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
+    expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
+    const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
+    const incidentsMetric = screen.getByText("Incidencias del periodo");
+    const linksMetric = screen.getByText("Links validados");
+    const focusMetric = screen.getByText("% detractores medio");
+    expect(
+      Boolean(linkedCommentsMetric.compareDocumentPosition(incidentsMetric) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ).toBe(true);
+    expect(
+      Boolean(linksMetric.compareDocumentPosition(focusMetric) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ).toBe(true);
+    expect(screen.getByText(/Flujo causal:/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Timeline causal (diario)" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
@@ -612,20 +632,22 @@ describe("App", () => {
     );
     expect(screen.getAllByText("Ranking de hipótesis").length).toBeGreaterThan(0);
     expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Tópico" })).toHaveValue("Todos");
+    expect(screen.getByRole("combobox", { name: /Tópico NPS afectado/i })).toHaveValue("Todos");
     await user.selectOptions(
-      screen.getByRole("combobox", { name: "Tópico" }),
-      "Operativa crítica fallida"
+      screen.getByRole("combobox", { name: /Tópico NPS afectado/i }),
+      "Consulta > Estado de cuenta / comprobantes"
     );
     const rankingTable = screen.getByRole("table");
-    expect(within(rankingTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(within(rankingTable).getByText("Consulta > Estado de cuenta / comprobantes")).toBeInTheDocument();
     expect(
       within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Evidence wall" }));
     const evidenceTable = screen.getByRole("table");
-    expect(within(evidenceTable).getByText("Operativa crítica fallida")).toBeInTheDocument();
+    expect(
+      within(evidenceTable).getByText("Consulta > Estado de cuenta / comprobantes")
+    ).toBeInTheDocument();
     expect(
       within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();

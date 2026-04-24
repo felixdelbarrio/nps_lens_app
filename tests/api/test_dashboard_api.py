@@ -255,15 +255,23 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["causal_method"]["value"] == "domain_touchpoint"
-    assert linking_payload["navigation"][1]["label"] == "Touchpoints afectados por Subpalanca"
+    assert linking_payload["causal_method"]["value"] == "executive_journeys"
+    assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"
     assert "situation" in linking_payload
+    assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
     assert "scenarios" in linking_payload
     assert "deep_dive" in linking_payload
     assert linking_payload["navigation"][3]["label"] == "Análisis de Tópicos de NPS afectados"
     assert linking_payload["deep_dive"]["title"] == "Análisis de Tópicos de NPS afectados"
     assert linking_payload["deep_dive"]["topic_filter"]["default"] == "Todos"
+    assert isinstance(linking_payload["deep_dive"]["topic_filter"]["options"], list)
+    assert linking_payload["deep_dive"]["topic_filter"]["options"][0]["value"] == "Todos"
+    assert linking_payload["deep_dive"]["ranking"]["rows"]
+    assert linking_payload["deep_dive"]["evidence"]["rows"]
+    assert linking_payload["deep_dive"]["trending"]["figure"] is not None
+    assert linking_payload["scenarios"]["cards"][0]["anchor_topic"]
+    assert linking_payload["entity_summary"]["table"][0]["Tópico NPS ancla"]
     assert [tab["label"] for tab in linking_payload["deep_dive"]["tabs"]] == [
         "Ranking de hipótesis",
         "Evidence wall",

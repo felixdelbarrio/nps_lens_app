@@ -132,6 +132,42 @@ def _unique_string_values(values: Sequence[object]) -> list[str]:
     return unique
 
 
+def _flatten_string_values(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return _unique_string_values(list(value))
+    normalized = str(value or "").strip()
+    return [normalized] if normalized else []
+
+
+def _filter_frame_by_topic_values(
+    frame: Optional[pd.DataFrame],
+    topics: Sequence[object],
+    *,
+    column: str = "nps_topic",
+) -> pd.DataFrame:
+    if frame is None:
+        return pd.DataFrame()
+    if frame.empty:
+        return frame.copy()
+
+    normalized_topics = set(_unique_string_values(topics))
+    if not normalized_topics or column not in frame.columns:
+        return frame.head(0).copy()
+
+    mask = frame[column].astype(str).str.strip().isin(normalized_topics)
+    return frame.loc[mask].copy().reset_index(drop=True)
+
+
+def _topic_filter_options(topics: Sequence[object]) -> list[dict[str, str]]:
+    normalized_topics = _unique_string_values(topics)
+    topic_count = len(normalized_topics)
+    topic_label = "tópico afectado" if topic_count == 1 else "tópicos afectados"
+    return [
+        {"value": "Todos", "label": f"Todos ({topic_count} {topic_label})"},
+        *[{"value": topic, "label": topic} for topic in normalized_topics],
+    ]
+
+
 def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -319,6 +355,30 @@ def _cap_chain_evidence_rows(
         for v in out.get("comment_records", pd.Series([[]] * len(out), index=out.index)).tolist()
     ]
     return out
+
+
+def _affected_topics_for_method(
+    chain_df: Optional[pd.DataFrame],
+    topic_map_df: Optional[pd.DataFrame],
+) -> list[str]:
+    topics: list[str] = []
+
+    if chain_df is not None and not chain_df.empty:
+        if "source_topics" in chain_df.columns:
+            for value in chain_df["source_topics"].tolist():
+                topics.extend(_flatten_string_values(value))
+        if "anchor_topic" in chain_df.columns:
+            topics.extend(chain_df["anchor_topic"].astype(str).tolist())
+
+    if (
+        not topics
+        and topic_map_df is not None
+        and not topic_map_df.empty
+        and "source_nps_topic" in topic_map_df.columns
+    ):
+        topics.extend(topic_map_df["source_nps_topic"].astype(str).tolist())
+
+    return _unique_string_values(topics)
 
 
 class DashboardService:
@@ -735,6 +795,7 @@ class DashboardService:
         )
         broken_journeys_df = mode_payload["broken_journeys_df"]
         broken_journey_links_df = mode_payload["broken_journey_links_df"]
+        causal_topic_map_df = mode_payload["causal_topic_map_df"]
         links_mode_df = mode_payload["links_mode_df"]
         by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
         by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
@@ -762,7 +823,7 @@ class DashboardService:
         )
         canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
         canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
-        canonical_rationale_summary = cast(Any, canonical_bundle["rationale_summary"])
+        canonical_rationale_df = cast(pd.DataFrame, canonical_bundle["rationale_df"])
         mode_ranking_df = cast(pd.DataFrame, mode_bundle["ranking_df"])
         mode_rank_source_df = (
             mode_ranking_df
@@ -831,11 +892,35 @@ class DashboardService:
             entity_summary_chart_df["entity_label"] = (
                 _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
             )
+        affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)
+        filtered_rationale_df = _filter_frame_by_topic_values(
+            canonical_rationale_df,
+            affected_topics,
+        )
+        filtered_ranking_df = _filter_frame_by_topic_values(
+            canonical_ranking_df,
+            affected_topics,
+        )
+        filtered_ranking_view_df = _filter_frame_by_topic_values(
+            canonical_ranking_view_df,
+            affected_topics,
+            column="Tópico NPS",
+        )
+        filtered_evidence_df = _filter_frame_by_topic_values(
+            evidence_df,
+            affected_topics,
+        )
+        active_rationale_summary = summarize_incident_nps_rationale(filtered_rationale_df)
         median_lag_weeks = pd.to_numeric(
-            pd.Series([canonical_rationale_summary.median_lag_weeks]),
+            pd.Series([active_rationale_summary.median_lag_weeks]),
             errors="coerce",
         ).iloc[0]
         median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
+        topic_filter_options = _topic_filter_options(affected_topics)
+        active_topic_count = max(len(topic_filter_options) - 1, 0)
+        topic_filter_method_label = method_spec.label.lower()
+        if topic_filter_method_label.startswith("por "):
+            topic_filter_method_label = topic_filter_method_label[4:]
 
         timeline_figure = self._serialize_figure(
             self._build_linking_overview_figure(
@@ -854,15 +939,14 @@ class DashboardService:
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
 
-        ranking_rows = self._serialize_rows(canonical_ranking_view_df.head(20))
-        topic_options = cast(list[str], canonical_bundle["topic_options"])
-        evidence_sorted_df = evidence_df.copy()
+        ranking_rows = self._serialize_rows(filtered_ranking_view_df.head(20))
+        evidence_sorted_df = filtered_evidence_df.copy()
         if not evidence_sorted_df.empty:
             topic_rank = {
                 topic: index
                 for index, topic in enumerate(
                     _unique_string_values(
-                        _series_or_default(canonical_ranking_df, "nps_topic").astype(str).tolist()
+                        _series_or_default(filtered_ranking_df, "nps_topic").astype(str).tolist()
                     )
                 )
             }
@@ -898,32 +982,42 @@ class DashboardService:
                 "focus_responses": int(len(focus_df)),
                 "incidents": int(len(helix_slice)),
                 "linked_pairs": int(len(links_mode_df)),
-                "topics_analyzed": int(canonical_rationale_summary.topics_analyzed),
-                "nps_points_at_risk": float(canonical_rationale_summary.nps_points_at_risk),
-                "nps_points_recoverable": float(canonical_rationale_summary.nps_points_recoverable),
-                "top3_incident_share": float(canonical_rationale_summary.top3_incident_share),
-                "confidence_mean": float(canonical_rationale_summary.confidence_mean),
+                "topics_analyzed": int(active_rationale_summary.topics_analyzed),
+                "nps_points_at_risk": float(active_rationale_summary.nps_points_at_risk),
+                "nps_points_recoverable": float(active_rationale_summary.nps_points_recoverable),
+                "top3_incident_share": float(active_rationale_summary.top3_incident_share),
+                "confidence_mean": float(active_rationale_summary.confidence_mean),
                 "average_focus_rate": average_focus,
                 "median_lag_weeks": median_lag_value,
             },
             "situation": {
-                "title": "Situación del periodo",
-                "subtitle": method_spec.situation_subtitle,
-                "kpis": [
-                    {"label": "Respuestas analizadas", "value": str(int(len(nps_slice)))},
-                    {"label": "Incidencias del periodo", "value": str(int(len(helix_slice)))},
-                    {
-                        "label": "Método causal",
-                        "value": method_spec.label,
-                        "hint": method_spec.flow,
-                    },
-                    {"label": f"{focus_label} medio", "value": f"{average_focus*100.0:.1f}%"},
-                ],
+                "narrative": {
+                    "kicker": "Narrativa causal",
+                    "title": (
+                        f"{len(scenario_cards)} {method_spec.entity_plural.lower()} defendibles para {focus_name}"
+                        if scenario_cards
+                        else "Sin escenarios causales defendibles en esta ventana"
+                    ),
+                    "summary": (
+                        f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
+                        f"{float(min_similarity):.2f}, top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
+                    ),
+                    "metrics": self._build_situation_narrative_metrics(
+                        method_label=method_spec.label,
+                        method_flow=method_spec.flow,
+                        responses_total=len(nps_slice),
+                        comments_total=chain_candidates_summary["linked_comments_total"],
+                        incidents_total=len(helix_slice),
+                        linked_incidents_total=chain_candidates_summary["linked_incidents_total"],
+                        linked_pairs_total=chain_candidates_summary["linked_pairs_total"],
+                        focus_label=focus_label,
+                        average_focus_rate=average_focus,
+                    ),
+                },
                 "metadata": [
                     {"label": "Flujo causal", "value": method_spec.flow},
                     {"label": "Foco analítico", "value": method_spec.navigation_label},
                 ],
-                "figure_title": "Timeline causal (diario)",
                 "figure": timeline_figure,
                 "note": " ".join([note for note in situation_notes if note]),
             },
@@ -956,65 +1050,26 @@ class DashboardService:
                 "subtitle": (
                     f"Escenarios priorizados bajo la lectura causal {method_spec.label.lower()}."
                 ),
-                "banner": {
-                    "kicker": "Narrativa causal",
-                    "title": (
-                        f"{len(scenario_cards)} {method_spec.entity_plural.lower()} defendibles para {focus_name}"
-                        if scenario_cards
-                        else "Sin escenarios defendibles en esta ventana"
-                    ),
-                    "summary": (
-                        f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
-                        f"{float(min_similarity):.2f}, top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
-                    ),
-                    "metrics": [
-                        {
-                            "label": "Método causal",
-                            "value": method_spec.label,
-                            "hint": "Flujo del método causal: " + method_spec.flow,
-                        },
-                        {
-                            "label": "Incidencias con match",
-                            "value": str(chain_candidates_summary["linked_incidents_total"]),
-                        },
-                        {
-                            "label": "Comentarios enlazados",
-                            "value": str(chain_candidates_summary["linked_comments_total"]),
-                        },
-                        {
-                            "label": "Links validados",
-                            "value": str(chain_candidates_summary["linked_pairs_total"]),
-                        },
-                    ],
-                },
-                "pills": [
-                    "Solo cadena completa defendible",
-                    f"{int(chain_candidates_summary['topics_total'])} focos causales activos",
-                    f"{int(chain_candidates_summary['chains_total'])} escenarios priorizados",
-                ],
                 "cards": scenario_cards,
             },
             "deep_dive": {
                 "title": "Análisis de Tópicos de NPS afectados",
-                "subtitle": (
-                    "Lectura transversal de tópicos NPS afectados, estable e independiente "
-                    "del método causal seleccionado."
-                ),
+                "subtitle": method_spec.deep_dive_subtitle,
                 "kpis": [
                     {
                         "label": "NPS en riesgo",
-                        "value": f"{float(canonical_rationale_summary.nps_points_at_risk):.2f} pts",
+                        "value": f"{float(active_rationale_summary.nps_points_at_risk):.2f} pts",
                     },
                     {
                         "label": "NPS recuperable",
                         "value": (
-                            f"{float(canonical_rationale_summary.nps_points_recoverable):.2f} pts"
+                            f"{float(active_rationale_summary.nps_points_recoverable):.2f} pts"
                         ),
                     },
                     {
                         "label": "Concentración top-3",
                         "value": (
-                            f"{float(canonical_rationale_summary.top3_incident_share)*100.0:.1f}%"
+                            f"{float(active_rationale_summary.top3_incident_share)*100.0:.1f}%"
                         ),
                     },
                     {
@@ -1027,9 +1082,14 @@ class DashboardService:
                     },
                 ],
                 "topic_filter": {
-                    "label": "Tópico",
-                    "options": topic_options,
+                    "label": "Tópico NPS afectado",
+                    "options": topic_filter_options,
                     "default": "Todos",
+                    "hint": (
+                        f"{active_topic_count} tópico afectado por {topic_filter_method_label}."
+                        if active_topic_count == 1
+                        else f"{active_topic_count} tópicos afectados por {topic_filter_method_label}."
+                    ),
                 },
                 "tabs": [
                     {"id": "ranking", "label": "Ranking de hipótesis"},
@@ -1038,7 +1098,7 @@ class DashboardService:
                 "trending": {
                     "title": "NPS tópicos trending",
                     "figure": self._serialize_figure(
-                        self._build_topics_trending_figure(canonical_ranking_df, theme)
+                        self._build_topics_trending_figure(filtered_ranking_df, theme)
                     ),
                     "empty_state": "No hay señal suficiente para construir tópicos trending.",
                 },
@@ -1337,6 +1397,51 @@ class DashboardService:
         if focus_group == "passive":
             return "neutros"
         return "detractores"
+
+    @staticmethod
+    def _build_situation_narrative_metrics(
+        *,
+        method_label: str,
+        method_flow: str,
+        responses_total: int,
+        comments_total: int,
+        incidents_total: int,
+        linked_incidents_total: int,
+        linked_pairs_total: int,
+        focus_label: str,
+        average_focus_rate: float,
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "label": "Método causal",
+                "value": method_label,
+                "hint": "Flujo del método causal: " + method_flow,
+            },
+            {
+                "label": "Respuestas analizadas",
+                "value": str(int(responses_total)),
+            },
+            {
+                "label": "Comentarios enlazados",
+                "value": str(int(comments_total)),
+            },
+            {
+                "label": "Incidencias del periodo",
+                "value": str(int(incidents_total)),
+            },
+            {
+                "label": "Incidencias con match",
+                "value": str(int(linked_incidents_total)),
+            },
+            {
+                "label": "Links validados",
+                "value": str(int(linked_pairs_total)),
+            },
+            {
+                "label": f"{focus_label} medio",
+                "value": f"{float(average_focus_rate) * 100.0:.1f}%",
+            },
+        ]
 
     @staticmethod
     def _build_touchpoint_mode_payload(
@@ -1680,12 +1785,6 @@ class DashboardService:
             benchmark=operational_benchmark,
         )
         rationale_summary = summarize_incident_nps_rationale(rationale_df)
-        topic_options = [
-            "Todos",
-            *_unique_string_values(
-                _series_or_default(ranking_df, "nps_topic").astype(str).tolist()
-            ),
-        ]
         return {
             "rank_df": rank,
             "changepoints_df": changepoints_df,
@@ -1697,7 +1796,6 @@ class DashboardService:
             "rationale_df": rationale_df,
             "rationale_summary": rationale_summary,
             "top_topic": top_topic,
-            "topic_options": topic_options,
         }
 
     @staticmethod
