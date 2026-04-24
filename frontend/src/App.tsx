@@ -168,7 +168,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
-  const [touchpointSource, setTouchpointSource] = useState("domain_touchpoint");
+  const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [opportunityDimension, setOpportunityDimension] = useState("Palanca");
@@ -233,7 +233,7 @@ export function App() {
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
     setDownloadsPath(config.preferences.downloads_path || "");
     setHelixBaseUrl(config.preferences.helix_base_url || "");
-    setTouchpointSource(config.preferences.touchpoint_source || "domain_touchpoint");
+    setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
     setMinSimilarity(config.preferences.min_similarity ?? 0.25);
     setMaxDaysApart(config.preferences.max_days_apart ?? 10);
     setMinN(config.preferences.min_n_opportunities ?? 200);
@@ -472,7 +472,11 @@ export function App() {
       return;
     }
     if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
-      setTouchpointSource(causalMethodOptions[0]?.value || "domain_touchpoint");
+      setTouchpointSource(
+        causalMethodOptions.find((option) => option.value === "executive_journeys")?.value ||
+          causalMethodOptions[0]?.value ||
+          "executive_journeys"
+      );
     }
   }, [causalMethodOptions, touchpointSource]);
 
@@ -711,6 +715,8 @@ export function App() {
   }
 
   function renderFiltersContainer() {
+    const showCausalMethodFilter = mainArea === "insights" && insightTab === "linking";
+
     return (
       <section className="surface-card context-strip-card">
         <div className="section-heading">
@@ -722,7 +728,7 @@ export function App() {
             </p>
           </div>
         </div>
-        <div className="field-grid filters-inline-grid">
+        <div className={`field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method" : ""}`}>
           <label>
             <span>Año</span>
             <select onChange={(event) => setPopYear(event.target.value)} value={popYear}>
@@ -753,7 +759,43 @@ export function App() {
               ))}
             </select>
           </label>
+          {showCausalMethodFilter ? (
+            <label>
+              <span>Método causal</span>
+              <select
+                onChange={(event) => setTouchpointSource(event.target.value)}
+                value={touchpointSource}
+              >
+                {causalMethodOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
+      </section>
+    );
+  }
+
+  function renderAreaCoreCard() {
+    if (mainArea !== "insights") {
+      return null;
+    }
+
+    return (
+      <section className="surface-card context-strip-card area-core-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Área core</p>
+            <h2>Insights operativos</h2>
+            <p className="secondary-copy">
+              La navegación principal de Insights se fija antes de abrir filtros y vistas de detalle.
+            </p>
+          </div>
+        </div>
+        <NavigationTabs compact items={INSIGHT_TABS} onChange={setInsightTab} value={insightTab} />
       </section>
     );
   }
@@ -1127,16 +1169,6 @@ export function App() {
   function renderInsightsArea() {
     return (
       <section className="workspace-stack">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Área core</p>
-            <h2>Insights operativos</h2>
-            <p className="secondary-copy">
-              La navegación analítica se concentra en una única área de trabajo para reducir ruido y mantener continuidad cognitiva.
-            </p>
-          </div>
-        </div>
-        <NavigationTabs items={INSIGHT_TABS} onChange={setInsightTab} value={insightTab} />
         {insightTab === "nps" ? renderNpsSection() : renderLinkingSection()}
       </section>
     );
@@ -1377,6 +1409,8 @@ export function App() {
             </p>
           </div>
 
+          {renderAreaCoreCard()}
+
           {renderServiceContainer()}
 
           <PrimaryNav
@@ -1441,7 +1475,6 @@ export function App() {
 
       <SettingsSheet
         activeTab={settingsTab}
-        causalMethodOptions={causalMethodOptions}
         downloadsPath={downloadsPath}
         helixBaseUrl={helixBaseUrl}
         hierarchySaving={isSavingHierarchy}
@@ -1465,9 +1498,7 @@ export function App() {
         setMinSimilarity={setMinSimilarity}
         setMaxDaysApart={setMaxDaysApart}
         setThemeMode={setThemeMode}
-        setTouchpointSource={setTouchpointSource}
         themeMode={themeMode}
-        touchpointSource={touchpointSource}
       />
     </>
   );

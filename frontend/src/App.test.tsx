@@ -42,7 +42,7 @@ const contextPayload = {
     theme_mode: "light",
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
-    touchpoint_source: "domain_touchpoint",
+    touchpoint_source: "executive_journeys",
     min_similarity: 0.25,
     max_days_apart: 10,
     min_n_opportunities: 200,
@@ -176,18 +176,24 @@ const linkingPayloadAvailable = {
     average_focus_rate: 0.1524
   },
   situation: {
-    title: "Situación del periodo",
-    subtitle: "Cruce diario entre incidencias y NPS con lectura causal organizada por journeys de detracción.",
-    kpis: [
-      { label: "Respuestas analizadas", value: "26618" },
-      { label: "Incidencias del periodo", value: "233" },
-      {
-        label: "Método causal",
-        value: "Journeys de detracción",
-        hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
-      },
-      { label: "% detractores medio", value: "15.2%" }
-    ],
+    narrative: {
+      kicker: "Narrativa causal",
+      title: "2 journeys de detracción defendibles para detractores",
+      summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
+      metrics: [
+        {
+          label: "Método causal",
+          value: "Journeys de detracción",
+          hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
+        },
+        { label: "Respuestas analizadas", value: "26618" },
+        { label: "Incidencias del periodo", value: "233" },
+        { label: "% detractores medio", value: "15.2%" },
+        { label: "Incidencias con match", value: "20" },
+        { label: "Comentarios enlazados", value: "22" },
+        { label: "Links validados", value: "30" }
+      ]
+    },
     metadata: [
       {
         label: "Flujo causal",
@@ -195,7 +201,6 @@ const linkingPayloadAvailable = {
       },
       { label: "Foco analítico", value: "Journeys de detracción" }
     ],
-    figure_title: "Timeline causal (diario)",
     figure: null,
     note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité."
   },
@@ -229,13 +234,17 @@ const linkingPayloadAvailable = {
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
     topic_filter: {
-      label: "Tópico",
+      label: "Tópico NPS afectado",
       options: [
-        "Todos",
-        "Pagos/ Transferencias > Faltan detalles de movimientos",
-        "Operativa crítica fallida"
+        { value: "Todos", label: "Todos (2 tópicos afectados)" },
+        {
+          value: "Pagos/ Transferencias > Faltan detalles de movimientos",
+          label: "Pagos/ Transferencias > Faltan detalles de movimientos"
+        },
+        { value: "Operativa crítica fallida", label: "Operativa crítica fallida" }
       ],
-      default: "Todos"
+      default: "Todos",
+      hint: "2 tópicos afectados por journeys de detracción."
     },
     tabs: [
       { id: "ranking", label: "Ranking de hipótesis" },
@@ -288,18 +297,6 @@ const linkingPayloadAvailable = {
   scenarios: {
     title: "Análisis de escenarios causales",
     subtitle: "Escenarios priorizados bajo la lectura causal journeys de detracción.",
-    banner: {
-      kicker: "Narrativa causal",
-      title: "2 journeys de detracción defendibles para detractores",
-      summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
-      metrics: [
-        { label: "Método causal", value: "Journeys de detracción" },
-        { label: "Incidencias con match", value: "20" },
-        { label: "Comentarios enlazados", value: "22" },
-        { label: "Links validados", value: "30" }
-      ]
-    },
-    pills: ["Solo cadena completa defendible", "2 tópicos linkados", "2 cadenas causales"],
     cards: [
       {
         chain_key: "chain-1",
@@ -600,6 +597,9 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );
+    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
+    expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
+    expect(screen.getByText(/Flujo causal:/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Timeline causal (diario)" })).not.toBeInTheDocument();
     expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
@@ -612,9 +612,9 @@ describe("App", () => {
     );
     expect(screen.getAllByText("Ranking de hipótesis").length).toBeGreaterThan(0);
     expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Tópico" })).toHaveValue("Todos");
+    expect(screen.getByRole("combobox", { name: /Tópico NPS afectado/i })).toHaveValue("Todos");
     await user.selectOptions(
-      screen.getByRole("combobox", { name: "Tópico" }),
+      screen.getByRole("combobox", { name: /Tópico NPS afectado/i }),
       "Operativa crítica fallida"
     );
     const rankingTable = screen.getByRole("table");
