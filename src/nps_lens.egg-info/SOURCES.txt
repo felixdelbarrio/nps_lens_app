@@ -16,6 +16,7 @@ src/nps_lens/analytics/__init__.py
 src/nps_lens/analytics/causal.py
 src/nps_lens/analytics/changepoints.py
 src/nps_lens/analytics/drivers.py
+src/nps_lens/analytics/helix_operational_metrics.py
 src/nps_lens/analytics/hotspot_metrics.py
 src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
@@ -88,6 +89,7 @@ tests/test_config_env.py
 tests/test_design_tokens.py
 tests/test_drivers.py
 tests/test_helix_ingest_filtering.py
+tests/test_helix_operational_metrics.py
 tests/test_hotspot_metrics.py
 tests/test_incident_attribution.py
 tests/test_incident_rationale.py

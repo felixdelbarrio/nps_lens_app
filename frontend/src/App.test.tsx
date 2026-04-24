@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -335,7 +336,7 @@ const linkingPayloadAvailable = {
           { label: "Prioridad", value: "0.62" },
           { label: "NPS en riesgo", value: "0.00 pts" },
           { label: "NPS recuperable", value: "0.00 pts" },
-          { label: "Owner", value: "VoC + Analitica" }
+          { label: "Owner (rol)", value: "VoC + Analitica" }
         ],
         incident_records: [
           {
@@ -359,6 +360,73 @@ const linkingPayloadAvailable = {
           {
             "Tópico NPS": "Operativa crítica fallida",
             Prioridad: 0.62
+          }
+        ],
+        matrix_figure: null,
+        risk_recovery_figure: null,
+        heatmap_figure: null,
+        changepoints_figure: null,
+        lag_figure: null
+      },
+      {
+        chain_key: "chain-2",
+        rank: 2,
+        title: "Fricción en consulta de saldos",
+        statement: "Consulta -> saldo / disponibilidad -> retraso de actualización.",
+        selection_label: "Consulta de saldos | Fricción en consulta de saldos | 8 INC | 10 VoC",
+        linked_incidents: 8,
+        linked_comments: 10,
+        linked_pairs: 14,
+        detractor_probability: 0.52,
+        nps_delta_expected: -0.0,
+        total_nps_impact: 0.0,
+        confidence: 0.14,
+        priority: 0.51,
+        nps_points_at_risk: 0.0,
+        nps_points_recoverable: 0.0,
+        owner_role: "Canal Digital",
+        flow_steps: [
+          "(8) Incidencias + comentarios",
+          "Consulta de saldos",
+          "Consulta / Disponibilidad / Saldos",
+          "Riesgo NPS"
+        ],
+        spotlight_metrics: [
+          { label: "Journey de detracción", value: "Consulta de saldos" },
+          { label: "Tópico NPS ancla", value: "Fricción en consulta de saldos" },
+          { label: "Touchpoint afectado", value: "Consulta" },
+          { label: "Prob. detractores", value: "52.0%" },
+          { label: "Delta NPS", value: "-0.0" },
+          { label: "Impacto total", value: "0.00 pts" },
+          { label: "Confianza", value: "0.14" },
+          { label: "Links validados", value: "14" },
+          { label: "Prioridad", value: "0.51" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
+          { label: "Owner (rol)", value: "Canal Digital" }
+        ],
+        incident_records: [
+          {
+            incident_id: "INC000104231684",
+            summary: "ACOTAMIENTO IRD...",
+            url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU4"
+          }
+        ],
+        comment_records: [
+          {
+            comment_id: "2",
+            date: "2026-03-25",
+            nps: "2",
+            group: "DETRACTOR",
+            palanca: "Consulta",
+            subpalanca: "Saldos",
+            comment: "Los saldos tardan mucho en reflejarse."
+          }
+        ],
+        detail_table: [
+          {
+            "Tópico NPS": "Fricción en consulta de saldos",
+            Prioridad: 0.51
           }
         ],
         matrix_figure: null,
@@ -439,9 +507,17 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
+  function renderApp() {
+    return render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <App />
+      </SWRConfig>
+    );
+  }
+
   it("renders restored navigation, filters, traceability and uploads", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
 
     await waitFor(() =>
       expect(
@@ -451,6 +527,9 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: /NPS Lens/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Evolución promotores vs detractores" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
@@ -484,7 +563,7 @@ describe("App", () => {
     const user = userEvent.setup();
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() =>
       expect(
@@ -509,7 +588,7 @@ describe("App", () => {
     const user = userEvent.setup();
     currentLinkingPayload = linkingPayloadAvailable;
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() =>
       expect(
@@ -518,7 +597,10 @@ describe("App", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
-    expect(screen.getByRole("heading", { name: "Timeline causal (diario)" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
+    );
+    expect(screen.queryByRole("heading", { name: "Timeline causal (diario)" })).not.toBeInTheDocument();
     expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
@@ -556,10 +638,14 @@ describe("App", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
-    expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument();
+    expect(
+      screen.queryByText("2 journeys de detracción defendibles para detractores")
+    ).not.toBeInTheDocument();
     expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Comentarios enlazados" })).toBeInTheDocument();
+    expect(screen.queryByText("Escenario activo")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "1 incidencia enlazada" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "1 comentario enlazado" })).toBeInTheDocument();
     expect(screen.queryByText(/Los IDs abren la incidencia original en Helix/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tabla" })).toHaveClass("is-active");
     expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(

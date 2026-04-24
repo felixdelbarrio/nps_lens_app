@@ -19,6 +19,7 @@ import type {
   DatasetStatus,
   HelixUploadResult,
   LinkingPayload,
+  PlotlyFigureSpec,
   PreferencesPayload,
   ServiceOriginHierarchyPayload,
   UploadSelectionPayload,
@@ -84,6 +85,7 @@ const NPS_TABS = [
 ];
 
 const OVERVIEW_TABS = [
+  { id: "promoters-vs-detractors", label: "Evolución promotores vs detractores" },
   { id: "daily", label: "NPS clásico vs detractores" },
   { id: "weekly", label: "Media semanal" },
   { id: "topics", label: "Qué dicen los clientes" },
@@ -179,7 +181,7 @@ export function App() {
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("nps");
   const [npsTab, setNpsTab] = useState("summary");
-  const [overviewTab, setOverviewTab] = useState("daily");
+  const [overviewTab, setOverviewTab] = useState("promoters-vs-detractors");
   const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
@@ -297,7 +299,7 @@ export function App() {
   } = useSWR<DashboardPayload>(dashboardKey, () => fetchDashboard(dashboardQuery));
 
   const linkingKey =
-    mainArea === "insights" && insightTab === "linking" && serviceOrigin && serviceOriginN1
+    mainArea === "insights" && serviceOrigin && serviceOriginN1
       ? [
           "linking",
           serviceOrigin,
@@ -759,6 +761,29 @@ export function App() {
   function renderOverviewTab() {
     if (dashboard?.empty_state) {
       return <p className="empty-state">{dashboard.empty_state}</p>;
+    }
+
+    if (overviewTab === "promoters-vs-detractors") {
+      const situation = (linking?.situation || {}) as Record<string, unknown>;
+      const situationFigure = (situation.figure as PlotlyFigureSpec | null | undefined) || null;
+      const situationNote = typeof situation.note === "string" ? situation.note : "";
+
+      return (
+        <section className="surface-card stack-panel">
+          <p className="secondary-copy">
+            Lectura diaria de la evolución del mix NPS sin superponer volumen de incidencias.
+          </p>
+          <PlotFigure
+            emptyMessage={
+              linking?.empty_state ||
+              "No hay suficiente base cruzada para construir la evolución diaria de promotores vs detractores."
+            }
+            figure={situationFigure}
+            testId="promoters-vs-detractors-figure"
+          />
+          {situationNote ? <p className="secondary-copy">{situationNote}</p> : null}
+        </section>
+      );
     }
 
     if (overviewTab === "daily") {
