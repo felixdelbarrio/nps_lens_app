@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import type { CausalMethodOption, ServiceOriginHierarchyPayload } from "../api";
+import type { ServiceOriginHierarchyPayload } from "../api";
 import type { ThemeMode } from "../theme";
 import { Icon } from "./Icon";
 import { NavigationTabs } from "./NavigationTabs";
@@ -19,8 +19,6 @@ type SettingsSheetProps = {
   setDownloadsPath: (value: string) => void;
   helixBaseUrl: string;
   setHelixBaseUrl: (value: string) => void;
-  touchpointSource: string;
-  setTouchpointSource: (value: string) => void;
   minSimilarity: number;
   setMinSimilarity: (value: number) => void;
   maxDaysApart: number;
@@ -29,7 +27,6 @@ type SettingsSheetProps = {
   setMinN: (value: number) => void;
   minNCross: number;
   setMinNCross: (value: number) => void;
-  causalMethodOptions: CausalMethodOption[];
   serviceOrigins: string[];
   serviceOriginN1Map: Record<string, string[]>;
   serviceOriginN2Map: Record<string, Record<string, string[]>>;
@@ -56,8 +53,6 @@ export function SettingsSheet({
   setDownloadsPath,
   helixBaseUrl,
   setHelixBaseUrl,
-  touchpointSource,
-  setTouchpointSource,
   minSimilarity,
   setMinSimilarity,
   maxDaysApart,
@@ -66,7 +61,6 @@ export function SettingsSheet({
   setMinN,
   minNCross,
   setMinNCross,
-  causalMethodOptions,
   serviceOrigins,
   serviceOriginN1Map,
   serviceOriginN2Map,
@@ -91,9 +85,6 @@ export function SettingsSheet({
   if (!open) {
     return null;
   }
-
-  const selectedCausalMethod =
-    causalMethodOptions.find((option) => option.value === touchpointSource) || causalMethodOptions[0];
 
   return (
     <div className="sheet-backdrop" onClick={onClose} role="presentation">
@@ -209,37 +200,18 @@ export function SettingsSheet({
               <div>
                 <h3>Análisis causal</h3>
                 <p className="secondary-copy">
-                  Se recuperan los parámetros configurables del flujo estable previo a la migración React.
+                  El método causal ya se selecciona en los filtros de Incidencias ↔ NPS; aquí se mantienen únicamente los umbrales operativos.
                 </p>
               </div>
             </div>
             <div className="settings-section-stack">
               <article className="settings-subsection">
                 <div className="settings-subsection-copy">
-                  <h4>Método causal</h4>
+                  <h4>Parámetros de causalidad</h4>
                   <p className="secondary-copy">
-                    Selecciona cómo se segmenta el touchpoint antes de enlazar incidencias, comentarios y NPS.
+                    Ajusta el matching causal y la ventana temporal que gobiernan el cruce Helix ↔ VoC.
                   </p>
                 </div>
-                <div className="choice-grid">
-                  {causalMethodOptions.map((option) => (
-                    <button
-                      className={`choice-chip${option.value === touchpointSource ? " is-selected" : ""}`}
-                      key={option.value}
-                      onClick={() => setTouchpointSource(option.value)}
-                      type="button"
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                {selectedCausalMethod ? (
-                  <article className="note-card settings-method-card">
-                    <strong>{selectedCausalMethod.label}</strong>
-                    <p className="secondary-copy">{selectedCausalMethod.summary}</p>
-                    <p className="field-hint">Flujo: {selectedCausalMethod.flow}</p>
-                  </article>
-                ) : null}
                 <div className="field-grid">
                   <label>
                     <span>Similitud en la causalidad</span>

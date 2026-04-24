@@ -81,7 +81,7 @@ class PreferencesResponse(BaseModel):
     theme_mode: str = "light"
     downloads_path: str = ""
     helix_base_url: str = ""
-    touchpoint_source: str = "domain_touchpoint"
+    touchpoint_source: str = "executive_journeys"
     min_similarity: float = 0.25
     max_days_apart: int = 10
     min_n_opportunities: int = 200
