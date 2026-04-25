@@ -233,6 +233,8 @@ def _configure_text_frame(tf: object) -> None:
         tf.word_wrap = True
     with contextlib.suppress(Exception):
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    with contextlib.suppress(Exception):
+        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
 
 
 def _focus_risk_label(focus_name: str) -> str:
@@ -355,6 +357,43 @@ def _nps_band(value: object) -> str:
     return "Pasivo"
 
 
+_CATEGORY_CANONICALS = {
+    "funcionamiento continuo": "Funcionamiento continuo",
+    "agregar funcionalidad": "Agregar funcionalidad",
+    "fallas en el login": "Fallas en el login",
+}
+
+
+def _category_key(value: object) -> str:
+    clean = " ".join(str(value or "").split()).strip().casefold()
+    if clean in {"", "nan", "none", "null", "<na>"}:
+        return ""
+    clean = unicodedata.normalize("NFKD", clean).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", clean).strip()
+
+
+def _normalize_category_value(value: object) -> str:
+    clean = " ".join(str(value or "").split()).strip()
+    key = _category_key(clean)
+    if not key:
+        return ""
+    return _CATEGORY_CANONICALS.get(key, clean)
+
+
+def _normalize_presentation_categories(
+    df: pd.DataFrame,
+    *,
+    columns: Iterable[str] = ("Palanca", "Subpalanca"),
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=getattr(df, "columns", []))
+    out = df.copy()
+    for column in columns:
+        if column in out.columns:
+            out[column] = out[column].map(_normalize_category_value)
+    return out
+
+
 def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     cols = [
         "date",
@@ -382,17 +421,11 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         out["nps_topic"] = out["nps_topic"].astype(str).fillna("").str.strip()
     else:
         out["nps_topic"] = build_nps_topic(out).astype(str).fillna("").str.strip()
-    out["Palanca"] = (
-        out.get("Palanca", pd.Series([""] * len(out), index=out.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
+    out["Palanca"] = out.get("Palanca", pd.Series([""] * len(out), index=out.index)).map(
+        _normalize_category_value
     )
-    out["Subpalanca"] = (
-        out.get("Subpalanca", pd.Series([""] * len(out), index=out.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
+    out["Subpalanca"] = out.get("Subpalanca", pd.Series([""] * len(out), index=out.index)).map(
+        _normalize_category_value
     )
     out["band"] = out["NPS"].map(_nps_band)
     out = out.dropna(subset=["date"]).copy()
@@ -430,6 +463,7 @@ def _split_source_period_frames(
     out = out.dropna(subset=["Fecha"]).copy()
     if out.empty:
         return pd.DataFrame(), pd.DataFrame()
+    out = _normalize_presentation_categories(out)
 
     start_ts = pd.Timestamp(period_start)
     end_ts = pd.Timestamp(period_end)
@@ -770,11 +804,14 @@ def _opportunities_table(
     cols = ["dimension", "value", "n", "current_nps", "potential_uplift", "confidence", "why"]
     if current_nps_df is None or current_nps_df.empty:
         return pd.DataFrame(columns=cols)
-    work = current_nps_df.copy()
+    work = _normalize_presentation_categories(current_nps_df, columns=[dimension])
     if "nps_topic" not in work.columns or work["nps_topic"].astype(str).str.strip().eq("").all():
         work["nps_topic"] = build_nps_topic(work).astype(str).fillna("").str.strip()
     dims = [str(dimension)] if str(dimension or "").strip() in work.columns else []
     if not dims:
+        return pd.DataFrame(columns=cols)
+    work = work[work[dimension].astype(str).str.strip().ne("")].copy()
+    if work.empty:
         return pd.DataFrame(columns=cols)
     rows = rank_opportunities(
         work,
@@ -1235,7 +1272,8 @@ def _build_web_heatmap_figure(source_df: pd.DataFrame, *, row_dim: str) -> Optio
     required = {row_dim, "Canal", "NPS"}
     if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
         return None
-    chart_df = source_df.dropna(subset=[row_dim, "Canal", "NPS"]).copy()
+    chart_df = _normalize_presentation_categories(source_df, columns=[row_dim])
+    chart_df = chart_df.dropna(subset=[row_dim, "Canal", "NPS"]).copy()
     if chart_df.empty:
         return None
     chart_df[row_dim] = chart_df[row_dim].astype(str).str.strip()
@@ -1290,7 +1328,8 @@ def _build_web_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd
     required = {dimension, "Canal", "NPS"}
     if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
         return pd.DataFrame(columns=cols)
-    work = source_df.dropna(subset=[dimension, "Canal", "NPS"]).copy()
+    work = _normalize_presentation_categories(source_df, columns=[dimension])
+    work = work.dropna(subset=[dimension, "Canal", "NPS"]).copy()
     work[dimension] = work[dimension].astype(str).str.strip()
     work["Canal"] = work["Canal"].astype(str).str.strip()
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
@@ -2735,7 +2774,8 @@ def _add_stat_card(
     accent_bar.line.fill.background()
 
     tf = box.text_frame
-    tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+    _configure_text_frame(tf)
+    tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
     tf.clear()
     p0 = tf.paragraphs[0]
     p0.alignment = PP_ALIGN.CENTER
@@ -5267,6 +5307,12 @@ def _build_causal_scenarios(
                 _fmt_pct_or_nd(row.get("detractor_probability", np.nan)),
                 BBVA_COLORS["red"],
             ),
+            ("Confianza", _fmt_num_or_nd(row.get("confidence", np.nan)), BBVA_COLORS["green"]),
+            (
+                "Vínculos validados",
+                str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
+                BBVA_COLORS["sky"],
+            ),
             (
                 "Cambio esperado en NPS",
                 _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
@@ -5276,22 +5322,6 @@ def _build_causal_scenarios(
                 "Impacto total",
                 f"{_fmt_num_or_nd(row.get('total_nps_impact', np.nan))} pts",
                 BBVA_COLORS["blue"],
-            ),
-            ("Confianza", _fmt_num_or_nd(row.get("confidence", np.nan)), BBVA_COLORS["green"]),
-            (
-                "Vínculos validados",
-                str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
-                BBVA_COLORS["sky"],
-            ),
-            (
-                "NPS en riesgo",
-                f"{_fmt_num_or_nd(row.get('nps_points_at_risk', np.nan))} pts",
-                BBVA_COLORS["red"],
-            ),
-            (
-                "NPS recuperable",
-                f"{_fmt_num_or_nd(row.get('nps_points_recoverable', np.nan))} pts",
-                BBVA_COLORS["green"],
             ),
         ]
         incident_lines = [
@@ -5483,26 +5513,24 @@ def _add_cover_slide(
     overview: dict[str, object],
     story_md: str,
 ) -> None:
+    del overview, story_md
     slide = _new_slide(prs, kind="cover")
-    title = "NPS Lens"
+    _add_bg(slide, BBVA_COLORS["bg_dark"])
+    accent = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE, Inches(0.0), Inches(0.0), Inches(0.24), Inches(7.5)
+    )
+    accent.fill.solid()
+    accent.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
+    accent.line.fill.background()
+
+    title = "Análisis NPS térmico y causalidad"
     subtitle = f"{service_origin} · {service_origin_n1}".strip(" ·")
     if service_origin_n2:
         subtitle = f"{subtitle} · {service_origin_n2}".strip(" ·")
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    subtitle = f"{subtitle} · {period_label}".strip(" ·")
 
-    eyebrow = slide.shapes.add_textbox(Inches(0.70), Inches(0.36), Inches(2.4), Inches(0.26))
-    etf = eyebrow.text_frame
-    _configure_text_frame(etf)
-    etf.clear()
-    ep = etf.paragraphs[0]
-    er = ep.add_run()
-    er.text = "Lectura ejecutiva"
-    er.font.name = BBVA_FONT_MEDIUM
-    er.font.size = Pt(10.5)
-    er.font.bold = True
-    er.font.color.rgb = _rgb(BBVA_COLORS["blue"])
-
-    hero = slide.shapes.add_textbox(Inches(0.70), Inches(0.58), Inches(5.8), Inches(0.55))
+    hero = slide.shapes.add_textbox(Inches(0.78), Inches(3.04), Inches(11.85), Inches(0.86))
     htf = hero.text_frame
     _configure_text_frame(htf)
     htf.clear()
@@ -5510,11 +5538,11 @@ def _add_cover_slide(
     hr = hp.add_run()
     hr.text = title
     hr.font.name = BBVA_FONT_DISPLAY
-    hr.font.size = Pt(30)
+    hr.font.size = Pt(38)
     hr.font.bold = True
-    hr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+    hr.font.color.rgb = _rgb(BBVA_COLORS["white"])
 
-    sub = slide.shapes.add_textbox(Inches(0.70), Inches(0.98), Inches(6.2), Inches(0.34))
+    sub = slide.shapes.add_textbox(Inches(0.82), Inches(3.94), Inches(10.80), Inches(0.50))
     stf = sub.text_frame
     _configure_text_frame(stf)
     stf.clear()
@@ -5522,89 +5550,8 @@ def _add_cover_slide(
     sr = sp.add_run()
     sr.text = subtitle
     sr.font.name = BBVA_FONT_BODY
-    sr.font.size = Pt(14)
-    sr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
-
-    ribbon = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(0.62),
-        Inches(1.36),
-        Inches(12.0),
-        Inches(0.52),
-    )
-    ribbon.fill.solid()
-    ribbon.fill.fore_color.rgb = _rgb(BBVA_COLORS["blue"])
-    ribbon.line.fill.background()
-    rtf = ribbon.text_frame
-    rtf.clear()
-    rp = rtf.paragraphs[0]
-    rr = rp.add_run()
-    rr.text = f"Periodo analizado · {period_label}"
-    rr.font.name = BBVA_FONT_MEDIUM
-    rr.font.size = Pt(12)
-    rr.font.bold = True
-    rr.font.color.rgb = _rgb(BBVA_COLORS["white"])
-
-    summary_lines = _cover_summary_lines(overview, story_md) or [
-        "La lectura combina señal de experiencia, comentarios y evolución del periodo.",
-        "Las tarjetas de la derecha recogen el tamaño de muestra y el equilibrio entre detractores y promotores.",
-        "El resto del deck explica qué temas pesan más y dónde conviene priorizar acciones.",
-    ]
-    _add_bullet_lines(
-        slide,
-        left=0.70,
-        top=2.02,
-        width=6.75,
-        height=3.36,
-        title="Mensaje clave del periodo",
-        lines=summary_lines,
-        accent=BBVA_COLORS["sky"],
-    )
-
-    _add_stat_card(
-        slide,
-        left=7.68,
-        top=2.02,
-        width=2.3,
-        height=1.58,
-        label="Comentarios",
-        value=_fmt_count_or_nd(overview.get("comments", 0)),
-        accent=BBVA_COLORS["blue"],
-        hint="Base útil del periodo",
-    )
-    _add_stat_card(
-        slide,
-        left=10.12,
-        top=2.02,
-        width=2.3,
-        height=1.58,
-        label="NPS medio",
-        value=_fmt_num_or_nd(overview.get("nps_mean", np.nan)),
-        accent=BBVA_COLORS["green"],
-        hint="Escala 0-10",
-    )
-    _add_stat_card(
-        slide,
-        left=7.68,
-        top=3.74,
-        width=2.3,
-        height=1.58,
-        label="% detractores",
-        value=_fmt_pct_or_nd(overview.get("detractor_rate", np.nan)),
-        accent=BBVA_COLORS["red"],
-        hint="Valoraciones <= 6",
-    )
-    _add_stat_card(
-        slide,
-        left=10.12,
-        top=3.74,
-        width=2.3,
-        height=1.58,
-        label="% promotores",
-        value=_fmt_pct_or_nd(overview.get("promoter_rate", np.nan)),
-        accent=BBVA_COLORS["green"],
-        hint="Valoraciones >= 9",
-    )
+    sr.font.size = Pt(15)
+    sr.font.color.rgb = _rgb("C7D3EA")
 
 
 def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationContext) -> None:
@@ -5666,9 +5613,9 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     _add_stat_card(
         slide,
         left=8.70,
-        top=1.20,
+        top=1.10,
         width=3.40,
-        height=1.34,
+        height=1.12,
         label="NPS medio",
         value=_fmt_num_or_nd(context.overview.get("nps_mean", np.nan), decimals=1),
         accent=BBVA_COLORS["green"],
@@ -5677,9 +5624,9 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     _add_stat_card(
         slide,
         left=8.70,
-        top=2.82,
+        top=2.52,
         width=3.40,
-        height=1.34,
+        height=1.12,
         label="Detractores",
         value=_fmt_pct_or_nd(context.overview.get("detractor_rate", np.nan)),
         accent=BBVA_COLORS["red"],
@@ -5688,9 +5635,20 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     _add_stat_card(
         slide,
         left=8.70,
-        top=4.44,
+        top=3.94,
         width=3.40,
-        height=1.34,
+        height=1.12,
+        label="% promotores",
+        value=_fmt_pct_or_nd(context.overview.get("promoter_rate", np.nan)),
+        accent=BBVA_COLORS["green"],
+        hint="Valoraciones >= 9",
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=5.36,
+        width=3.40,
+        height=1.12,
         label="Comentarios",
         value=_fmt_count_or_nd(context.overview.get("comments", 0)),
         accent=BBVA_COLORS["blue"],
@@ -5952,13 +5910,13 @@ def _add_deep_dive_slide(
         title="2. Qué han dicho los clientes",
         subtitle=f"Temas más repetidos en los comentarios del periodo · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=8.55, height=5.42, title="Top temas del periodo")
+    _panel(slide, left=0.66, top=1.48, width=12.02, height=5.42, title="Top temas del periodo")
     _figure_in_panel(
         slide,
         figure=topic_fig,
         left=0.82,
         top=1.82,
-        width=7.46,
+        width=11.62,
         height=3.20,
         empty_note="No hay suficiente volumen textual para construir el top 10.",
         target_ppi=176,
@@ -5977,31 +5935,15 @@ def _add_deep_dive_slide(
         slide,
         left=0.82,
         top=5.02,
-        width=7.54,
+        width=11.62,
         title="",
         headers=["cluster_id", "n", "top_terms", "examples"],
         rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
         row_height=0.36,
-        col_width_ratios=[0.8, 0.8, 2.5, 2.3],
-        clip_lengths=[8, 8, 36, 34],
+        col_width_ratios=[0.8, 0.8, 4.5, 4.3],
+        clip_lengths=[8, 8, 58, 58],
         font_size_pt=10.4,
         max_rows=3,
-    )
-
-    bullet_lines = [
-        f"{row.label}: {_fmt_count_or_nd(row.n)} comentarios."
-        for _, row in text_topics_df.head(EDITORIAL_LIMITS.max_text_clusters).iterrows()
-    ] or ["No se han detectado temas con masa crítica suficiente."]
-    _add_bullet_lines(
-        slide,
-        left=9.28,
-        top=1.48,
-        width=3.40,
-        height=5.42,
-        title="Qué destaca",
-        lines=bullet_lines,
-        accent=BBVA_COLORS["sky"],
-        body_font_size_pt=14.0,
     )
 
 
@@ -6762,6 +6704,7 @@ def _add_causal_section_cover_slide(
     nps_points_recoverable: float,
     top3_incident_share: float,
 ) -> None:
+    del nps_points_at_risk, nps_points_recoverable, top3_incident_share
     slide = _new_slide(prs, kind="cover")
     _add_bg(slide, BBVA_COLORS["bg_dark"])
     method = context.causal
@@ -6813,35 +6756,13 @@ def _add_causal_section_cover_slide(
     _add_stat_card(
         slide,
         left=8.70,
-        top=1.20,
+        top=2.82,
         width=3.40,
         height=1.34,
         label="Escenarios",
         value=_fmt_count_or_nd(len(method.scenarios)),
         accent=BBVA_COLORS["blue"],
         hint="Casos priorizados",
-    )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=2.82,
-        width=3.40,
-        height=1.34,
-        label="NPS en riesgo",
-        value=f"{_fmt_num_or_nd(nps_points_at_risk, decimals=1)} pts",
-        accent=BBVA_COLORS["red"],
-        hint="Impacto estimado",
-    )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=4.44,
-        width=3.40,
-        height=1.34,
-        label="NPS recuperable",
-        value=f"{_fmt_num_or_nd(nps_points_recoverable, decimals=1)} pts",
-        accent=BBVA_COLORS["green"],
-        hint=f"Top-3 incidencias {_fmt_pct_or_nd(top3_incident_share)}",
     )
 
 
@@ -6860,8 +6781,11 @@ def _add_causal_analysis_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title=f"13.{scenario.index} Análisis causal editorial",
-        subtitle=f"{method_spec.entity_singular}: {title} · {context.period_label}",
+        title=f"13.{scenario.index} {title}",
+        subtitle=(
+            f"Análisis causal de {method_spec.entity_singular}: "
+            f"Escenario #{scenario.index} · {context.period_label}"
+        ),
     )
     chain_statement = (
         f"{_fmt_count_or_nd(row.get('linked_incidents', 0))} incidencias Helix y "
@@ -6880,41 +6804,77 @@ def _add_causal_analysis_slide(
         border=BBVA_COLORS["sky"],
         title_size=13,
     )
-    _add_bullet_lines(
-        slide,
-        left=0.66,
-        top=2.60,
-        width=5.78,
-        height=2.22,
-        title="Incidencias enlazadas",
-        lines=scenario.incident_lines
-        or ["No se han encontrado incidencias Helix adicionales para este escenario."],
-        accent=BBVA_COLORS["orange"],
-        body_font_size_pt=11.5,
+
+    evidence = (
+        scenario.helix_evidence_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+        or scenario.incident_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+        or ["No se han encontrado evidencias Helix adicionales defendibles para este escenario."]
     )
-    _add_bullet_lines(
-        slide,
-        left=6.66,
-        top=2.60,
-        width=6.02,
-        height=2.22,
-        title="Comentarios enlazados",
-        lines=scenario.comment_lines
-        or ["No se han encontrado verbatims adicionales para este escenario."],
-        accent=BBVA_COLORS["red"],
-        body_font_size_pt=11.5,
-    )
-    for pos, (label, value, accent) in enumerate(scenario.kpis):
+    card_width = 5.76
+    card_height = 1.34 if len(evidence) > 2 else 1.46
+    positions = [(0.66, 2.52), (6.92, 2.52), (0.66, 4.12), (6.92, 4.12)]
+    for idx, line in enumerate(evidence[:4]):
+        left, top = positions[idx]
+        _panel(
+            slide,
+            left=left,
+            top=top,
+            width=card_width,
+            height=card_height,
+            title=f"Evidencia {idx + 1}",
+            fill=BBVA_COLORS["white"],
+            border=BBVA_COLORS["line"],
+            title_size=12,
+        )
+        tb = slide.shapes.add_textbox(
+            Inches(left + 0.18),
+            Inches(top + 0.44),
+            Inches(card_width - 0.36),
+            Inches(card_height - 0.58),
+        )
+        tf = tb.text_frame
+        _configure_text_frame(tf)
+        tf.clear()
+        p = tf.paragraphs[0]
+        _add_markdown_runs(
+            p,
+            text=line,
+            max_chars=152,
+            font_size_pt=10.8,
+            color=BBVA_COLORS["muted"],
+        )
+
+    visible_kpis = scenario.kpis[:4]
+    kpi_left = 0.66
+    kpi_top = 6.02
+    comment_left = 9.08
+    comment_width = 3.60
+    available_width = comment_left - kpi_left - 0.20
+    kpi_count = max(len(visible_kpis), 1)
+    kpi_width = min(2.80, available_width / kpi_count - 0.10)
+    for pos, (label, value, accent) in enumerate(visible_kpis):
         _add_stat_card(
             slide,
-            left=0.66 + pos * 3.02,
-            top=5.18,
-            width=2.80,
-            height=1.22,
+            left=kpi_left + pos * (kpi_width + 0.15),
+            top=kpi_top,
+            width=kpi_width,
+            height=1.16,
             label=label,
             value=value,
             accent=accent,
         )
+    _add_bullet_lines(
+        slide,
+        left=comment_left,
+        top=kpi_top,
+        width=comment_width,
+        height=1.16,
+        title="Comentarios enlazados",
+        lines=scenario.comment_lines
+        or ["No se han encontrado verbatims adicionales para este escenario."],
+        accent=BBVA_COLORS["red"],
+        body_font_size_pt=9.6,
+    )
 
 
 def _add_causal_evidence_slide(
@@ -7252,7 +7212,6 @@ def generate_business_review_ppt(
     )
     for scenario in context.causal.scenarios:
         _add_causal_analysis_slide(prs, context=context, scenario=scenario)
-        _add_causal_evidence_slide(prs, context=context, scenario=scenario)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = f"nps-incidencias-{_slug(service_origin)}-{_slug(service_origin_n1)}-{stamp}.pptx"
