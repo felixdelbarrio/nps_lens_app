@@ -120,7 +120,11 @@ const dashboardPayload = {
   comparison: { has_data: false, table: [] },
   cohorts: {},
   gaps: { has_data: false, table: [] },
-  opportunities: { has_data: false, table: [], bullets: [] },
+  opportunities: {
+    has_data: false,
+    table: [],
+    bullets: ["Si mejoramos **Palanca=Acceso**, el modelo estima un **potencial de +24.0 puntos**."]
+  },
   controls: {
     dimensions: ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"],
     cohort_rows: ["Palanca", "Subpalanca"],
@@ -545,6 +549,11 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
+    await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
+    const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
+    expect(opportunityNote).not.toBeNull();
+    expect(opportunityNote).not.toHaveTextContent("**");
+    expect(within(opportunityNote as HTMLElement).getByText("Palanca=Acceso").tagName).toBe("STRONG");
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
