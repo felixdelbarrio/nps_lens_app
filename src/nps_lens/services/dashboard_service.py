@@ -73,6 +73,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
+from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -1372,9 +1373,7 @@ class DashboardService:
     def _select_top_chain_rows(attribution_df: pd.DataFrame) -> pd.DataFrame:
         if attribution_df.empty:
             return attribution_df
-        if "priority" in attribution_df.columns:
-            return attribution_df.sort_values("priority", ascending=False).head(3).copy()
-        return attribution_df.head(3).copy()
+        return select_causal_scenarios(attribution_df, max_rows=3)
 
     @staticmethod
     def _period_bounds(frame: pd.DataFrame) -> tuple[date, date]:

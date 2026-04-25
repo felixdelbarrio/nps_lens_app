@@ -102,7 +102,18 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     if chain_df is None or chain_df.empty:
         return pd.DataFrame(columns=getattr(chain_df, "columns", []))
     work = chain_df.copy()
+    if "rank" in work.columns:
+        work["rank"] = _numeric_series(work, "rank")
+        ranked = work.dropna(subset=["rank"]).copy()
+        ranked = ranked[ranked["rank"] > 0].copy()
+        if not ranked.empty:
+            return ranked.sort_values(["rank"], ascending=[True]).head(max_rows).copy()
     for column in (
+        "detractor_probability",
+        "focus_probability_with_incident",
+        "total_nps_impact",
+        "nps_points_at_risk",
+        "nps_points_recoverable",
         "priority",
         "confidence",
         "causal_score",
@@ -114,14 +125,19 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     return (
         work.sort_values(
             [
-                "priority",
-                "confidence",
-                "causal_score",
+                "detractor_probability",
+                "focus_probability_with_incident",
+                "total_nps_impact",
+                "nps_points_at_risk",
+                "nps_points_recoverable",
                 "linked_pairs",
                 "linked_incidents",
                 "linked_comments",
+                "confidence",
+                "causal_score",
+                "priority",
             ],
-            ascending=[False, False, False, False, False, False],
+            ascending=[False, False, False, False, False, False, False, False, False, False, False],
         )
         .head(max_rows)
         .copy()
