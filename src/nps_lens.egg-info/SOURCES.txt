@@ -68,8 +68,11 @@ src/nps_lens/platform/batch.py
 src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
 src/nps_lens/reports/__init__.py
+src/nps_lens/reports/content_selectors.py
+src/nps_lens/reports/editorial_tokens.py
 src/nps_lens/reports/executive_ppt.py
 src/nps_lens/reports/ppt_template.py
+src/nps_lens/reports/presentation_context.py
 src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py

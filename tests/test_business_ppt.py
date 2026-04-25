@@ -19,6 +19,7 @@ from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.content_selectors import (
     parse_markdown_strong,
+    select_causal_scenarios,
     select_negative_delta_rows,
     select_nonzero_kpis,
 )
@@ -385,7 +386,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count >= 14
+    assert out.slide_count == 13
 
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == out.slide_count
@@ -404,9 +405,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
             for paragraph in shape.text_frame.paragraphs:
                 cover_texts.append(paragraph.text or "")
 
-    assert any("NPS Lens" in t for t in texts)
-    assert any("Mensaje clave del periodo" in t for t in texts)
+    assert any("Análisis NPS térmico y causalidad" in t for t in texts)
     assert any("NPS térmico" in t for t in texts)
+    assert any("% PROMOTORES" in t for t in texts)
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
     assert any("5. Qué ha cambiado en Palanca" in t for t in texts)
@@ -417,8 +418,10 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("10. Oportunidades priorizadas · Subpalanca" in t for t in texts)
     assert any("11. Narrativa causal · Por Subpalanca" in t for t in texts)
     assert any("12. Journeys de detracción" in t for t in texts)
-    assert any("13.1 Análisis causal editorial" in t for t in texts)
-    assert any("14.1 Detalle de evidencias Helix" in t for t in texts)
+    assert any("13.1 Acceso > Login" in t for t in texts)
+    assert any("Análisis causal de Subpalanca: Escenario #1 ·" in t for t in texts)
+    assert not any("Detalle de evidencias Helix" in t for t in texts)
+    assert not any("Qué destaca" in t for t in texts)
     assert not any("2. Cuándo y cómo lo dicen" in t for t in texts)
     assert not any("5. Casos más alejados del promedio" in t for t in texts)
     assert not any("Situación del periodo" in t for t in texts)
@@ -431,6 +434,13 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
     assert not any("VoC" in t for t in texts)
+    assert all(
+        shape.text_frame.vertical_anchor != executive_ppt.MSO_VERTICAL_ANCHOR.MIDDLE
+        for slide in prs.slides
+        for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        and any((paragraph.text or "").strip() for paragraph in shape.text_frame.paragraphs)
+    )
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -520,8 +530,148 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                     texts.append(paragraph.text or "")
 
     assert any("12. Journeys de detracción" in t for t in texts)
-    assert any("Journey de detracción: Acceso bloqueado" in t for t in texts)
+    assert any("Análisis causal de Journey de detracción: Escenario #1 ·" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
+
+
+def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slides() -> None:
+    payload = _sample_payload()
+    base = payload["attribution"].iloc[0].to_dict()
+    rows = [
+        {
+            **base,
+            "nps_topic": "Acceso bloqueado",
+            "touchpoint": "Login / autenticación",
+            "palanca": "Acceso",
+            "subpalanca": "Bloqueo / OTP",
+            "linked_incidents": 5,
+            "linked_comments": 3,
+            "linked_pairs": 5,
+            "detractor_probability": 0.13,
+            "confidence": 0.20,
+            "priority": 0.91,
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
+        {
+            **base,
+            "nps_topic": "Operativa crítica fallida",
+            "touchpoint": "Transferencias / pagos / firma",
+            "palanca": "Operativa",
+            "subpalanca": "Error funcional / timeout",
+            "linked_incidents": 8,
+            "linked_comments": 5,
+            "linked_pairs": 10,
+            "detractor_probability": 0.45,
+            "confidence": 0.15,
+            "priority": 0.62,
+            "incident_records": [
+                {
+                    "incident_id": "INC000104256298",
+                    "summary": "Condición de horario en proceso KNJCR2UC.",
+                    "url": "",
+                },
+                {
+                    "incident_id": "INC000104257175",
+                    "summary": "Caída en contratación de seguro cibernético Web.",
+                    "url": "",
+                },
+                {
+                    "incident_id": "",
+                    "summary": "Al ingresar al módulo de transferencias en tiempo real seguimiento, el sistema no muestra la opción de firmar las operaciones.",
+                    "url": "",
+                },
+                {
+                    "incident_id": "",
+                    "summary": "Al querer obtener los comprobantes de pago del 16/01/2026, el sistema se queda cargando.",
+                    "url": "",
+                },
+            ],
+            "comment_examples": [
+                "NPS 0: no me deja hacer trasnferencias , marca error de horario",
+                "NPS 2: no me avisaron de que mi contrato de seguro subio de precio",
+            ],
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
+        {
+            **base,
+            "nps_topic": "Rendimiento degradado",
+            "touchpoint": "Lentitud / cuelgues",
+            "palanca": "Uso recurrente",
+            "subpalanca": "Degradación del servicio",
+            "linked_incidents": 2,
+            "linked_comments": 2,
+            "linked_pairs": 2,
+            "detractor_probability": float("nan"),
+            "confidence": 0.0,
+            "priority": 0.10,
+            "incident_records": [
+                {
+                    "incident_id": "",
+                    "summary": "Se detecta que al abrir el PDF del EDC del mes de febrero se muestra un error.",
+                    "url": "",
+                },
+                {
+                    "incident_id": "",
+                    "summary": "Se procede a obtener un estado de cuenta CFDI y el flujo no completa.",
+                    "url": "",
+                },
+            ],
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
+    ]
+    attribution = pd.DataFrame(rows)
+
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="ENTERPRISE WEB",
+        service_origin_n2="",
+        period_start=date(2026, 3, 1),
+        period_end=date(2026, 3, 29),
+        focus_name="detractores",
+        overall_weekly=payload["overall_daily"],
+        rationale_df=payload["rationale"],
+        nps_points_at_risk=0.0,
+        nps_points_recoverable=0.0,
+        top3_incident_share=0.0,
+        median_lag_weeks=0.0,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=attribution,
+        by_topic_daily=payload["by_topic_daily"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
+        touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        entity_summary_df=attribution,
+        entity_summary_kpis=[
+            {"label": "Journeys de detracción", "value": "3"},
+            {"label": "Touchpoints cubiertos", "value": "3"},
+            {"label": "Links validados", "value": "17"},
+        ],
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = [
+        paragraph.text or ""
+        for slide in prs.slides
+        for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+    ]
+
+    assert out.slide_count == 15
+    assert any("13.1 Operativa crítica fallida" in t for t in texts)
+    assert any("13.2 Acceso bloqueado" in t for t in texts)
+    assert any("13.3 Rendimiento degradado" in t for t in texts)
+    assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
+    slide_11_texts = [
+        paragraph.text or ""
+        for shape in prs.slides[10].shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+    ]
+    assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_11_texts)
+    assert any("INC000104257175" in t for t in texts)
+    assert any("VÍNCULOS VALIDADOS" in t for t in texts)
 
 
 def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
@@ -583,7 +733,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                     texts.append(paragraph.text or "")
 
     assert any("12. Journeys rotos" in t for t in texts)
-    assert any("Journey roto: Acceso / Login" in t for t in texts)
+    assert any("Análisis causal de Journey roto: Escenario #1 ·" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -806,6 +956,14 @@ def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> Non
     assert executive_ppt._nps_band(10) == "Promotor"
     assert executive_ppt._nps_band(8) == "Pasivo"
     assert executive_ppt._nps_band(2) == "Detractor"
+    assert (
+        executive_ppt._normalize_category_value("Funcionamiento Continuo")
+        == "Funcionamiento continuo"
+    )
+    assert (
+        executive_ppt._normalize_category_value("Agregar Funcionalidad") == "Agregar funcionalidad"
+    )
+    assert executive_ppt._normalize_category_value("Fallas en el Login") == "Fallas en el login"
 
 
 def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
@@ -836,6 +994,33 @@ def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> N
         ("Palanca=Acceso", True),
         (", sube", False),
     ]
+
+    scenarios = select_causal_scenarios(
+        pd.DataFrame(
+            [
+                {
+                    "nps_topic": "Acceso bloqueado",
+                    "priority": 0.91,
+                    "confidence": 0.20,
+                    "detractor_probability": 0.13,
+                    "linked_pairs": 5,
+                    "linked_incidents": 5,
+                    "linked_comments": 3,
+                },
+                {
+                    "nps_topic": "Operativa crítica fallida",
+                    "priority": 0.62,
+                    "confidence": 0.15,
+                    "detractor_probability": 0.45,
+                    "linked_pairs": 10,
+                    "linked_incidents": 8,
+                    "linked_comments": 5,
+                },
+            ]
+        ),
+        max_rows=2,
+    )
+    assert scenarios["nps_topic"].tolist() == ["Operativa crítica fallida", "Acceso bloqueado"]
 
 
 def test_daily_kpis_chart_places_x_axis_labels_at_bottom() -> None:
@@ -888,7 +1073,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
 
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
     assert any("12. Journeys de detracción" in t for t in texts)
-    assert not any("13.1 Análisis causal editorial" in t for t in texts)
+    assert not any("13.1" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:
