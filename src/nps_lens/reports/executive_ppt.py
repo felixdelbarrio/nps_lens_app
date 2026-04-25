@@ -49,10 +49,25 @@ from nps_lens.design.tokens import (
     plotly_risk_scale,
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
+from nps_lens.reports.content_selectors import (
+    parse_markdown_strong,
+    select_causal_scenarios,
+    select_negative_delta_rows,
+    select_nonzero_kpis,
+    select_opportunities,
+    select_text_clusters,
+)
+from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
 from nps_lens.reports.ppt_template import (
     CorporatePresentationTheme,
     build_presentation,
     resolve_layout,
+)
+from nps_lens.reports.presentation_context import (
+    CausalScenarioViewModel,
+    CausalViewModel,
+    DimensionViewModel,
+    PresentationContext,
 )
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
@@ -1117,6 +1132,365 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
         yaxis=dict(title="Impacto potencial (pts NPS)", rangemode="tozero"),
         showlegend=False,
+    )
+    return fig
+
+
+def _build_overview_figure(
+    selected_nps_df: Optional[pd.DataFrame], *, period_days: int
+) -> Optional[go.Figure]:
+    fig = chart_daily_kpis(
+        selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame(),
+        get_theme("light"),
+        days=max(int(period_days), 1),
+    )
+    if fig is None:
+        return None
+    fig.update_layout(
+        legend=dict(orientation="h", x=0.0, y=1.18, yanchor="bottom", title_text=""),
+        margin=dict(l=58, r=58, t=88, b=74),
+    )
+    fig.update_xaxes(
+        side="bottom",
+        ticklabelposition="outside bottom",
+        automargin=True,
+        tickfont=dict(size=20),
+        title_font=dict(size=20),
+    )
+    fig.update_yaxes(tickfont=dict(size=18), title_font=dict(size=18))
+    return fig
+
+
+def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure]:
+    topic_fig = chart_topic_bars(
+        text_topics_df, get_theme("light"), top_k=EDITORIAL_LIMITS.max_text_clusters
+    )
+    if topic_fig is None or text_topics_df.empty:
+        return topic_fig
+    topic_rows = (
+        text_topics_df.sort_values("n", ascending=False)
+        .head(EDITORIAL_LIMITS.max_text_clusters)
+        .copy()
+    )
+    topic_labels = []
+    for row in topic_rows.itertuples():
+        terms = [str(term).strip() for term in list(row.top_terms)[:2] if str(term).strip()]
+        topic_labels.append(_clip(f"#{int(row.cluster_id)} · {', '.join(terms)}", 24))
+    with contextlib.suppress(Exception):
+        topic_fig.data[0].y = topic_labels
+    counts = pd.to_numeric(text_topics_df.get("n"), errors="coerce").dropna()
+    xmax = float(counts.max()) if not counts.empty else 0.0
+    topic_fig.update_xaxes(
+        title_text="Comentarios",
+        nticks=5,
+        dtick=2000 if xmax >= 6000 else 1000 if xmax >= 2000 else None,
+        tickformat="~s",
+        tickfont=dict(size=20),
+        title_font=dict(size=20),
+    )
+    topic_fig.update_yaxes(tickfont=dict(size=28), automargin=True)
+    topic_fig.update_layout(margin=dict(l=250, r=24, t=22, b=54), bargap=0.34)
+    return topic_fig
+
+
+def _build_driver_delta_figure(
+    delta_df: pd.DataFrame, *, panel_height_in: float
+) -> Optional[go.Figure]:
+    fig = chart_driver_delta(delta_df, get_theme("light"), top_k=max(len(delta_df), 1))
+    if fig is None or delta_df.empty:
+        return fig
+    plot_df = delta_df.head(EDITORIAL_LIMITS.max_change_rows).copy()
+    label_count = len(plot_df)
+    max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
+    wrap_width = 26 if max_len >= 26 else 22 if max_len >= 18 else 18
+    left_margin = 430 if max_len >= 34 else 380 if max_len >= 26 else 330 if max_len >= 18 else 285
+    y_font_size = 34 if label_count <= 5 else 30 if label_count <= 7 else 26
+    labels = [
+        _wrap_label(value, width=wrap_width, max_lines=2, joiner="<br>")
+        for value in plot_df["value"].astype(str).tolist()
+    ]
+    with contextlib.suppress(Exception):
+        fig.data[0].y = labels
+    fig.update_yaxes(
+        tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
+        automargin=True,
+        title_text="",
+    )
+    fig.update_xaxes(
+        title_text="Delta NPS",
+        tickfont=dict(size=19),
+        title_font=dict(size=20),
+        nticks=5,
+        zeroline=True,
+        zerolinecolor="#" + BBVA_COLORS["line"],
+    )
+    fig.update_layout(
+        margin=dict(l=left_margin, r=48, t=20, b=58 if panel_height_in <= 3.8 else 52),
+        bargap=0.30,
+    )
+    return fig
+
+
+def _build_web_heatmap_figure(source_df: pd.DataFrame, *, row_dim: str) -> Optional[go.Figure]:
+    required = {row_dim, "Canal", "NPS"}
+    if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
+        return None
+    chart_df = source_df.dropna(subset=[row_dim, "Canal", "NPS"]).copy()
+    if chart_df.empty:
+        return None
+    chart_df[row_dim] = chart_df[row_dim].astype(str).str.strip()
+    chart_df["Canal"] = chart_df["Canal"].astype(str).str.strip()
+    chart_df = chart_df[
+        chart_df[row_dim].ne("") & chart_df["Canal"].str.casefold().eq("web")
+    ].copy()
+    if chart_df.empty:
+        return None
+    fig = chart_cohort_heatmap(
+        chart_df, get_theme("light"), row_dim=row_dim, col_dim="Canal", min_n=1
+    )
+    if fig is None:
+        return None
+    row_stats = (
+        chart_df.groupby(row_dim, as_index=False)
+        .agg(n=("NPS", "size"), nps=("NPS", "mean"))
+        .sort_values(["nps", "n"], ascending=[True, False])
+        .head(EDITORIAL_LIMITS.max_web_rows)
+    )
+    labels = [
+        _compact_axis_label(value, width=24, max_lines=2, max_chars=44).replace("<br>", " ")
+        for value in row_stats[row_dim].astype(str).tolist()
+    ]
+    with contextlib.suppress(Exception):
+        fig.data[0].y = labels
+    fig.update_yaxes(
+        tickfont=dict(size=30 if len(labels) <= 5 else 26, family=BBVA_FONT_MEDIUM),
+        automargin=True,
+        title_text="",
+    )
+    fig.update_xaxes(
+        side="bottom", tickangle=0, tickfont=dict(size=22), automargin=True, title_text=""
+    )
+    fig.update_layout(margin=dict(l=390, r=116, t=18, b=54))
+    fig.update_coloraxes(
+        showscale=True,
+        colorbar=dict(
+            title="NPS",
+            tickmode="array",
+            tickvals=[0, 2, 6, 8, 10],
+            len=0.74,
+            y=0.5,
+            thickness=14,
+        ),
+    )
+    return fig
+
+
+def _build_web_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd.DataFrame:
+    cols = ["value", "n", "nps", "detractor_rate"]
+    required = {dimension, "Canal", "NPS"}
+    if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
+        return pd.DataFrame(columns=cols)
+    work = source_df.dropna(subset=[dimension, "Canal", "NPS"]).copy()
+    work[dimension] = work[dimension].astype(str).str.strip()
+    work["Canal"] = work["Canal"].astype(str).str.strip()
+    work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
+    work = (
+        work[work[dimension].ne("") & work["Canal"].str.casefold().eq("web")]
+        .dropna(subset=["NPS"])
+        .copy()
+    )
+    if work.empty:
+        return pd.DataFrame(columns=cols)
+    out = (
+        work.groupby(dimension, as_index=False)
+        .agg(
+            n=("NPS", "size"),
+            nps=("NPS", "mean"),
+            detractor_rate=(
+                "NPS",
+                lambda s: float((pd.to_numeric(s, errors="coerce") <= 6).mean()),
+            ),
+        )
+        .rename(columns={dimension: "value"})
+    )
+    return (
+        out.sort_values(["nps", "n"], ascending=[True, False])
+        .head(EDITORIAL_LIMITS.max_web_rows)[cols]
+        .copy()
+    )
+
+
+def _build_opportunity_figure(opp_df: pd.DataFrame) -> Optional[go.Figure]:
+    fig = chart_opportunities_bar(opp_df, get_theme("light"), top_k=max(len(opp_df), 1))
+    if fig is None or opp_df.empty:
+        return fig
+    plot_df = select_opportunities(opp_df, max_rows=EDITORIAL_LIMITS.max_opportunities)
+    label_count = len(plot_df)
+    label_lengths = (
+        plot_df["label"].astype(str).str.replace("<br>", " ", regex=False).str.len()
+        if "label" in plot_df.columns
+        else pd.Series(dtype=float)
+    )
+    max_len = int(label_lengths.max() or 0)
+    y_font_size = 30 if label_count <= 5 else 27 if label_count <= 7 else 24
+    left_margin = 340 if max_len >= 28 else 300 if max_len >= 22 else 255
+    uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
+    text_values = [
+        _fmt_signed_or_nd(value, decimals=1) if np.isfinite(value) else ""
+        for value in uplift.tolist()
+    ]
+    with contextlib.suppress(Exception):
+        fig.data[0].text = text_values
+        fig.data[0].textposition = "outside"
+        fig.data[0].cliponaxis = False
+        fig.data[0].textfont.size = 20
+    fig.update_yaxes(
+        title_text="", tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM), automargin=True
+    )
+    fig.update_xaxes(
+        title_text="Impacto estimado", tickfont=dict(size=19), title_font=dict(size=20), nticks=5
+    )
+    fig.update_layout(margin=dict(l=left_margin, r=72, t=18, b=54), bargap=0.34)
+    return fig
+
+
+def _prepare_opportunity_chart_df(opportunities_df: pd.DataFrame) -> pd.DataFrame:
+    opp_chart_df = select_opportunities(
+        opportunities_df, max_rows=EDITORIAL_LIMITS.max_opportunities
+    )
+    if opp_chart_df.empty:
+        return opp_chart_df
+
+    def _opp_label(row: pd.Series) -> str:
+        value = str(row.get("value", "")).strip()
+        base = value
+        return _compact_axis_label(
+            base, width=22 if len(base) >= 22 else 18, max_lines=2, max_chars=38
+        )
+
+    opp_chart_df["label"] = opp_chart_df.apply(_opp_label, axis=1)
+    return opp_chart_df
+
+
+def _build_journey_table(
+    *,
+    touchpoint_source: str,
+    entity_summary_df: pd.DataFrame,
+    broken_journeys_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    cols = ["journey", "touchpoint", "links", "comments", "nps", "confidence"]
+    if (
+        str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+        and broken_journeys_df is not None
+        and not broken_journeys_df.empty
+    ):
+        source = broken_journeys_df.copy()
+        source["priority_sort"] = pd.to_numeric(source.get("linked_pairs"), errors="coerce").fillna(
+            0.0
+        )
+        source["confidence_sort"] = pd.to_numeric(
+            source.get("semantic_cohesion"), errors="coerce"
+        ).fillna(0.0)
+        source["nps_sort"] = pd.to_numeric(source.get("avg_nps"), errors="coerce").fillna(10.0)
+        out = (
+            source.sort_values(
+                ["priority_sort", "confidence_sort", "nps_sort"], ascending=[False, False, True]
+            )
+            .head(EDITORIAL_LIMITS.max_journey_rows)
+            .copy()
+        )
+        return pd.DataFrame(
+            {
+                "journey": out.get("journey_label", pd.Series(dtype=str)).astype(str),
+                "touchpoint": out.get("touchpoint", pd.Series(dtype=str)).astype(str),
+                "links": pd.to_numeric(out.get("linked_pairs"), errors="coerce")
+                .fillna(0)
+                .astype(int),
+                "comments": pd.to_numeric(out.get("linked_comments"), errors="coerce")
+                .fillna(0)
+                .astype(int),
+                "nps": pd.to_numeric(out.get("avg_nps"), errors="coerce"),
+                "confidence": pd.to_numeric(out.get("semantic_cohesion"), errors="coerce").fillna(
+                    0.0
+                ),
+            }
+        )
+    if entity_summary_df is None or entity_summary_df.empty:
+        return pd.DataFrame(columns=cols)
+    source = select_causal_scenarios(entity_summary_df, max_rows=EDITORIAL_LIMITS.max_journey_rows)
+    return pd.DataFrame(
+        {
+            "journey": source.get("nps_topic", pd.Series(dtype=str)).astype(str),
+            "touchpoint": source.get("touchpoint", pd.Series(dtype=str)).astype(str),
+            "links": pd.to_numeric(source.get("linked_pairs"), errors="coerce")
+            .fillna(0)
+            .astype(int),
+            "comments": pd.to_numeric(source.get("linked_comments"), errors="coerce")
+            .fillna(0)
+            .astype(int),
+            "nps": pd.to_numeric(source.get("avg_nps"), errors="coerce"),
+            "confidence": pd.to_numeric(source.get("confidence"), errors="coerce").fillna(0.0),
+        }
+    )
+
+
+def _build_journey_summary_figure(
+    summary_df: pd.DataFrame, *, touchpoint_source: str
+) -> Optional[go.Figure]:
+    method_spec = get_causal_method_spec(touchpoint_source)
+    plot_df = summary_df.copy() if summary_df is not None else pd.DataFrame()
+    if plot_df.empty:
+        return None
+    plot_df["entity_label"] = plot_df.get("nps_topic", "").astype(str).str.strip()
+    fig = chart_causal_entity_bar(
+        plot_df,
+        get_theme("light"),
+        entity_label=method_spec.entity_singular,
+        top_k=min(EDITORIAL_LIMITS.max_journey_rows, len(plot_df)) if not plot_df.empty else 10,
+    )
+    if fig is None or plot_df.empty:
+        return fig
+    y_values = [str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))]
+    if not y_values:
+        return fig
+    max_len = max(len(value) for value in y_values)
+    label_count = len(y_values)
+    wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
+    max_chars = 92 if max_len <= 72 else 84
+    y_font_size = 27 if label_count <= 6 else 24 if label_count <= 8 else 22
+    left_margin = 430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
+    pretty_labels = [
+        _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
+        for value in y_values
+    ]
+    with contextlib.suppress(Exception):
+        fig.data[0].y = pretty_labels
+    fig.update_yaxes(
+        title_text="",
+        tickmode="array",
+        tickvals=pretty_labels,
+        ticktext=pretty_labels,
+        tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+        automargin=True,
+    )
+    fig.update_xaxes(
+        title_text="Links validados Helix↔VoC",
+        tickfont=dict(size=17),
+        title_font=dict(size=18),
+        nticks=6,
+        automargin=True,
+    )
+    fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
+    fig.update_coloraxes(
+        colorbar=dict(
+            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
+            tickmode="array",
+            tickvals=[0, 1, 2, 3, 4],
+            tickfont=dict(size=14),
+            len=0.82,
+            y=0.5,
+            thickness=16,
+        )
     )
     return fig
 
@@ -2394,6 +2768,49 @@ def _add_stat_card(
         r2.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
+def _add_markdown_runs(
+    paragraph: object,
+    *,
+    text: object,
+    prefix: str = "",
+    max_chars: int = 170,
+    font_size_pt: float = 11.0,
+    color: str = "",
+) -> None:
+    remaining = max(int(max_chars), 1)
+    if prefix:
+        run = paragraph.add_run()
+        run.text = prefix
+        run.font.name = BBVA_FONT_BODY
+        run.font.size = Pt(font_size_pt)
+        run.font.color.rgb = _rgb(color or BBVA_COLORS["muted"])
+    visible_len = 0
+    truncated = False
+    for segment in parse_markdown_strong(text):
+        if remaining <= 0:
+            truncated = True
+            break
+        segment_text = segment.text
+        if len(segment_text) > remaining:
+            segment_text = segment_text[: max(remaining - 1, 0)].rstrip() + "…"
+            truncated = True
+        run = paragraph.add_run()
+        run.text = segment_text
+        run.font.name = BBVA_FONT_BODY if not segment.bold else BBVA_FONT_MEDIUM
+        run.font.size = Pt(font_size_pt)
+        run.font.bold = bool(segment.bold)
+        run.font.color.rgb = _rgb(color or BBVA_COLORS["muted"])
+        visible_len += len(segment_text)
+        remaining -= len(segment_text)
+        if truncated:
+            break
+    if visible_len == 0 and not prefix:
+        run = paragraph.add_run()
+        run.text = ""
+        run.font.name = BBVA_FONT_BODY
+        run.font.size = Pt(font_size_pt)
+
+
 def _add_bullet_lines(
     slide: object,
     *,
@@ -2425,11 +2842,14 @@ def _add_bullet_lines(
             p.alignment = PP_ALIGN.LEFT
             p.space_before = Pt(4 if idx else 0)
             p.level = 0
-            r = p.add_run()
-            r.text = f"• {_clip(line, 145 if width <= 4.0 else 170)}"
-            r.font.name = BBVA_FONT_BODY
-            r.font.size = Pt(body_font_size_pt)
-            r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+            _add_markdown_runs(
+                p,
+                text=line,
+                prefix="• ",
+                max_chars=145 if width <= 4.0 else 170,
+                font_size_pt=body_font_size_pt,
+                color=BBVA_COLORS["muted"],
+            )
         return
 
     panel = _panel(
@@ -2449,11 +2869,14 @@ def _add_bullet_lines(
         p.alignment = PP_ALIGN.LEFT
         p.space_before = Pt(6)
         p.level = 0
-        r = p.add_run()
-        r.text = f"• {_clip(line, 145 if width <= 4.0 else 170)}"
-        r.font.name = BBVA_FONT_BODY
-        r.font.size = Pt(body_font_size_pt)
-        r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+        _add_markdown_runs(
+            p,
+            text=line,
+            prefix="• ",
+            max_chars=145 if width <= 4.0 else 170,
+            font_size_pt=body_font_size_pt,
+            color=BBVA_COLORS["muted"],
+        )
 
 
 def _add_compact_table(
@@ -4782,6 +5205,273 @@ def _set_placeholder_text(
     r.font.color.rgb = _rgb(BBVA_COLORS["ink"])
 
 
+def _build_dimension_view_model(
+    *,
+    dimension: str,
+    slide_number: int,
+    selected_raw: pd.DataFrame,
+    current_source_period: pd.DataFrame,
+    baseline_source_period: pd.DataFrame,
+    current_label: str,
+    baseline_label: str,
+) -> DimensionViewModel:
+    min_n = max(10, min(50, int(max(len(selected_raw), 1) * 0.02)))
+    delta_df = driver_delta_table(
+        current_source_period,
+        baseline_source_period,
+        dimension=dimension,
+        min_n=min_n,
+    )
+    if delta_df.empty:
+        delta_df = _driver_change_table(
+            selected_raw,
+            pd.DataFrame(columns=selected_raw.columns),
+            dimension=dimension,
+        )
+    change_table = select_negative_delta_rows(delta_df, max_rows=EDITORIAL_LIMITS.max_change_rows)
+    change_figure = _build_driver_delta_figure(change_table, panel_height_in=4.18)
+    source_for_web = current_source_period if not current_source_period.empty else selected_raw
+    web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
+    opportunities_min_n = max(20, min(200, int(max(len(selected_raw), 1) * 0.02)))
+    opportunities = _opportunities_table(
+        selected_raw, dimension=dimension, min_n=opportunities_min_n
+    )
+    opportunities = _prepare_opportunity_chart_df(opportunities)
+    return DimensionViewModel(
+        dimension=dimension,
+        slide_number=slide_number,
+        change_df=delta_df,
+        change_table_df=change_table,
+        change_figure=change_figure,
+        web_heatmap_figure=_build_web_heatmap_figure(source_for_web, row_dim=dimension),
+        web_table_df=web_table,
+        opportunities_df=opportunities,
+        opportunities_figure=_build_opportunity_figure(opportunities),
+        opportunity_bullets=explain_opportunities(
+            opportunities, max_items=EDITORIAL_LIMITS.max_opportunity_bullets
+        ),
+    )
+
+
+def _build_causal_scenarios(
+    chains: pd.DataFrame,
+    *,
+    focus_name: str,
+) -> list[CausalScenarioViewModel]:
+    scenarios: list[CausalScenarioViewModel] = []
+    selected = select_causal_scenarios(chains, max_rows=EDITORIAL_LIMITS.max_causal_scenarios)
+    for idx, (_, row) in enumerate(selected.iterrows(), start=1):
+        raw_kpis = [
+            (
+                _focus_probability_label(focus_name),
+                _fmt_pct_or_nd(row.get("detractor_probability", np.nan)),
+                BBVA_COLORS["red"],
+            ),
+            (
+                "Cambio esperado en NPS",
+                _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
+                BBVA_COLORS["orange"],
+            ),
+            (
+                "Impacto total",
+                f"{_fmt_num_or_nd(row.get('total_nps_impact', np.nan))} pts",
+                BBVA_COLORS["blue"],
+            ),
+            ("Confianza", _fmt_num_or_nd(row.get("confidence", np.nan)), BBVA_COLORS["green"]),
+            (
+                "Vínculos validados",
+                str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
+                BBVA_COLORS["sky"],
+            ),
+            (
+                "NPS en riesgo",
+                f"{_fmt_num_or_nd(row.get('nps_points_at_risk', np.nan))} pts",
+                BBVA_COLORS["red"],
+            ),
+            (
+                "NPS recuperable",
+                f"{_fmt_num_or_nd(row.get('nps_points_recoverable', np.nan))} pts",
+                BBVA_COLORS["green"],
+            ),
+        ]
+        incident_lines = [
+            _clean_evidence_excerpt(line, max_len=130)
+            for line in _chain_list(row.get("incident_examples"))[
+                : EDITORIAL_LIMITS.max_helix_evidence
+            ]
+        ]
+        comment_lines = [
+            _clean_evidence_excerpt(line, max_len=135)
+            for line in _chain_list(row.get("comment_examples"))[
+                : EDITORIAL_LIMITS.max_voc_evidence
+            ]
+        ]
+        helix_records = _chain_incident_records(row.get("incident_records"))
+        helix_lines = [
+            _clean_evidence_excerpt(
+                f"{record.get('incident_id', '')}: {record.get('summary', '')}", max_len=145
+            )
+            for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
+        ]
+        if not helix_lines:
+            helix_lines = incident_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+        scenarios.append(
+            CausalScenarioViewModel(
+                index=idx,
+                row=row,
+                kpis=select_nonzero_kpis(
+                    raw_kpis, max_items=EDITORIAL_LIMITS.max_visible_causal_kpis
+                ),
+                incident_lines=incident_lines,
+                comment_lines=comment_lines,
+                helix_evidence_lines=helix_lines,
+            )
+        )
+    return scenarios
+
+
+def _build_presentation_context(
+    *,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    period_start: date,
+    period_end: date,
+    focus_name: str,
+    overall_weekly: pd.DataFrame,
+    story_md: str,
+    attribution_df: Optional[pd.DataFrame],
+    selected_nps_df: Optional[pd.DataFrame],
+    comparison_nps_df: Optional[pd.DataFrame],
+    touchpoint_source: str,
+    entity_summary_df: Optional[pd.DataFrame],
+    entity_summary_kpis: Optional[list[dict[str, str]]],
+    broken_journeys_df: Optional[pd.DataFrame],
+) -> PresentationContext:
+    period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    period_days = (pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1
+    selected_raw = _coerce_nps_records(selected_nps_df)
+    compare_raw = _coerce_nps_records(comparison_nps_df)
+    current_period, baseline_period = _split_period_frames(
+        compare_raw if not compare_raw.empty else selected_raw,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    current_source_period, baseline_source_period = _split_source_period_frames(
+        comparison_nps_df if comparison_nps_df is not None else selected_nps_df,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    if current_source_period.empty and selected_nps_df is not None:
+        current_source_period, _ = _split_source_period_frames(
+            selected_nps_df,
+            period_start=period_start,
+            period_end=period_end,
+        )
+    if selected_raw.empty:
+        selected_raw = current_period.copy()
+    if selected_raw.empty:
+        selected_raw = compare_raw[
+            (compare_raw["date"] >= pd.Timestamp(period_start))
+            & (compare_raw["date"] <= pd.Timestamp(period_end))
+        ].copy()
+
+    daily_signals, _ = _prepare_daily_signals(
+        overall_weekly,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    daily_mix = _daily_group_mix(selected_raw)
+    if daily_mix.empty and not daily_signals.empty:
+        daily_mix = daily_signals[["date", "nps_mean", "detractor_rate"]].copy()
+        daily_mix["responses"] = 0.0
+        daily_mix["passive_rate"] = (1.0 - daily_mix["detractor_rate"]).clip(lower=0.0)
+        daily_mix["promoter_rate"] = 0.0
+        daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
+
+    overview = _period_overview(selected_raw)
+    text_topics = select_text_clusters(
+        _text_topics_table(selected_raw, top_k=10),
+        max_clusters=EDITORIAL_LIMITS.max_text_clusters,
+    )
+    current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    baseline_label = (
+        f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
+        if not baseline_period.empty
+        else "sin base histórica"
+    )
+    dimensions = {
+        "Palanca": _build_dimension_view_model(
+            dimension="Palanca",
+            slide_number=5,
+            selected_raw=selected_raw,
+            current_source_period=current_source_period,
+            baseline_source_period=baseline_source_period,
+            current_label=current_label,
+            baseline_label=baseline_label,
+        ),
+        "Subpalanca": _build_dimension_view_model(
+            dimension="Subpalanca",
+            slide_number=6,
+            selected_raw=selected_raw,
+            current_source_period=current_source_period,
+            baseline_source_period=baseline_source_period,
+            current_label=current_label,
+            baseline_label=baseline_label,
+        ),
+    }
+    del current_label, baseline_label
+
+    chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
+    causal_entity_summary = (
+        entity_summary_df.copy() if entity_summary_df is not None else pd.DataFrame()
+    )
+    method_spec = get_causal_method_spec(touchpoint_source)
+    causal = CausalViewModel(
+        touchpoint_source=str(touchpoint_source or "").strip(),
+        method_label=method_spec.label,
+        method_title=method_spec.navigation_title,
+        method_subtitle=method_spec.navigation_subtitle,
+        entity_summary_df=causal_entity_summary,
+        entity_summary_figure=_build_journey_summary_figure(
+            causal_entity_summary, touchpoint_source=touchpoint_source
+        ),
+        entity_summary_kpis=list(entity_summary_kpis or []),
+        journey_table_df=_build_journey_table(
+            touchpoint_source=touchpoint_source,
+            entity_summary_df=causal_entity_summary,
+            broken_journeys_df=broken_journeys_df,
+        ),
+        scenarios=_build_causal_scenarios(chains, focus_name=focus_name),
+    )
+    return PresentationContext(
+        service_origin=service_origin,
+        service_origin_n1=service_origin_n1,
+        service_origin_n2=service_origin_n2,
+        period_start=period_start,
+        period_end=period_end,
+        period_label=period_label,
+        period_days=period_days,
+        focus_name=focus_name,
+        overview=overview,
+        story_md=story_md,
+        selected_raw=selected_raw,
+        daily_mix=daily_mix,
+        daily_signals=daily_signals,
+        overview_figure=_build_overview_figure(selected_nps_df, period_days=period_days),
+        text_topics_df=text_topics,
+        text_topic_figure=_build_text_topic_figure(text_topics),
+        current_label=f"{_safe_date(period_start)} -> {_safe_date(period_end)}",
+        baseline_label=(
+            f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
+            if not baseline_period.empty
+            else "sin base histórica"
+        ),
+        dimensions=dimensions,
+        causal=causal,
+    )
+
+
 def _add_cover_slide(
     prs: Presentation,
     *,
@@ -4917,6 +5607,272 @@ def _add_cover_slide(
     )
 
 
+def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationContext) -> None:
+    slide = _new_slide(prs, kind="cover")
+    _add_bg(slide, BBVA_COLORS["bg_dark"])
+    accent = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE, Inches(0.0), Inches(0.0), Inches(0.24), Inches(7.5)
+    )
+    accent.fill.solid()
+    accent.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
+    accent.line.fill.background()
+
+    eyebrow = slide.shapes.add_textbox(Inches(0.78), Inches(0.72), Inches(4.8), Inches(0.36))
+    tf = eyebrow.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    r = tf.paragraphs[0].add_run()
+    r.text = "Bloque 1 · Experiencia térmica"
+    r.font.name = BBVA_FONT_MEDIUM
+    r.font.size = Pt(13)
+    r.font.bold = True
+    r.font.color.rgb = _rgb(BBVA_COLORS["sky"])
+
+    title = slide.shapes.add_textbox(Inches(0.78), Inches(1.18), Inches(7.4), Inches(1.25))
+    ttf = title.text_frame
+    _configure_text_frame(ttf)
+    ttf.clear()
+    tr = ttf.paragraphs[0].add_run()
+    tr.text = "NPS térmico"
+    tr.font.name = BBVA_FONT_DISPLAY
+    tr.font.size = Pt(48)
+    tr.font.bold = True
+    tr.font.color.rgb = _rgb(BBVA_COLORS["white"])
+
+    subtitle = slide.shapes.add_textbox(Inches(0.82), Inches(2.46), Inches(7.2), Inches(0.72))
+    stf = subtitle.text_frame
+    _configure_text_frame(stf)
+    stf.clear()
+    sr = stf.paragraphs[0].add_run()
+    sr.text = f"{context.service_origin} · {context.service_origin_n1} · {context.period_label}"
+    sr.font.name = BBVA_FONT_BODY
+    sr.font.size = Pt(16)
+    sr.font.color.rgb = _rgb("C7D3EA")
+
+    summary = _cover_summary_lines(context.overview, context.story_md)[:3] or [
+        "El bloque ordena la señal del periodo desde evolución, comentario y deterioros por dimensión.",
+    ]
+    _add_bullet_lines(
+        slide,
+        left=0.82,
+        top=3.42,
+        width=7.2,
+        height=2.50,
+        title="Lectura ejecutiva",
+        lines=summary,
+        accent=BBVA_COLORS["sky"],
+        body_font_size_pt=13.8,
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=1.20,
+        width=3.40,
+        height=1.34,
+        label="NPS medio",
+        value=_fmt_num_or_nd(context.overview.get("nps_mean", np.nan), decimals=1),
+        accent=BBVA_COLORS["green"],
+        hint="Escala 0-10",
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=2.82,
+        width=3.40,
+        height=1.34,
+        label="Detractores",
+        value=_fmt_pct_or_nd(context.overview.get("detractor_rate", np.nan)),
+        accent=BBVA_COLORS["red"],
+        hint="Peso sobre respuestas",
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=4.44,
+        width=3.40,
+        height=1.34,
+        label="Comentarios",
+        value=_fmt_count_or_nd(context.overview.get("comments", 0)),
+        accent=BBVA_COLORS["blue"],
+        hint="Base útil analizada",
+    )
+
+
+def _add_dimension_change_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    view_model: DimensionViewModel,
+) -> None:
+    dimension = view_model.dimension
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"{view_model.slide_number}. Qué ha cambiado en {dimension}",
+        subtitle=(
+            f"Periodo actual frente a la base histórica anterior · actual {context.current_label} · "
+            f"base {context.baseline_label}"
+        ),
+    )
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=7.78,
+        height=5.42,
+        title=f"Deterioros principales en {dimension}",
+    )
+    _figure_in_panel(
+        slide,
+        figure=view_model.change_figure,
+        left=0.88,
+        top=1.84,
+        width=7.24,
+        height=4.76,
+        empty_note=f"No hay base histórica suficiente para comparar {dimension.lower()}.",
+        target_ppi=178,
+    )
+    rows = [
+        [
+            _clip(row.value, 34),
+            _fmt_count_or_nd(row.n_current),
+            _fmt_num_or_nd(row.nps_current, decimals=1),
+            _fmt_signed_or_nd(row.delta_nps, decimals=1),
+        ]
+        for row in view_model.change_table_df.head(EDITORIAL_LIMITS.max_change_rows).itertuples()
+    ]
+    _add_compact_table(
+        slide,
+        left=8.70,
+        top=1.48,
+        width=3.98,
+        title="Mayor deterioro",
+        headers=[dimension, "n", "NPS", "Δ"],
+        rows=rows or [["Sin datos", "-", "-", "-"]],
+        row_height=0.48,
+        col_width_ratios=[2.4, 0.7, 0.8, 0.7],
+        clip_lengths=[34, 8, 8, 8],
+        font_size_pt=10.8,
+        max_rows=EDITORIAL_LIMITS.max_change_rows,
+    )
+    _add_bullet_lines(
+        slide,
+        left=8.70,
+        top=5.64,
+        width=3.98,
+        height=1.26,
+        title="Criterio de recorte",
+        lines=["Se muestran los mayores deterioros de NPS con volumen defendible para comité."],
+        accent=BBVA_COLORS["line"],
+        body_font_size_pt=10.8,
+    )
+
+
+def _add_web_pain_dimension_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    view_model: DimensionViewModel,
+    slide_number: int,
+) -> None:
+    dimension = view_model.dimension
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"{slide_number}. Dónde duele en la Web · {dimension}",
+        subtitle=f"NPS del canal Web por {dimension.lower()} dentro del periodo analizado · {context.period_label}",
+    )
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=8.10,
+        height=5.42,
+        title=f"Mapa de dolor Web por {dimension}",
+    )
+    _figure_in_panel(
+        slide,
+        figure=view_model.web_heatmap_figure,
+        left=0.86,
+        top=1.86,
+        width=7.66,
+        height=4.76,
+        empty_note=f"No hay señal suficiente para mostrar {dimension.lower()} en el canal Web.",
+        target_ppi=178,
+    )
+    rows = [
+        [
+            _clip(row.value, 36),
+            _fmt_count_or_nd(row.n),
+            _fmt_num_or_nd(row.nps, decimals=1),
+            _fmt_pct_or_nd(row.detractor_rate),
+        ]
+        for row in view_model.web_table_df.head(EDITORIAL_LIMITS.max_web_rows).itertuples()
+    ]
+    _add_compact_table(
+        slide,
+        left=9.02,
+        top=1.48,
+        width=3.66,
+        title="Focos Web",
+        headers=[dimension, "n", "NPS", "% det."],
+        rows=rows or [["Sin datos", "-", "-", "-"]],
+        row_height=0.43,
+        col_width_ratios=[2.3, 0.7, 0.8, 0.9],
+        clip_lengths=[34, 8, 8, 8],
+        font_size_pt=10.2,
+        max_rows=EDITORIAL_LIMITS.max_web_rows,
+    )
+
+
+def _add_opportunity_dimension_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    view_model: DimensionViewModel,
+    slide_number: int,
+) -> None:
+    dimension = view_model.dimension
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"{slide_number}. Oportunidades priorizadas · {dimension}",
+        subtitle=f"Ranking por impacto potencial y solidez de evidencia · {context.period_label}",
+    )
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=12.02,
+        height=4.52,
+        title=f"Impacto estimado en {dimension}",
+    )
+    _figure_in_panel(
+        slide,
+        figure=view_model.opportunities_figure,
+        left=0.86,
+        top=1.84,
+        width=11.62,
+        height=3.82,
+        empty_note=f"No se identificaron oportunidades robustas para {dimension.lower()} con el umbral actual.",
+        target_ppi=176,
+    )
+    _add_bullet_lines(
+        slide,
+        left=0.66,
+        top=6.12,
+        width=12.02,
+        height=0.88,
+        title="",
+        lines=view_model.opportunity_bullets,
+        accent=BBVA_COLORS["line"],
+        body_font_size_pt=12.0,
+    )
+
+
 def _add_overview_slide(
     prs: Presentation,
     *,
@@ -4927,6 +5883,7 @@ def _add_overview_slide(
     overview: dict[str, object],
     selected_nps_df: Optional[pd.DataFrame],
     period_days: int,
+    overview_figure: Optional[go.Figure] = None,
 ) -> None:
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -4945,10 +5902,10 @@ def _add_overview_slide(
     )
     _figure_in_panel(
         slide,
-        figure=chart_daily_kpis(
-            selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame(),
-            get_theme("light"),
-            days=max(int(period_days), 1),
+        figure=(
+            overview_figure
+            if overview_figure is not None
+            else _build_overview_figure(selected_nps_df, period_days=period_days)
         ),
         left=0.82,
         top=1.84,
@@ -4982,29 +5939,11 @@ def _add_deep_dive_slide(
     *,
     period_label: str,
     text_topics_df: pd.DataFrame,
+    topic_figure: Optional[go.Figure] = None,
 ) -> None:
-    topic_fig = chart_topic_bars(text_topics_df, get_theme("light"), top_k=10)
-    if topic_fig is not None:
-        topic_rows = text_topics_df.sort_values("n", ascending=False).head(10).copy()
-        topic_labels = []
-        for row in topic_rows.itertuples():
-            terms = [str(term).strip() for term in list(row.top_terms)[:2] if str(term).strip()]
-            short_label = _clip(f"#{int(row.cluster_id)} · {', '.join(terms)}", 20)
-            topic_labels.append(short_label)
-        with contextlib.suppress(Exception):
-            topic_fig.data[0].y = topic_labels
-        counts = pd.to_numeric(text_topics_df.get("n"), errors="coerce").dropna()
-        xmax = float(counts.max()) if not counts.empty else 0.0
-        dtick = 2000 if xmax >= 6000 else 1000 if xmax >= 2000 else None
-        topic_fig.update_xaxes(
-            title_text="Comentarios",
-            nticks=5 if xmax >= 5000 else 6,
-            dtick=dtick,
-            tickformat="~s",
-            tickfont=dict(size=18),
-            title_font=dict(size=19),
-        )
-        topic_fig.update_yaxes(tickfont=dict(size=26))
+    topic_fig = (
+        topic_figure if topic_figure is not None else _build_text_topic_figure(text_topics_df)
+    )
 
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -5051,7 +5990,7 @@ def _add_deep_dive_slide(
 
     bullet_lines = [
         f"{row.label}: {_fmt_count_or_nd(row.n)} comentarios."
-        for _, row in text_topics_df.head(3).iterrows()
+        for _, row in text_topics_df.head(EDITORIAL_LIMITS.max_text_clusters).iterrows()
     ] or ["No se han detectado temas con masa crítica suficiente."]
     _add_bullet_lines(
         slide,
@@ -5740,89 +6679,21 @@ def _add_journeys_summary_slide(
     touchpoint_source: str,
     entity_summary_df: pd.DataFrame,
     entity_summary_kpis: list[dict[str, str]],
+    entity_summary_figure: Optional[go.Figure] = None,
+    journey_table_df: Optional[pd.DataFrame] = None,
 ) -> None:
     method_spec = get_causal_method_spec(touchpoint_source)
 
-    def _summary_figure(summary_df: pd.DataFrame) -> Optional[go.Figure]:
-        plot_df = summary_df.copy() if summary_df is not None else pd.DataFrame()
-        if plot_df.empty:
-            return None
-        plot_df["entity_label"] = plot_df.get("nps_topic", "").astype(str).str.strip()
-        fig = chart_causal_entity_bar(
-            plot_df,
-            get_theme("light"),
-            entity_label=method_spec.entity_singular,
-            top_k=min(10, len(plot_df)) if not plot_df.empty else 10,
-        )
-        if fig is None or plot_df.empty:
-            return fig
-
-        y_values = [
-            str(value).replace("<br>", " ") for value in list(getattr(fig.data[0], "y", []))
-        ]
-        if not y_values:
-            return fig
-
-        max_len = max(len(value) for value in y_values)
-        label_count = len(y_values)
-        wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
-        max_chars = 92 if max_len <= 72 else 84
-        y_font_size = 30 if label_count <= 6 else 27 if label_count <= 8 else 24
-        left_margin = (
-            430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
-        )
-
-        pretty_labels = [
-            _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
-            for value in y_values
-        ]
-        with contextlib.suppress(Exception):
-            fig.data[0].y = pretty_labels
-
-        fig.update_yaxes(
-            title_text="",
-            tickmode="array",
-            tickvals=pretty_labels,
-            ticktext=pretty_labels,
-            tickfont=dict(
-                size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]
-            ),
-            automargin=True,
-        )
-        fig.update_xaxes(
-            title_text="Links validados Helix↔VoC",
-            tickfont=dict(size=17),
-            title_font=dict(size=18),
-            nticks=6,
-            automargin=True,
-        )
-        fig.update_layout(
-            margin=dict(
-                l=left_margin,
-                r=104,
-                t=14,
-                b=34,
-            ),
-            bargap=0.22,
-        )
-        fig.update_coloraxes(
-            colorbar=dict(
-                title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
-                tickmode="array",
-                tickvals=[0, 1, 2, 3, 4],
-                tickfont=dict(size=14),
-                len=0.82,
-                y=0.5,
-                thickness=16,
-            )
-        )
-        return fig
-
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
+    journey_title = (
+        "12. Journeys rotos"
+        if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+        else "12. Journeys de detracción"
+    )
     _add_header(
         slide,
-        title=f"8. {method_spec.navigation_title}",
+        title=journey_title,
         subtitle=f"{method_spec.navigation_subtitle} · {period_label}",
     )
     for index, metric in enumerate(entity_summary_kpis[:3]):
@@ -5840,16 +6711,274 @@ def _add_journeys_summary_slide(
                 else BBVA_COLORS["orange"] if index == 1 else BBVA_COLORS["green"]
             ),
         )
-    _panel(slide, left=0.66, top=2.88, width=12.02, height=4.02, title="")
+    _panel(slide, left=0.66, top=2.72, width=5.58, height=4.18, title=method_spec.chart_title)
     _figure_in_panel(
         slide,
-        figure=_summary_figure(entity_summary_df),
-        left=0.84,
-        top=3.10,
-        width=11.66,
-        height=3.56,
+        figure=(
+            entity_summary_figure
+            if entity_summary_figure is not None
+            else _build_journey_summary_figure(
+                entity_summary_df, touchpoint_source=touchpoint_source
+            )
+        ),
+        left=0.86,
+        top=3.08,
+        width=5.14,
+        height=3.48,
         empty_note=method_spec.table_empty_message,
         target_ppi=170,
+    )
+    table_df = journey_table_df if journey_table_df is not None else pd.DataFrame()
+    rows = [
+        [
+            _clip(row.journey, 58),
+            _clip(row.touchpoint, 22),
+            _fmt_count_or_nd(row.links),
+            _fmt_num_or_nd(row.confidence, decimals=2),
+        ]
+        for row in table_df.head(EDITORIAL_LIMITS.max_journey_rows).itertuples()
+    ]
+    _add_compact_table(
+        slide,
+        left=6.52,
+        top=2.72,
+        width=6.16,
+        title=method_spec.table_title,
+        headers=["Journey", "Touchpoint", "Links", "Conf."],
+        rows=rows or [["Sin evidencia suficiente", "-", "-", "-"]],
+        row_height=0.46,
+        col_width_ratios=[3.3, 1.2, 0.7, 0.7],
+        clip_lengths=[58, 22, 8, 8],
+        font_size_pt=10.0,
+        max_rows=EDITORIAL_LIMITS.max_journey_rows,
+    )
+
+
+def _add_causal_section_cover_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    nps_points_at_risk: float,
+    nps_points_recoverable: float,
+    top3_incident_share: float,
+) -> None:
+    slide = _new_slide(prs, kind="cover")
+    _add_bg(slide, BBVA_COLORS["bg_dark"])
+    method = context.causal
+    eyebrow = slide.shapes.add_textbox(Inches(0.78), Inches(0.72), Inches(5.4), Inches(0.34))
+    tf = eyebrow.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    r = tf.paragraphs[0].add_run()
+    r.text = "Bloque 2 · Narrativa causal seleccionada"
+    r.font.name = BBVA_FONT_MEDIUM
+    r.font.size = Pt(13)
+    r.font.bold = True
+    r.font.color.rgb = _rgb(BBVA_COLORS["sky"])
+
+    title = slide.shapes.add_textbox(Inches(0.78), Inches(1.18), Inches(8.0), Inches(1.28))
+    ttf = title.text_frame
+    _configure_text_frame(ttf)
+    ttf.clear()
+    tr = ttf.paragraphs[0].add_run()
+    tr.text = f"11. Narrativa causal · {method.method_label}"
+    tr.font.name = BBVA_FONT_DISPLAY
+    tr.font.size = Pt(38)
+    tr.font.bold = True
+    tr.font.color.rgb = _rgb(BBVA_COLORS["white"])
+
+    subtitle = slide.shapes.add_textbox(Inches(0.82), Inches(2.54), Inches(7.8), Inches(0.84))
+    stf = subtitle.text_frame
+    _configure_text_frame(stf)
+    stf.clear()
+    sr = stf.paragraphs[0].add_run()
+    sr.text = f"{method.method_subtitle} · {context.period_label}"
+    sr.font.name = BBVA_FONT_BODY
+    sr.font.size = Pt(15)
+    sr.font.color.rgb = _rgb("C7D3EA")
+
+    flow_box = _panel(
+        slide,
+        left=0.82,
+        top=3.62,
+        width=7.48,
+        height=1.26,
+        title="Hipótesis causal defendible",
+        subtitle=get_causal_method_spec(method.touchpoint_source).flow,
+        fill=BBVA_COLORS["white"],
+        border=BBVA_COLORS["sky"],
+        title_size=13,
+    )
+    del flow_box
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=1.20,
+        width=3.40,
+        height=1.34,
+        label="Escenarios",
+        value=_fmt_count_or_nd(len(method.scenarios)),
+        accent=BBVA_COLORS["blue"],
+        hint="Casos priorizados",
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=2.82,
+        width=3.40,
+        height=1.34,
+        label="NPS en riesgo",
+        value=f"{_fmt_num_or_nd(nps_points_at_risk, decimals=1)} pts",
+        accent=BBVA_COLORS["red"],
+        hint="Impacto estimado",
+    )
+    _add_stat_card(
+        slide,
+        left=8.70,
+        top=4.44,
+        width=3.40,
+        height=1.34,
+        label="NPS recuperable",
+        value=f"{_fmt_num_or_nd(nps_points_recoverable, decimals=1)} pts",
+        accent=BBVA_COLORS["green"],
+        hint=f"Top-3 incidencias {_fmt_pct_or_nd(top3_incident_share)}",
+    )
+
+
+def _add_causal_analysis_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    scenario: CausalScenarioViewModel,
+) -> None:
+    row = scenario.row
+    method_spec = get_causal_method_spec(
+        str(row.get("presentation_mode", "") or context.causal.touchpoint_source).strip()
+    )
+    title = _clip(row.get("nps_topic", f"Escenario {scenario.index}"), 72)
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"13.{scenario.index} Análisis causal editorial",
+        subtitle=f"{method_spec.entity_singular}: {title} · {context.period_label}",
+    )
+    chain_statement = (
+        f"{_fmt_count_or_nd(row.get('linked_incidents', 0))} incidencias Helix y "
+        f"{_fmt_count_or_nd(row.get('linked_comments', 0))} comentarios convergen en "
+        f"{title} con lectura {method_spec.label}."
+    )
+    _panel(
+        slide,
+        left=0.66,
+        top=1.48,
+        width=12.02,
+        height=0.86,
+        title="Lectura ejecutiva",
+        subtitle=chain_statement,
+        fill=BBVA_COLORS["white"],
+        border=BBVA_COLORS["sky"],
+        title_size=13,
+    )
+    _add_bullet_lines(
+        slide,
+        left=0.66,
+        top=2.60,
+        width=5.78,
+        height=2.22,
+        title="Incidencias enlazadas",
+        lines=scenario.incident_lines
+        or ["No se han encontrado incidencias Helix adicionales para este escenario."],
+        accent=BBVA_COLORS["orange"],
+        body_font_size_pt=11.5,
+    )
+    _add_bullet_lines(
+        slide,
+        left=6.66,
+        top=2.60,
+        width=6.02,
+        height=2.22,
+        title="Comentarios enlazados",
+        lines=scenario.comment_lines
+        or ["No se han encontrado verbatims adicionales para este escenario."],
+        accent=BBVA_COLORS["red"],
+        body_font_size_pt=11.5,
+    )
+    for pos, (label, value, accent) in enumerate(scenario.kpis):
+        _add_stat_card(
+            slide,
+            left=0.66 + pos * 3.02,
+            top=5.18,
+            width=2.80,
+            height=1.22,
+            label=label,
+            value=value,
+            accent=accent,
+        )
+
+
+def _add_causal_evidence_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    scenario: CausalScenarioViewModel,
+) -> None:
+    row = scenario.row
+    title = _clip(row.get("nps_topic", f"Escenario {scenario.index}"), 72)
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"14.{scenario.index} Detalle de evidencias Helix",
+        subtitle=f"Evidencias con mayor vinculación causal para {title} · {context.period_label}",
+    )
+    evidence = scenario.helix_evidence_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+    if not evidence:
+        evidence = [
+            "No se han encontrado evidencias Helix adicionales defendibles para este escenario."
+        ]
+    card_width = 5.76
+    card_height = 1.44
+    positions = [(0.66, 1.62), (6.92, 1.62), (0.66, 3.42), (6.92, 3.42)]
+    for idx, line in enumerate(evidence[:4]):
+        left, top = positions[idx]
+        _panel(
+            slide,
+            left=left,
+            top=top,
+            width=card_width,
+            height=card_height,
+            title=f"Evidencia {idx + 1}",
+            fill=BBVA_COLORS["white"],
+            border=BBVA_COLORS["line"],
+            title_size=12,
+        )
+        tb = slide.shapes.add_textbox(
+            Inches(left + 0.18), Inches(top + 0.46), Inches(card_width - 0.36), Inches(0.80)
+        )
+        tf = tb.text_frame
+        _configure_text_frame(tf)
+        tf.clear()
+        p = tf.paragraphs[0]
+        _add_markdown_runs(
+            p,
+            text=line,
+            max_chars=150,
+            font_size_pt=11.2,
+            color=BBVA_COLORS["muted"],
+        )
+    _add_bullet_lines(
+        slide,
+        left=0.66,
+        top=5.46,
+        width=12.02,
+        height=1.10,
+        title="Criterio de selección",
+        lines=[
+            "Se priorizan evidencias enlazadas al escenario causal por ranking de prioridad, confianza, score causal y volumen de links."
+        ],
+        accent=BBVA_COLORS["sky"],
+        body_font_size_pt=11.6,
     )
 
 
@@ -6045,137 +7174,85 @@ def generate_business_review_ppt(
     prs.slide_width = Inches(13.333)
     prs.slide_height = Inches(7.5)
 
-    period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
-
-    selected_raw = _coerce_nps_records(selected_nps_df)
-    compare_raw = _coerce_nps_records(comparison_nps_df)
-    current_period, baseline_period = _split_period_frames(
-        compare_raw if not compare_raw.empty else selected_raw,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    current_source_period, baseline_source_period = _split_source_period_frames(
-        comparison_nps_df if comparison_nps_df is not None else selected_nps_df,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    if current_source_period.empty and selected_nps_df is not None:
-        current_source_period, _ = _split_source_period_frames(
-            selected_nps_df,
-            period_start=period_start,
-            period_end=period_end,
-        )
-    if selected_raw.empty:
-        selected_raw = current_period.copy()
-    if selected_raw.empty:
-        selected_raw = compare_raw[
-            (compare_raw["date"] >= pd.Timestamp(period_start))
-            & (compare_raw["date"] <= pd.Timestamp(period_end))
-        ].copy()
-
-    daily_signals, _ = _prepare_daily_signals(
-        overall_weekly,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    daily_mix = _daily_group_mix(selected_raw)
-    if daily_mix.empty and not daily_signals.empty:
-        daily_mix = daily_signals[["date", "nps_mean", "detractor_rate"]].copy()
-        daily_mix["responses"] = 0.0
-        daily_mix["passive_rate"] = (1.0 - daily_mix["detractor_rate"]).clip(lower=0.0)
-        daily_mix["promoter_rate"] = 0.0
-        daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
-
-    overview = _period_overview(selected_raw)
-    text_topics_df = _text_topics_table(selected_raw, top_k=10)
-    palanca_gap_df = _dimension_gap_table(selected_raw, dimension="Palanca", top_k=10)
-    subpalanca_gap_df = _dimension_gap_table(selected_raw, dimension="Subpalanca", top_k=10)
-    opportunities_df = _opportunities_table(selected_raw, dimension="Palanca", min_n=200)
-    chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
-    causal_entity_summary = (
-        entity_summary_df.copy() if entity_summary_df is not None else pd.DataFrame()
-    )
-
-    _add_cover_slide(
-        prs,
+    context = _build_presentation_context(
         service_origin=service_origin,
         service_origin_n1=service_origin_n1,
         service_origin_n2=service_origin_n2,
         period_start=period_start,
         period_end=period_end,
-        overview=overview,
+        focus_name=focus_name,
+        overall_weekly=overall_weekly,
         story_md=story_md,
+        attribution_df=attribution_df,
+        selected_nps_df=selected_nps_df,
+        comparison_nps_df=comparison_nps_df,
+        touchpoint_source=touchpoint_source,
+        entity_summary_df=entity_summary_df,
+        entity_summary_kpis=entity_summary_kpis,
+        broken_journeys_df=broken_journeys_df,
     )
+
+    _add_cover_slide(
+        prs,
+        service_origin=context.service_origin,
+        service_origin_n1=context.service_origin_n1,
+        service_origin_n2=context.service_origin_n2,
+        period_start=context.period_start,
+        period_end=context.period_end,
+        overview=context.overview,
+        story_md=context.story_md,
+    )
+    _add_nps_section_cover_slide(prs, context=context)
     _add_overview_slide(
         prs,
-        service_origin=service_origin,
-        service_origin_n1=service_origin_n1,
-        period_label=period_label,
-        period_end=period_end,
-        overview=overview,
+        service_origin=context.service_origin,
+        service_origin_n1=context.service_origin_n1,
+        period_label=context.period_label,
+        period_end=context.period_end,
+        overview=context.overview,
         selected_nps_df=selected_nps_df,
-        period_days=(pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1,
+        period_days=context.period_days,
+        overview_figure=context.overview_figure,
     )
-    _add_deep_dive_slide(prs, period_label=period_label, text_topics_df=text_topics_df)
-    _add_topic_timing_slide(
+    _add_deep_dive_slide(
         prs,
-        period_label=period_label,
-        period_days=(pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1,
-        selected_nps_df=selected_nps_df,
+        period_label=context.period_label,
+        text_topics_df=context.text_topics_df,
+        topic_figure=context.text_topic_figure,
     )
-    if not baseline_period.empty:
-        current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
-        baseline_label = (
-            f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
-            if not baseline_period.empty
-            else "sin base"
-        )
-        _add_change_vs_past_slide(
-            prs,
-            period_label=period_label,
-            current_label=current_label,
-            baseline_label=baseline_label,
-            current_source_df=current_source_period,
-            baseline_source_df=baseline_source_period,
-        )
-    _add_pain_by_group_slide(
-        prs,
-        period_label=period_label,
-        selected_nps_df=selected_nps_df,
+    _add_dimension_change_slide(prs, context=context, view_model=context.dimensions["Palanca"])
+    _add_dimension_change_slide(prs, context=context, view_model=context.dimensions["Subpalanca"])
+    _add_web_pain_dimension_slide(
+        prs, context=context, view_model=context.dimensions["Palanca"], slide_number=7
     )
-    _add_gap_slide(
-        prs,
-        period_label=period_label,
-        palanca_gap_df=palanca_gap_df,
-        subpalanca_gap_df=subpalanca_gap_df,
+    _add_web_pain_dimension_slide(
+        prs, context=context, view_model=context.dimensions["Subpalanca"], slide_number=8
     )
-    _add_opportunity_slide(prs, period_label=period_label, opportunities_df=opportunities_df)
-    _add_causal_timeline_slide(
+    _add_opportunity_dimension_slide(
+        prs, context=context, view_model=context.dimensions["Palanca"], slide_number=9
+    )
+    _add_opportunity_dimension_slide(
+        prs, context=context, view_model=context.dimensions["Subpalanca"], slide_number=10
+    )
+    _add_causal_section_cover_slide(
         prs,
-        period_label=period_label,
-        daily_mix=daily_mix,
-        overall_daily=daily_signals,
+        context=context,
         nps_points_at_risk=nps_points_at_risk,
         nps_points_recoverable=nps_points_recoverable,
         top3_incident_share=top3_incident_share,
-        touchpoint_source=touchpoint_source,
     )
     _add_journeys_summary_slide(
         prs,
-        period_label=period_label,
-        touchpoint_source=touchpoint_source,
-        entity_summary_df=causal_entity_summary,
-        entity_summary_kpis=list(entity_summary_kpis or []),
+        period_label=context.period_label,
+        touchpoint_source=context.causal.touchpoint_source,
+        entity_summary_df=context.causal.entity_summary_df,
+        entity_summary_kpis=context.causal.entity_summary_kpis,
+        entity_summary_figure=context.causal.entity_summary_figure,
+        journey_table_df=context.causal.journey_table_df,
     )
-    if chains is not None and not chains.empty:
-        for idx, (_, chain_row) in enumerate(chains.head(3).iterrows(), start=1):
-            _add_chain_scenario_slide(
-                prs,
-                chain_row=chain_row,
-                idx=idx,
-                focus_name=focus_name,
-                period_label=period_label,
-            )
+    for scenario in context.causal.scenarios:
+        _add_causal_analysis_slide(prs, context=context, scenario=scenario)
+        _add_causal_evidence_slide(prs, context=context, scenario=scenario)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = f"nps-incidencias-{_slug(service_origin)}-{_slug(service_origin_n1)}-{stamp}.pptx"
