@@ -397,4 +397,5 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("3. Qué ha cambiado respecto al pasado" in text for text in all_texts)
+    assert any("5. Qué ha cambiado en Palanca" in text for text in all_texts)
+    assert any("6. Qué ha cambiado en Subpalanca" in text for text in all_texts)

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import useSWR from "swr";
 
 import {
@@ -99,6 +99,25 @@ const DATA_TABS = [
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
+
+function renderStrongMarkdown(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const pattern = /\*\*(.+?)\*\*/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) {
+      parts.push(text.slice(cursor, match.index));
+    }
+    parts.push(<strong key={`${match.index}-${match[1]}`}>{match[1]}</strong>);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+  return parts.length ? parts : [text];
+}
+
 const MONTH_LABELS_ES: Record<string, string> = {
   "01": "Enero",
   "02": "Febrero",
@@ -1088,7 +1107,7 @@ export function App() {
             <article className="note-card">
               <ul className="plain-list">
                 {(dashboard?.opportunities.bullets || []).map((bullet) => (
-                  <li key={bullet}>{bullet}</li>
+                  <li key={bullet}>{renderStrongMarkdown(bullet)}</li>
                 ))}
               </ul>
             </article>

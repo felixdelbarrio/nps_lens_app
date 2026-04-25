@@ -17,13 +17,18 @@ from nps_lens.analytics.incident_attribution import (
 )
 from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
+from nps_lens.reports.content_selectors import (
+    parse_markdown_strong,
+    select_negative_delta_rows,
+    select_nonzero_kpis,
+)
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 from nps_lens.reports.ppt_template import (
     build_presentation,
     find_corporate_template_path,
     resolve_layout,
 )
-from nps_lens.ui.charts import chart_incident_risk_recovery
+from nps_lens.ui.charts import chart_daily_kpis, chart_incident_risk_recovery
 from nps_lens.ui.theme import get_theme
 
 
@@ -304,6 +309,22 @@ def _sample_payload() -> dict:
     }
 
 
+def _assert_no_shape_overflow(prs: Presentation) -> None:
+    tolerance = 1000
+    for slide_index, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if getattr(shape, "left", None) is None:
+                continue
+            assert shape.left >= -tolerance, f"shape overflow left on slide {slide_index}"
+            assert shape.top >= -tolerance, f"shape overflow top on slide {slide_index}"
+            assert (
+                shape.left + shape.width <= prs.slide_width + tolerance
+            ), f"shape overflow right on slide {slide_index}"
+            assert (
+                shape.top + shape.height <= prs.slide_height + tolerance
+            ), f"shape overflow bottom on slide {slide_index}"
+
+
 def test_generate_business_review_ppt_builds_new_story() -> None:
     payload = _sample_payload()
     business_story = """# Informe de negocio — NPS Lens
@@ -364,10 +385,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count >= 11
+    assert out.slide_count >= 14
 
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == out.slide_count
+    _assert_no_shape_overflow(prs)
 
     texts = []
     for slide in prs.slides:
@@ -384,21 +406,26 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert any("NPS Lens" in t for t in texts)
     assert any("Mensaje clave del periodo" in t for t in texts)
+    assert any("NPS térmico" in t for t in texts)
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
-    assert any("NPS del canal Web por eje de experiencia" in t for t in texts)
-    assert any("Palanca · canal Web" in t for t in texts)
-    assert any("Subpalanca · canal Web" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
-    assert any("2. Cuándo y cómo lo dicen" in t for t in texts)
-    assert any("3. Qué ha cambiado respecto al pasado" in t for t in texts)
-    assert any("4. Dónde duele según el tipo de cliente" in t for t in texts)
-    assert any("5. Casos más alejados del promedio" in t for t in texts)
-    assert any("6. Oportunidades a priorizar" in t for t in texts)
-    assert any("7. Situación del periodo" in t for t in texts)
-    assert any("8. Touchpoints afectados por Subpalanca" in t for t in texts)
-    assert any("9.1 Análisis causal" in t for t in texts)
+    assert any("5. Qué ha cambiado en Palanca" in t for t in texts)
+    assert any("6. Qué ha cambiado en Subpalanca" in t for t in texts)
+    assert any("7. Dónde duele en la Web · Palanca" in t for t in texts)
+    assert any("8. Dónde duele en la Web · Subpalanca" in t for t in texts)
+    assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
+    assert any("10. Oportunidades priorizadas · Subpalanca" in t for t in texts)
+    assert any("11. Narrativa causal · Por Subpalanca" in t for t in texts)
+    assert any("12. Journeys de detracción" in t for t in texts)
+    assert any("13.1 Análisis causal editorial" in t for t in texts)
+    assert any("14.1 Detalle de evidencias Helix" in t for t in texts)
+    assert not any("2. Cuándo y cómo lo dicen" in t for t in texts)
+    assert not any("5. Casos más alejados del promedio" in t for t in texts)
+    assert not any("Situación del periodo" in t for t in texts)
     assert not any("10.1 Matriz visual" in t for t in texts)
     assert not any("11.1 Señal temporal" in t for t in texts)
+    assert not any("**" in t for t in texts)
+    assert not any("Fix estructural" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
@@ -492,7 +519,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("8. Journeys de detracción" in t for t in texts)
+    assert any("12. Journeys de detracción" in t for t in texts)
     assert any("Journey de detracción: Acceso bloqueado" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
@@ -555,7 +582,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("8. Journeys rotos" in t for t in texts)
+    assert any("12. Journeys rotos" in t for t in texts)
     assert any("Journey roto: Acceso / Login" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
@@ -719,6 +746,16 @@ def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
     assert any("6. Oportunidades a priorizar" in text for text in texts)
     assert any("Ranking por impacto estimado x confianza" in text for text in texts)
     assert any("Si mejoramos" in text for text in texts)
+    assert not any("**" in text for text in texts)
+    assert any(
+        run.font.bold
+        for slide in prs.slides
+        for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+        for run in paragraph.runs
+        if "Palanca=" in run.text or "potencial de +" in run.text
+    )
     assert any(
         "No se identificaron oportunidades robustas con el umbral actual." in text for text in texts
     )
@@ -771,6 +808,46 @@ def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> Non
     assert executive_ppt._nps_band(2) == "Detractor"
 
 
+def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
+    delta_df = pd.DataFrame(
+        {
+            "value": ["Mejora", "Peor A", "Peor B", "Neutro"],
+            "delta_nps": [4.0, -8.0, -8.0, 0.0],
+            "n_current": [100, 20, 80, 50],
+        }
+    )
+
+    selected = select_negative_delta_rows(delta_df, max_rows=2)
+    assert selected["value"].tolist() == ["Peor B", "Peor A"]
+
+    kpis = select_nonzero_kpis(
+        [
+            ("Cero", "0 pts", "red"),
+            ("Sin dato", "n/d", "blue"),
+            ("Con valor", "1,5 pts", "green"),
+        ],
+        max_items=3,
+    )
+    assert kpis == [("Con valor", "1,5 pts", "green")]
+
+    segments = parse_markdown_strong("Si mejoramos **Palanca=Acceso**, sube")
+    assert [(segment.text, segment.bold) for segment in segments] == [
+        ("Si mejoramos ", False),
+        ("Palanca=Acceso", True),
+        (", sube", False),
+    ]
+
+
+def test_daily_kpis_chart_places_x_axis_labels_at_bottom() -> None:
+    payload = _sample_payload()
+
+    fig = chart_daily_kpis(payload["selected_nps"], get_theme("light"), days=31)
+
+    assert fig is not None
+    assert fig.layout.xaxis.side == "bottom"
+    assert fig.layout.xaxis.ticklabelposition == "outside bottom"
+
+
 def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:
     payload = _sample_payload()
     out = generate_business_review_ppt(
@@ -810,8 +887,8 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                     texts.append(paragraph.text or "")
 
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
-    assert any("8. Touchpoints afectados por Subpalanca" in t for t in texts)
-    assert not any("9.1 Análisis causal" in t for t in texts)
+    assert any("12. Journeys de detracción" in t for t in texts)
+    assert not any("13.1 Análisis causal editorial" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:
@@ -910,7 +987,7 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                     texts.append(paragraph.text or "")
 
     assert any("1. Evolución del NPS del periodo" in t for t in texts)
-    assert any("6. Oportunidades a priorizar" in t for t in texts)
+    assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
 
 
 def test_history_fig_daily_uses_requested_colors() -> None:

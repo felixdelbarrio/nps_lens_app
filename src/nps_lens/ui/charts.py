@@ -434,8 +434,9 @@ def chart_daily_kpis(
         fig,
         [pd.Timestamp(d) for d in agg["day"].tolist()],
         max_ticks=16,
-        side="top",
+        side="bottom",
     )
+    fig.update_xaxes(ticklabelposition="outside bottom")
     return apply_plotly_template(fig, theme)
 
 
