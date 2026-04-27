@@ -23,34 +23,16 @@ jobs:
         include:
           - label: linux
             runner: ubuntu-latest
-            shell: bash
-            archive_shell: bash
             artifact_name: nps-lens-linux
             artifact_path: build/pyinstaller/linux/nps-lens-linux.tar.gz
-            archive_cmd: |
-              tar -czf build/pyinstaller/linux/nps-lens-linux.tar.gz \
-                -C build/pyinstaller/linux/dist nps-lens
           - label: macos
-            runner: macos-13
-            shell: bash
-            archive_shell: bash
+            runner: macos-15-intel
             artifact_name: nps-lens-macos
             artifact_path: build/pyinstaller/macos/nps-lens-macos.zip
-            archive_cmd: |
-              ditto -c -k --sequesterRsrc --keepParent \
-                build/pyinstaller/macos/dist/nps-lens.app \
-                build/pyinstaller/macos/nps-lens-macos.zip
           - label: windows
             runner: windows-latest
-            shell: bash
             artifact_name: nps-lens-windows
             artifact_path: build/pyinstaller/windows/nps-lens-windows.zip
-            archive_shell: pwsh
-            archive_cmd: |
-              Compress-Archive `
-                -Path build/pyinstaller/windows/dist/nps-lens.exe `
-                -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
-                -Force
 
     steps:
       - uses: actions/checkout@v4
@@ -69,24 +51,44 @@ jobs:
 
       - name: Install Linux system libraries for pywebview packaging
         if: matrix.label == 'linux'
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
 
       - name: Install dependencies
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: |
           make python-build
           npm --prefix frontend ci
 
       - name: Build native desktop application
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: make build
 
-      - name: Archive build output
-        shell: ${{ matrix.archive_shell }}
-        run: ${{ matrix.archive_cmd }}
+      - name: Archive Linux build output
+        if: matrix.label == 'linux'
+        shell: bash
+        run: |
+          tar -czf build/pyinstaller/linux/nps-lens-linux.tar.gz \
+            -C build/pyinstaller/linux/dist nps-lens
+
+      - name: Archive macOS build output
+        if: matrix.label == 'macos'
+        shell: bash
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/pyinstaller/macos/dist/nps-lens.app \
+            build/pyinstaller/macos/nps-lens-macos.zip
+
+      - name: Archive Windows build output
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path build/pyinstaller/windows/dist/nps-lens.exe `
+            -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
+            -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
