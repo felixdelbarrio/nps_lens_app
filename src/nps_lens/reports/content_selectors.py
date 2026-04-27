@@ -35,7 +35,7 @@ def select_text_clusters(text_topics_df: pd.DataFrame, *, max_clusters: int) -> 
 
 
 def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select the strongest deteriorations first, then highest current volume."""
+    """Select real deteriorations only, strongest first, then highest current volume."""
 
     if delta_df is None or delta_df.empty:
         return pd.DataFrame(columns=getattr(delta_df, "columns", []))
@@ -47,7 +47,7 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
         return work
     deteriorations = work[work["delta_nps"] < 0].copy()
     if deteriorations.empty:
-        deteriorations = work.copy()
+        return deteriorations
     return (
         deteriorations.sort_values(
             ["delta_nps", "n_current", "value"], ascending=[True, False, True]

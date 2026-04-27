@@ -9,6 +9,13 @@ import plotly.graph_objects as go
 
 
 @dataclass(frozen=True)
+class CausalEvidenceRecord:
+    incident_id: str
+    summary: str
+    url: str = ""
+
+
+@dataclass(frozen=True)
 class DimensionViewModel:
     dimension: str
     slide_number: int
@@ -30,6 +37,7 @@ class CausalScenarioViewModel:
     incident_lines: list[str]
     comment_lines: list[str]
     helix_evidence_lines: list[str]
+    helix_evidence_records: list[CausalEvidenceRecord]
 
 
 @dataclass(frozen=True)
