@@ -1608,10 +1608,16 @@ class DashboardService:
                 if not isinstance(entry, dict):
                     continue
                 incident_id = str(entry.get("incident_id", "") or "").strip()
-                current_url = str(entry.get("url", "") or "").strip()
+                current_url = str(
+                    entry.get("url", "")
+                    or entry.get("incident_id__href", "")
+                    or entry.get("incident_id__hyperlink", "")
+                    or ""
+                ).strip()
+                resolved_url = current_url or lookup.get(incident_id, "")
                 records.append(
                     {str(key): str(item or "").strip() for key, item in entry.items()}
-                    | {"url": current_url or lookup.get(incident_id, "")}
+                    | {"url": resolved_url, "incident_id__href": resolved_url}
                 )
             normalized_records.append(records)
         out["incident_records"] = normalized_records

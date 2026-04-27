@@ -43,7 +43,7 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Touchpoints afectados por Palanca",
         navigation_title="Touchpoints afectados por Palanca",
         navigation_subtitle=(
-            "Cada fila resume una palanca causal y los touchpoints afectados que están "
+            "Cada escenario resume una palanca causal y los touchpoints afectados que están "
             "sosteniendo la fricción observada en NPS."
         ),
         chart_title="Palancas con más touchpoints afectados",
@@ -73,7 +73,7 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Touchpoints afectados por Subpalanca",
         navigation_title="Touchpoints afectados por Subpalanca",
         navigation_subtitle=(
-            "Cada fila resume una subpalanca causal y el touchpoint donde se materializa la fricción."
+            "Cada escenario resume una subpalanca causal y el touchpoint donde se materializa la fricción."
         ),
         chart_title="Subpalancas con más touchpoints afectados",
         table_title="Detalle de touchpoints afectados por Subpalanca",
@@ -103,7 +103,7 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Incidencias por Source Service N2 de Hélix",
         navigation_title="Incidencias por Source Service N2 de Hélix",
         navigation_subtitle=(
-            "Cada fila resume un Source Service N2 de Hélix y su conexión defendible con la caída de experiencia."
+            "Cada escenario resume un Source Service N2 de Hélix y su conexión defendible con la caída de experiencia."
         ),
         chart_title="Source Service N2 de Hélix con más incidencias validadas",
         table_title="Detalle causal por Source Service N2 de Hélix",
@@ -136,7 +136,7 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Journeys rotos",
         navigation_title="Journeys rotos",
         navigation_subtitle=(
-            "Cada fila resume un journey roto detectado automáticamente y el touchpoint donde converge la evidencia."
+            "Cada escenario resume un journey roto detectado automáticamente y el touchpoint donde converge la evidencia."
         ),
         chart_title="Journeys rotos con mayor evidencia validada",
         table_title="Detalle de journeys rotos detectados",
@@ -167,9 +167,9 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Journeys de detracción",
         navigation_title="Journeys de detracción",
         navigation_subtitle=(
-            "Cada fila resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS."
+            "Cada escenario resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS."
         ),
-        chart_title="Journeys de detracción con mayor evidencia validada",
+        chart_title="Evidencia validada por journey",
         table_title="Detalle de journeys de detracción",
         table_empty_message=(
             "No hay journeys de detracción defendibles con evidencia suficiente en esta ventana."

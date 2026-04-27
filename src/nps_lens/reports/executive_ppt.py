@@ -57,13 +57,14 @@ from nps_lens.reports.content_selectors import (
     select_opportunities,
     select_text_clusters,
 )
-from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
+from nps_lens.reports.editorial_tokens import EDITORIAL_COPY, EDITORIAL_LIMITS
 from nps_lens.reports.ppt_template import (
     CorporatePresentationTheme,
     build_presentation,
     resolve_layout,
 )
 from nps_lens.reports.presentation_context import (
+    CausalEvidenceRecord,
     CausalScenarioViewModel,
     CausalViewModel,
     DimensionViewModel,
@@ -74,8 +75,8 @@ from nps_lens.ui.charts import (
     _compact_axis_label,
     chart_causal_entity_bar,
     chart_cohort_heatmap,
-    chart_daily_kpis,
     chart_daily_mix_business,
+    chart_daily_nps_committee_stack,
     chart_daily_volume,
     chart_driver_bar,
     chart_driver_delta,
@@ -174,6 +175,12 @@ def _fmt_locale_number(
 
 def _fmt_count_or_nd(v: object) -> str:
     return _fmt_locale_number(v, decimals=0)
+
+
+def _fmt_count_with_label(v: object, *, singular: str, plural: str) -> str:
+    count = _safe_int(v, default=-1)
+    label = singular if count == 1 else plural
+    return f"**{_fmt_count_or_nd(v)}** {label}"
 
 
 def _fmt_pct_or_nd(v: object, decimals: int = 0) -> str:
@@ -1176,7 +1183,7 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
 def _build_overview_figure(
     selected_nps_df: Optional[pd.DataFrame], *, period_days: int
 ) -> Optional[go.Figure]:
-    fig = chart_daily_kpis(
+    fig = chart_daily_nps_committee_stack(
         selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame(),
         get_theme("light"),
         days=max(int(period_days), 1),
@@ -1185,7 +1192,7 @@ def _build_overview_figure(
         return None
     fig.update_layout(
         legend=dict(orientation="h", x=0.0, y=1.18, yanchor="bottom", title_text=""),
-        margin=dict(l=58, r=58, t=88, b=74),
+        margin=dict(l=72, r=86, t=84, b=76),
     )
     fig.update_xaxes(
         side="bottom",
@@ -1200,13 +1207,13 @@ def _build_overview_figure(
 
 def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure]:
     topic_fig = chart_topic_bars(
-        text_topics_df, get_theme("light"), top_k=EDITORIAL_LIMITS.max_text_clusters
+        text_topics_df, get_theme("light"), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
     )
     if topic_fig is None or text_topics_df.empty:
         return topic_fig
     topic_rows = (
         text_topics_df.sort_values("n", ascending=False)
-        .head(EDITORIAL_LIMITS.max_text_clusters)
+        .head(EDITORIAL_LIMITS.max_text_chart_clusters)
         .copy()
     )
     topic_labels = []
@@ -1225,8 +1232,9 @@ def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure
         tickfont=dict(size=20),
         title_font=dict(size=20),
     )
-    topic_fig.update_yaxes(tickfont=dict(size=28), automargin=True)
-    topic_fig.update_layout(margin=dict(l=250, r=24, t=22, b=54), bargap=0.34)
+    y_font = 26 if len(topic_rows) <= 5 else 22 if len(topic_rows) <= 8 else 19
+    topic_fig.update_yaxes(tickfont=dict(size=y_font), automargin=True)
+    topic_fig.update_layout(margin=dict(l=270, r=28, t=18, b=54), bargap=0.26)
     return topic_fig
 
 
@@ -2919,6 +2927,161 @@ def _add_bullet_lines(
         )
 
 
+def _add_markdown_panel(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    title: str,
+    body: str,
+    border: str,
+    title_size: float = 13.0,
+    body_size: float = 11.2,
+    max_chars: int = 220,
+) -> None:
+    _panel(
+        slide,
+        left=left,
+        top=top,
+        width=width,
+        height=height,
+        title=title,
+        fill=BBVA_COLORS["white"],
+        border=border,
+        title_size=title_size,
+    )
+    tb = slide.shapes.add_textbox(
+        Inches(left + 0.18),
+        Inches(top + 0.42),
+        Inches(width - 0.36),
+        Inches(max(height - 0.52, 0.20)),
+    )
+    tf = tb.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    _add_markdown_runs(
+        p,
+        text=body,
+        max_chars=max_chars,
+        font_size_pt=body_size,
+        color=BBVA_COLORS["muted"],
+    )
+
+
+def _add_incident_evidence_panel(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    records: list[CausalEvidenceRecord],
+    fallback_lines: list[str],
+) -> None:
+    _panel(
+        slide,
+        left=left,
+        top=top,
+        width=width,
+        height=height,
+        title=EDITORIAL_COPY.incident_examples_title,
+        fill=BBVA_COLORS["white"],
+        border=BBVA_COLORS["line"],
+        title_size=13,
+    )
+    items = records[: EDITORIAL_LIMITS.max_helix_evidence]
+    if not items:
+        items = [
+            CausalEvidenceRecord(incident_id="", summary=line, url="")
+            for line in fallback_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+        ]
+    if not items:
+        items = [
+            CausalEvidenceRecord(
+                incident_id="",
+                summary="No se han encontrado evidencias Helix adicionales defendibles para este escenario.",
+                url="",
+            )
+        ]
+
+    cols = 2
+    gap_x = 0.22
+    gap_y = 0.18
+    inner_left = left + 0.18
+    inner_top = top + 0.62
+    card_width = (width - 0.36 - gap_x) / cols
+    card_height = (height - 0.84 - gap_y) / 2
+    for idx, item in enumerate(items[:4]):
+        row = idx // cols
+        col = idx % cols
+        card_left = inner_left + col * (card_width + gap_x)
+        card_top = inner_top + row * (card_height + gap_y)
+        _panel(
+            slide,
+            left=card_left,
+            top=card_top,
+            width=card_width,
+            height=card_height,
+            title="",
+            fill="F7F8F8",
+            border=BBVA_COLORS["line"],
+        )
+        head = slide.shapes.add_textbox(
+            Inches(card_left + 0.14),
+            Inches(card_top + 0.10),
+            Inches(card_width - 0.28),
+            Inches(0.24),
+        )
+        htf = head.text_frame
+        _configure_text_frame(htf)
+        htf.clear()
+        hp = htf.paragraphs[0]
+        prefix = hp.add_run()
+        prefix.text = f"Evidencia {idx + 1}"
+        prefix.font.name = BBVA_FONT_HEAD
+        prefix.font.size = Pt(10.8)
+        prefix.font.bold = True
+        prefix.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+        incident_id = str(item.incident_id or "").strip()
+        if incident_id:
+            sep = hp.add_run()
+            sep.text = " · "
+            sep.font.name = BBVA_FONT_BODY
+            sep.font.size = Pt(10.8)
+            sep.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+            link = hp.add_run()
+            link.text = incident_id
+            link.font.name = BBVA_FONT_MEDIUM
+            link.font.size = Pt(10.8)
+            link.font.bold = True
+            link.font.underline = bool(item.url)
+            link.font.color.rgb = _rgb(BBVA_COLORS["blue"] if item.url else BBVA_COLORS["muted"])
+            if item.url:
+                link.hyperlink.address = item.url
+
+        body = slide.shapes.add_textbox(
+            Inches(card_left + 0.14),
+            Inches(card_top + 0.40),
+            Inches(card_width - 0.28),
+            Inches(max(card_height - 0.50, 0.28)),
+        )
+        btf = body.text_frame
+        _configure_text_frame(btf)
+        btf.clear()
+        bp = btf.paragraphs[0]
+        _add_markdown_runs(
+            bp,
+            text=item.summary,
+            max_chars=128,
+            font_size_pt=9.2,
+            color=BBVA_COLORS["muted"],
+        )
+
+
 def _add_compact_table(
     slide: object,
     *,
@@ -2932,7 +3095,11 @@ def _add_compact_table(
     col_width_ratios: Optional[list[float]] = None,
     clip_lengths: Optional[list[int]] = None,
     font_size_pt: float = 9.6,
+    header_font_size_pt: float = 10.5,
+    cell_height: float = 0.30,
     max_rows: int = 6,
+    panel_border: str = "",
+    numeric_columns: Optional[set[int]] = None,
 ) -> None:
     title_pad = 0.62 if str(title or "").strip() else 0.24
     visible_rows = max(min(len(rows), max(int(max_rows), 1)), 1)
@@ -2945,6 +3112,7 @@ def _add_compact_table(
         height=height,
         title=title,
         fill=BBVA_COLORS["white"],
+        border=panel_border or BBVA_COLORS["line"],
     )
     base_top = top + (0.46 if str(title or "").strip() else 0.18)
     if col_width_ratios and len(col_width_ratios) == len(headers):
@@ -2972,7 +3140,7 @@ def _add_compact_table(
         r = p.add_run()
         r.text = header
         r.font.name = BBVA_FONT_MEDIUM
-        r.font.size = Pt(10.5)
+        r.font.size = Pt(header_font_size_pt)
         r.font.bold = True
         r.font.color.rgb = _rgb(BBVA_COLORS["blue"])
 
@@ -2983,12 +3151,14 @@ def _add_compact_table(
                 Inches(x_positions[col_idx] + 0.05),
                 Inches(current_top),
                 Inches(column_widths[col_idx] - 0.08),
-                Inches(0.28),
+                Inches(cell_height),
             )
             tf = tb.text_frame
             _configure_text_frame(tf)
             tf.clear()
             p = tf.paragraphs[0]
+            if numeric_columns and col_idx in numeric_columns:
+                p.alignment = PP_ALIGN.RIGHT
             r = p.add_run()
             clip_len = (
                 clip_lengths[col_idx]
@@ -3664,7 +3834,13 @@ def _chain_incident_records(value: object) -> list[dict[str, str]]:
             continue
         incident_id = str(entry.get("incident_id", "") or "").strip()
         summary = str(entry.get("summary", "") or "").strip()
-        url = str(entry.get("url", "") or "").strip()
+        url = str(
+            entry.get("url", "")
+            or entry.get("incident_id__href", "")
+            or entry.get("incident_id__hyperlink", "")
+            or entry.get("href", "")
+            or ""
+        ).strip()
         if incident_id or summary:
             out.append(
                 {
@@ -5337,6 +5513,14 @@ def _build_causal_scenarios(
             ]
         ]
         helix_records = _chain_incident_records(row.get("incident_records"))
+        helix_evidence_records = [
+            CausalEvidenceRecord(
+                incident_id=record.get("incident_id", ""),
+                summary=_clean_evidence_excerpt(record.get("summary", ""), max_len=170),
+                url=record.get("url", ""),
+            )
+            for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
+        ]
         helix_lines = [
             _clean_evidence_excerpt(
                 f"{record.get('incident_id', '')}: {record.get('summary', '')}", max_len=145
@@ -5355,6 +5539,7 @@ def _build_causal_scenarios(
                 incident_lines=incident_lines,
                 comment_lines=comment_lines,
                 helix_evidence_lines=helix_lines,
+                helix_evidence_records=helix_evidence_records,
             )
         )
     return scenarios
@@ -5420,10 +5605,7 @@ def _build_presentation_context(
         daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
 
     overview = _period_overview(selected_raw)
-    text_topics = select_text_clusters(
-        _text_topics_table(selected_raw, top_k=10),
-        max_clusters=EDITORIAL_LIMITS.max_text_clusters,
-    )
+    text_topics = _text_topics_table(selected_raw, top_k=EDITORIAL_LIMITS.max_text_chart_clusters)
     current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
     baseline_label = (
         f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
@@ -5569,7 +5751,7 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     _configure_text_frame(tf)
     tf.clear()
     r = tf.paragraphs[0].add_run()
-    r.text = "Bloque 1 · Experiencia térmica"
+    r.text = EDITORIAL_COPY.nps_block_eyebrow
     r.font.name = BBVA_FONT_MEDIUM
     r.font.size = Pt(13)
     r.font.bold = True
@@ -5605,7 +5787,7 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
         top=3.42,
         width=7.2,
         height=2.50,
-        title="Lectura ejecutiva",
+        title=EDITORIAL_COPY.nps_highlights_title,
         lines=summary,
         accent=BBVA_COLORS["sky"],
         body_font_size_pt=13.8,
@@ -5677,7 +5859,7 @@ def _add_dimension_change_slide(
         slide,
         left=0.66,
         top=1.48,
-        width=7.78,
+        width=7.46,
         height=5.42,
         title=f"Deterioros principales en {dimension}",
     )
@@ -5686,7 +5868,7 @@ def _add_dimension_change_slide(
         figure=view_model.change_figure,
         left=0.88,
         top=1.84,
-        width=7.24,
+        width=6.92,
         height=4.76,
         empty_note=f"No hay base histórica suficiente para comparar {dimension.lower()}.",
         target_ppi=178,
@@ -5694,36 +5876,27 @@ def _add_dimension_change_slide(
     rows = [
         [
             _clip(row.value, 34),
-            _fmt_count_or_nd(row.n_current),
-            _fmt_num_or_nd(row.nps_current, decimals=1),
             _fmt_signed_or_nd(row.delta_nps, decimals=1),
+            _fmt_num_or_nd(row.nps_current, decimals=1),
         ]
         for row in view_model.change_table_df.head(EDITORIAL_LIMITS.max_change_rows).itertuples()
     ]
     _add_compact_table(
         slide,
-        left=8.70,
+        left=8.34,
         top=1.48,
-        width=3.98,
+        width=4.34,
         title="Mayor deterioro",
-        headers=[dimension, "n", "NPS", "Δ"],
-        rows=rows or [["Sin datos", "-", "-", "-"]],
-        row_height=0.48,
-        col_width_ratios=[2.4, 0.7, 0.8, 0.7],
-        clip_lengths=[34, 8, 8, 8],
-        font_size_pt=10.8,
+        headers=["Valor", EDITORIAL_COPY.detriment_column_title, "NPS actual"],
+        rows=rows or [["Sin deterioro real", "-", "-"]],
+        row_height=0.60,
+        col_width_ratios=[2.50, 1.22, 0.92],
+        clip_lengths=[34, 12, 10],
+        font_size_pt=11.2,
+        header_font_size_pt=9.1,
+        cell_height=0.36,
         max_rows=EDITORIAL_LIMITS.max_change_rows,
-    )
-    _add_bullet_lines(
-        slide,
-        left=8.70,
-        top=5.64,
-        width=3.98,
-        height=1.26,
-        title="Criterio de recorte",
-        lines=["Se muestran los mayores deterioros de NPS con volumen defendible para comité."],
-        accent=BBVA_COLORS["line"],
-        body_font_size_pt=10.8,
+        numeric_columns={1, 2},
     )
 
 
@@ -5746,17 +5919,17 @@ def _add_web_pain_dimension_slide(
         slide,
         left=0.66,
         top=1.48,
-        width=8.10,
+        width=8.02,
         height=5.42,
-        title=f"Mapa de dolor Web por {dimension}",
+        title="",
     )
     _figure_in_panel(
         slide,
         figure=view_model.web_heatmap_figure,
         left=0.86,
-        top=1.86,
-        width=7.66,
-        height=4.76,
+        top=1.68,
+        width=7.58,
+        height=5.02,
         empty_note=f"No hay señal suficiente para mostrar {dimension.lower()} en el canal Web.",
         target_ppi=178,
     )
@@ -5771,17 +5944,20 @@ def _add_web_pain_dimension_slide(
     ]
     _add_compact_table(
         slide,
-        left=9.02,
+        left=8.92,
         top=1.48,
-        width=3.66,
+        width=3.76,
         title="Focos Web",
         headers=[dimension, "n", "NPS", "% det."],
         rows=rows or [["Sin datos", "-", "-", "-"]],
-        row_height=0.43,
-        col_width_ratios=[2.3, 0.7, 0.8, 0.9],
-        clip_lengths=[34, 8, 8, 8],
-        font_size_pt=10.2,
+        row_height=0.44,
+        col_width_ratios=[2.20, 0.88, 0.76, 0.82],
+        clip_lengths=[34, 10, 8, 8],
+        font_size_pt=9.7,
+        header_font_size_pt=9.0,
+        cell_height=0.30,
         max_rows=EDITORIAL_LIMITS.max_web_rows,
+        numeric_columns={1, 2, 3},
     )
 
 
@@ -5806,15 +5982,15 @@ def _add_opportunity_dimension_slide(
         top=1.48,
         width=12.02,
         height=4.52,
-        title=f"Impacto estimado en {dimension}",
+        title="",
     )
     _figure_in_panel(
         slide,
         figure=view_model.opportunities_figure,
         left=0.86,
-        top=1.84,
+        top=1.66,
         width=11.62,
-        height=3.82,
+        height=4.08,
         empty_note=f"No se identificaron oportunidades robustas para {dimension.lower()} con el umbral actual.",
         target_ppi=176,
     )
@@ -5856,7 +6032,7 @@ def _add_overview_slide(
         top=1.48,
         width=9.00,
         height=5.42,
-        title="NPS clásico y peso detractor",
+        title="NPS clásico, promotores y detractores",
     )
     _figure_in_panel(
         slide,
@@ -5875,8 +6051,8 @@ def _add_overview_slide(
 
     month_label = _month_label_es(period_end).title()
     trend_lines = [
-        f"El periodo arranca con NPS clásico {_fmt_num_or_nd(overview.get('start_classic', np.nan))} y termina en {_fmt_num_or_nd(overview.get('end_classic', np.nan))}.",
-        f"El peso detractor pasa de {_fmt_pct_or_nd(overview.get('start_detr', np.nan))} a {_fmt_pct_or_nd(overview.get('end_detr', np.nan))}.",
+        f"El periodo arranca con NPS clásico **{_fmt_num_or_nd(overview.get('start_classic', np.nan))}** y termina en **{_fmt_num_or_nd(overview.get('end_classic', np.nan))}**.",
+        f"El peso detractor pasa de **{_fmt_pct_or_nd(overview.get('start_detr', np.nan))}** a **{_fmt_pct_or_nd(overview.get('end_detr', np.nan))}**.",
         "NPS clásico = promotores menos detractores; se usa para seguir la señal neta del periodo.",
     ]
     _add_bullet_lines(
@@ -5922,6 +6098,9 @@ def _add_deep_dive_slide(
         target_ppi=176,
     )
 
+    summary_df = select_text_clusters(
+        text_topics_df, max_clusters=EDITORIAL_LIMITS.max_text_table_clusters
+    )
     table_rows = [
         [
             str(row.cluster_id),
@@ -5929,21 +6108,24 @@ def _add_deep_dive_slide(
             str(row.top_terms_txt),
             str(row.example_txt),
         ]
-        for row in text_topics_df.head(3).itertuples()
+        for row in summary_df.itertuples()
     ]
     _add_compact_table(
         slide,
         left=0.82,
-        top=5.02,
+        top=5.08,
         width=11.62,
         title="",
         headers=["cluster_id", "n", "top_terms", "examples"],
         rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
-        row_height=0.36,
-        col_width_ratios=[0.8, 0.8, 4.5, 4.3],
-        clip_lengths=[8, 8, 58, 58],
-        font_size_pt=10.4,
-        max_rows=3,
+        row_height=0.34,
+        col_width_ratios=[1.05, 0.80, 4.65, 4.10],
+        clip_lengths=[10, 8, 64, 58],
+        font_size_pt=9.8,
+        header_font_size_pt=9.7,
+        cell_height=0.26,
+        max_rows=EDITORIAL_LIMITS.max_text_table_clusters,
+        numeric_columns={1},
     )
 
 
@@ -6648,12 +6830,12 @@ def _add_journeys_summary_slide(
             label=str(metric.get("label", "")).strip(),
             value=str(metric.get("value", "")).strip(),
             accent=(
-                BBVA_COLORS["blue"]
+                BBVA_COLORS["red"]
                 if index == 0
                 else BBVA_COLORS["orange"] if index == 1 else BBVA_COLORS["green"]
             ),
         )
-    _panel(slide, left=0.66, top=2.72, width=5.58, height=4.18, title=method_spec.chart_title)
+    _panel(slide, left=0.66, top=2.72, width=5.58, height=4.18, title="")
     _figure_in_panel(
         slide,
         figure=(
@@ -6664,9 +6846,9 @@ def _add_journeys_summary_slide(
             )
         ),
         left=0.86,
-        top=3.08,
+        top=2.92,
         width=5.14,
-        height=3.48,
+        height=3.76,
         empty_note=method_spec.table_empty_message,
         target_ppi=170,
     )
@@ -6692,7 +6874,11 @@ def _add_journeys_summary_slide(
         col_width_ratios=[3.3, 1.2, 0.7, 0.7],
         clip_lengths=[58, 22, 8, 8],
         font_size_pt=10.0,
+        header_font_size_pt=9.5,
+        cell_height=0.32,
         max_rows=EDITORIAL_LIMITS.max_journey_rows,
+        panel_border=BBVA_COLORS["red"],
+        numeric_columns={2, 3},
     )
 
 
@@ -6708,12 +6894,12 @@ def _add_causal_section_cover_slide(
     slide = _new_slide(prs, kind="cover")
     _add_bg(slide, BBVA_COLORS["bg_dark"])
     method = context.causal
-    eyebrow = slide.shapes.add_textbox(Inches(0.78), Inches(0.72), Inches(5.4), Inches(0.34))
+    eyebrow = slide.shapes.add_textbox(Inches(0.78), Inches(0.72), Inches(10.9), Inches(0.34))
     tf = eyebrow.text_frame
     _configure_text_frame(tf)
     tf.clear()
     r = tf.paragraphs[0].add_run()
-    r.text = "Bloque 2 · Narrativa causal seleccionada"
+    r.text = EDITORIAL_COPY.causal_block_eyebrow
     r.font.name = BBVA_FONT_MEDIUM
     r.font.size = Pt(13)
     r.font.bold = True
@@ -6724,7 +6910,7 @@ def _add_causal_section_cover_slide(
     _configure_text_frame(ttf)
     ttf.clear()
     tr = ttf.paragraphs[0].add_run()
-    tr.text = f"11. Narrativa causal · {method.method_label}"
+    tr.text = f"{EDITORIAL_COPY.causal_title_prefix} · {method.method_label}"
     tr.font.name = BBVA_FONT_DISPLAY
     tr.font.size = Pt(38)
     tr.font.bold = True
@@ -6743,7 +6929,7 @@ def _add_causal_section_cover_slide(
     flow_box = _panel(
         slide,
         left=0.82,
-        top=3.62,
+        top=3.42,
         width=7.48,
         height=1.26,
         title="Hipótesis causal defendible",
@@ -6756,12 +6942,12 @@ def _add_causal_section_cover_slide(
     _add_stat_card(
         slide,
         left=8.70,
-        top=2.82,
+        top=3.42,
         width=3.40,
-        height=1.34,
+        height=1.26,
         label="Escenarios",
         value=_fmt_count_or_nd(len(method.scenarios)),
-        accent=BBVA_COLORS["blue"],
+        accent=BBVA_COLORS["red"],
         hint="Casos priorizados",
     )
 
@@ -6788,21 +6974,22 @@ def _add_causal_analysis_slide(
         ),
     )
     chain_statement = (
-        f"{_fmt_count_or_nd(row.get('linked_incidents', 0))} incidencias Helix y "
-        f"{_fmt_count_or_nd(row.get('linked_comments', 0))} comentarios convergen en "
+        f"{_fmt_count_with_label(row.get('linked_incidents', 0), singular='incidencia Helix', plural='incidencias Helix')} y "
+        f"{_fmt_count_with_label(row.get('linked_comments', 0), singular='comentario', plural='comentarios')} convergen en "
         f"{title} con lectura {method_spec.label}."
     )
-    _panel(
+    _add_markdown_panel(
         slide,
         left=0.66,
         top=1.48,
         width=12.02,
         height=0.86,
-        title="Lectura ejecutiva",
-        subtitle=chain_statement,
-        fill=BBVA_COLORS["white"],
+        title=EDITORIAL_COPY.scenario_summary_title,
+        body=chain_statement,
         border=BBVA_COLORS["sky"],
         title_size=13,
+        body_size=11.3,
+        max_chars=210,
     )
 
     evidence = (
@@ -6810,48 +6997,24 @@ def _add_causal_analysis_slide(
         or scenario.incident_lines[: EDITORIAL_LIMITS.max_helix_evidence]
         or ["No se han encontrado evidencias Helix adicionales defendibles para este escenario."]
     )
-    card_width = 5.76
-    card_height = 1.34 if len(evidence) > 2 else 1.46
-    positions = [(0.66, 2.52), (6.92, 2.52), (0.66, 4.12), (6.92, 4.12)]
-    for idx, line in enumerate(evidence[:4]):
-        left, top = positions[idx]
-        _panel(
-            slide,
-            left=left,
-            top=top,
-            width=card_width,
-            height=card_height,
-            title=f"Evidencia {idx + 1}",
-            fill=BBVA_COLORS["white"],
-            border=BBVA_COLORS["line"],
-            title_size=12,
-        )
-        tb = slide.shapes.add_textbox(
-            Inches(left + 0.18),
-            Inches(top + 0.44),
-            Inches(card_width - 0.36),
-            Inches(card_height - 0.58),
-        )
-        tf = tb.text_frame
-        _configure_text_frame(tf)
-        tf.clear()
-        p = tf.paragraphs[0]
-        _add_markdown_runs(
-            p,
-            text=line,
-            max_chars=152,
-            font_size_pt=10.8,
-            color=BBVA_COLORS["muted"],
-        )
+    _add_incident_evidence_panel(
+        slide,
+        left=0.66,
+        top=2.50,
+        width=12.02,
+        height=3.18,
+        records=scenario.helix_evidence_records,
+        fallback_lines=evidence,
+    )
 
     visible_kpis = scenario.kpis[:4]
     kpi_left = 0.66
-    kpi_top = 6.02
-    comment_left = 9.08
-    comment_width = 3.60
+    kpi_top = 5.96
+    comment_left = 7.48
+    comment_width = 5.20
     available_width = comment_left - kpi_left - 0.20
     kpi_count = max(len(visible_kpis), 1)
-    kpi_width = min(2.80, available_width / kpi_count - 0.10)
+    kpi_width = min(1.58, available_width / kpi_count - 0.10)
     for pos, (label, value, accent) in enumerate(visible_kpis):
         _add_stat_card(
             slide,
@@ -6869,11 +7032,11 @@ def _add_causal_analysis_slide(
         top=kpi_top,
         width=comment_width,
         height=1.16,
-        title="Comentarios enlazados",
+        title=EDITORIAL_COPY.linked_comments_examples_title,
         lines=scenario.comment_lines
         or ["No se han encontrado verbatims adicionales para este escenario."],
         accent=BBVA_COLORS["red"],
-        body_font_size_pt=9.6,
+        body_font_size_pt=9.8,
     )
 
 
