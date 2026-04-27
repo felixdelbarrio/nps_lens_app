@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import zipfile
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -29,6 +30,8 @@ from nps_lens.reports.ppt_template import (
     find_corporate_template_path,
     resolve_layout,
 )
+from nps_lens.services.dashboard_service import DashboardService
+from nps_lens.settings import Settings
 from nps_lens.ui.charts import chart_daily_kpis, chart_incident_risk_recovery
 from nps_lens.ui.theme import get_theme
 
@@ -182,7 +185,11 @@ def _sample_payload() -> dict:
                 "owner_role": "Producto + Tecnologia",
                 "eta_weeks": 6.0,
                 "incident_records": [
-                    {"incident_id": "INC00001", "summary": "problema en el login", "url": ""},
+                    {
+                        "incident_id": "INC00001",
+                        "summary": "problema en el login",
+                        "url": "https://helix.example/INC00001",
+                    },
                     {"incident_id": "INC00003", "summary": "no puedo acceder", "url": ""},
                     {
                         "incident_id": "INC00025",
@@ -416,10 +423,23 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("8. Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
     assert any("10. Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("11. Narrativa causal · Por Subpalanca" in t for t in texts)
+    assert any("Bloque 1 · Analisis VoC" in t for t in texts)
+    assert any("Highlights del periodo" in t for t in texts)
+    assert any("11. Análisis causal empleado · Por Subpalanca" in t for t in texts)
     assert any("12. Journeys de detracción" in t for t in texts)
     assert any("13.1 Acceso > Login" in t for t in texts)
     assert any("Análisis causal de Subpalanca: Escenario #1 ·" in t for t in texts)
+    assert any("Sumario del análisis del escenario" in t for t in texts)
+    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
+    assert any("Ejemplos de Comentarios enlazados" in t for t in texts)
+    assert any("detrimento NPS" in t for t in texts)
+    assert not any("Lectura ejecutiva" in t for t in texts)
+    assert not any("Criterio de recorte" in t for t in texts)
+    assert not any("Mapa de dolor Web por Palanca" in t for t in texts)
+    assert not any("Mapa de dolor Web por Subpalanca" in t for t in texts)
+    assert not any("Impacto estimado en Palanca" in t for t in texts)
+    assert not any("Impacto estimado en Subpalanca" in t for t in texts)
+    assert not any("Journeys de detracción con mayor evidencia validada" in t for t in texts)
     assert not any("Detalle de evidencias Helix" in t for t in texts)
     assert not any("Qué destaca" in t for t in texts)
     assert not any("2. Cuándo y cómo lo dicen" in t for t in texts)
@@ -433,7 +453,6 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
-    assert not any("VoC" in t for t in texts)
     assert all(
         shape.text_frame.vertical_anchor != executive_ppt.MSO_VERTICAL_ANCHOR.MIDDLE
         for slide in prs.slides
@@ -441,6 +460,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         if getattr(shape, "has_text_frame", False)
         and any((paragraph.text or "").strip() for paragraph in shape.text_frame.paragraphs)
     )
+    with zipfile.ZipFile(BytesIO(out.content)) as archive:
+        rels = archive.read("ppt/slides/_rels/slide13.xml.rels").decode("utf-8")
+    assert "https://helix.example/INC00001" in rels
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -568,12 +590,12 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
                 {
                     "incident_id": "INC000104256298",
                     "summary": "Condición de horario en proceso KNJCR2UC.",
-                    "url": "",
+                    "url": "https://helix.example/INC000104256298",
                 },
                 {
                     "incident_id": "INC000104257175",
                     "summary": "Caída en contratación de seguro cibernético Web.",
-                    "url": "",
+                    "url": "https://helix.example/INC000104257175",
                 },
                 {
                     "incident_id": "",
@@ -662,6 +684,8 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
     assert any("13.1 Operativa crítica fallida" in t for t in texts)
     assert any("13.2 Acceso bloqueado" in t for t in texts)
     assert any("13.3 Rendimiento degradado" in t for t in texts)
+    assert any("Sumario del análisis del escenario" in t for t in texts)
+    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
     slide_11_texts = [
         paragraph.text or ""
@@ -672,6 +696,9 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
     assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_11_texts)
     assert any("INC000104257175" in t for t in texts)
     assert any("VÍNCULOS VALIDADOS" in t for t in texts)
+    with zipfile.ZipFile(BytesIO(out.content)) as archive:
+        rels = archive.read("ppt/slides/_rels/slide13.xml.rels").decode("utf-8")
+    assert "https://helix.example/INC000104257175" in rels
 
 
 def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
@@ -914,6 +941,10 @@ def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
 def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> None:
     assert executive_ppt._fmt_pct_or_nd(0.25) == "25%"
     assert executive_ppt._fmt_pct_or_nd(float("nan")) == "n/d"
+    assert (
+        executive_ppt._fmt_count_with_label(1, singular="incidencia", plural="incidencias")
+        == "**1** incidencia"
+    )
     assert executive_ppt._fmt_signed_or_nd(-2.34, decimals=1) == "-2,3"
     assert executive_ppt._fmt_num_or_nd(7.891, decimals=1) == "7,9"
     assert executive_ppt._clip("abcdefgh", 5) == "abcd…"
@@ -977,6 +1008,10 @@ def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> N
 
     selected = select_negative_delta_rows(delta_df, max_rows=2)
     assert selected["value"].tolist() == ["Peor B", "Peor A"]
+    assert select_negative_delta_rows(
+        pd.DataFrame({"value": ["Mejora"], "delta_nps": [1.0], "n_current": [100]}),
+        max_rows=2,
+    ).empty
 
     kpis = select_nonzero_kpis(
         [
@@ -1031,6 +1066,18 @@ def test_daily_kpis_chart_places_x_axis_labels_at_bottom() -> None:
     assert fig is not None
     assert fig.layout.xaxis.side == "bottom"
     assert fig.layout.xaxis.ticklabelposition == "outside bottom"
+
+    stacked = executive_ppt.chart_daily_nps_committee_stack(
+        payload["selected_nps"], get_theme("light"), days=31
+    )
+    assert stacked is not None
+    assert len(stacked.data) == 4
+    assert [trace.name for trace in stacked.data] == [
+        "NPS clásico",
+        "% detractores",
+        "% promotores",
+        "% detractores",
+    ]
 
 
 def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:
@@ -1291,6 +1338,40 @@ def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
     assert len(opp_fig.data) == 1
 
 
+def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() -> None:
+    topics = pd.DataFrame(
+        {
+            "cluster_id": [1, 2, 3, 4, 5],
+            "n": [500, 400, 300, 200, 100],
+            "top_terms": [["uno", "dos"]] * 5,
+            "examples": [["ejemplo"]] * 5,
+            "label": [""] * 5,
+            "top_terms_txt": ["uno, dos"] * 5,
+            "example_txt": ["ejemplo"] * 5,
+        }
+    )
+
+    fig = executive_ppt._build_text_topic_figure(topics)
+    assert fig is not None
+    assert len(fig.data[0].x) == 5
+
+    prs = Presentation()
+    executive_ppt._add_deep_dive_slide(
+        prs,
+        period_label="2026-03-01 -> 2026-03-29",
+        text_topics_df=topics,
+        topic_figure=None,
+    )
+    texts = [
+        paragraph.text or ""
+        for shape in prs.slides[0].shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+    ]
+    assert "1" in texts and "2" in texts and "3" in texts
+    assert "4" not in texts and "5" not in texts
+
+
 def test_chain_helpers_cover_edge_cases() -> None:
     assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
     assert executive_ppt._chain_list(None) == []
@@ -1300,7 +1381,45 @@ def test_chain_helpers_cover_edge_cases() -> None:
     assert executive_ppt._chain_incident_records([{"incident_id": "INC1", "summary": "hola"}]) == [
         {"incident_id": "INC1", "summary": "hola", "url": ""}
     ]
+    assert executive_ppt._chain_incident_records(
+        [{"incident_id": "INC2", "summary": "hola", "incident_id__href": "https://helix/2"}]
+    ) == [{"incident_id": "INC2", "summary": "hola", "url": "https://helix/2"}]
     assert executive_ppt._chain_incident_records(["bad"]) == []
+
+
+def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        database_path=tmp_path / "data" / "dashboard.sqlite3",
+        frontend_dist_dir=tmp_path / "frontend-dist",
+        frontend_public_dir=tmp_path / "frontend-public",
+        api_host="127.0.0.1",
+        api_port=8000,
+        default_service_origin="BBVA México",
+        default_service_origin_n1="Senda",
+        allowed_service_origins=["BBVA México"],
+        allowed_service_origin_n1={"BBVA México": ["Senda"]},
+        log_level="INFO",
+    )
+    service = DashboardService(repository=object(), settings=settings)  # type: ignore[arg-type]
+    chain_df = pd.DataFrame(
+        {
+            "incident_records": [
+                [{"incident_id": "INC00042", "summary": "Falla de acceso", "url": ""}]
+            ]
+        }
+    )
+    helix_df = pd.DataFrame(
+        {
+            "Incident Number": ["INC00042"],
+            "Record ID": ["AGGADG1A2B3C"],
+        }
+    )
+
+    out = service._inject_incident_record_urls(chain_df, helix_df=helix_df)
+    record = out.iloc[0]["incident_records"][0]
+    assert record["url"].endswith("/AGGADG1A2B3C")
+    assert record["incident_id__href"] == record["url"]
 
 
 def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:

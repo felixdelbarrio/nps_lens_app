@@ -440,6 +440,115 @@ def chart_daily_kpis(
     return apply_plotly_template(fig, theme)
 
 
+def chart_daily_nps_committee_stack(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    days: int = 60,
+    metrics: pd.DataFrame | None = None,
+):
+    """Committee view with NPS/detractors and promoters/detractors stacked vertically."""
+
+    if metrics is not None and not metrics.empty:
+        required = {"day", "n", "classic_nps", "det_pct", "pro_pct"}
+        if not required.issubset(set(metrics.columns)):
+            return None
+        agg = metrics[["day", "n", "classic_nps", "det_pct", "pro_pct"]].copy()
+        agg = agg.sort_values("day")
+    else:
+        agg = shared_daily_metrics(df, days=int(days))
+        if agg.empty:
+            return None
+
+    th = chart_theme(theme)
+    detr_c, _, pro_c = _status_colors(theme)
+    import plotly.graph_objects as go  # lazy import
+    from plotly.subplots import make_subplots  # lazy import
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.16,
+        specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["day"],
+            y=agg["classic_nps"],
+            mode="lines+markers",
+            name="NPS clásico",
+            line=dict(color=th.accent, width=3),
+            marker=dict(size=7, color=th.accent),
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>NPS clásico=%{y:.1f}<br>n=%{customdata}<extra></extra>",
+            customdata=agg["n"],
+        ),
+        row=1,
+        col=1,
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["day"],
+            y=agg["det_pct"],
+            mode="lines+markers",
+            name="% detractores",
+            line=dict(color=detr_c, width=2.4, dash="dot"),
+            marker=dict(size=5, color=detr_c),
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            customdata=agg["n"],
+        ),
+        row=1,
+        col=1,
+        secondary_y=True,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["day"],
+            y=agg["pro_pct"],
+            mode="lines+markers",
+            name="% promotores",
+            line=dict(color=pro_c, width=2.8),
+            marker=dict(size=6, color=pro_c),
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% promotores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            customdata=agg["n"],
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["day"],
+            y=agg["det_pct"],
+            mode="lines+markers",
+            name="% detractores",
+            line=dict(color=detr_c, width=2.4, dash="dot"),
+            marker=dict(size=5, color=detr_c),
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            customdata=agg["n"],
+            showlegend=False,
+        ),
+        row=2,
+        col=1,
+    )
+
+    _layout_common(fig, th, height=540)
+    fig.update_layout(
+        showlegend=True,
+        hovermode="x unified",
+        legend=dict(orientation="h", x=0, y=1.12, title_text=""),
+        margin=dict(l=54, r=78, t=82, b=62),
+    )
+    fig.update_yaxes(title_text="NPS clásico", row=1, col=1, secondary_y=False, rangemode="tozero")
+    fig.update_yaxes(title_text="% detractores", row=1, col=1, secondary_y=True, ticksuffix="%")
+    fig.update_yaxes(title_text="% diario", row=2, col=1, ticksuffix="%", range=[0, 100])
+    fig.update_xaxes(title_text="", row=1, col=1)
+    fig.update_xaxes(title_text="Día", row=2, col=1)
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=16)
+    fig.update_xaxes(ticklabelposition="outside bottom")
+    return apply_plotly_template(fig, theme)
+
+
 def chart_daily_mix_business(
     df: pd.DataFrame,
     theme: Theme,
@@ -1182,7 +1291,7 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
 
     d = (
         delta_df.copy()
-        .sort_values(["delta_nps", "n_current", "n_baseline"], ascending=[False, False, False])
+        .sort_values(["delta_nps", "n_current", "n_baseline"], ascending=[True, False, False])
         .head(top_k)
         .copy()
     )

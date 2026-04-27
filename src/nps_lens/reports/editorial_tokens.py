@@ -8,6 +8,8 @@ class EditorialContentLimits:
     """Centralized limits for committee-grade slide density."""
 
     max_text_clusters: int = 3
+    max_text_chart_clusters: int = 10
+    max_text_table_clusters: int = 3
     max_change_rows: int = 6
     max_web_rows: int = 8
     max_opportunities: int = 8
@@ -48,8 +50,21 @@ class EditorialLayout:
         return self.slide_width - (self.margin_x * 2)
 
 
+@dataclass(frozen=True)
+class EditorialCopy:
+    nps_block_eyebrow: str = "Bloque 1 · Analisis VoC"
+    nps_highlights_title: str = "Highlights del periodo"
+    causal_block_eyebrow: str = "Analisis VoC junto a las incidencias Helix reportada en el periodo"
+    causal_title_prefix: str = "11. Análisis causal empleado"
+    scenario_summary_title: str = "Sumario del análisis del escenario"
+    incident_examples_title: str = "Ejemplos de incidencias en el caso de uso"
+    linked_comments_examples_title: str = "Ejemplos de Comentarios enlazados"
+    detriment_column_title: str = "detrimento NPS"
+
+
 EDITORIAL_LIMITS = EditorialContentLimits()
 EDITORIAL_LAYOUT = EditorialLayout()
+EDITORIAL_COPY = EditorialCopy()
 
 
 SLIDE_TITLES: tuple[str, ...] = (
@@ -63,7 +78,7 @@ SLIDE_TITLES: tuple[str, ...] = (
     "Dónde duele en Web · Subpalanca",
     "Oportunidades priorizadas · Palanca",
     "Oportunidades priorizadas · Subpalanca",
-    "Narrativa causal",
+    "Análisis causal empleado",
     "Journeys de detracción",
     "Análisis causal editorial",
     "Detalle de evidencias Helix",

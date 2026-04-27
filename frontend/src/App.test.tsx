@@ -210,13 +210,13 @@ const linkingPayloadAvailable = {
   },
   entity_summary: {
     title: "Journeys de detracción",
-    subtitle: "Cada fila resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS.",
+    subtitle: "Cada escenario resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS.",
     kpis: [
       { label: "Journeys de detracción", value: "6" },
       { label: "Touchpoints cubiertos", value: "4" },
       { label: "Links validados", value: "34" }
     ],
-    figure_title: "Journeys de detracción con mayor evidencia validada",
+    figure_title: "Evidencia validada por journey",
     figure: null,
     table_title: "Detalle de journeys de detracción",
     empty_state: "No hay journeys de detracción defendibles con evidencia suficiente en esta ventana.",
@@ -349,7 +349,8 @@ const linkingPayloadAvailable = {
           {
             incident_id: "INC000104355468",
             summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
-            url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
+            incident_id__href:
+              "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
           }
         ],
         comment_records: [

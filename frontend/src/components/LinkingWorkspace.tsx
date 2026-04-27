@@ -86,6 +86,10 @@ function linkedCountHeading(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function incidentHref(record: Record<string, unknown>) {
+  return asString(record.url ?? record.incident_id__href ?? record.incident_id__hyperlink);
+}
+
 function getTopicName(row: Record<string, unknown>) {
   return asString(row["Tópico NPS"] ?? row.nps_topic ?? row.topic ?? row.label);
 }
@@ -145,7 +149,7 @@ function renderHelixCards(records: Array<Record<string, unknown>>) {
     <div className="evidence-card-grid">
       {records.map((record, index) => {
         const incidentId = asString(record.incident_id, "INC");
-        const href = asString(record.url);
+        const href = incidentHref(record);
         return (
           <article className="evidence-card" key={`helix-record-${index}`}>
             {href ? (
@@ -370,7 +374,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
   const evidenceHelixTable = activeHelixRecords.map((record) => ({
     ID: asString(record.incident_id),
-    ID__href: asString(record.url),
+    ID__href: incidentHref(record),
     "Evidencia Helix": asString(record.summary)
   }));
   const evidenceVocTable = activeVocRecords.map((record) => ({
@@ -568,7 +572,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                         {activeHelixRecords.length ? (
                           activeHelixRecords.slice(0, 6).map((record, index) => {
                             const incidentId = asString(record.incident_id, `INC-${index + 1}`);
-                            const href = asString(record.url);
+                            const href = incidentHref(record);
                             return href ? (
                               <a
                                 className="evidence-pill evidence-pill-link"
