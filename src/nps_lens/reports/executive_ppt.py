@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import contextlib
@@ -26,10 +27,8 @@ from pptx.util import Inches, Pt
 from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
-    summarize_hotspot_counts,
-)
-from nps_lens.analytics.hotspot_metrics import (
     build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
+    summarize_hotspot_counts,
 )
 from nps_lens.analytics.incident_attribution import (
     EXECUTIVE_JOURNEY_CATALOG,
@@ -83,6 +82,7 @@ from nps_lens.ui.charts import (
     chart_opportunities_bar,
     chart_topic_bars,
 )
+from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.narratives import explain_opportunities
 from nps_lens.ui.theme import get_theme
 
@@ -105,7 +105,6 @@ def _ppt_nps_marker_colors(values: pd.Series | list[object]) -> list[str]:
     series = values if isinstance(values, pd.Series) else pd.Series(list(values))
     tokens = DesignTokens.default()
     return [nps_score_color(tokens, "light", value) for value in series.tolist()]
-
 
 
 @dataclass(frozen=True)
@@ -153,6 +152,17 @@ GOLDEN_PANEL_BORDER = "D5DCE3"
 GOLDEN_PANEL_SHADOW = "B6BEC7"
 GOLDEN_TABLE_HEADER_FILL = "F2F4F8"
 GOLDEN_DANGER_BAR = "FF5252"
+
+
+def _select_driver_delta_chart_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
+    """Backward-compatible selector for golden change chart/table rows.
+
+    Keep this as a thin wrapper over the shared editorial selector so tests and
+    callers cannot accidentally introduce a second ranking implementation in
+    the PPT layer.
+    """
+
+    return select_negative_delta_rows(delta_df, max_rows=max_rows)
 
 
 @dataclass(frozen=True)
@@ -1286,64 +1296,40 @@ def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure
     return topic_fig
 
 
-def _select_driver_delta_chart_rows(delta_df: pd.DataFrame, *, max_rows: int = 12) -> pd.DataFrame:
-    if delta_df is None or delta_df.empty:
-        return pd.DataFrame(
-            columns=["value", "delta_nps", "nps_current", "nps_baseline", "n_current", "n_baseline"]
-        )
-    df = delta_df.copy()
-    if "delta_nps" not in df.columns:
-        return df.head(max_rows).copy()
-    df["delta_nps"] = pd.to_numeric(df["delta_nps"], errors="coerce").fillna(0.0)
-    return (
-        df.sort_values(["delta_nps", "value"], ascending=[True, True])
-        .head(max(int(max_rows), 1))
-        .copy()
-    )
-
-
 def _build_driver_delta_figure(
     delta_df: pd.DataFrame, *, panel_height_in: float
 ) -> Optional[go.Figure]:
     fig = chart_driver_delta(delta_df, get_theme("light"), top_k=max(len(delta_df), 1))
     if fig is None or delta_df.empty:
         return fig
-    plot_df = delta_df.copy().head(max(len(delta_df), 1))
+    plot_df = delta_df.head(EDITORIAL_LIMITS.max_change_rows).copy()
     label_count = len(plot_df)
     max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
-    wrap_width = 32 if max_len >= 28 else 28 if max_len >= 20 else 18
-    left_margin = 455 if max_len >= 34 else 410 if max_len >= 26 else 360 if max_len >= 18 else 300
-    y_font_size = 24 if label_count >= 11 else 27 if label_count >= 8 else 30
+    wrap_width = 26 if max_len >= 26 else 22 if max_len >= 18 else 18
+    left_margin = 430 if max_len >= 34 else 380 if max_len >= 26 else 330 if max_len >= 18 else 285
+    y_font_size = 34 if label_count <= 5 else 30 if label_count <= 7 else 26
     labels = [
         _wrap_label(value, width=wrap_width, max_lines=2, joiner="<br>")
         for value in plot_df["value"].astype(str).tolist()
     ]
     with contextlib.suppress(Exception):
         fig.data[0].y = labels
-        fig.data[0].marker.line.width = 0
     fig.update_yaxes(
-        tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+        tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
         automargin=True,
         title_text="",
-        showline=False,
     )
     fig.update_xaxes(
-        title_text="Delta NPS (actual - base)",
-        tickfont=dict(size=18, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["muted"]),
-        title_font=dict(size=19, family=BBVA_FONT_MEDIUM, color="#" + BBVA_COLORS["ink"]),
+        title_text="Delta NPS",
+        tickfont=dict(size=19),
+        title_font=dict(size=20),
         nticks=5,
         zeroline=True,
-        zerolinewidth=1,
         zerolinecolor="#" + BBVA_COLORS["line"],
-        gridcolor="#D5DCE3",
-        showgrid=True,
     )
     fig.update_layout(
-        paper_bgcolor="#" + BBVA_COLORS["white"],
-        plot_bgcolor="#F7F8FA",
-        margin=dict(l=left_margin, r=36, t=8, b=56 if panel_height_in <= 3.2 else 50),
-        bargap=0.22 if label_count >= 10 else 0.30,
-        showlegend=False,
+        margin=dict(l=left_margin, r=48, t=20, b=58 if panel_height_in <= 3.8 else 52),
+        bargap=0.30,
     )
     return fig
 
@@ -1491,6 +1477,13 @@ def _prepare_opportunity_chart_df(opportunities_df: pd.DataFrame) -> pd.DataFram
     return opp_chart_df
 
 
+def _first_existing_series(df: pd.DataFrame, *columns: str) -> pd.Series:
+    for column in columns:
+        if column in df.columns:
+            return df[column]
+    return pd.Series(dtype=str)
+
+
 def _build_journey_table(
     *,
     touchpoint_source: str,
@@ -1503,6 +1496,7 @@ def _build_journey_table(
         "palanca",
         "subpalanca",
         "anchor_topic",
+        "nps_topic",
         "links",
         "comments",
         "nps",
@@ -1514,73 +1508,106 @@ def _build_journey_table(
         and not broken_journeys_df.empty
     ):
         source = broken_journeys_df.copy()
-        source["priority_sort"] = pd.to_numeric(source.get("linked_pairs"), errors="coerce").fillna(
-            0.0
-        )
-        source["confidence_sort"] = pd.to_numeric(
-            source.get("semantic_cohesion"), errors="coerce"
+        source["priority_sort"] = pd.to_numeric(
+            source.get("linked_pairs"),
+            errors="coerce",
         ).fillna(0.0)
-        source["nps_sort"] = pd.to_numeric(source.get("avg_nps"), errors="coerce").fillna(10.0)
+        source["confidence_sort"] = pd.to_numeric(
+            source.get("semantic_cohesion"),
+            errors="coerce",
+        ).fillna(0.0)
+        source["nps_sort"] = pd.to_numeric(
+            source.get("avg_nps"),
+            errors="coerce",
+        ).fillna(10.0)
         out = (
             source.sort_values(
-                ["priority_sort", "confidence_sort", "nps_sort"], ascending=[False, False, True]
+                ["priority_sort", "confidence_sort", "nps_sort"],
+                ascending=[False, False, True],
             )
             .head(EDITORIAL_LIMITS.max_journey_rows)
             .copy()
         )
-        journey_label = out.get("journey_label", pd.Series(dtype=str)).astype(str)
         return pd.DataFrame(
             {
-                "journey": journey_label,
-                "touchpoint": out.get("touchpoint", pd.Series(dtype=str)).astype(str),
-                "palanca": out.get(
-                    "palanca", pd.Series([""] * len(out), index=out.index)
+                "journey": _first_existing_series(out, "journey_label").astype(str),
+                "touchpoint": _first_existing_series(out, "touchpoint").astype(str),
+                "palanca": _first_existing_series(out, "palanca").astype(str),
+                "subpalanca": _first_existing_series(out, "subpalanca").astype(str),
+                "anchor_topic": _first_existing_series(
+                    out,
+                    "anchor_topic",
+                    "nps_topic",
+                    "topic",
                 ).astype(str),
-                "subpalanca": out.get(
-                    "subpalanca", pd.Series([""] * len(out), index=out.index)
-                ).astype(str),
-                "anchor_topic": out.get(
-                    "source_nps_topic", pd.Series([""] * len(out), index=out.index)
-                ).astype(str),
-                "links": pd.to_numeric(out.get("linked_pairs"), errors="coerce")
+                "nps_topic": _first_existing_series(out, "nps_topic", "topic").astype(str),
+                "links": pd.to_numeric(
+                    _first_existing_series(out, "linked_pairs"),
+                    errors="coerce",
+                )
                 .fillna(0)
                 .astype(int),
-                "comments": pd.to_numeric(out.get("linked_comments"), errors="coerce")
+                "comments": pd.to_numeric(
+                    _first_existing_series(out, "linked_comments"),
+                    errors="coerce",
+                )
                 .fillna(0)
                 .astype(int),
-                "nps": pd.to_numeric(out.get("avg_nps"), errors="coerce"),
-                "confidence": pd.to_numeric(out.get("semantic_cohesion"), errors="coerce").fillna(
-                    0.0
-                ),
+                "nps": pd.to_numeric(_first_existing_series(out, "avg_nps"), errors="coerce"),
+                "confidence": pd.to_numeric(
+                    _first_existing_series(out, "semantic_cohesion"),
+                    errors="coerce",
+                ).fillna(0.0),
             }
         )
     if entity_summary_df is None or entity_summary_df.empty:
         return pd.DataFrame(columns=cols)
-    source = select_causal_scenarios(entity_summary_df, max_rows=EDITORIAL_LIMITS.max_journey_rows)
-    empty = pd.Series([""] * len(source), index=source.index)
-    journey_series = source.get(
-        "entity_label", source.get("journey_label", source.get("nps_topic", empty))
-    ).astype(str)
-    anchor_topic = source.get(
-        "source_nps_topic", source.get("anchor_topic", source.get("nps_topic", empty))
-    ).astype(str)
+    source = select_causal_scenarios(
+        entity_summary_df,
+        max_rows=EDITORIAL_LIMITS.max_journey_rows,
+    )
     return pd.DataFrame(
         {
-            "journey": journey_series,
-            "touchpoint": source.get("touchpoint", empty).astype(str),
-            "palanca": source.get("palanca", empty).astype(str),
-            "subpalanca": source.get("subpalanca", empty).astype(str),
-            "anchor_topic": anchor_topic,
-            "links": pd.to_numeric(source.get("linked_pairs"), errors="coerce")
+            "journey": _first_existing_series(
+                source,
+                "journey",
+                "entity_label",
+                "nps_topic",
+            ).astype(str),
+            "touchpoint": _first_existing_series(source, "touchpoint").astype(str),
+            "palanca": _first_existing_series(source, "palanca").astype(str),
+            "subpalanca": _first_existing_series(source, "subpalanca").astype(str),
+            "anchor_topic": _first_existing_series(
+                source,
+                "anchor_topic",
+                "source_nps_topic",
+                "nps_topic",
+            ).astype(str),
+            "nps_topic": _first_existing_series(
+                source,
+                "nps_topic",
+                "source_nps_topic",
+            ).astype(str),
+            "links": pd.to_numeric(
+                _first_existing_series(source, "linked_pairs"),
+                errors="coerce",
+            )
             .fillna(0)
             .astype(int),
-            "comments": pd.to_numeric(source.get("linked_comments"), errors="coerce")
+            "comments": pd.to_numeric(
+                _first_existing_series(source, "linked_comments"),
+                errors="coerce",
+            )
             .fillna(0)
             .astype(int),
-            "nps": pd.to_numeric(source.get("avg_nps"), errors="coerce"),
-            "confidence": pd.to_numeric(source.get("confidence"), errors="coerce").fillna(0.0),
+            "nps": pd.to_numeric(_first_existing_series(source, "avg_nps"), errors="coerce"),
+            "confidence": pd.to_numeric(
+                _first_existing_series(source, "confidence"),
+                errors="coerce",
+            ).fillna(0.0),
         }
     )
+
 
 def _build_journey_summary_figure(
     summary_df: pd.DataFrame, *, touchpoint_source: str
@@ -1589,12 +1616,7 @@ def _build_journey_summary_figure(
     plot_df = summary_df.copy() if summary_df is not None else pd.DataFrame()
     if plot_df.empty:
         return None
-    if "entity_label" in plot_df.columns:
-        plot_df["entity_label"] = plot_df["entity_label"].astype(str).str.strip()
-    elif "journey_label" in plot_df.columns:
-        plot_df["entity_label"] = plot_df["journey_label"].astype(str).str.strip()
-    else:
-        plot_df["entity_label"] = plot_df.get("nps_topic", "").astype(str).str.strip()
+    plot_df["entity_label"] = plot_df.get("nps_topic", "").astype(str).str.strip()
     fig = chart_causal_entity_bar(
         plot_df,
         get_theme("light"),
@@ -1610,8 +1632,8 @@ def _build_journey_summary_figure(
     label_count = len(y_values)
     wrap_width = 44 if max_len <= 46 else 40 if max_len <= 58 else 36
     max_chars = 92 if max_len <= 72 else 84
-    y_font_size = 18 if label_count <= 3 else 20 if label_count <= 6 else 18
-    left_margin = 310 if max_len >= 42 else 275 if max_len >= 28 else 245
+    y_font_size = 27 if label_count <= 6 else 24 if label_count <= 8 else 22
+    left_margin = 430 if max_len >= 72 else 390 if max_len >= 58 else 350 if max_len >= 44 else 320
     pretty_labels = [
         _compact_axis_label(value, width=wrap_width, max_lines=2, max_chars=max_chars)
         for value in y_values
@@ -1628,26 +1650,21 @@ def _build_journey_summary_figure(
     )
     fig.update_xaxes(
         title_text="Links validados Helix↔VoC",
-        tickfont=dict(size=11),
-        title_font=dict(size=11),
+        tickfont=dict(size=17),
+        title_font=dict(size=18),
         nticks=6,
         automargin=True,
     )
-    fig.update_layout(
-        paper_bgcolor="#" + BBVA_COLORS["white"],
-        plot_bgcolor="#" + BBVA_COLORS["white"],
-        margin=dict(l=left_margin, r=72, t=8, b=38),
-        bargap=0.28,
-    )
+    fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="NPS en riesgo", side="right", font=dict(size=11)),
+            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
-            tickfont=dict(size=10),
-            len=0.78,
+            tickfont=dict(size=14),
+            len=0.82,
             y=0.5,
-            thickness=12,
+            thickness=16,
         )
     )
     return fig
@@ -2758,307 +2775,6 @@ def _add_header(
     line.line.fill.background()
 
 
-
-
-def _add_golden_header(slide: object, *, title: str, subtitle: str) -> None:
-    """Header tuned for the 2026 BBVA executive golden layouts."""
-    title_box = slide.shapes.add_textbox(Inches(0.72), Inches(0.33), Inches(11.0), Inches(0.58))
-    tf = title_box.text_frame
-    _configure_text_frame(tf)
-    tf.clear()
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = title
-    r.font.name = BBVA_FONT_DISPLAY
-    r.font.size = Pt(31)
-    r.font.bold = True
-    r.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-
-    sub_box = slide.shapes.add_textbox(Inches(0.72), Inches(0.97), Inches(11.6), Inches(0.30))
-    stf = sub_box.text_frame
-    _configure_text_frame(stf)
-    stf.clear()
-    sp = stf.paragraphs[0]
-    sr = sp.add_run()
-    sr.text = subtitle
-    sr.font.name = BBVA_FONT_BODY
-    sr.font.size = Pt(12.6)
-    sr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
-
-    shadow = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(0.62),
-        Inches(1.305),
-        Inches(12.10),
-        Inches(0.035),
-    )
-    shadow.fill.solid()
-    shadow.fill.fore_color.rgb = _rgb("A7AFB8")
-    shadow.line.fill.background()
-
-    line = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(0.62),
-        Inches(1.270),
-        Inches(12.10),
-        Inches(0.035),
-    )
-    line.fill.solid()
-    line.fill.fore_color.rgb = _rgb(BBVA_COLORS["line"])
-    line.line.fill.background()
-
-
-def _set_shape_line(shape: object, color: str, width_pt: float = 0.9) -> None:
-    shape.line.color.rgb = _rgb(color)
-    shape.line.width = Pt(width_pt)
-
-
-def _add_golden_panel(
-    slide: object,
-    *,
-    left: float,
-    top: float,
-    width: float,
-    height: float,
-    border: str = GOLDEN_PANEL_BORDER,
-    fill: str = "FFFFFF",
-    shadow: bool = True,
-) -> object:
-    if shadow:
-        sh = slide.shapes.add_shape(
-            MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-            Inches(left + 0.035),
-            Inches(top + 0.045),
-            Inches(width),
-            Inches(height),
-        )
-        sh.fill.solid()
-        sh.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_SHADOW)
-        sh.fill.transparency = 72
-        sh.line.fill.background()
-    panel = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(left),
-        Inches(top),
-        Inches(width),
-        Inches(height),
-    )
-    panel.fill.solid()
-    panel.fill.fore_color.rgb = _rgb(fill)
-    _set_shape_line(panel, border, 0.9)
-    return panel
-
-
-def _add_golden_stat_card(
-    slide: object,
-    *,
-    left: float,
-    top: float,
-    width: float,
-    height: float,
-    label: str,
-    value: str,
-    accent: str,
-) -> None:
-    _add_golden_panel(
-        slide,
-        left=left,
-        top=top,
-        width=width,
-        height=height,
-        border=GOLDEN_PANEL_BORDER,
-        fill=BBVA_COLORS["white"],
-        shadow=True,
-    )
-    accent_bar = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
-        Inches(left),
-        Inches(top),
-        Inches(0.12),
-        Inches(height),
-    )
-    accent_bar.fill.solid()
-    accent_bar.fill.fore_color.rgb = _rgb(accent)
-    accent_bar.line.fill.background()
-
-    label_box = slide.shapes.add_textbox(
-        Inches(left + 0.18),
-        Inches(top + 0.13),
-        Inches(width - 0.28),
-        Inches(0.22),
-    )
-    ltf = label_box.text_frame
-    _configure_text_frame(ltf)
-    ltf.clear()
-    lp = ltf.paragraphs[0]
-    lp.alignment = PP_ALIGN.CENTER
-    lr = lp.add_run()
-    lr.text = str(label or "").strip().upper()
-    lr.font.name = BBVA_FONT_MEDIUM
-    lr.font.size = Pt(9.5)
-    lr.font.bold = True
-    lr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
-
-    value_box = slide.shapes.add_textbox(
-        Inches(left + 0.18),
-        Inches(top + 0.48),
-        Inches(width - 0.28),
-        Inches(0.42),
-    )
-    vtf = value_box.text_frame
-    _configure_text_frame(vtf)
-    vtf.clear()
-    vp = vtf.paragraphs[0]
-    vp.alignment = PP_ALIGN.CENTER
-    vr = vp.add_run()
-    vr.text = str(value or "").strip()
-    vr.font.name = BBVA_FONT_DISPLAY
-    vr.font.size = Pt(24)
-    vr.font.bold = True
-    vr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-
-
-def _column_edges(left: float, width: float, ratios: list[float]) -> list[float]:
-    total = sum(ratios) or 1.0
-    edges = [left]
-    cursor = left
-    for ratio in ratios:
-        cursor += width * ratio / total
-        edges.append(cursor)
-    return edges
-
-
-def _add_golden_table_panel(
-    slide: object,
-    *,
-    left: float,
-    top: float,
-    width: float,
-    height: float,
-    title: str,
-    headers: list[str],
-    rows: list[list[str]],
-    col_width_ratios: list[float],
-    max_rows: int,
-    border: str = GOLDEN_PANEL_BORDER,
-    title_font_size_pt: float = 15.5,
-    header_font_size_pt: float = 9.6,
-    body_font_size_pt: float = 9.7,
-    body_clip_lengths: Optional[list[int]] = None,
-    numeric_columns: Optional[set[int]] = None,
-) -> None:
-    _add_golden_panel(
-        slide,
-        left=left,
-        top=top,
-        width=width,
-        height=height,
-        border=border,
-        fill=BBVA_COLORS["white"],
-        shadow=True,
-    )
-    title = str(title or "").strip()
-    title_h = 0.44 if title else 0.0
-    if title:
-        title_box = slide.shapes.add_textbox(
-            Inches(left + 0.12),
-            Inches(top + 0.19),
-            Inches(width - 0.24),
-            Inches(0.27),
-        )
-        ttf = title_box.text_frame
-        _configure_text_frame(ttf)
-        ttf.clear()
-        tp = ttf.paragraphs[0]
-        tp.alignment = PP_ALIGN.CENTER
-        tr = tp.add_run()
-        tr.text = title
-        tr.font.name = BBVA_FONT_HEAD
-        tr.font.size = Pt(title_font_size_pt)
-        tr.font.bold = True
-        tr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-
-    inner_left = left + 0.18
-    inner_width = width - 0.36
-    inner_top = top + title_h + 0.10
-    header_h = 0.48
-    row_h = (height - title_h - 0.20 - header_h) / max(max_rows, 1)
-    edges = _column_edges(inner_left, inner_width, col_width_ratios)
-
-    header_bg = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(inner_left),
-        Inches(inner_top),
-        Inches(inner_width),
-        Inches(header_h),
-    )
-    header_bg.fill.solid()
-    header_bg.fill.fore_color.rgb = _rgb(GOLDEN_TABLE_HEADER_FILL)
-    header_bg.line.fill.background()
-
-    for idx, header in enumerate(headers):
-        x = edges[idx]
-        w = edges[idx + 1] - edges[idx]
-        tb = slide.shapes.add_textbox(
-            Inches(x + 0.04),
-            Inches(inner_top + 0.07),
-            Inches(max(w - 0.08, 0.05)),
-            Inches(header_h - 0.10),
-        )
-        tf = tb.text_frame
-        _configure_text_frame(tf)
-        tf.clear()
-        p = tf.paragraphs[0]
-        r = p.add_run()
-        r.text = str(header or "")
-        r.font.name = BBVA_FONT_MEDIUM
-        r.font.size = Pt(header_font_size_pt)
-        r.font.bold = True
-        r.font.color.rgb = _rgb(BBVA_COLORS["blue"])
-
-    line_count = max_rows + 1
-    for i in range(line_count):
-        y = inner_top + header_h + i * row_h
-        line = slide.shapes.add_shape(
-            MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-            Inches(inner_left),
-            Inches(y),
-            Inches(inner_width),
-            Inches(0.010),
-        )
-        line.fill.solid()
-        line.fill.fore_color.rgb = _rgb(BBVA_COLORS["line"])
-        line.line.fill.background()
-
-    for row_idx, row in enumerate(rows[:max_rows]):
-        y = inner_top + header_h + row_idx * row_h + 0.11
-        for col_idx, value in enumerate(row[: len(headers)]):
-            x = edges[col_idx]
-            w = edges[col_idx + 1] - edges[col_idx]
-            tb = slide.shapes.add_textbox(
-                Inches(x + 0.04),
-                Inches(y),
-                Inches(max(w - 0.08, 0.05)),
-                Inches(max(row_h - 0.08, 0.05)),
-            )
-            tf = tb.text_frame
-            _configure_text_frame(tf)
-            tf.clear()
-            para = tf.paragraphs[0]
-            if numeric_columns and col_idx in numeric_columns:
-                para.alignment = PP_ALIGN.RIGHT
-            clip_len = (
-                body_clip_lengths[col_idx]
-                if body_clip_lengths is not None and col_idx < len(body_clip_lengths)
-                else 48
-            )
-            run = para.add_run()
-            run.text = _clip(value, clip_len)
-            run.font.name = BBVA_FONT_BODY
-            run.font.size = Pt(body_font_size_pt)
-            run.font.color.rgb = _rgb(BBVA_COLORS["muted"])
-
-
 def _panel(
     slide: object,
     *,
@@ -3492,6 +3208,183 @@ def _add_incident_evidence_panel(
             font_size_pt=9.2,
             color=BBVA_COLORS["muted"],
         )
+
+
+@dataclass(frozen=True)
+class WrappedTableLayout:
+    rows: list[list[str]]
+    row_heights: list[float]
+    font_size_pt: float
+    total_height: float
+
+
+def _wrap_text_to_width(text: object, *, column_width_in: float, font_size_pt: float) -> str:
+    """Deterministically wrap text for PPT table cells without ellipsis."""
+    clean = " ".join(str(text or "").replace("…", " ").split())
+    if not clean:
+        return ""
+    # Conservative average glyph width: PPT font size points -> inches.
+    avg_char_width_in = max(font_size_pt, 1.0) / 72.0 * 0.50
+    usable_width = max(float(column_width_in) - 0.10, 0.20)
+    chars_per_line = max(int(usable_width / avg_char_width_in), 8)
+    return "\n".join(
+        textwrap.wrap(
+            clean,
+            width=chars_per_line,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        or [clean]
+    )
+
+
+def _build_wrapped_table_layout(
+    rows: list[list[str]],
+    *,
+    column_widths: list[float],
+    font_size_pt: float,
+    min_row_height: float,
+    max_total_rows_height: float | None = None,
+) -> WrappedTableLayout:
+    """Return wrapped cell text and deterministic row heights for premium tables."""
+    size = float(font_size_pt)
+    wrapped_rows: list[list[str]] = []
+    row_heights: list[float] = []
+
+    def render(candidate_size: float) -> tuple[list[list[str]], list[float], float]:
+        rendered: list[list[str]] = []
+        heights: list[float] = []
+        line_height = max(candidate_size / 72.0 * 1.20, 0.12)
+        for raw_row in rows:
+            rendered_row: list[str] = []
+            max_lines = 1
+            for idx, value in enumerate(raw_row):
+                width = column_widths[min(idx, len(column_widths) - 1)] if column_widths else 1.0
+                wrapped = _wrap_text_to_width(
+                    value,
+                    column_width_in=width,
+                    font_size_pt=candidate_size,
+                )
+                rendered_row.append(wrapped)
+                max_lines = max(max_lines, wrapped.count("\n") + 1)
+            rendered.append(rendered_row)
+            heights.append(max(float(min_row_height), 0.10 + line_height * max_lines))
+        return rendered, heights, sum(heights)
+
+    wrapped_rows, row_heights, total = render(size)
+    if max_total_rows_height is not None and total > max_total_rows_height:
+        for candidate in (size - 0.5, size - 1.0, size - 1.5):
+            if candidate < 8.0:
+                break
+            wrapped_rows, row_heights, total = render(candidate)
+            size = candidate
+            if total <= max_total_rows_height:
+                break
+        if total > max_total_rows_height and row_heights:
+            scale = max_total_rows_height / total
+            row_heights = [max(min_row_height, h * scale) for h in row_heights]
+            total = sum(row_heights)
+    return WrappedTableLayout(
+        rows=wrapped_rows,
+        row_heights=row_heights,
+        font_size_pt=size,
+        total_height=total,
+    )
+
+
+def _add_wrapped_journey_table(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    title: str,
+    headers: list[str],
+    rows: list[list[str]],
+    col_width_ratios: list[float],
+    font_size_pt: float = 9.2,
+    header_font_size_pt: float = 8.7,
+    max_rows: int = 6,
+    panel_border: str = "",
+) -> None:
+    visible_rows = rows[:max(int(max_rows), 1)] if rows else [["Sin evidencia suficiente"] + ["-"] * (len(headers) - 1)]
+    ratio_sum = sum(col_width_ratios) or 1.0
+    column_widths = [((width - 0.26) * ratio / ratio_sum) for ratio in col_width_ratios]
+    max_rows_height = 2.05
+    layout = _build_wrapped_table_layout(
+        visible_rows,
+        column_widths=column_widths,
+        font_size_pt=font_size_pt,
+        min_row_height=0.55,
+        max_total_rows_height=max_rows_height,
+    )
+    title_pad = 0.62 if str(title or "").strip() else 0.24
+    header_height = 0.70
+    height = title_pad + header_height + layout.total_height + 0.20
+    _panel(
+        slide,
+        left=left,
+        top=top,
+        width=width,
+        height=height,
+        title=title,
+        fill=BBVA_COLORS["white"],
+        border=panel_border or BBVA_COLORS["line"],
+    )
+    base_top = top + (0.50 if str(title or "").strip() else 0.18)
+    x_positions: list[float] = []
+    cursor = left + 0.13
+    for col_width in column_widths:
+        x_positions.append(cursor)
+        cursor += col_width
+
+    for idx, header in enumerate(headers):
+        tb = slide.shapes.add_textbox(
+            Inches(x_positions[idx]),
+            Inches(base_top),
+            Inches(column_widths[idx] - 0.06),
+            Inches(header_height - 0.10),
+        )
+        tf = tb.text_frame
+        _configure_text_frame(tf)
+        tf.clear()
+        p = tf.paragraphs[0]
+        r = p.add_run()
+        r.text = _wrap_text_to_width(
+            header,
+            column_width_in=column_widths[idx],
+            font_size_pt=header_font_size_pt,
+        )
+        r.font.name = BBVA_FONT_MEDIUM
+        r.font.size = Pt(header_font_size_pt)
+        r.font.bold = True
+        r.font.color.rgb = _rgb(BBVA_COLORS["blue"])
+
+    current_top = base_top + header_height
+    for row_idx, row in enumerate(layout.rows):
+        row_height = layout.row_heights[row_idx]
+        for col_idx, value in enumerate(row[: len(headers)]):
+            tb = slide.shapes.add_textbox(
+                Inches(x_positions[col_idx]),
+                Inches(current_top),
+                Inches(column_widths[col_idx] - 0.06),
+                Inches(row_height),
+            )
+            tf = tb.text_frame
+            _configure_text_frame(tf)
+            tf.word_wrap = True
+            tf.auto_size = MSO_AUTO_SIZE.NONE
+            tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
+            tf.clear()
+            p = tf.paragraphs[0]
+            r = p.add_run()
+            r.text = str(value).replace("…", "")
+            r.font.name = BBVA_FONT_BODY
+            r.font.size = Pt(layout.font_size_pt)
+            r.font.color.rgb = _rgb(
+                BBVA_COLORS["muted"] if col_idx else BBVA_COLORS["ink"]
+            )
+        current_top += row_height
 
 
 def _add_compact_table(
@@ -5844,7 +5737,7 @@ def _build_dimension_view_model(
     baseline_label: str,
 ) -> DimensionViewModel:
     min_n = max(10, min(50, int(max(len(selected_raw), 1) * 0.02)))
-    delta_df = driver_delta_table(
+    delta_df = get_changes_vs_historic(
         current_source_period,
         baseline_source_period,
         dimension=dimension,
@@ -5856,11 +5749,8 @@ def _build_dimension_view_model(
             pd.DataFrame(columns=selected_raw.columns),
             dimension=dimension,
         )
-    change_table = select_negative_delta_rows(delta_df, max_rows=GOLDEN_CHANGE_LAYOUT.table_rows)
-    chart_rows = _select_driver_delta_chart_rows(delta_df, max_rows=12)
-    change_figure = _build_driver_delta_figure(
-        chart_rows, panel_height_in=GOLDEN_CHANGE_LAYOUT.chart_height
-    )
+    change_table = select_negative_delta_rows(delta_df, max_rows=EDITORIAL_LIMITS.max_change_rows)
+    change_figure = _build_driver_delta_figure(change_table, panel_height_in=4.18)
     source_for_web = current_source_period if not current_source_period.empty else selected_raw
     web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
     opportunities_min_n = max(20, min(200, int(max(len(selected_raw), 1) * 0.02)))
@@ -6260,10 +6150,9 @@ def _add_dimension_change_slide(
     view_model: DimensionViewModel,
 ) -> None:
     dimension = view_model.dimension
-    layout = GOLDEN_CHANGE_LAYOUT
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
-    _add_golden_header(
+    _add_header(
         slide,
         title=f"{view_model.slide_number}. Qué ha cambiado en {dimension}",
         subtitle=(
@@ -6271,55 +6160,50 @@ def _add_dimension_change_slide(
             f"base {context.baseline_label}"
         ),
     )
-
-    _add_golden_panel(
+    _panel(
         slide,
-        left=layout.chart_panel_left,
-        top=layout.chart_panel_top,
-        width=layout.chart_panel_width,
-        height=layout.chart_panel_height,
-        border=GOLDEN_PANEL_BORDER,
-        fill=BBVA_COLORS["white"],
-        shadow=True,
+        left=0.66,
+        top=1.48,
+        width=7.46,
+        height=5.42,
+        title=f"Deterioros principales en {dimension}",
     )
     _figure_in_panel(
         slide,
         figure=view_model.change_figure,
-        left=layout.chart_left,
-        top=layout.chart_top,
-        width=layout.chart_width,
-        height=layout.chart_height,
+        left=0.88,
+        top=1.84,
+        width=6.92,
+        height=4.76,
         empty_note=f"No hay base histórica suficiente para comparar {dimension.lower()}.",
         target_ppi=178,
     )
-
     rows = [
         [
-            _clip(row.value, 42),
-            _fmt_signed_or_nd(row.delta_nps, decimals=2),
-            _fmt_num_or_nd(row.nps_current, decimals=2),
-            _fmt_num_or_nd(row.nps_baseline, decimals=2),
-            _fmt_count_or_nd(row.n_current),
-            _fmt_count_or_nd(row.n_baseline),
+            _clip(row.value, 34),
+            _fmt_signed_or_nd(row.delta_nps, decimals=1),
+            _fmt_num_or_nd(row.nps_current, decimals=1),
         ]
-        for row in view_model.change_table_df.head(layout.table_rows).itertuples()
+        for row in view_model.change_table_df.head(EDITORIAL_LIMITS.max_change_rows).itertuples()
     ]
-    _add_golden_table_panel(
+    _add_compact_table(
         slide,
-        left=layout.table_left,
-        top=layout.table_top,
-        width=layout.table_width,
-        height=layout.table_height,
-        title="",
-        headers=["Valor", "Δ NPS", "NPS actual", "NPS base", "n actual", "n base"],
-        rows=rows or [["Sin deterioro real", "-", "-", "-", "-", "-"]],
-        col_width_ratios=[2.7, 1.0, 1.15, 1.15, 1.0, 1.0],
-        max_rows=layout.table_rows,
-        header_font_size_pt=9.6,
-        body_font_size_pt=9.7,
-        body_clip_lengths=[42, 12, 12, 12, 10, 10],
-        numeric_columns={1, 2, 3, 4, 5},
+        left=8.34,
+        top=1.48,
+        width=4.34,
+        title="Mayor deterioro",
+        headers=["Valor", EDITORIAL_COPY.detriment_column_title, "NPS actual"],
+        rows=rows or [["Sin deterioro real", "-", "-"]],
+        row_height=0.60,
+        col_width_ratios=[2.50, 1.22, 0.92],
+        clip_lengths=[34, 12, 10],
+        font_size_pt=11.2,
+        header_font_size_pt=9.1,
+        cell_height=0.36,
+        max_rows=EDITORIAL_LIMITS.max_change_rows,
+        numeric_columns={1, 2},
     )
+
 
 def _add_web_pain_dimension_slide(
     prs: Presentation,
@@ -7228,7 +7112,6 @@ def _add_journeys_summary_slide(
     journey_table_df: Optional[pd.DataFrame] = None,
 ) -> None:
     method_spec = get_causal_method_spec(touchpoint_source)
-    layout = GOLDEN_JOURNEY_LAYOUT
 
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -7237,36 +7120,27 @@ def _add_journeys_summary_slide(
         if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
         else "12. Journeys de detracción"
     )
-    _add_golden_header(
+    _add_header(
         slide,
         title=journey_title,
         subtitle=f"{method_spec.navigation_subtitle} · {period_label}",
     )
     for index, metric in enumerate(entity_summary_kpis[:3]):
-        _add_golden_stat_card(
+        _add_stat_card(
             slide,
-            left=layout.card_left + index * (layout.card_width + layout.card_gap),
-            top=layout.card_top,
-            width=layout.card_width,
-            height=layout.card_height,
+            left=0.66 + index * 3.96,
+            top=1.48,
+            width=3.78,
+            height=1.10,
             label=str(metric.get("label", "")).strip(),
             value=str(metric.get("value", "")).strip(),
             accent=(
                 BBVA_COLORS["red"]
                 if index == 0
-                else BBVA_COLORS["sky"] if index == 1 else BBVA_COLORS["green"]
+                else BBVA_COLORS["orange"] if index == 1 else BBVA_COLORS["green"]
             ),
         )
-    _add_golden_panel(
-        slide,
-        left=layout.chart_panel_left,
-        top=layout.chart_panel_top,
-        width=layout.chart_panel_width,
-        height=layout.chart_panel_height,
-        border=GOLDEN_PANEL_BORDER,
-        fill=BBVA_COLORS["white"],
-        shadow=True,
-    )
+    _panel(slide, left=0.66, top=2.72, width=5.58, height=4.18, title="")
     _figure_in_panel(
         slide,
         figure=(
@@ -7276,49 +7150,51 @@ def _add_journeys_summary_slide(
                 entity_summary_df, touchpoint_source=touchpoint_source
             )
         ),
-        left=layout.chart_left,
-        top=layout.chart_top,
-        width=layout.chart_width,
-        height=layout.chart_height,
+        left=0.86,
+        top=2.92,
+        width=5.14,
+        height=3.76,
         empty_note=method_spec.table_empty_message,
-        target_ppi=180,
+        target_ppi=170,
     )
     table_df = journey_table_df if journey_table_df is not None else pd.DataFrame()
-    rows = [
-        [
-            _clip(row.journey, 38),
-            _clip(row.touchpoint, 28),
-            _clip(getattr(row, "palanca", ""), 20),
-            _clip(getattr(row, "subpalanca", ""), 22),
-            _clip(getattr(row, "anchor_topic", ""), 42),
-        ]
-        for row in table_df.head(layout.table_rows).itertuples()
-    ]
-    _add_golden_table_panel(
+    rows = []
+    for row in table_df.head(EDITORIAL_LIMITS.max_journey_rows).itertuples():
+        rows.append(
+            [
+                str(getattr(row, "journey", "") or ""),
+                str(getattr(row, "touchpoint", "") or ""),
+                str(getattr(row, "palanca", "") or ""),
+                str(getattr(row, "subpalanca", "") or ""),
+                str(
+                    getattr(row, "anchor_topic", "")
+                    or getattr(row, "nps_topic", "")
+                    or getattr(row, "topic", "")
+                    or ""
+                ),
+            ]
+        )
+    _add_wrapped_journey_table(
         slide,
-        left=layout.table_panel_left,
-        top=layout.table_panel_top,
-        width=layout.table_panel_width,
-        height=layout.table_panel_height,
+        left=6.52,
+        top=2.72,
+        width=6.16,
         title=method_spec.table_title,
         headers=[
-            "Journey de\ndetracción"
-            if str(touchpoint_source or "").strip() != TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
-            else "Journey\nroto",
-            "Touchpoint\ndel catálogo",
+            "Journey de detracción",
+            "Touchpoint del catálogo",
             "Palanca",
             "Subpalanca",
-            "Tópico NPS\nancla",
+            "Tópico NPS ancla",
         ],
         rows=rows or [["Sin evidencia suficiente", "-", "-", "-", "-"]],
-        col_width_ratios=[1.35, 1.40, 1.20, 1.28, 1.42],
-        max_rows=layout.table_rows,
-        border=BBVA_COLORS["red"],
-        title_font_size_pt=15.5,
-        header_font_size_pt=9.0,
-        body_font_size_pt=8.7,
-        body_clip_lengths=[38, 28, 20, 22, 42],
+        col_width_ratios=[1.25, 1.30, 0.95, 1.25, 1.35],
+        font_size_pt=8.9,
+        header_font_size_pt=8.2,
+        max_rows=EDITORIAL_LIMITS.max_journey_rows,
+        panel_border=BBVA_COLORS["red"],
     )
+
 
 def _add_causal_section_cover_slide(
     prs: Presentation,

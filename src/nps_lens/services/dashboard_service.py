@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 import contextlib
@@ -52,8 +53,6 @@ from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
 from nps_lens.core.knowledge_cache import (
     load_entries as kc_load_entries,
-)
-from nps_lens.core.knowledge_cache import (
     score_adjustments as kc_score_adjustments,
 )
 from nps_lens.core.nps_math import filter_by_nps_group, focus_mask, grouped_focus_rates
@@ -78,7 +77,6 @@ from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     default_windows,
-    driver_delta_table,
     selected_month_label,
     slice_by_window,
 )
@@ -98,6 +96,7 @@ from nps_lens.ui.charts import (
     chart_opportunities_bar,
     chart_topic_bars,
 )
+from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.narratives import (
     build_executive_story,
     compare_periods,
@@ -563,17 +562,12 @@ class DashboardService:
             cur_window_df = slice_by_window(history_df, w_cur)
             base_window_df = slice_by_window(history_df, w_base)
             comparison_story = compare_periods(cur_window_df, base_window_df)
-            delta_df = driver_delta_table(
+            delta_df = get_changes_vs_historic(
                 cur_window_df,
                 base_window_df,
                 dimension=comparison_dimension,
                 min_n=min_n_cross,
             )
-            if not delta_df.empty:
-                delta_df = delta_df.sort_values(
-                    ["delta_nps", "n_current", "n_baseline"],
-                    ascending=[False, False, False],
-                ).reset_index(drop=True)
             comparison_payload = {
                 "summary": {
                     "label_current": comparison_story.label_current,
