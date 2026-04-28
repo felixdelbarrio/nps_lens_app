@@ -1,12 +1,6 @@
-# ruff: noqa: E402, I001
 from __future__ import annotations
 
-import sys
-import types
-
-sys.modules.setdefault("ruptures", types.SimpleNamespace())
-
-from nps_lens.reports.executive_ppt import (  # noqa: E402
+from nps_lens.reports.executive_ppt import (
     _build_wrapped_table_layout,
     _wrap_text_to_width,
 )

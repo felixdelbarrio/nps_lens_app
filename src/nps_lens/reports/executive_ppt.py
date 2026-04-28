@@ -1,4 +1,3 @@
-# ruff: noqa: I001
 from __future__ import annotations
 
 import contextlib
@@ -27,8 +26,10 @@ from pptx.util import Inches, Pt
 from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
-    build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
     summarize_hotspot_counts,
+)
+from nps_lens.analytics.hotspot_metrics import (
+    build_hotspot_daily_breakdown as build_hotspot_daily_breakdown_metrics,
 )
 from nps_lens.analytics.incident_attribution import (
     EXECUTIVE_JOURNEY_CATALOG,
@@ -56,7 +57,13 @@ from nps_lens.reports.content_selectors import (
     select_opportunities,
     select_text_clusters,
 )
-from nps_lens.reports.editorial_tokens import EDITORIAL_COPY, EDITORIAL_LIMITS
+from nps_lens.reports.editorial_tokens import (
+    CHANGE_SLIDE_LAYOUT,
+    EDITORIAL_COPY,
+    EDITORIAL_LIMITS,
+    EXECUTIVE_TABLE_STYLE,
+    JOURNEY_SUMMARY_LAYOUT,
+)
 from nps_lens.reports.ppt_template import (
     CorporatePresentationTheme,
     build_presentation,
@@ -105,64 +112,6 @@ def _ppt_nps_marker_colors(values: pd.Series | list[object]) -> list[str]:
     series = values if isinstance(values, pd.Series) else pd.Series(list(values))
     tokens = DesignTokens.default()
     return [nps_score_color(tokens, "light", value) for value in series.tolist()]
-
-
-@dataclass(frozen=True)
-class _GoldenChangeLayout:
-    chart_panel_left: float = 0.63
-    chart_panel_top: float = 1.42
-    chart_panel_width: float = 12.08
-    chart_panel_height: float = 3.15
-    chart_left: float = 1.15
-    chart_top: float = 1.55
-    chart_width: float = 10.70
-    chart_height: float = 2.72
-    table_left: float = 0.64
-    table_top: float = 4.68
-    table_width: float = 12.05
-    table_height: float = 2.26
-    table_rows: int = 4
-
-
-@dataclass(frozen=True)
-class _GoldenJourneyLayout:
-    card_left: float = 0.65
-    card_top: float = 1.42
-    card_width: float = 3.64
-    card_height: float = 1.07
-    card_gap: float = 0.32
-    chart_panel_left: float = 0.64
-    chart_panel_top: float = 2.62
-    chart_panel_width: float = 5.46
-    chart_panel_height: float = 4.04
-    chart_left: float = 0.93
-    chart_top: float = 2.94
-    chart_width: float = 4.55
-    chart_height: float = 3.42
-    table_panel_left: float = 6.47
-    table_panel_top: float = 2.62
-    table_panel_width: float = 5.92
-    table_panel_height: float = 3.44
-    table_rows: int = 2
-
-
-GOLDEN_CHANGE_LAYOUT = _GoldenChangeLayout()
-GOLDEN_JOURNEY_LAYOUT = _GoldenJourneyLayout()
-GOLDEN_PANEL_BORDER = "D5DCE3"
-GOLDEN_PANEL_SHADOW = "B6BEC7"
-GOLDEN_TABLE_HEADER_FILL = "F2F4F8"
-GOLDEN_DANGER_BAR = "FF5252"
-
-
-def _select_driver_delta_chart_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Backward-compatible selector for golden change chart/table rows.
-
-    Keep this as a thin wrapper over the shared editorial selector so tests and
-    callers cannot accidentally introduce a second ranking implementation in
-    the PPT layer.
-    """
-
-    return select_negative_delta_rows(delta_df, max_rows=max_rows)
 
 
 @dataclass(frozen=True)
@@ -1305,7 +1254,7 @@ def _build_driver_delta_figure(
 
     The PPT layer receives the single-source dataset used by Insights and does
     not recompute deltas, counts, ranking or top-N. The only work here is visual
-    normalization for the golden 16:9 deck. Labels are never rewritten after
+    normalization for the committee 16:9 deck. Labels are never rewritten after
     ``chart_driver_delta`` creates the figure; mutating Plotly categorical y
     values after construction can create duplicate categories in PowerPoint
     exports.
@@ -3329,6 +3278,10 @@ def _add_wrapped_journey_table(
     header_font_size_pt: float = 8.7,
     max_rows: int = 6,
     panel_border: str = "",
+    max_rows_height: float = 2.05,
+    min_row_height: float = 0.55,
+    header_height: float = 0.70,
+    title_pad: float = 0.62,
 ) -> None:
     visible_rows = (
         rows[: max(int(max_rows), 1)]
@@ -3337,17 +3290,15 @@ def _add_wrapped_journey_table(
     )
     ratio_sum = sum(col_width_ratios) or 1.0
     column_widths = [((width - 0.26) * ratio / ratio_sum) for ratio in col_width_ratios]
-    max_rows_height = 2.05
     layout = _build_wrapped_table_layout(
         visible_rows,
         column_widths=column_widths,
         font_size_pt=font_size_pt,
-        min_row_height=0.55,
+        min_row_height=min_row_height,
         max_total_rows_height=max_rows_height,
     )
-    title_pad = 0.62 if str(title or "").strip() else 0.24
-    header_height = 0.70
-    height = title_pad + header_height + layout.total_height + 0.20
+    resolved_title_pad = title_pad if str(title or "").strip() else 0.24
+    height = resolved_title_pad + header_height + layout.total_height + 0.20
     _panel(
         slide,
         left=left,
@@ -3410,6 +3361,126 @@ def _add_wrapped_journey_table(
             r.font.size = Pt(layout.font_size_pt)
             r.font.color.rgb = _rgb(BBVA_COLORS["muted"] if col_idx else BBVA_COLORS["ink"])
         current_top += row_height
+
+
+def _add_table_text_cell(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    text: str,
+    font_size_pt: float,
+    bold: bool = False,
+    align: object = PP_ALIGN.LEFT,
+    color: str = "ink",
+) -> None:
+    cell = slide.shapes.add_textbox(
+        Inches(left),
+        Inches(top),
+        Inches(width),
+        Inches(height),
+    )
+    tf = cell.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    p = tf.paragraphs[0]
+    p.alignment = align
+    r = p.add_run()
+    r.text = text
+    r.font.name = BBVA_FONT_MEDIUM if bold else BBVA_FONT_BODY
+    r.font.size = Pt(font_size_pt)
+    r.font.bold = bold
+    r.font.color.rgb = _rgb(BBVA_COLORS[color])
+
+
+def _add_grid_table(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    headers: list[str],
+    rows: list[list[str]],
+    col_width_ratios: list[float],
+    header_height: float,
+    row_height: float,
+    header_fill: str,
+    border_color: str,
+    header_font_size_pt: float = 10.0,
+    cell_font_size_pt: float = 10.0,
+) -> None:
+    ratio_sum = sum(col_width_ratios) or 1.0
+    col_widths = [width * ratio / ratio_sum for ratio in col_width_ratios]
+    col_lefts: list[float] = []
+    cursor = left
+    for col_width in col_widths:
+        col_lefts.append(cursor)
+        cursor += col_width
+
+    header_bg = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        Inches(left),
+        Inches(top),
+        Inches(width),
+        Inches(header_height),
+    )
+    header_bg.fill.solid()
+    header_bg.fill.fore_color.rgb = _rgb(header_fill)
+    header_bg.line.color.rgb = _rgb(border_color)
+
+    for idx, header in enumerate(headers):
+        _add_table_text_cell(
+            slide,
+            left=col_lefts[idx] + 0.10,
+            top=top + 0.05,
+            width=col_widths[idx] - 0.20,
+            height=header_height - 0.06,
+            text=header,
+            font_size_pt=header_font_size_pt,
+            bold=True,
+            align=PP_ALIGN.LEFT if idx == 0 else PP_ALIGN.CENTER,
+            color="blue",
+        )
+
+    line_height = 0.01
+    for row_idx, row_values in enumerate(rows):
+        current_top = top + header_height + row_height * row_idx
+        separator = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+            Inches(left),
+            Inches(current_top),
+            Inches(width),
+            Inches(line_height),
+        )
+        separator.fill.solid()
+        separator.fill.fore_color.rgb = _rgb(border_color)
+        separator.line.color.rgb = _rgb(border_color)
+        for col_idx, value in enumerate(row_values[: len(headers)]):
+            _add_table_text_cell(
+                slide,
+                left=col_lefts[col_idx] + 0.10,
+                top=current_top + 0.05,
+                width=col_widths[col_idx] - 0.20,
+                height=row_height - 0.06,
+                text=value,
+                font_size_pt=cell_font_size_pt,
+                align=PP_ALIGN.LEFT if col_idx == 0 else PP_ALIGN.CENTER,
+                color="ink" if col_idx == 0 else "muted",
+            )
+
+    bottom_line_top = top + header_height + row_height * len(rows)
+    bottom_line = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        Inches(left),
+        Inches(bottom_line_top),
+        Inches(width),
+        Inches(line_height),
+    )
+    bottom_line.fill.solid()
+    bottom_line.fill.fore_color.rgb = _rgb(border_color)
+    bottom_line.line.color.rgb = _rgb(border_color)
 
 
 def _add_compact_table(
@@ -5765,7 +5836,7 @@ def _build_dimension_view_model(
         current_source_period,
         baseline_source_period,
         dimension=dimension,
-        min_n=1,
+        min_n=EDITORIAL_LIMITS.min_change_rows_n,
     )
     if delta_df.empty:
         delta_df = _driver_change_table(
@@ -5775,11 +5846,11 @@ def _build_dimension_view_model(
         )
     change_table = select_negative_delta_rows(
         delta_df,
-        max_rows=GOLDEN_CHANGE_LAYOUT.table_rows,
+        max_rows=CHANGE_SLIDE_LAYOUT.max_rows,
     )
     change_figure = _build_driver_delta_figure(
         delta_df,
-        panel_height_in=GOLDEN_CHANGE_LAYOUT.chart_height,
+        panel_height_in=CHANGE_SLIDE_LAYOUT.chart.height,
     )
     source_for_web = current_source_period if not current_source_period.empty else selected_raw
     web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
@@ -6173,21 +6244,6 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     )
 
 
-def _add_hidden_text_marker(slide: object, text: str) -> None:
-    marker = slide.shapes.add_textbox(Inches(0.05), Inches(7.45), Inches(0.12), Inches(0.05))
-    marker.fill.background()
-    marker.line.fill.background()
-    tf = marker.text_frame
-    _configure_text_frame(tf)
-    tf.clear()
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = text
-    r.font.name = BBVA_FONT_BODY
-    r.font.size = Pt(1)
-    r.font.color.rgb = _rgb(BBVA_COLORS["bg_light"])
-
-
 def _add_dimension_change_slide(
     prs: Presentation,
     *,
@@ -6195,7 +6251,8 @@ def _add_dimension_change_slide(
     view_model: DimensionViewModel,
 ) -> None:
     dimension = view_model.dimension
-    layout = GOLDEN_CHANGE_LAYOUT
+    layout = CHANGE_SLIDE_LAYOUT
+    table_style = EXECUTIVE_TABLE_STYLE
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -6209,105 +6266,38 @@ def _add_dimension_change_slide(
 
     _panel(
         slide,
-        left=layout.chart_panel_left,
-        top=layout.chart_panel_top,
-        width=layout.chart_panel_width,
-        height=layout.chart_panel_height,
+        left=layout.chart_panel.left,
+        top=layout.chart_panel.top,
+        width=layout.chart_panel.width,
+        height=layout.chart_panel.height,
         title="",
         fill=BBVA_COLORS["white"],
-        border=GOLDEN_PANEL_BORDER,
+        border=table_style.panel_border,
     )
     _figure_in_panel(
         slide,
         figure=view_model.change_figure,
-        left=layout.chart_left,
-        top=layout.chart_top,
-        width=layout.chart_width,
-        height=layout.chart_height,
+        left=layout.chart.left,
+        top=layout.chart.top,
+        width=layout.chart.width,
+        height=layout.chart.height,
         empty_note=f"No hay base histórica suficiente para comparar {dimension.lower()}.",
         target_ppi=190,
     )
 
     _panel(
         slide,
-        left=layout.table_left,
-        top=layout.table_top,
-        width=layout.table_width,
-        height=layout.table_height,
+        left=layout.table_panel.left,
+        top=layout.table_panel.top,
+        width=layout.table_panel.width,
+        height=layout.table_panel.height,
         title="",
         fill=BBVA_COLORS["white"],
-        border=GOLDEN_PANEL_BORDER,
+        border=table_style.panel_border,
     )
-
-    table_left = layout.table_left + 0.60
-    table_top = layout.table_top + 0.32
-    table_width = layout.table_width - 1.20
-    header_height = 0.42
-    row_height = 0.44
-    headers = ["Valor", "Δ NPS", "NPS actual", "NPS base", "n actual", "n base"]
-    ratios = [2.80, 1.05, 1.30, 1.30, 1.05, 1.05]
-    ratio_sum = sum(ratios)
-    col_widths = [table_width * ratio / ratio_sum for ratio in ratios]
-    col_lefts = []
-    cursor = table_left
-    for col_width in col_widths:
-        col_lefts.append(cursor)
-        cursor += col_width
-
-    header_bg = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(table_left),
-        Inches(table_top),
-        Inches(table_width),
-        Inches(header_height),
-    )
-    header_bg.fill.solid()
-    header_bg.fill.fore_color.rgb = _rgb(GOLDEN_TABLE_HEADER_FILL)
-    header_bg.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
-
-    def _add_cell_text(
-        *,
-        text: str,
-        col_idx: int,
-        top: float,
-        height: float,
-        font_size: float,
-        bold: bool = False,
-        align: object = PP_ALIGN.LEFT,
-        color: str = "ink",
-    ) -> None:
-        cell = slide.shapes.add_textbox(
-            Inches(col_lefts[col_idx] + 0.10),
-            Inches(top + 0.05),
-            Inches(col_widths[col_idx] - 0.20),
-            Inches(height - 0.06),
-        )
-        tf = cell.text_frame
-        _configure_text_frame(tf)
-        tf.clear()
-        p = tf.paragraphs[0]
-        p.alignment = align
-        r = p.add_run()
-        r.text = text
-        r.font.name = BBVA_FONT_MEDIUM if bold else BBVA_FONT_BODY
-        r.font.size = Pt(font_size)
-        r.font.bold = bold
-        r.font.color.rgb = _rgb(BBVA_COLORS[color])
-
-    for idx, header in enumerate(headers):
-        _add_cell_text(
-            text=header,
-            col_idx=idx,
-            top=table_top,
-            height=header_height,
-            font_size=10.0,
-            bold=True,
-            align=PP_ALIGN.LEFT if idx == 0 else PP_ALIGN.CENTER,
-            color="blue",
-        )
 
     rows = []
-    for row in view_model.change_table_df.head(layout.table_rows).itertuples():
+    for row in view_model.change_table_df.head(layout.max_rows).itertuples():
         rows.append(
             [
                 str(row.value),
@@ -6321,51 +6311,24 @@ def _add_dimension_change_slide(
     if not rows:
         rows = [["Sin deterioro real", "-", "-", "-", "-", "-"]]
 
-    line_height = 0.01
-    for row_idx, row_values in enumerate(rows[: layout.table_rows]):
-        current_top = table_top + header_height + row_height * row_idx
-        separator = slide.shapes.add_shape(
-            MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-            Inches(table_left),
-            Inches(current_top),
-            Inches(table_width),
-            Inches(line_height),
-        )
-        separator.fill.solid()
-        separator.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_BORDER)
-        separator.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
-        for col_idx, value in enumerate(row_values):
-            _add_cell_text(
-                text=value,
-                col_idx=col_idx,
-                top=current_top,
-                height=row_height,
-                font_size=10.0,
-                bold=False,
-                align=PP_ALIGN.LEFT if col_idx == 0 else PP_ALIGN.CENTER,
-                color="ink" if col_idx == 0 else "muted",
-            )
-
-    bottom_line_top = (
-        table_top
-        + header_height
-        + row_height
-        * min(
-            len(rows),
-            layout.table_rows,
-        )
+    table_left = layout.table_panel.left + layout.table_inner_x
+    table_top = layout.table_panel.top + layout.table_inner_top
+    table_width = layout.table_panel.width - (layout.table_inner_x * 2)
+    _add_grid_table(
+        slide,
+        left=table_left,
+        top=table_top,
+        width=table_width,
+        headers=list(layout.headers),
+        rows=rows[: layout.max_rows],
+        col_width_ratios=list(layout.width_ratios),
+        header_height=layout.header_height,
+        row_height=layout.row_height,
+        header_fill=table_style.header_fill,
+        border_color=table_style.panel_border,
+        header_font_size_pt=10.0,
+        cell_font_size_pt=10.0,
     )
-    bottom_line = slide.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-        Inches(table_left),
-        Inches(bottom_line_top),
-        Inches(table_width),
-        Inches(line_height),
-    )
-    bottom_line.fill.solid()
-    bottom_line.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_BORDER)
-    bottom_line.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
-    _add_hidden_text_marker(slide, "detrimento NPS")
 
 
 def _add_web_pain_dimension_slide(
@@ -7275,6 +7238,7 @@ def _add_journeys_summary_slide(
     journey_table_df: Optional[pd.DataFrame] = None,
 ) -> None:
     method_spec = get_causal_method_spec(touchpoint_source)
+    layout = JOURNEY_SUMMARY_LAYOUT
 
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
@@ -7303,7 +7267,14 @@ def _add_journeys_summary_slide(
                 else BBVA_COLORS["orange"] if index == 1 else BBVA_COLORS["green"]
             ),
         )
-    _panel(slide, left=0.66, top=2.72, width=5.58, height=4.18, title="")
+    _panel(
+        slide,
+        left=layout.chart_panel.left,
+        top=layout.chart_panel.top,
+        width=layout.chart_panel.width,
+        height=layout.chart_panel.height,
+        title="",
+    )
     _figure_in_panel(
         slide,
         figure=(
@@ -7313,10 +7284,10 @@ def _add_journeys_summary_slide(
                 entity_summary_df, touchpoint_source=touchpoint_source
             )
         ),
-        left=0.86,
-        top=2.92,
-        width=5.14,
-        height=3.76,
+        left=layout.chart.left,
+        top=layout.chart.top,
+        width=layout.chart.width,
+        height=layout.chart.height,
         empty_note=method_spec.table_empty_message,
         target_ppi=170,
     )
@@ -7339,23 +7310,21 @@ def _add_journeys_summary_slide(
         )
     _add_wrapped_journey_table(
         slide,
-        left=6.52,
-        top=2.72,
-        width=6.16,
+        left=layout.table_panel_left,
+        top=layout.table_panel_top,
+        width=layout.table_panel_width,
         title=method_spec.table_title,
-        headers=[
-            "Journey de detracción",
-            "Touchpoint del catálogo",
-            "Palanca",
-            "Subpalanca",
-            "Tópico NPS ancla",
-        ],
+        headers=list(layout.headers),
         rows=rows or [["Sin evidencia suficiente", "-", "-", "-", "-"]],
-        col_width_ratios=[1.25, 1.30, 0.95, 1.25, 1.35],
+        col_width_ratios=list(layout.width_ratios),
         font_size_pt=8.9,
         header_font_size_pt=8.2,
-        max_rows=EDITORIAL_LIMITS.max_journey_rows,
+        max_rows=layout.max_rows,
         panel_border=BBVA_COLORS["red"],
+        max_rows_height=layout.table_max_rows_height,
+        min_row_height=layout.wrapped_min_row_height,
+        header_height=layout.wrapped_header_height,
+        title_pad=layout.wrapped_title_pad,
     )
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
 
 import pandas as pd
@@ -17,13 +16,6 @@ HISTORIC_CHANGE_COLUMNS: tuple[str, ...] = (
     "n_current",
     "n_baseline",
 )
-
-
-@dataclass(frozen=True)
-class HistoricChangeSpec:
-    dimension: Literal["Palanca", "Subpalanca"]
-    min_n: int = 30
-    top_n: int | None = None
 
 
 def normalize_historic_dimension(
@@ -49,8 +41,9 @@ def get_changes_vs_historic(
     """Single source of truth for Insights and PPT historic-change datasets.
 
     The function owns the aggregation, ranking and optional top-N cut used by
-    both the dashboard Insights section and the executive PPT slides 5/6.
-    Presentation layers must not recompute deltas, counts or ranking.
+    the dashboard Insights section and the executive PPT slides 5/6. Callers
+    may choose their own volume threshold, but presentation layers must not
+    recompute deltas, counts or ranking.
     """
     normalized_dimension = normalize_historic_dimension(dimension)
     out = driver_delta_table(
@@ -72,26 +65,3 @@ def get_changes_vs_historic(
     if top_n is not None:
         ranked = ranked.head(max(int(top_n), 0)).reset_index(drop=True)
     return ranked
-
-
-def format_nps(value: object, decimals: int = 2) -> str:
-    return _format_locale_number(value, decimals=decimals)
-
-
-def format_delta(value: object, decimals: int = 2) -> str:
-    return _format_locale_number(value, decimals=decimals)
-
-
-def format_count(value: object) -> str:
-    return _format_locale_number(value, decimals=0)
-
-
-def _format_locale_number(value: object, *, decimals: int) -> str:
-    try:
-        f = float(value)
-    except Exception:
-        return "n/d"
-    if pd.isna(f):
-        return "n/d"
-    rendered = f"{f:,.{max(int(decimals), 0)}f}"
-    return rendered.replace(",", "_").replace(".", ",").replace("_", ".")

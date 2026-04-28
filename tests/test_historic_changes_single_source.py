@@ -1,15 +1,9 @@
-# ruff: noqa: E402, I001
 from __future__ import annotations
 
-import sys
-import types
+import pandas as pd
 
-sys.modules.setdefault("ruptures", types.SimpleNamespace())
-
-import pandas as pd  # noqa: E402
-
-from nps_lens.reports.executive_ppt import _build_dimension_view_model  # noqa: E402
-from nps_lens.ui.historic_changes import get_changes_vs_historic  # noqa: E402
+from nps_lens.reports.executive_ppt import _build_dimension_view_model
+from nps_lens.ui.historic_changes import get_changes_vs_historic
 
 
 def _sample_frames() -> tuple[pd.DataFrame, pd.DataFrame]:

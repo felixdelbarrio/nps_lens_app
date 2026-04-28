@@ -432,7 +432,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Sumario del análisis del escenario" in t for t in texts)
     assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
     assert any("Ejemplos de Comentarios enlazados" in t for t in texts)
-    assert any("detrimento NPS" in t for t in texts)
+    assert any("Δ NPS" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
     assert not any("Mapa de dolor Web por Palanca" in t for t in texts)
@@ -1775,13 +1775,13 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> 
     assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
 
 
-def test_golden_change_layout_uses_full_width_chart_and_table() -> None:
-    layout = executive_ppt.GOLDEN_CHANGE_LAYOUT
+def test_change_layout_uses_full_width_chart_and_table() -> None:
+    layout = executive_ppt.CHANGE_SLIDE_LAYOUT
 
-    assert layout.chart_panel_left < 0.70
-    assert layout.chart_panel_width > 12.0
-    assert layout.table_top > layout.chart_panel_top + layout.chart_panel_height
-    assert layout.table_rows == 4
+    assert layout.chart_panel.left < 0.70
+    assert layout.chart_panel.width > 12.0
+    assert layout.table_panel.top > layout.chart_panel.top + layout.chart_panel.height
+    assert layout.max_rows == 4
 
     df = pd.DataFrame(
         {
@@ -1794,12 +1794,12 @@ def test_golden_change_layout_uses_full_width_chart_and_table() -> None:
         }
     )
 
-    out = executive_ppt._select_driver_delta_chart_rows(df, max_rows=2)
+    out = select_negative_delta_rows(df, max_rows=2)
 
     assert out["value"].tolist() == ["A", "B"]
 
 
-def test_golden_journey_table_exposes_catalog_detail_columns() -> None:
+def test_journey_table_exposes_catalog_detail_columns() -> None:
     entity_summary = pd.DataFrame(
         [
             {
