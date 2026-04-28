@@ -1297,39 +1297,75 @@ def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure
 
 
 def _build_driver_delta_figure(
-    delta_df: pd.DataFrame, *, panel_height_in: float
+    delta_df: pd.DataFrame, *, panel_height_in: float, max_rows: int = 12
 ) -> Optional[go.Figure]:
-    fig = chart_driver_delta(delta_df, get_theme("light"), top_k=max(len(delta_df), 1))
-    if fig is None or delta_df.empty:
-        return fig
-    plot_df = delta_df.head(EDITORIAL_LIMITS.max_change_rows).copy()
-    label_count = len(plot_df)
-    max_len = int(plot_df["value"].astype(str).str.len().max() or 0)
-    wrap_width = 26 if max_len >= 26 else 22 if max_len >= 18 else 18
-    left_margin = 430 if max_len >= 34 else 380 if max_len >= 26 else 330 if max_len >= 18 else 285
-    y_font_size = 34 if label_count <= 5 else 30 if label_count <= 7 else 26
-    labels = [
-        _wrap_label(value, width=wrap_width, max_lines=2, joiner="<br>")
-        for value in plot_df["value"].astype(str).tolist()
+    """Render the historic-change chart from the shared Insights dataset only.
+
+    The PPT layer does not recompute deltas, counts, rankings or filters here.
+    ``chart_driver_delta`` receives the single-source dataset and applies the
+    same presentation ordering used by Insights. The extra work below is limited
+    to deterministic typography and margins for the PPT golden layout.
+    """
+
+    if delta_df.empty:
+        return None
+
+    row_count = max(1, min(int(max_rows), len(delta_df)))
+    fig = chart_driver_delta(delta_df, get_theme("light"), top_k=row_count)
+    if fig is None:
+        return None
+
+    rendered_labels = [str(value) for value in list(getattr(fig.data[0], "y", []))]
+    label_count = len(rendered_labels) or row_count
+    max_len = max(
+        (len(label.replace("<br>", " ")) for label in rendered_labels),
+        default=0,
+    )
+    wrap_width = 30 if max_len >= 34 else 26 if max_len >= 26 else 22 if max_len >= 18 else 18
+    left_margin = 360 if max_len >= 34 else 315 if max_len >= 26 else 270 if max_len >= 18 else 230
+    y_font_size = 15 if label_count >= 11 else 16 if label_count >= 9 else 17
+
+    wrapped_labels = [
+        _wrap_label(
+            label.replace("<br>", " "),
+            width=wrap_width,
+            max_lines=2,
+            joiner="<br>",
+        )
+        for label in rendered_labels
     ]
     with contextlib.suppress(Exception):
-        fig.data[0].y = labels
+        fig.data[0].y = wrapped_labels
+        fig.update_yaxes(categoryarray=wrapped_labels)
+
+    fig.update_traces(
+        textposition="outside",
+        textfont=dict(size=9, family=BBVA_FONT_BODY, color="#" + BBVA_COLORS["ink"]),
+        cliponaxis=False,
+    )
     fig.update_yaxes(
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
         automargin=True,
         title_text="",
     )
     fig.update_xaxes(
-        title_text="Delta NPS",
-        tickfont=dict(size=19),
-        title_font=dict(size=20),
+        title_text="Delta NPS (actual - base)",
+        tickfont=dict(size=12, family=BBVA_FONT_BODY),
+        title_font=dict(size=13, family=BBVA_FONT_MEDIUM),
         nticks=5,
         zeroline=True,
-        zerolinecolor="#" + BBVA_COLORS["line"],
+        zerolinecolor="#" + BBVA_COLORS["muted"],
+        zerolinewidth=1,
     )
     fig.update_layout(
-        margin=dict(l=left_margin, r=48, t=20, b=58 if panel_height_in <= 3.8 else 52),
-        bargap=0.30,
+        margin=dict(
+            l=left_margin,
+            r=52,
+            t=10,
+            b=46 if panel_height_in <= 3.0 else 54,
+        ),
+        bargap=0.18 if label_count >= 11 else 0.22,
+        uniformtext=dict(mode="show", minsize=8),
     )
     return fig
 
@@ -5751,8 +5787,14 @@ def _build_dimension_view_model(
             pd.DataFrame(columns=selected_raw.columns),
             dimension=dimension,
         )
-    change_table = select_negative_delta_rows(delta_df, max_rows=EDITORIAL_LIMITS.max_change_rows)
-    change_figure = _build_driver_delta_figure(change_table, panel_height_in=4.18)
+    change_table = select_negative_delta_rows(
+        delta_df,
+        max_rows=GOLDEN_CHANGE_LAYOUT.table_rows,
+    )
+    change_figure = _build_driver_delta_figure(
+        delta_df,
+        panel_height_in=GOLDEN_CHANGE_LAYOUT.chart_height,
+    )
     source_for_web = current_source_period if not current_source_period.empty else selected_raw
     web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
     opportunities_min_n = max(20, min(200, int(max(len(selected_raw), 1) * 0.02)))
@@ -6152,6 +6194,7 @@ def _add_dimension_change_slide(
     view_model: DimensionViewModel,
 ) -> None:
     dimension = view_model.dimension
+    layout = GOLDEN_CHANGE_LAYOUT
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
@@ -6162,49 +6205,165 @@ def _add_dimension_change_slide(
             f"base {context.baseline_label}"
         ),
     )
+
     _panel(
         slide,
-        left=0.66,
-        top=1.48,
-        width=7.46,
-        height=5.42,
-        title=f"Deterioros principales en {dimension}",
+        left=layout.chart_panel_left,
+        top=layout.chart_panel_top,
+        width=layout.chart_panel_width,
+        height=layout.chart_panel_height,
+        title="",
+        fill=BBVA_COLORS["white"],
+        border=GOLDEN_PANEL_BORDER,
     )
     _figure_in_panel(
         slide,
         figure=view_model.change_figure,
-        left=0.88,
-        top=1.84,
-        width=6.92,
-        height=4.76,
+        left=layout.chart_left,
+        top=layout.chart_top,
+        width=layout.chart_width,
+        height=layout.chart_height,
         empty_note=f"No hay base histórica suficiente para comparar {dimension.lower()}.",
-        target_ppi=178,
+        target_ppi=190,
     )
-    rows = [
-        [
-            _clip(row.value, 34),
-            _fmt_signed_or_nd(row.delta_nps, decimals=1),
-            _fmt_num_or_nd(row.nps_current, decimals=1),
-        ]
-        for row in view_model.change_table_df.head(EDITORIAL_LIMITS.max_change_rows).itertuples()
-    ]
-    _add_compact_table(
+
+    _panel(
         slide,
-        left=8.34,
-        top=1.48,
-        width=4.34,
-        title="Mayor deterioro",
-        headers=["Valor", EDITORIAL_COPY.detriment_column_title, "NPS actual"],
-        rows=rows or [["Sin deterioro real", "-", "-"]],
-        row_height=0.60,
-        col_width_ratios=[2.50, 1.22, 0.92],
-        clip_lengths=[34, 12, 10],
-        font_size_pt=11.2,
-        header_font_size_pt=9.1,
-        cell_height=0.36,
-        max_rows=EDITORIAL_LIMITS.max_change_rows,
-        numeric_columns={1, 2},
+        left=layout.table_left,
+        top=layout.table_top,
+        width=layout.table_width,
+        height=layout.table_height,
+        title="",
+        fill=BBVA_COLORS["white"],
+        border=GOLDEN_PANEL_BORDER,
     )
+
+    table_left = layout.table_left + 0.60
+    table_top = layout.table_top + 0.32
+    table_width = layout.table_width - 1.20
+    header_height = 0.42
+    row_height = 0.44
+    headers = ["Valor", "Δ NPS", "NPS actual", "NPS base", "n actual", "n base"]
+    ratios = [2.80, 1.05, 1.30, 1.30, 1.05, 1.05]
+    ratio_sum = sum(ratios)
+    col_widths = [table_width * ratio / ratio_sum for ratio in ratios]
+    col_lefts = []
+    cursor = table_left
+    for col_width in col_widths:
+        col_lefts.append(cursor)
+        cursor += col_width
+
+    header_bg = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        Inches(table_left),
+        Inches(table_top),
+        Inches(table_width),
+        Inches(header_height),
+    )
+    header_bg.fill.solid()
+    header_bg.fill.fore_color.rgb = _rgb(GOLDEN_TABLE_HEADER_FILL)
+    header_bg.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
+
+    def _add_cell_text(
+        *,
+        text: str,
+        col_idx: int,
+        top: float,
+        height: float,
+        font_size: float,
+        bold: bool = False,
+        align: object = PP_ALIGN.LEFT,
+        color: str = "ink",
+    ) -> None:
+        cell = slide.shapes.add_textbox(
+            Inches(col_lefts[col_idx] + 0.10),
+            Inches(top + 0.05),
+            Inches(col_widths[col_idx] - 0.20),
+            Inches(height - 0.06),
+        )
+        tf = cell.text_frame
+        _configure_text_frame(tf)
+        tf.clear()
+        p = tf.paragraphs[0]
+        p.alignment = align
+        r = p.add_run()
+        r.text = text
+        r.font.name = BBVA_FONT_MEDIUM if bold else BBVA_FONT_BODY
+        r.font.size = Pt(font_size)
+        r.font.bold = bold
+        r.font.color.rgb = _rgb(BBVA_COLORS[color])
+
+    for idx, header in enumerate(headers):
+        _add_cell_text(
+            text=header,
+            col_idx=idx,
+            top=table_top,
+            height=header_height,
+            font_size=10.0,
+            bold=True,
+            align=PP_ALIGN.LEFT if idx == 0 else PP_ALIGN.CENTER,
+            color="blue",
+        )
+
+    rows = []
+    for row in view_model.change_table_df.head(layout.table_rows).itertuples():
+        rows.append(
+            [
+                str(row.value),
+                _fmt_signed_or_nd(row.delta_nps, decimals=2),
+                _fmt_num_or_nd(row.nps_current, decimals=2),
+                _fmt_num_or_nd(row.nps_baseline, decimals=2),
+                _fmt_count_or_nd(row.n_current),
+                _fmt_count_or_nd(row.n_baseline),
+            ]
+        )
+    if not rows:
+        rows = [["Sin deterioro real", "-", "-", "-", "-", "-"]]
+
+    line_height = 0.01
+    for row_idx, row_values in enumerate(rows[: layout.table_rows]):
+        current_top = table_top + header_height + row_height * row_idx
+        separator = slide.shapes.add_shape(
+            MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+            Inches(table_left),
+            Inches(current_top),
+            Inches(table_width),
+            Inches(line_height),
+        )
+        separator.fill.solid()
+        separator.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_BORDER)
+        separator.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
+        for col_idx, value in enumerate(row_values):
+            _add_cell_text(
+                text=value,
+                col_idx=col_idx,
+                top=current_top,
+                height=row_height,
+                font_size=10.0,
+                bold=False,
+                align=PP_ALIGN.LEFT if col_idx == 0 else PP_ALIGN.CENTER,
+                color="ink" if col_idx == 0 else "muted",
+            )
+
+    bottom_line_top = (
+        table_top
+        + header_height
+        + row_height
+        * min(
+            len(rows),
+            layout.table_rows,
+        )
+    )
+    bottom_line = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+        Inches(table_left),
+        Inches(bottom_line_top),
+        Inches(table_width),
+        Inches(line_height),
+    )
+    bottom_line.fill.solid()
+    bottom_line.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_BORDER)
+    bottom_line.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
 
 
 def _add_web_pain_dimension_slide(
