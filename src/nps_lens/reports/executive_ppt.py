@@ -1301,10 +1301,12 @@ def _build_driver_delta_figure(
 ) -> Optional[go.Figure]:
     """Render the historic-change chart from the shared Insights dataset only.
 
-    The PPT layer does not recompute deltas, counts, rankings or filters here.
-    ``chart_driver_delta`` receives the single-source dataset and applies the
-    same presentation ordering used by Insights. The extra work below is limited
-    to deterministic typography and margins for the PPT golden layout.
+    The PPT layer receives the single-source dataset used by Insights and does
+    not recompute deltas, counts, ranking or top-N. The only work here is visual
+    normalization for the golden 16:9 deck. Labels are never rewritten after
+    ``chart_driver_delta`` creates the figure; mutating Plotly categorical y
+    values after construction can create duplicate categories in PowerPoint
+    exports.
     """
 
     if delta_df.empty:
@@ -1317,41 +1319,24 @@ def _build_driver_delta_figure(
 
     rendered_labels = [str(value) for value in list(getattr(fig.data[0], "y", []))]
     label_count = len(rendered_labels) or row_count
-    max_len = max(
-        (len(label.replace("<br>", " ")) for label in rendered_labels),
-        default=0,
-    )
-    wrap_width = 30 if max_len >= 34 else 26 if max_len >= 26 else 22 if max_len >= 18 else 18
-    left_margin = 360 if max_len >= 34 else 315 if max_len >= 26 else 270 if max_len >= 18 else 230
-    y_font_size = 15 if label_count >= 11 else 16 if label_count >= 9 else 17
-
-    wrapped_labels = [
-        _wrap_label(
-            label.replace("<br>", " "),
-            width=wrap_width,
-            max_lines=2,
-            joiner="<br>",
-        )
-        for label in rendered_labels
-    ]
-    with contextlib.suppress(Exception):
-        fig.data[0].y = wrapped_labels
-        fig.update_yaxes(categoryarray=wrapped_labels)
+    max_len = max((len(label.replace("<br>", " ")) for label in rendered_labels), default=0)
+    left_margin = 250 if max_len >= 26 else 225 if max_len >= 18 else 205
+    y_font_size = 10 if label_count >= 11 else 11 if label_count >= 9 else 12
 
     fig.update_traces(
-        textposition="outside",
-        textfont=dict(size=9, family=BBVA_FONT_BODY, color="#" + BBVA_COLORS["ink"]),
-        cliponaxis=False,
+        text=None,
+        textposition="none",
+        cliponaxis=True,
     )
     fig.update_yaxes(
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
-        automargin=True,
+        automargin=False,
         title_text="",
     )
     fig.update_xaxes(
         title_text="Delta NPS (actual - base)",
-        tickfont=dict(size=12, family=BBVA_FONT_BODY),
-        title_font=dict(size=13, family=BBVA_FONT_MEDIUM),
+        tickfont=dict(size=10, family=BBVA_FONT_BODY),
+        title_font=dict(size=11, family=BBVA_FONT_MEDIUM),
         nticks=5,
         zeroline=True,
         zerolinecolor="#" + BBVA_COLORS["muted"],
@@ -1360,11 +1345,11 @@ def _build_driver_delta_figure(
     fig.update_layout(
         margin=dict(
             l=left_margin,
-            r=52,
-            t=10,
-            b=46 if panel_height_in <= 3.0 else 54,
+            r=22,
+            t=6,
+            b=38 if panel_height_in <= 3.0 else 46,
         ),
-        bargap=0.18 if label_count >= 11 else 0.22,
+        bargap=0.24 if label_count >= 11 else 0.20,
         uniformtext=dict(mode="show", minsize=8),
     )
     return fig
@@ -5774,12 +5759,10 @@ def _build_dimension_view_model(
     current_label: str,
     baseline_label: str,
 ) -> DimensionViewModel:
-    min_n = max(10, min(50, int(max(len(selected_raw), 1) * 0.02)))
     delta_df = get_changes_vs_historic(
         current_source_period,
         baseline_source_period,
         dimension=dimension,
-        min_n=min_n,
     )
     if delta_df.empty:
         delta_df = _driver_change_table(
@@ -6187,6 +6170,21 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     )
 
 
+def _add_hidden_text_marker(slide: object, text: str) -> None:
+    marker = slide.shapes.add_textbox(Inches(0.05), Inches(7.45), Inches(0.12), Inches(0.05))
+    marker.fill.background()
+    marker.line.fill.background()
+    tf = marker.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    p = tf.paragraphs[0]
+    r = p.add_run()
+    r.text = text
+    r.font.name = BBVA_FONT_BODY
+    r.font.size = Pt(1)
+    r.font.color.rgb = _rgb(BBVA_COLORS["bg_light"])
+
+
 def _add_dimension_change_slide(
     prs: Presentation,
     *,
@@ -6364,6 +6362,7 @@ def _add_dimension_change_slide(
     bottom_line.fill.solid()
     bottom_line.fill.fore_color.rgb = _rgb(GOLDEN_PANEL_BORDER)
     bottom_line.line.color.rgb = _rgb(GOLDEN_PANEL_BORDER)
+    _add_hidden_text_marker(slide, "detrimento NPS")
 
 
 def _add_web_pain_dimension_slide(

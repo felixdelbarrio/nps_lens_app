@@ -22,7 +22,7 @@ HISTORIC_CHANGE_COLUMNS: tuple[str, ...] = (
 @dataclass(frozen=True)
 class HistoricChangeSpec:
     dimension: Literal["Palanca", "Subpalanca"]
-    min_n: int = 50
+    min_n: int = 30
     top_n: int | None = None
 
 
@@ -43,7 +43,7 @@ def get_changes_vs_historic(
     *,
     dimension: HistoricDimension | str,
     score_col: str = "NPS",
-    min_n: int = 50,
+    min_n: int = 30,
     top_n: int | None = None,
 ) -> pd.DataFrame:
     """Single source of truth for Insights and PPT historic-change datasets.
