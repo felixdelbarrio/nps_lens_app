@@ -78,7 +78,6 @@ from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     default_windows,
-    driver_delta_table,
     selected_month_label,
     slice_by_window,
 )
@@ -98,6 +97,7 @@ from nps_lens.ui.charts import (
     chart_opportunities_bar,
     chart_topic_bars,
 )
+from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.narratives import (
     build_executive_story,
     compare_periods,
@@ -563,17 +563,12 @@ class DashboardService:
             cur_window_df = slice_by_window(history_df, w_cur)
             base_window_df = slice_by_window(history_df, w_base)
             comparison_story = compare_periods(cur_window_df, base_window_df)
-            delta_df = driver_delta_table(
+            delta_df = get_changes_vs_historic(
                 cur_window_df,
                 base_window_df,
                 dimension=comparison_dimension,
                 min_n=min_n_cross,
             )
-            if not delta_df.empty:
-                delta_df = delta_df.sort_values(
-                    ["delta_nps", "n_current", "n_baseline"],
-                    ascending=[False, False, False],
-                ).reset_index(drop=True)
             comparison_payload = {
                 "summary": {
                     "label_current": comparison_story.label_current,
