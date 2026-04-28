@@ -3307,7 +3307,11 @@ def _add_wrapped_journey_table(
     max_rows: int = 6,
     panel_border: str = "",
 ) -> None:
-    visible_rows = rows[:max(int(max_rows), 1)] if rows else [["Sin evidencia suficiente"] + ["-"] * (len(headers) - 1)]
+    visible_rows = (
+        rows[: max(int(max_rows), 1)]
+        if rows
+        else [["Sin evidencia suficiente"] + ["-"] * (len(headers) - 1)]
+    )
     ratio_sum = sum(col_width_ratios) or 1.0
     column_widths = [((width - 0.26) * ratio / ratio_sum) for ratio in col_width_ratios]
     max_rows_height = 2.05
@@ -3381,9 +3385,7 @@ def _add_wrapped_journey_table(
             r.text = str(value).replace("…", "")
             r.font.name = BBVA_FONT_BODY
             r.font.size = Pt(layout.font_size_pt)
-            r.font.color.rgb = _rgb(
-                BBVA_COLORS["muted"] if col_idx else BBVA_COLORS["ink"]
-            )
+            r.font.color.rgb = _rgb(BBVA_COLORS["muted"] if col_idx else BBVA_COLORS["ink"])
         current_top += row_height
 
 
