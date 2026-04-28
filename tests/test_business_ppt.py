@@ -1773,3 +1773,57 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> 
     assert fig.data[5]["mode"] == "lines+markers"
     assert fig.data[5]["yaxis"] == "y3"
     assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
+
+
+def test_golden_change_layout_uses_full_width_chart_and_table() -> None:
+    layout = executive_ppt.GOLDEN_CHANGE_LAYOUT
+
+    assert layout.chart_panel_left < 0.70
+    assert layout.chart_panel_width > 12.0
+    assert layout.table_top > layout.chart_panel_top + layout.chart_panel_height
+    assert layout.table_rows == 4
+
+    df = pd.DataFrame(
+        {
+            "value": ["B", "A", "C"],
+            "delta_nps": [-0.2, -1.1, 0.5],
+            "nps_current": [7.0, 6.0, 8.0],
+            "nps_baseline": [7.2, 7.1, 7.5],
+            "n_current": [100, 80, 30],
+            "n_baseline": [120, 95, 40],
+        }
+    )
+
+    out = executive_ppt._select_driver_delta_chart_rows(df, max_rows=2)
+
+    assert out["value"].tolist() == ["A", "B"]
+
+
+def test_golden_journey_table_exposes_catalog_detail_columns() -> None:
+    entity_summary = pd.DataFrame(
+        [
+            {
+                "entity_label": "Operativa crítica fallida",
+                "source_nps_topic": "Pagos / Transferencias > Mostrar movimientos actualizados",
+                "touchpoint": "Transferencias / pagos / firma",
+                "palanca": "Operativa",
+                "subpalanca": "Error funcional / timeout",
+                "linked_pairs": 16,
+                "linked_comments": 13,
+                "avg_nps": 2.0,
+                "confidence": 0.38,
+                "priority": 0.5,
+            }
+        ]
+    )
+
+    table = executive_ppt._build_journey_table(
+        touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        entity_summary_df=entity_summary,
+        broken_journeys_df=None,
+    )
+
+    assert table.loc[0, "journey"] == "Operativa crítica fallida"
+    assert table.loc[0, "palanca"] == "Operativa"
+    assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
+    assert {"touchpoint", "subpalanca", "links", "confidence"}.issubset(table.columns)
