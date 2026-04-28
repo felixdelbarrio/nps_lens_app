@@ -749,6 +749,7 @@ def _driver_change_table(
     cols = [
         "value",
         "n_current",
+        "n_baseline",
         "nps_current",
         "nps_baseline",
         "delta_nps",
@@ -778,7 +779,7 @@ def _driver_change_table(
             "detractor_rate": "detr_current",
         }
     ).merge(
-        base[["value", "nps", "detractor_rate"]],
+        base[["value", "n", "nps", "detractor_rate"]],
         on="value",
         how="inner",
     )
@@ -787,6 +788,7 @@ def _driver_change_table(
     merged = merged.rename(
         columns={
             "nps": "nps_baseline",
+            "n": "n_baseline",
             "detractor_rate": "detr_baseline",
         }
     )
@@ -5763,6 +5765,7 @@ def _build_dimension_view_model(
         current_source_period,
         baseline_source_period,
         dimension=dimension,
+        min_n=1,
     )
     if delta_df.empty:
         delta_df = _driver_change_table(
