@@ -235,7 +235,7 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
         )
     )
     fig.update_layout(
-        yaxis_title="NPS (media del score 0-10)",
+        yaxis_title="Score medio (0-10)",
         xaxis_title="Periodo",
         showlegend=False,
     )
@@ -700,7 +700,7 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     )
     fig.update_traces(marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]))
     fig.update_layout(
-        xaxis_title="Diferencia vs NPS global (puntos)",
+        xaxis_title="Diferencia vs Score global (puntos)",
         yaxis_title="",
         showlegend=False,
     )
@@ -739,7 +739,9 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
         hover_data={"n": True, "confidence": ":.2f", "potential_uplift": ":.1f"},
     )
     fig.update_traces(marker_color=colors)
-    fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
+    fig.update_layout(
+        xaxis_title="Impacto estimado (puntos Score)", yaxis_title="", showlegend=False
+    )
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 
@@ -793,7 +795,7 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
             cmin=0.0,
             cmax=10.0,
             colorbar=dict(
-                title="NPS medio",
+                title="Score medio",
                 tickmode="array",
                 tickvals=[0, 2, 6, 8, 10],
             ),
@@ -866,7 +868,7 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="NPS en riesgo",
+                title="Score en riesgo",
                 tickfont=dict(size=10),
             )
         ),
@@ -948,7 +950,7 @@ def chart_incident_priority_matrix(
             hovertemplate=(
                 "Tópico=%{y}<br>Prioridad=%{x:.2f}<br>"
                 "Confianza=%{customdata[0]:.2f}<br>"
-                "NPS en riesgo=%{customdata[1]:.2f}<br>"
+                "Score en riesgo=%{customdata[1]:.2f}<br>"
                 "Incidencias=%{customdata[2]:.0f}<extra></extra>"
             ),
         )
@@ -1034,12 +1036,12 @@ def chart_incident_risk_recovery(
             x=d["nps_points_at_risk"],
             y=d["topic"],
             mode="markers+text",
-            name="NPS en riesgo",
+            name="Score en riesgo",
             marker=dict(color=detr_c, size=11),
             text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
             textposition="middle right",
             cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
+            hovertemplate="Tópico=%{y}<br>Score en riesgo=%{x:.2f}<extra></extra>",
         )
     )
     fig.add_trace(
@@ -1047,16 +1049,16 @@ def chart_incident_risk_recovery(
             x=d["nps_points_recoverable"],
             y=d["topic"],
             mode="markers+text",
-            name="NPS recuperable",
+            name="Score recuperable",
             marker=dict(color=pro_c, size=11, symbol="diamond"),
             text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
             textposition="middle left",
             cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
+            hovertemplate="Tópico=%{y}<br>Score recuperable=%{x:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
-        xaxis_title="Puntos NPS",
+        xaxis_title="Puntos Score",
         yaxis_title="",
         legend_title_text="Metricas",
         legend=dict(orientation="h", y=1.08, x=0),
@@ -1220,7 +1222,7 @@ def chart_nps_timeseries_with_changepoints(
             x=ts.index,
             y=ts.values,
             mode="lines+markers",
-            name="NPS",
+            name="Score",
             line={"color": th.accent, "width": 2},
         )
     )
@@ -1244,7 +1246,7 @@ def chart_nps_timeseries_with_changepoints(
             opacity=0.9,
         )
 
-    fig.update_layout(xaxis_title="Fecha", yaxis_title="NPS", showlegend=False)
+    fig.update_layout(xaxis_title="Fecha", yaxis_title="Score", showlegend=False)
     _layout_common(fig, th, height=320)
     return apply_plotly_template(fig, theme)
 
@@ -1309,7 +1311,7 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         },
     )
     fig.update_traces(marker_color=_diverging_colors(theme, plot_df["delta_nps"]))
-    fig.update_layout(xaxis_title="Delta NPS (actual - base)", yaxis_title="", showlegend=False)
+    fig.update_layout(xaxis_title="Delta Score (actual - base)", yaxis_title="", showlegend=False)
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
@@ -1357,26 +1359,31 @@ def chart_cohort_heatmap(
     fig = px.imshow(
         pivot,
         aspect="auto",
-        labels=dict(x=col_dim, y=row_dim, color="NPS"),
+        labels=dict(x=col_dim, y=row_dim, color="Score"),
         color_continuous_scale=_colorscale_rgy(theme),
         zmin=0,
         zmax=10,
     )
+    longest_row_label = max((len(str(value)) for value in pivot.index), default=0)
+    left_margin = min(220, max(96, 12 * longest_row_label))
+    responsive_height = max(420, min(760, 56 + 34 * len(pivot.index)))
     fig.update_layout(
         coloraxis=dict(
             cmin=0.0,
             cmax=10.0,
             colorbar=dict(
-                title="NPS",
+                title="Score",
                 tickmode="array",
                 tickvals=[0, 2, 6, 8, 10],
                 len=0.78,
                 y=0.5,
                 thickness=14,
             ),
-        )
+        ),
+        margin=dict(l=left_margin, r=86, t=82, b=78),
     )
     fig.update_xaxes(tickangle=-28, side="bottom", automargin=True)
-    fig.update_yaxes(automargin=True)
-    _layout_common(fig, th, height=420)
+    fig.update_yaxes(automargin=True, ticklabelposition="outside left")
+    _layout_common(fig, th, height=responsive_height)
+    fig.update_layout(margin=dict(l=left_margin, r=86, t=82, b=78))
     return apply_plotly_template(fig, theme)

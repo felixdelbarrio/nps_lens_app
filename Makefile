@@ -64,7 +64,7 @@ default:
 
 venv:
 	@test -x "$(PY)" || $(PYTHON) -m venv $(VENV)
-	$(PIP) install -U pip
+	$(PY) -m pip install -U pip
 
 python-dev:
 	$(MAKE) venv

@@ -65,6 +65,7 @@ class ContextOptionsResponse(BaseModel):
     available_years: list[str] = Field(default_factory=list)
     available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
     nps_groups: list[str] = Field(default_factory=list)
+    score_channels: list[str] = Field(default_factory=list)
     causal_method_options: list[CausalMethodOption] = Field(default_factory=list)
     preferences: dict[str, Any] = Field(default_factory=dict)
     nps_dataset: dict[str, Any] = Field(default_factory=dict)
@@ -78,6 +79,7 @@ class PreferencesResponse(BaseModel):
     pop_year: str = "Todos"
     pop_month: str = "Todos"
     nps_group_choice: str = "Todos"
+    score_channel: str = "Todos"
     theme_mode: str = "light"
     downloads_path: str = ""
     helix_base_url: str = ""

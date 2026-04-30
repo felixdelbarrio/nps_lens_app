@@ -296,6 +296,7 @@ def _is_cover_metric_line(text: str) -> bool:
         for token in [
             "muestras",
             "comentarios analizados",
+            "score medio",
             "nps medio",
             "nps clásico",
             "nps clasico",
@@ -879,7 +880,7 @@ def _chain_portfolio_fig(
         template="plotly_white",
         margin=dict(l=24, r=16, t=20, b=30),
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
-        yaxis=dict(title="Impacto total (pts NPS)", rangemode="tozero"),
+        yaxis=dict(title="Impacto total (pts Score)", rangemode="tozero"),
         showlegend=False,
     )
     return fig
@@ -957,7 +958,7 @@ def _top_topics_fig(topics_df: pd.DataFrame, *, top_k: int = 10) -> Optional[go.
             textposition="outside",
             cliponaxis=False,
             customdata=np.column_stack([d["nps_mean"].fillna(np.nan), d["nps_topic"].astype(str)]),
-            hovertemplate="%{customdata[1]}<br>Comentarios=%{x:.0f}<br>NPS medio=%{customdata[0]:.2f}<extra></extra>",
+            hovertemplate="%{customdata[1]}<br>Comentarios=%{x:.0f}<br>Score medio=%{customdata[0]:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
@@ -1108,7 +1109,7 @@ def _group_heatmap_fig(matrix_df: pd.DataFrame, *, dimension: str) -> Optional[g
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=24, r=16, t=20, b=24),
-        xaxis_title="Grupo NPS",
+        xaxis_title="Grupo Score",
         yaxis_title="",
     )
     return fig
@@ -1134,7 +1135,7 @@ def _gap_vs_overall_fig(gap_df: pd.DataFrame) -> Optional[go.Figure]:
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=32, r=28, t=20, b=24),
-        xaxis_title="Diferencia frente al NPS medio",
+        xaxis_title="Diferencia frente al Score medio",
         yaxis_title="",
         showlegend=False,
     )
@@ -1183,7 +1184,7 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
         template="plotly_white",
         margin=dict(l=24, r=24, t=20, b=24),
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
-        yaxis=dict(title="Impacto potencial (pts NPS)", rangemode="tozero"),
+        yaxis=dict(title="Impacto potencial (pts Score)", rangemode="tozero"),
         showlegend=False,
     )
     return fig
@@ -1285,7 +1286,7 @@ def _build_driver_delta_figure(
         title_text="",
     )
     fig.update_xaxes(
-        title_text="Delta NPS (actual - base)",
+        title_text="Delta Score (actual - base)",
         tickfont=dict(size=10, family=BBVA_FONT_BODY),
         title_font=dict(size=11, family=BBVA_FONT_MEDIUM),
         nticks=5,
@@ -1350,7 +1351,7 @@ def _build_web_heatmap_figure(source_df: pd.DataFrame, *, row_dim: str) -> Optio
     fig.update_coloraxes(
         showscale=True,
         colorbar=dict(
-            title="NPS",
+            title="Score",
             tickmode="array",
             tickvals=[0, 2, 6, 8, 10],
             len=0.74,
@@ -1630,7 +1631,7 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
+            title=dict(text="Score en riesgo", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -3965,8 +3966,8 @@ def _add_impact_chain_slide(
                 "Se muestran verbatims reales enlazados con el cluster, no frases genéricas ni heurísticas aisladas.",
             ),
             (
-                "5. NPS",
-                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+                "5. Score",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta Score e impacto total.",
             ),
         ]
         if is_broken_journey_mode
@@ -3985,8 +3986,8 @@ def _add_impact_chain_slide(
                 "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
             ),
             (
-                "5. NPS",
-                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS e impacto total.",
+                "5. Score",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta Score e impacto total.",
             ),
         ]
     )
@@ -4098,7 +4099,7 @@ def _add_executive_journey_summary_slide(
     catalog_rows = list(executive_journey_catalog or EXECUTIVE_JOURNEY_CATALOG)
     row_y = 2.92
     cols = [0.92, 3.15, 6.45, 10.15]
-    headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en NPS"]
+    headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en Score"]
     for idx, header in enumerate(headers):
         tb = slide.shapes.add_textbox(Inches(cols[idx]), Inches(row_y), Inches(2.2), Inches(0.26))
         ttf = tb.text_frame
@@ -4273,8 +4274,8 @@ def _chain_priority_summary(  # pragma: no cover - legacy helper for compatibili
     parts_top = [
         f"Prioridad {_fmt_num_or_nd(priority)}",
         f"Confianza {_fmt_num_or_nd(confidence)}",
-        f"NPS en riesgo {_fmt_num_or_nd(risk)} pts",
-        f"NPS recuperable {_fmt_num_or_nd(recoverable)} pts",
+        f"Score en riesgo {_fmt_num_or_nd(risk)} pts",
+        f"Score recuperable {_fmt_num_or_nd(recoverable)} pts",
     ]
     parts_bottom = [
         f"Delta % {focus_name} {_fmt_signed_or_nd(delta_focus)} pp",
@@ -4405,7 +4406,7 @@ def _add_chain_evidence_slide(
     mtf.clear()
     metrics = [
         f"Prob. {focus_name}: {_fmt_pct_or_nd(chain_row.get('detractor_probability', np.nan))}",
-        f"Delta NPS: {_fmt_signed_or_nd(chain_row.get('nps_delta_expected', np.nan))}",
+        f"Delta Score: {_fmt_signed_or_nd(chain_row.get('nps_delta_expected', np.nan))}",
         f"Impacto total: {_fmt_num_or_nd(chain_row.get('total_nps_impact', 0.0))} pts",
         f"Links validados: {int(_safe_int(chain_row.get('linked_pairs', 0), default=0))}",
         f"Confianza: {_fmt_num_or_nd(chain_row.get('confidence', 0.0))}",
@@ -4682,7 +4683,7 @@ def _history_fig(  # pragma: no cover - legacy chart kept for backwards compatib
         go.Scatter(
             x=d["date"],
             y=d["nps_mean"],
-            name="NPS medio",
+            name="Score medio",
             mode="lines+markers",
             line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
             marker=dict(
@@ -4718,7 +4719,7 @@ def _history_fig(  # pragma: no cover - legacy chart kept for backwards compatib
         margin=dict(l=24, r=84, t=22, b=24),
         legend=dict(orientation="h", x=0.01, y=1.08),
         xaxis=dict(title="Día"),
-        yaxis=dict(title="NPS medio (0-10)", range=[0, 10]),
+        yaxis=dict(title="Score medio (0-10)", range=[0, 10]),
         yaxis2=dict(
             title=f"% {focus_name}",
             overlaying="y",
@@ -5025,7 +5026,7 @@ def _month_overlap_fig(
         go.Scatter(
             x=d["date"],
             y=d["nps_mean"],
-            name="NPS medio",
+            name="Score medio",
             mode="lines+markers",
             line=dict(color="#" + BBVA_COLORS["blue"], width=3.2),
             marker=dict(
@@ -5076,7 +5077,7 @@ def _month_overlap_fig(
         legend=dict(orientation="h", x=0.01, y=1.10),
         barmode="overlay",
         xaxis=dict(title="Día"),
-        yaxis=dict(title="NPS medio (0-10)", range=[0, 10]),
+        yaxis=dict(title="Score medio (0-10)", range=[0, 10]),
         yaxis2=dict(
             title=f"% {focus_name}",
             overlaying="y",
@@ -5716,7 +5717,7 @@ def _zoom_incident_fig(
             go.Scatter(
                 x=nps_series["date"],
                 y=nps_series["nps_mean"],
-                name="NPS medio",
+                name="Score medio",
                 yaxis="y3",
                 mode="lines+markers",
                 line=dict(color="#" + BBVA_COLORS["blue"], width=2.6),
@@ -5757,7 +5758,7 @@ def _zoom_incident_fig(
             showgrid=False,
         ),
         yaxis3=dict(
-            title="NPS medio (0-10)",
+            title="Score medio (0-10)",
             overlaying="y",
             side="right",
             anchor="free",
@@ -5896,7 +5897,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["sky"],
             ),
             (
-                "Cambio esperado en NPS",
+                "Cambio esperado en Score",
                 _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
                 BBVA_COLORS["orange"],
             ),
@@ -6204,7 +6205,7 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
         top=1.10,
         width=3.40,
         height=1.12,
-        label="NPS medio",
+        label="Score medio",
         value=_fmt_num_or_nd(context.overview.get("nps_mean", np.nan), decimals=1),
         accent=BBVA_COLORS["green"],
         hint="Escala 0-10",
@@ -6344,7 +6345,7 @@ def _add_web_pain_dimension_slide(
     _add_header(
         slide,
         title=f"{slide_number}. Dónde duele en la Web · {dimension}",
-        subtitle=f"NPS del canal Web por {dimension.lower()} dentro del periodo analizado · {context.period_label}",
+        subtitle=f"Score del canal Web por {dimension.lower()} dentro del periodo analizado · {context.period_label}",
     )
     _panel(
         slide,
@@ -6379,7 +6380,7 @@ def _add_web_pain_dimension_slide(
         top=1.48,
         width=3.76,
         title="Focos Web",
-        headers=[dimension, "n", "NPS", "% det."],
+        headers=[dimension, "n", "Score", "% det."],
         rows=rows or [["Sin datos", "-", "-", "-"]],
         row_height=0.44,
         col_width_ratios=[2.20, 0.88, 0.76, 0.82],
@@ -6454,7 +6455,7 @@ def _add_overview_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="1. Evolución del NPS del periodo",
+        title="1. Evolución del NPS clásico del periodo",
         subtitle=f"{service_origin} · {service_origin_n1} · {period_label}",
     )
     _panel(
@@ -6650,7 +6651,7 @@ def _add_change_vs_past_slide(
             automargin=True,
         )
         fig.update_xaxes(
-            title_text="Delta NPS",
+            title_text="Delta Score",
             tickfont=dict(size=18),
             title_font=dict(size=20),
             nticks=5,
@@ -6814,7 +6815,7 @@ def _add_pain_by_group_slide(
         if show_scale:
             fig.update_coloraxes(
                 colorbar=dict(
-                    title="NPS",
+                    title="Score",
                     tickmode="array",
                     tickvals=[0, 2, 6, 8, 10],
                     len=0.72,
@@ -6829,7 +6830,7 @@ def _add_pain_by_group_slide(
     _add_header(
         slide,
         title="4. Dónde duele según el tipo de cliente",
-        subtitle=f"NPS del canal Web por eje de experiencia dentro del periodo analizado · {period_label}",
+        subtitle=f"Score del canal Web por eje de experiencia dentro del periodo analizado · {period_label}",
     )
     _panel(
         slide,
@@ -6912,7 +6913,7 @@ def _add_gap_slide(
             automargin=True,
         )
         fig.update_xaxes(
-            title_text="Gap NPS",
+            title_text="Gap Score",
             tickfont=dict(size=16),
             title_font=dict(size=17),
             nticks=4,
@@ -6932,7 +6933,7 @@ def _add_gap_slide(
     _add_header(
         slide,
         title="5. Casos más alejados del promedio",
-        subtitle=f"Top de casos con peor diferencia frente al NPS medio general · {period_label}",
+        subtitle=f"Top de casos con peor diferencia frente al Score medio general · {period_label}",
     )
     _panel(slide, left=0.66, top=1.48, width=8.70, height=2.38, title="Palanca")
     _figure_in_panel(
@@ -6948,7 +6949,7 @@ def _add_gap_slide(
 
     palanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
-        f"NPS {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
+        f"Score {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(palanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -6975,7 +6976,7 @@ def _add_gap_slide(
     )
     subpalanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
-        f"NPS {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
+        f"Score {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(subpalanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -7211,7 +7212,7 @@ def _add_causal_timeline_slide(
         top=4.94,
         width=1.60,
         height=1.12,
-        label="NPS en riesgo",
+        label="Score en riesgo",
         value=f"{_fmt_num_or_nd(nps_points_at_risk)} pts",
         accent=BBVA_COLORS["orange"],
     )
@@ -7221,7 +7222,7 @@ def _add_causal_timeline_slide(
         top=4.94,
         width=1.60,
         height=1.12,
-        label="NPS recuperable",
+        label="Score recuperable",
         value=f"{_fmt_num_or_nd(nps_points_recoverable)} pts",
         accent=BBVA_COLORS["green"],
     )
@@ -7602,7 +7603,7 @@ def _add_chain_scenario_slide(
             BBVA_COLORS["red"],
         ),
         (
-            "Cambio esperado en NPS",
+            "Cambio esperado en Score",
             _fmt_signed_or_nd(chain_row.get("nps_delta_expected", np.nan)),
             BBVA_COLORS["orange"],
         ),
@@ -7627,12 +7628,12 @@ def _add_chain_scenario_slide(
             BBVA_COLORS["red"],
         ),
         (
-            "NPS en riesgo",
+            "Score en riesgo",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_at_risk', np.nan))} pts",
             BBVA_COLORS["red"],
         ),
         (
-            "NPS recuperable",
+            "Score recuperable",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_recoverable', np.nan))} pts",
             BBVA_COLORS["green"],
         ),

@@ -13,6 +13,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
   - `analytics/` — drivers, texto, causalidad, changepoints, linking NPS↔Helix
   - `core/` — stores, caching, perf, profiling, métricas
   - `design/` — tokens/escala de colores (design system)
+  - `domain/` — reglas compartidas de negocio: métodos causales, labels Score/NPS y resolución de enlaces Helix
   - `ingest/` — ingesta + normalización + validación
   - `llm/` — contratos/validación y generación de packs
   - `reports/` — generación de presentaciones PPT para comité
@@ -28,7 +29,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 ### `nps_lens.config`
 - Carga `.env` y define `Settings`.
 - Normaliza listas y mapas (ej. `service_origin_n1_map`).
-- **No** debe leer datasets ni tocar Streamlit.
+- **No** debe leer datasets ni tocar frontend.
 
 ### `nps_lens.core.store`
 - Persistencia de datasets por contexto (Parquet + meta).
@@ -66,7 +67,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - `drivers.py`: ranking de palancas/subpalancas por impacto/volumen
 - `text_mining.py`: tópicos / keywords (MVP)
 - `nps_helix_link.py`: linking y agregados NPS↔Helix (diario/semanal)
-- `incident_rationale.py`: modelo central de atribución incidencia -> journey -> VoC -> NPS (probabilidad de foco, delta NPS esperado, impacto total, prioridad y plan de acción)
+- `incident_rationale.py`: modelo central de atribución incidencia -> journey -> VoC -> Score (probabilidad de foco, delta Score esperado, impacto total, prioridad y plan de acción)
 - `incident_attribution.py`: cadenas causales presentables basadas en links explícitos Helix ↔ VoC con evidencias reutilizables en app, pack y PPT
 - `causal.py`: score causal best‑effort con logit / heurísticas
 - `changepoints.py`: detección de cambios (ruptures opcional)
@@ -79,14 +80,24 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 ### `nps_lens.reports.*`
 - `executive_ppt.py`: composición de PPT de negocio (scope, KPI, gráficos, Impact Chain y plan de acción) usando la misma fuente de verdad analítica que la UI
 
+### `nps_lens.services.dashboard_service`
+- Fachada de dominio para la app React/FastAPI.
+- Centraliza Service Container, Period Container, filtro Canal, Grupo Score, KPIs, payloads de Sumario/Analítica/Linking, tablas y generación PPT.
+- El Sumario del Periodo usa solo Service + Period; Analítica NPS Térmico e Incidencias ↔ NPS usan además Canal + Grupo Score.
+
+### `nps_lens.domain.helix_links`
+- Resuelve enlaces Helix desde columnas de incidencia y `Record ID`.
+- Prioriza URLs explícitas válidas.
+- Evita construir enlaces con `Incident Number`.
+
 ### `nps_lens.platform.*`
 - `batch.py`: ejecución headless según config JSON
 - `artifacts.py`: layout de artefactos versionados
 
 ### `nps_lens.ui.*`
 - `theme.py`: tema tokenizado (light/dark) + CSS quirúrgico
-- `population.py`: Año/Mes/Grupo como control global (y window temporal)
-- `charts.py`: charts y tablas (Plotly/Streamlit)
+- `population.py`: `Año`/`Mes` del Period Container y window temporal
+- `charts.py`: charts y tablas (Plotly)
 - `narratives.py`: textos ejecutivos y narrativa causal reusable para UI/PPT
 - `components.py`: componentes visuales reutilizables, incluido el bloque `Impact Chain`
 - `business.py`: utilidades de slicing y ventanas
@@ -96,6 +107,10 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 ## 3) Convenciones de nombres (para coherencia)
 - Columns canónicas:
   - `Fecha`, `NPS`, `NPS Group`, `Comment`, `Palanca`, `Subpalanca`, `Canal`
+- Semántica visual:
+  - `Score` para valores o medias 0-10
+  - `NPS clásico` para `% promotores - % detractores`
+  - `NPS térmico` para fuente/dominio
 - Features internas:
   - prefijo `_` (ej. `_service_origin_n2_key`)
 - Context keys:

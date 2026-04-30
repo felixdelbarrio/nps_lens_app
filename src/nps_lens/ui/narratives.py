@@ -12,6 +12,7 @@ from nps_lens.analytics.incident_attribution import (
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
+from nps_lens.domain.labels import SCORE_AVERAGE_0_10_LABEL, SCORE_DELTA_LABEL
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class ExecSummary:
     n: int
     nps_avg: float
     detractor_rate: float
+    neutral_rate: float
     promoter_rate: float
     top_detractor_driver: str
     top_promoter_driver: str
@@ -181,6 +183,7 @@ def executive_summary(df: pd.DataFrame) -> ExecSummary:
 
     # Detractor / promoter definitions on 0..10 score
     detr = _safe_rate(tmp["NPS"] <= 6) if n else 0.0
+    neutral = _safe_rate((tmp["NPS"] >= 7) & (tmp["NPS"] <= 8)) if n else 0.0
     prom = _safe_rate(tmp["NPS"] >= 9) if n else 0.0
 
     # Simple driver: average NPS by Palanca
@@ -196,6 +199,7 @@ def executive_summary(df: pd.DataFrame) -> ExecSummary:
         n=n,
         nps_avg=nps_avg,
         detractor_rate=detr,
+        neutral_rate=neutral,
         promoter_rate=prom,
         top_detractor_driver=top_det,
         top_promoter_driver=top_pro,
@@ -257,8 +261,9 @@ def build_executive_story(
     lines.append("## 1) Qué está pasando")
     nps_val = "—" if summary.n == 0 else f"{summary.nps_avg:.2f}"
     lines.append(
-        f"- **Muestras**: {summary.n:,} · **NPS medio (0-10)**: {nps_val} · "
+        f"- **Muestras**: {summary.n:,} · **{SCORE_AVERAGE_0_10_LABEL}**: {nps_val} · "
         f"**Detractores**: {summary.detractor_rate*100:.1f}% · "
+        f"**Neutros**: {summary.neutral_rate*100:.1f}% · "
         f"**Promotores**: {summary.promoter_rate*100:.1f}%"
     )
     lines.append(
@@ -281,7 +286,7 @@ def build_executive_story(
             "—" if comparison.delta_nps != comparison.delta_nps else f"{comparison.delta_nps:+.2f}"
         )
         lines.append(
-            f"- Variación: **Δ NPS {d_nps}** · **Δ detractores {comparison.delta_detr_pp:+.1f} pp**"
+            f"- Variación: **{SCORE_DELTA_LABEL} {d_nps}** · **Δ detractores {comparison.delta_detr_pp:+.1f} pp**"
         )
 
     if top_opportunities:
@@ -347,10 +352,10 @@ def build_incident_ppt_story(
         f"- Se analizaron **{summary.topics_analyzed} tópicos** con evidencia multi-fuente (NPS + Helix)."
     )
     lines.append(
-        f"- El modelo estima **{summary.total_nps_impact:.2f} pts de impacto total en NPS** asociados a fricción operativa."
+        f"- El modelo estima **{summary.total_nps_impact:.2f} pts de impacto total en Score** asociados a fricción operativa."
     )
     lines.append(
-        f"- Potencial de recuperación estimado: **{summary.nps_points_recoverable:.2f} pts NPS**."
+        f"- Potencial de recuperación estimado: **{summary.nps_points_recoverable:.2f} pts Score**."
     )
     lines.append(
         f"- La concentración de incidencias en top-3 tópicos alcanza **{summary.top3_incident_share*100:.1f}%**."
@@ -363,7 +368,7 @@ def build_incident_ppt_story(
         f"- En el pico de afectación, la probabilidad del foco analizado sube a **{summary.peak_focus_probability*100:.0f}%**."
     )
     lines.append(
-        f"- El delta NPS esperado en los journeys afectados es de **{summary.expected_nps_delta:+.1f} puntos**."
+        f"- El delta Score esperado en los journeys afectados es de **{summary.expected_nps_delta:+.1f} puntos**."
     )
     if int(scope.get("chains_total", 0)) > 0:
         lines.append(
@@ -402,7 +407,7 @@ def build_incident_ppt_story(
             lines.append(
                 "  Impacto esperado: "
                 f"probabilidad {focus_name} **{_fmt_pct(probability)}** · "
-                f"Δ NPS **{_fmt_delta(delta_nps)}** · "
+                f"Delta Score **{_fmt_delta(delta_nps)}** · "
                 f"impacto total **{impact:.2f} pts** · "
                 f"evidencia validada **{incident_total} incidencias / {comment_total} comentarios**."
             )
@@ -451,7 +456,9 @@ def build_incident_ppt_story(
     lines.append(
         "- 30 días: activar quick wins en touchpoints críticos y cerrar brechas de instrumentación."
     )
-    lines.append("- 60 días: desplegar fixes estructurales en tópicos P1 con mayor NPS en riesgo.")
+    lines.append(
+        "- 60 días: desplegar fixes estructurales en tópicos P1 con mayor Score en riesgo."
+    )
     lines.append(
         "- 90 días: consolidar aprendizaje (confirmado/rechazado), medir recuperación y recalibrar prioridades."
     )
@@ -460,7 +467,7 @@ def build_incident_ppt_story(
     lines.append("## 5) KPI de seguimiento semanal")
     lines.append(f"- % {focus_name}")
     lines.append("- Incidencias por tópico priorizado")
-    lines.append("- Delta NPS esperado e impacto total atribuido")
+    lines.append("- Delta Score esperado e impacto total atribuido")
     lines.append("- Cumplimiento de ETA por owner/lane")
     return "\n".join(lines) + "\n"
 
@@ -497,10 +504,10 @@ def build_ppt_8slide_script(
         f"- Contexto: **{service_origin} · {service_origin_n1}** | Periodo: **{period_label}**."
     )
     lines.append(
-        f"- Se estiman **{summary.total_nps_impact:.2f} pts de impacto total en NPS** asociados a incidencias."
+        f"- Se estiman **{summary.total_nps_impact:.2f} pts de impacto total en Score** asociados a incidencias."
     )
     lines.append(
-        f"- Potencial recuperable estimado: **{summary.nps_points_recoverable:.2f} pts NPS**."
+        f"- Potencial recuperable estimado: **{summary.nps_points_recoverable:.2f} pts Score**."
     )
     lines.append(f"- Concentración top-3 incidencias: **{summary.top3_incident_share*100:.1f}%**.")
     lines.append("- Decisión sugerida: activar plan semanal en tópicos P1.")
@@ -562,7 +569,7 @@ def build_ppt_8slide_script(
                     f"- {title}: {expected_evidence or 'journey causal defendible'} | "
                     f"impacto esperado {impact_label or 'alto'} | "
                     f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"Delta Score {_fmt_delta(delta_nps)} | "
                     f"impacto {impact:.2f} pts | "
                     f"evidencia validada {incident_total}/{comment_total}."
                 )
@@ -572,7 +579,7 @@ def build_ppt_8slide_script(
                     f"- {title}: {expected_evidence or 'cluster semántico defendible'} | "
                     f"touchpoint {touchpoint or 'detectado automáticamente'} | "
                     f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"Delta Score {_fmt_delta(delta_nps)} | "
                     f"impacto {impact:.2f} pts | "
                     f"evidencia validada {incident_total}/{comment_total}."
                 )
@@ -581,7 +588,7 @@ def build_ppt_8slide_script(
                     f"- {title}: ({len(incident_examples)}) incidencias mostradas sobre {touchpoint} | "
                     f"({len(comment_examples)}) VoC | "
                     f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Δ NPS {_fmt_delta(delta_nps)} | "
+                    f"Delta Score {_fmt_delta(delta_nps)} | "
                     f"impacto {impact:.2f} pts | "
                     f"evidencia validada {incident_total}/{comment_total}."
                 )
@@ -607,7 +614,7 @@ def build_ppt_8slide_script(
     lines.append("")
 
     lines.append("## Slide 5 — Cuánto impacta al NPS")
-    lines.append("- Mostrar barra comparativa **NPS en riesgo vs NPS recuperable** por tópico.")
+    lines.append("- Mostrar barra comparativa **Score en riesgo vs Score recuperable** por tópico.")
     if not top.empty:
         risk_top = float(pd.to_numeric(top["nps_points_at_risk"], errors="coerce").fillna(0).sum())
         rec_top = float(
@@ -617,13 +624,13 @@ def build_ppt_8slide_script(
             f"- Top temas analizados: riesgo={risk_top:.2f} pts | recuperable={rec_top:.2f} pts."
         )
     lines.append(
-        f"- Delta NPS esperado agregado: **{summary.expected_nps_delta:+.1f} pts** | impacto total atribuido **{summary.total_nps_impact:.2f} pts**."
+        f"- Delta Score esperado agregado: **{summary.expected_nps_delta:+.1f} pts** | impacto total atribuido **{summary.total_nps_impact:.2f} pts**."
     )
     lines.append("- Mensaje clave: impacto económico esperado de corregir tópicos P1.")
     lines.append("")
 
     lines.append("## Slide 6 — Qué atacamos primero")
-    lines.append("- Usar matriz de prioridad (confianza x NPS en riesgo x volumen incidencias).")
+    lines.append("- Usar matriz de prioridad (confianza x Score en riesgo x volumen incidencias).")
     if top.empty:
         lines.append("- Definir backlog inicial de hipótesis con instrumentación mínima.")
     else:
@@ -645,7 +652,7 @@ def build_ppt_8slide_script(
     lines.append("## Slide 8 — Gobierno y métricas")
     lines.append(f"- KPI leading: incidencias por tópico P1, SLA de resolución, % {focus_name}.")
     lines.append(
-        "- KPI lagging: NPS térmico, NPS en riesgo (pts), NPS recuperable realizado (pts)."
+        "- KPI lagging: NPS térmico, Score en riesgo (pts), Score recuperable realizado (pts)."
     )
     lines.append("- Cadencia: comité semanal con owners de producto, tecnología y operaciones.")
     lines.append("")

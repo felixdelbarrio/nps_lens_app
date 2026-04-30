@@ -48,6 +48,7 @@ export type DashboardConfig = {
   available_years: string[];
   available_months_by_year: Record<string, string[]>;
   nps_groups: string[];
+  score_channels: string[];
   causal_method_options: CausalMethodOption[];
   preferences: PreferencesPayload;
   nps_dataset: DatasetStatus;
@@ -75,6 +76,7 @@ export type DashboardPayload = {
     samples: number;
     nps_average: number | null;
     detractor_rate: number | null;
+    neutral_rate: number | null;
     promoter_rate: number | null;
   };
   overview: {
@@ -207,6 +209,7 @@ export type DashboardQuery = {
   pop_year: string;
   pop_month: string;
   nps_group: string;
+  score_channel: string;
   comparison_dimension: string;
   gap_dimension: string;
   opportunity_dimension: string;
@@ -224,6 +227,7 @@ export type PreferencesPayload = {
   pop_year: string;
   pop_month: string;
   nps_group_choice: string;
+  score_channel: string;
   theme_mode: "light" | "dark";
   downloads_path: string;
   helix_base_url: string;
@@ -329,6 +333,7 @@ export async function fetchLinkingDashboard(params: {
   pop_year: string;
   pop_month: string;
   nps_group: string;
+  score_channel: string;
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
@@ -346,6 +351,7 @@ export async function fetchDatasetTable(
     pop_year: string;
     pop_month: string;
     nps_group: string;
+    score_channel: string;
     offset: number;
     limit: number;
   }
@@ -464,6 +470,7 @@ export async function downloadExecutiveReport(params: {
   pop_year: string;
   pop_month: string;
   nps_group: string;
+  score_channel: string;
   min_n: number;
   min_similarity: number;
   max_days_apart: number;

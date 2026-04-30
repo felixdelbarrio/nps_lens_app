@@ -178,7 +178,7 @@ function renderVocCards(records: Array<Record<string, unknown>>) {
           <div className="evidence-pill-row">
             <span className="evidence-pill">ID: {asString(record.comment_id, "-")}</span>
             <span className="evidence-pill">Fecha: {displayValue(record.date, "Fecha")}</span>
-            <span className="evidence-pill">NPS: {displayValue(record.nps, "NPS")}</span>
+            <span className="evidence-pill">Score: {displayValue(record.nps, "Score")}</span>
             <span className="evidence-pill">Grupo: {asString(record.group, "-")}</span>
           </div>
           <p>{asString(record.comment)}</p>
@@ -380,7 +380,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const evidenceVocTable = activeVocRecords.map((record) => ({
     ID: asString(record.comment_id),
     Fecha: asString(record.date),
-    NPS: record.nps,
+    Score: record.nps,
     Grupo: asString(record.group),
     Palanca: asString(record.palanca),
     Subpalanca: asString(record.subpalanca),

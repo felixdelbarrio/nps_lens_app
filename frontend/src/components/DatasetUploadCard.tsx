@@ -21,6 +21,7 @@ type DatasetUploadCardProps = {
   ctaLabel: string;
   datasetStatus: DatasetStatus;
   uploading: boolean;
+  disabled?: boolean;
   onSubmit: (payload: UploadSelectionPayload) => Promise<void>;
   feedback: UploadFeedback;
   testId: string;
@@ -35,7 +36,8 @@ export function DatasetUploadCard({
   uploading,
   onSubmit,
   feedback,
-  testId
+  testId,
+  disabled = false
 }: DatasetUploadCardProps) {
   const [file, setFile] = useState<File | null>(null);
   const [desktopPickerAvailable, setDesktopPickerAvailable] = useState(() =>
@@ -124,6 +126,7 @@ export function DatasetUploadCard({
               <div className="inline-actions">
                 <button
                   className="secondary-button"
+                  disabled={disabled || uploading}
                   onClick={() => void handlePickDesktopFile()}
                   type="button"
                 >
@@ -134,6 +137,7 @@ export function DatasetUploadCard({
                 data-testid={testId}
                 placeholder="Ningún fichero seleccionado"
                 readOnly
+                disabled={disabled || uploading}
                 type="text"
                 value={desktopFile?.name || ""}
               />
@@ -146,6 +150,7 @@ export function DatasetUploadCard({
               ref={inputRef}
               accept=".xlsx,.xlsm,.xls"
               data-testid={testId}
+              disabled={disabled || uploading}
               onChange={(event) => {
                 setFile(event.target.files?.[0] ?? null);
                 setDesktopFile(null);
@@ -156,7 +161,7 @@ export function DatasetUploadCard({
         </label>
       </div>
 
-      <button className="primary-button" disabled={uploading || !hasSelectedFile} type="submit">
+      <button className="primary-button" disabled={disabled || uploading || !hasSelectedFile} type="submit">
         {uploading ? "Importando..." : ctaLabel}
       </button>
 
