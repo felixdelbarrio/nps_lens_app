@@ -9,15 +9,17 @@ type PrimaryNavProps = {
   }>;
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 };
 
-export function PrimaryNav({ items, value, onChange }: PrimaryNavProps) {
+export function PrimaryNav({ items, value, onChange, disabled = false }: PrimaryNavProps) {
   return (
     <nav aria-label="Áreas principales" className="primary-nav">
       {items.map((item) => (
         <button
           aria-current={item.id === value ? "page" : undefined}
           className={`primary-nav-item${item.id === value ? " is-active" : ""}`}
+          disabled={disabled}
           key={item.id}
           onClick={() => onChange(item.id)}
           type="button"

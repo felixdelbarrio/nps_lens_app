@@ -338,13 +338,13 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     business_story = """# Informe de negocio — NPS Lens
 
 ## 1) Qué está pasando
-- Muestras: 36,872 · NPS medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
+- Muestras: 36,872 · Score medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
 - Zona de fricción: Agregar funcionalidad · Zona fuerte: FAN
 
 ## 2) Cambio vs base de comparación
 - Periodo actual: Mes actual (Febrero 2026 · 2026-02-01 → 2026-02-22) (n=20,791)
 - Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
-- Variación: Δ NPS -0.18 · Δ detractores +2.5 pp
+- Variación: Delta Score -0.18 · Δ detractores +2.5 pp
 
 ## 3) Dónde atacar primero (oportunidades)
 - Si mejoramos Palanca=Funcionamiento Continuo, el modelo estima un potencial de +57.2 puntos.
@@ -415,7 +415,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Análisis NPS térmico y causalidad" in t for t in texts)
     assert any("NPS térmico" in t for t in texts)
     assert any("% PROMOTORES" in t for t in texts)
-    assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
     assert any("2. Qué han dicho los clientes" in t for t in texts)
     assert any("5. Qué ha cambiado en Palanca" in t for t in texts)
     assert any("6. Qué ha cambiado en Subpalanca" in t for t in texts)
@@ -432,7 +432,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Sumario del análisis del escenario" in t for t in texts)
     assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
     assert any("Ejemplos de Comentarios enlazados" in t for t in texts)
-    assert any("Δ NPS" in t for t in texts)
+    assert any("Delta Score" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
     assert not any("Mapa de dolor Web por Palanca" in t for t in texts)
@@ -958,7 +958,7 @@ def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> Non
     assert executive_ppt._format_opportunity_scope("nps_topic", "Tema X") == "Tema X"
     assert executive_ppt._clean_evidence_excerpt("", max_len=20) == ""
     assert executive_ppt._clean_evidence_excerpt("Descripción: texto de prueba", max_len=20) != ""
-    assert executive_ppt._is_cover_metric_line("NPS medio del periodo")
+    assert executive_ppt._is_cover_metric_line("Score medio del periodo")
 
     source_df = pd.DataFrame(
         {
@@ -1118,7 +1118,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
     assert any("12. Journeys de detracción" in t for t in texts)
     assert not any("13.1" in t for t in texts)
 
@@ -1218,7 +1218,7 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS del periodo" in t for t in texts)
+    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
     assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
 
 
@@ -1768,7 +1768,7 @@ def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> 
     assert fig.data[4]["mode"] == "markers+text"
     assert fig.data[4]["yaxis"] == "y2"
     assert any(str(t) == "INC-1" for t in fig.data[4]["text"])
-    assert fig.data[5]["name"] == "NPS medio"
+    assert fig.data[5]["name"] == "Score medio"
     assert fig.data[5]["type"] == "scatter"
     assert fig.data[5]["mode"] == "lines+markers"
     assert fig.data[5]["yaxis"] == "y3"

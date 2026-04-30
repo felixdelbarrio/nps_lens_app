@@ -597,6 +597,10 @@ ul {
   gap: var(--space-4);
 }
 
+.metric-grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric-card,
 .kpi-card,
 .note-card {
@@ -630,12 +634,12 @@ ul {
 }
 
 .filters-inline-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
 }
 
 .filters-inline-grid.has-causal-method {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .field-grid.single-column {
@@ -728,7 +732,12 @@ input::placeholder {
 }
 
 .primary-button:disabled,
-.secondary-button:disabled {
+.secondary-button:disabled,
+.icon-button:disabled,
+.nav-tabs button:disabled,
+.primary-nav-item:disabled,
+select:disabled,
+input:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1477,6 +1486,7 @@ input::placeholder {
   .traceability-layout,
   .ingest-grid,
   .metric-grid,
+  .metric-grid-5,
   .kpi-grid,
   .maintenance-layout,
   .hero-metrics,
@@ -1521,6 +1531,7 @@ input::placeholder {
   }
 
   .metric-grid,
+  .metric-grid-5,
   .kpi-grid,
   .ingest-grid,
   .traceability-layout,

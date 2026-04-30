@@ -34,6 +34,7 @@ type SettingsSheetProps = {
   onSaveHierarchy: (payload: ServiceOriginHierarchyPayload) => Promise<void>;
   onReprocess: () => Promise<void>;
   reprocessPending: boolean;
+  actionsDisabled?: boolean;
 };
 
 const SETTINGS_TABS = [
@@ -67,7 +68,8 @@ export function SettingsSheet({
   hierarchySaving,
   onSaveHierarchy,
   onReprocess,
-  reprocessPending
+  reprocessPending,
+  actionsDisabled = false
 }: SettingsSheetProps) {
   useEffect(() => {
     if (!open) {
@@ -113,6 +115,7 @@ export function SettingsSheet({
           items={SETTINGS_TABS.map((tab) => ({ ...tab }))}
           onChange={(value) => onTabChange(value as SettingsTab)}
           value={activeTab}
+          disabled={actionsDisabled}
         />
 
         {activeTab === "appearance" ? (
@@ -271,6 +274,7 @@ export function SettingsSheet({
                     className="secondary-button"
                     data-testid="reprocess-button"
                     onClick={() => void onReprocess()}
+                    disabled={actionsDisabled || reprocessPending}
                     type="button"
                   >
                     {reprocessPending ? "Reprocesando..." : "Reprocesar agregados"}

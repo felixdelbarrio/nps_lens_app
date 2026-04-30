@@ -69,6 +69,11 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
+from nps_lens.domain.helix_links import (
+    build_helix_incident_url_lookup,
+    enrich_helix_incident_links,
+    resolve_helix_incident_url,
+)
 from nps_lens.domain.models import UploadContext
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -112,6 +117,9 @@ from nps_lens.ui.theme import Theme, get_theme
 _FILENAME_SANITIZER_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _MONTH_LABEL_TO_NUMBER = {label: number for number, label in MONTH_LABELS_ES.items()}
 _DEFAULT_NPS_GROUPS = [POP_ALL, "Detractores", "Neutros", "Promotores"]
+_DEFAULT_SCORE_CHANNELS = [POP_ALL]
+_PREFERRED_SCORE_CHANNEL = "Web"
+_PREFERRED_NPS_GROUP = "Detractores"
 _DEFAULT_DIMENSIONS = ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"]
 _COHORT_ROW_DIMENSIONS = {"Palanca": "Palanca", "Subpalanca": "Subpalanca"}
 _COHORT_COLUMN_DIMENSIONS = {
@@ -196,26 +204,6 @@ def _numeric_series(frame: pd.DataFrame, column: str, *, default: float = 0.0) -
 
 def _text_series(frame: pd.DataFrame, column: str, *, default: str = "") -> pd.Series[Any]:
     return _series_or_default(frame, column, default=default).astype(str).fillna("").str.strip()
-
-
-def _coalesce_text_columns(
-    frame: pd.DataFrame,
-    columns: Sequence[str],
-    *,
-    default: str = "",
-) -> pd.Series[Any]:
-    output = pd.Series([default] * len(frame), index=frame.index, dtype=object)
-    for column in columns:
-        if column not in frame.columns:
-            continue
-        candidate = _text_series(frame, column, default=default)
-        output = output.where(output.astype(str).str.strip().ne(""), candidate)
-    return output.astype(str).fillna("").str.strip()
-
-
-def _http_url_series(values: pd.Series[Any]) -> pd.Series[Any]:
-    series = values.astype(str).fillna("").str.strip()
-    return series.where(series.str.match(r"^https?://", case=False, na=False), "")
 
 
 def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
@@ -418,6 +406,7 @@ class DashboardService:
         preferences = self.settings.ui_defaults()
         records = self.repository.load_records_df(context)
         years, months_by_year = self._available_periods(records)
+        score_channels = self._available_score_channels(records)
         latest_upload = self.repository.list_uploads(limit=1, context=context)
         nps_dataset = {
             "available": not records.empty,
@@ -442,6 +431,7 @@ class DashboardService:
             "available_years": years,
             "available_months_by_year": months_by_year,
             "nps_groups": _DEFAULT_NPS_GROUPS,
+            "score_channels": score_channels,
             "causal_method_options": causal_method_options(),
             "preferences": preferences,
             "nps_dataset": nps_dataset,
@@ -514,7 +504,8 @@ class DashboardService:
         context: UploadContext,
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
-        nps_group: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
         comparison_dimension: str = "Palanca",
         gap_dimension: str = "Palanca",
         opportunity_dimension: str = "Palanca",
@@ -526,17 +517,37 @@ class DashboardService:
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
         all_records = self.repository.load_records_df(context)
-        history_df = filter_by_nps_group(all_records.copy(), nps_group)
-        current_df = self._apply_population_filters(history_df.copy(), pop_year, pop_month)
-        context_label = selected_month_label(pop_year=pop_year, pop_month=pop_month, df=history_df)
+        resolved_channel = self._resolve_score_channel(all_records, score_channel)
+        resolved_group = self._resolve_nps_group(all_records, nps_group)
+        scope_history_df = all_records
+        scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
+        analysis_history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
+        analysis_history_df = filter_by_nps_group(analysis_history_df, resolved_group)
+        analysis_current_df = self._apply_population_filters(
+            analysis_history_df,
+            pop_year,
+            pop_month,
+        )
+        context_label = selected_month_label(
+            pop_year=pop_year,
+            pop_month=pop_month,
+            df=scope_history_df,
+        )
 
-        if current_df.empty:
+        if scope_current_df.empty:
             return {
-                "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
+                "context_pills": self._context_pills(
+                    context,
+                    pop_year,
+                    pop_month,
+                    resolved_group,
+                    resolved_channel,
+                ),
                 "kpis": {
                     "samples": 0,
                     "nps_average": None,
                     "detractor_rate": None,
+                    "neutral_rate": None,
                     "promoter_rate": None,
                 },
                 "overview": {},
@@ -547,8 +558,8 @@ class DashboardService:
                 "empty_state": "No hay datos cargados para el contexto y filtros seleccionados.",
             }
 
-        summary = executive_summary(current_df)
-        topics_df = self._topics_df(current_df)
+        summary = executive_summary(scope_current_df)
+        topics_df = self._topics_df(analysis_current_df)
         if not topics_df.empty:
             topics_df = topics_df.sort_values(
                 ["n", "cluster_id"], ascending=[False, True]
@@ -558,10 +569,14 @@ class DashboardService:
         comparison_payload: dict[str, object] = {}
         comparison_story = None
         delta_df = pd.DataFrame()
-        w_cur, w_base = default_windows(history_df, pop_year=pop_year, pop_month=pop_month)
+        w_cur, w_base = default_windows(
+            analysis_history_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+        )
         if w_cur is not None and w_base is not None:
-            cur_window_df = slice_by_window(history_df, w_cur)
-            base_window_df = slice_by_window(history_df, w_base)
+            cur_window_df = slice_by_window(analysis_history_df, w_cur)
+            base_window_df = slice_by_window(analysis_history_df, w_base)
             comparison_story = compare_periods(cur_window_df, base_window_df)
             delta_df = get_changes_vs_historic(
                 cur_window_df,
@@ -585,7 +600,7 @@ class DashboardService:
             }
 
         gap_stats = pd.DataFrame(
-            [stat.__dict__ for stat in driver_table(current_df, gap_dimension)]
+            [stat.__dict__ for stat in driver_table(scope_current_df, gap_dimension)]
         )
         if not gap_stats.empty:
             gap_stats = gap_stats.sort_values(
@@ -593,7 +608,7 @@ class DashboardService:
             ).reset_index(drop=True)
 
         opportunities = rank_opportunities(
-            current_df,
+            scope_current_df,
             dimensions=[opportunity_dimension],
             min_n=min_n,
         )
@@ -607,25 +622,34 @@ class DashboardService:
 
         return {
             "context_label": context_label,
-            "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
+            "context_pills": self._context_pills(
+                context,
+                pop_year,
+                pop_month,
+                resolved_group,
+                resolved_channel,
+            ),
             "kpis": {
                 "samples": summary.n,
                 "nps_average": summary.nps_avg,
                 "detractor_rate": summary.detractor_rate,
+                "neutral_rate": summary.neutral_rate,
                 "promoter_rate": summary.promoter_rate,
             },
             "overview": {
-                "daily_kpis_figure": self._serialize_figure(chart_daily_kpis(current_df, theme)),
+                "daily_kpis_figure": self._serialize_figure(
+                    chart_daily_kpis(scope_current_df, theme)
+                ),
                 "weekly_trend_figure": self._serialize_figure(
-                    chart_nps_trend(current_df, theme, freq="W")
+                    chart_nps_trend(scope_current_df, theme, freq="W")
                 ),
                 "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                 "topics_table": self._serialize_rows(topics_df),
                 "daily_volume_figure": self._serialize_figure(
-                    chart_daily_volume(current_df, theme)
+                    chart_daily_volume(scope_current_df, theme)
                 ),
                 "daily_mix_figure": self._serialize_figure(
-                    chart_daily_mix_business(current_df, theme)
+                    chart_daily_mix_business(scope_current_df, theme)
                 ),
                 "insight_bullets": topics_bullets,
             },
@@ -635,7 +659,7 @@ class DashboardService:
                 "column_dimension": cohort_col,
                 "figure": self._serialize_figure(
                     chart_cohort_heatmap(
-                        current_df,
+                        scope_current_df,
                         theme,
                         row_dim=_COHORT_ROW_DIMENSIONS.get(cohort_row, "Palanca"),
                         col_dim=_COHORT_COLUMN_DIMENSIONS.get(cohort_col, "Canal"),
@@ -673,16 +697,24 @@ class DashboardService:
         context: UploadContext,
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
-        nps_group: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
         offset: int = 0,
         limit: int = 100,
     ) -> dict[str, object]:
         if dataset_kind == "helix":
             frame = self._enrich_helix_links(self._load_helix_df(context))
             frame = self._apply_population_filters(frame, pop_year, pop_month)
+            frame = self._apply_score_channel_filter(
+                frame,
+                self._resolve_score_channel(frame, score_channel),
+            )
         else:
             frame = self.repository.load_records_df(context)
-            frame = filter_by_nps_group(frame, nps_group)
+            resolved_channel = self._resolve_score_channel(frame, score_channel)
+            resolved_group = self._resolve_nps_group(frame, nps_group)
+            frame = self._apply_score_channel_filter(frame, resolved_channel)
+            frame = filter_by_nps_group(frame, resolved_group)
             frame = self._apply_population_filters(frame, pop_year, pop_month)
 
         total_rows = int(len(frame))
@@ -708,7 +740,8 @@ class DashboardService:
         context: UploadContext,
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
-        nps_group: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
         min_similarity: float = 0.25,
         max_days_apart: int = 10,
         touchpoint_source: str = "",
@@ -716,21 +749,26 @@ class DashboardService:
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
         nps_frame = self.repository.load_records_df(context)
+        resolved_channel = self._resolve_score_channel(nps_frame, score_channel)
+        resolved_group = self._resolve_nps_group(nps_frame, nps_group)
+        nps_filtered = self._apply_score_channel_filter(nps_frame, resolved_channel)
         nps_slice = self._apply_population_filters(
-            filter_by_nps_group(nps_frame.copy(), nps_group),
+            filter_by_nps_group(nps_filtered, resolved_group),
             pop_year,
             pop_month,
         )
         helix_history = self._load_helix_df(context)
         helix_slice = self._apply_population_filters(helix_history, pop_year, pop_month)
+        helix_slice = self._apply_score_channel_filter(helix_slice, resolved_channel)
 
-        focus_group, focus_label = self._linking_focus_group(nps_group)
+        focus_group, focus_label = self._linking_focus_group(resolved_group)
         if nps_slice.empty or helix_slice.empty:
             return self._empty_linking_payload(
                 context=context,
                 pop_year=pop_year,
                 pop_month=pop_month,
-                nps_group=nps_group,
+                nps_group=resolved_group,
+                score_channel=resolved_channel,
                 focus_group=focus_group,
                 focus_label=focus_label,
                 empty_state=(
@@ -745,7 +783,8 @@ class DashboardService:
                 context=context,
                 pop_year=pop_year,
                 pop_month=pop_month,
-                nps_group=nps_group,
+                nps_group=resolved_group,
+                score_channel=resolved_channel,
                 focus_group=focus_group,
                 focus_label=focus_label,
                 empty_state=(
@@ -797,7 +836,7 @@ class DashboardService:
         by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
         trend_df = overall_daily if not overall_daily.empty else overall_weekly
         average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
-        show_all_groups = str(nps_group or "").strip().lower() == str(POP_ALL).lower()
+        show_all_groups = str(resolved_group or "").strip().lower() == str(POP_ALL).lower()
 
         canonical_bundle = self._build_rationale_bundle(
             by_topic_weekly=by_topic_weekly,
@@ -962,7 +1001,13 @@ class DashboardService:
         deep_dive_rows = self._serialize_rows(evidence_sorted_df)
         return {
             "available": True,
-            "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
+            "context_pills": self._context_pills(
+                context,
+                pop_year,
+                pop_month,
+                resolved_group,
+                resolved_channel,
+            ),
             "focus_group": focus_group,
             "focus_label": focus_label,
             "empty_state": "",
@@ -1053,11 +1098,11 @@ class DashboardService:
                 "subtitle": method_spec.deep_dive_subtitle,
                 "kpis": [
                     {
-                        "label": "NPS en riesgo",
+                        "label": "Score en riesgo",
                         "value": f"{float(active_rationale_summary.nps_points_at_risk):.2f} pts",
                     },
                     {
-                        "label": "NPS recuperable",
+                        "label": "Score recuperable",
                         "value": (
                             f"{float(active_rationale_summary.nps_points_recoverable):.2f} pts"
                         ),
@@ -1117,15 +1162,22 @@ class DashboardService:
         context: UploadContext,
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
-        nps_group: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
         min_n: int = 200,
         min_similarity: float = 0.25,
         max_days_apart: int = 10,
         touchpoint_source: str = "",
     ) -> BusinessPptResult:
-        history_df = filter_by_nps_group(self.repository.load_records_df(context).copy(), nps_group)
-        if history_df.empty:
+        scope_history_df = self.repository.load_records_df(context)
+        if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
+        resolved_channel = self._resolve_score_channel(scope_history_df, score_channel)
+        resolved_group = self._resolve_nps_group(scope_history_df, nps_group)
+        history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
+        history_df = filter_by_nps_group(history_df, resolved_group)
+        if history_df.empty:
+            raise ValueError("No hay datos NPS para los filtros de Canal y Grupo seleccionados.")
 
         helix_history = self._load_helix_df(context)
         if helix_history.empty:
@@ -1133,18 +1185,20 @@ class DashboardService:
                 "No hay incidencias Helix cargadas para el contexto actual. La PPT requiere base cruzada."
             )
 
-        current_df = self._apply_population_filters(history_df.copy(), pop_year, pop_month)
+        scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
+        current_df = self._apply_population_filters(history_df, pop_year, pop_month)
         if current_df.empty:
             raise ValueError(
                 "El periodo filtrado no tiene respuestas NPS. Ajusta año, mes o grupo antes de generar la PPT."
             )
-        helix_current = self._apply_population_filters(helix_history.copy(), pop_year, pop_month)
+        helix_current = self._apply_population_filters(helix_history, pop_year, pop_month)
+        helix_current = self._apply_score_channel_filter(helix_current, resolved_channel)
         if helix_current.empty:
             raise ValueError(
                 "El periodo filtrado no tiene incidencias Helix. Ajusta año o mes para generar una PPT alineada con la vista causal."
             )
 
-        focus_group, _ = self._linking_focus_group(nps_group)
+        focus_group, _ = self._linking_focus_group(resolved_group)
         focus_name = self._focus_name(focus_group)
         focus_current = current_df.loc[focus_mask(current_df, focus_group=focus_group)].copy()
         if focus_current.empty:
@@ -1251,8 +1305,8 @@ class DashboardService:
         attribution_df = self._select_top_chain_rows(attribution_all_df)
 
         business_story_md = self._build_business_report_md(
-            current_df=current_df,
-            history_df=history_df,
+            current_df=scope_current_df if not scope_current_df.empty else current_df,
+            history_df=scope_history_df,
             pop_year=pop_year,
             pop_month=pop_month,
             min_n=min_n,
@@ -1277,8 +1331,8 @@ class DashboardService:
             story_md=business_story_md,
             script_8slides_md="",
             attribution_df=attribution_df,
-            selected_nps_df=current_df,
-            comparison_nps_df=history_df,
+            selected_nps_df=scope_current_df if not scope_current_df.empty else current_df,
+            comparison_nps_df=scope_history_df,
             touchpoint_source=active_touchpoint_source,
             entity_summary_df=attribution_all_df,
             entity_summary_kpis=entity_summary_kpis,
@@ -1488,80 +1542,10 @@ class DashboardService:
         return str(self.settings.ui_defaults().get("helix_base_url", "") or "").strip()
 
     def _enrich_helix_links(self, frame: pd.DataFrame) -> pd.DataFrame:
-        if frame is None or frame.empty:
-            return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
-
-        out = frame.copy()
-        base_url = self._helix_base_url()
-        generic_url = _http_url_series(
-            _coalesce_text_columns(
-                out,
-                [
-                    "Incident URL",
-                    "Incident Link",
-                    "Record URL",
-                    "Record Link",
-                    "Document URL",
-                    "Document Link",
-                    "URL",
-                    "Link",
-                    "Href",
-                ],
-            )
-        )
-        record_id = _coalesce_text_columns(out, ["Record ID", "workItemId", "InstanceId"])
-        constructed_url = (
-            record_id.map(
-                lambda value: f"{base_url}{value}" if base_url and str(value).strip() else ""
-            )
-            .astype(str)
-            .fillna("")
-            .str.strip()
-        )
-        for incident_column in ["Incident Number", "ID de la Incidencia", "id"]:
-            if incident_column not in out.columns:
-                continue
-            direct_url = _http_url_series(
-                _coalesce_text_columns(
-                    out,
-                    [f"{incident_column}__href", f"{incident_column}__hyperlink"],
-                )
-            )
-            resolved_url = direct_url.where(direct_url.ne(""), generic_url)
-            out[f"{incident_column}__href"] = (
-                resolved_url.where(resolved_url.ne(""), constructed_url)
-                .astype(str)
-                .fillna("")
-                .str.strip()
-            )
-        return out
+        return enrich_helix_incident_links(frame, base_url=self._helix_base_url())
 
     def _build_helix_incident_url_lookup(self, helix_df: pd.DataFrame) -> dict[str, str]:
-        if helix_df is None or helix_df.empty:
-            return {}
-        enriched = self._enrich_helix_links(helix_df)
-        incident_id = _coalesce_text_columns(
-            enriched, ["Incident Number", "ID de la Incidencia", "id"]
-        )
-        incident_url = _coalesce_text_columns(
-            enriched,
-            [
-                "Incident Number__href",
-                "ID de la Incidencia__href",
-                "id__href",
-                "Incident Number__hyperlink",
-                "ID de la Incidencia__hyperlink",
-                "id__hyperlink",
-            ],
-        )
-        lookup: dict[str, str] = {}
-        for inc_id, url in zip(incident_id.tolist(), incident_url.tolist()):
-            key = str(inc_id or "").strip()
-            href = str(url or "").strip()
-            if not key or not href or key in lookup:
-                continue
-            lookup[key] = href
-        return lookup
+        return build_helix_incident_url_lookup(helix_df, base_url=self._helix_base_url())
 
     def _attach_incident_link_column(
         self,
@@ -1609,7 +1593,12 @@ class DashboardService:
                     or entry.get("incident_id__hyperlink", "")
                     or ""
                 ).strip()
-                resolved_url = current_url or lookup.get(incident_id, "")
+                resolved_url = resolve_helix_incident_url(
+                    incident_id,
+                    lookup,
+                    current_url=current_url,
+                    base_url=self._helix_base_url(),
+                )
                 records.append(
                     {str(key): str(item or "").strip() for key, item in entry.items()}
                     | {"url": resolved_url, "incident_id__href": resolved_url}
@@ -1925,8 +1914,8 @@ class DashboardService:
                     "linked_incidents": "Incidencias",
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
-                    "avg_nps": "NPS medio",
-                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "avg_nps": "Score medio",
+                    "nps_points_at_risk": "Score en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -1956,8 +1945,8 @@ class DashboardService:
                     "linked_incidents": "Incidencias",
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
-                    "avg_nps": "NPS medio",
-                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "avg_nps": "Score medio",
+                    "nps_points_at_risk": "Score en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -1987,8 +1976,8 @@ class DashboardService:
                     "linked_incidents": "Incidencias",
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
-                    "avg_nps": "NPS medio",
-                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "avg_nps": "Score medio",
+                    "nps_points_at_risk": "Score en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -2018,8 +2007,8 @@ class DashboardService:
                     "linked_incidents": "Incidencias",
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
-                    "avg_nps": "NPS medio",
-                    "nps_points_at_risk": "NPS en riesgo (pts)",
+                    "avg_nps": "Score medio",
+                    "nps_points_at_risk": "Score en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -2044,8 +2033,8 @@ class DashboardService:
                 "linked_incidents": "Incidencias",
                 "linked_comments": "Comentarios VoC",
                 "linked_pairs": "Links validados",
-                "avg_nps": "NPS medio",
-                "nps_points_at_risk": "NPS en riesgo (pts)",
+                "avg_nps": "Score medio",
+                "nps_points_at_risk": "Score en riesgo (pts)",
                 "confidence": "Confianza",
             }
         )
@@ -2216,7 +2205,7 @@ class DashboardService:
                             ),
                         },
                         {
-                            "label": "Delta NPS",
+                            "label": "Delta Score",
                             "value": (
                                 f"{float(_metric_number(row.get('nps_delta_expected')) or 0.0):+.1f}"
                                 if _metric_number(row.get("nps_delta_expected")) is not None
@@ -2240,11 +2229,11 @@ class DashboardService:
                             "value": f"{float(_metric_number(row.get('priority')) or 0.0):.2f}",
                         },
                         {
-                            "label": "NPS en riesgo",
+                            "label": "Score en riesgo",
                             "value": f"{float(_metric_number(row.get('nps_points_at_risk')) or 0.0):.2f} pts",
                         },
                         {
-                            "label": "NPS recuperable",
+                            "label": "Score recuperable",
                             "value": f"{float(_metric_number(row.get('nps_points_recoverable')) or 0.0):.2f} pts",
                         },
                         {
@@ -2377,11 +2366,11 @@ class DashboardService:
                 "touchpoint": touchpoint_label,
                 "priority": "Prioridad",
                 "confidence": "Confianza",
-                "nps_points_at_risk": "NPS en riesgo (pts)",
-                "nps_points_recoverable": "NPS recuperable (pts)",
+                "nps_points_at_risk": "Score en riesgo (pts)",
+                "nps_points_recoverable": "Score recuperable (pts)",
                 "detractor_probability": f"Prob. {focus_name} con incidencia",
-                "nps_delta_expected": "Delta NPS esperado",
-                "total_nps_impact": "Impacto total NPS (pts)",
+                "nps_delta_expected": "Delta Score esperado",
+                "total_nps_impact": "Impacto total Score (pts)",
                 "causal_score": "Causal score",
                 "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
                 "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
@@ -2521,6 +2510,55 @@ class DashboardService:
             result = result.loc[result["Fecha"].dt.month == int(str(month_filter).strip().zfill(2))]
         return result
 
+    def _apply_score_channel_filter(
+        self,
+        frame: pd.DataFrame,
+        score_channel: str,
+    ) -> pd.DataFrame:
+        if frame.empty or "Canal" not in frame.columns:
+            return frame
+        channel = str(score_channel or POP_ALL).strip()
+        if channel.casefold() in {POP_ALL.casefold(), "all"}:
+            return frame
+        mask = (
+            frame["Canal"].fillna("").astype(str).str.strip().str.casefold().eq(channel.casefold())
+        )
+        return frame.loc[mask]
+
+    def _resolve_score_channel(
+        self,
+        frame: pd.DataFrame,
+        score_channel: Optional[str],
+    ) -> str:
+        available = self._available_score_channels(frame)
+        requested = str(score_channel or "").strip()
+        if requested:
+            for option in available:
+                if option.casefold() == requested.casefold():
+                    return option
+            return POP_ALL
+        for option in available:
+            if option.casefold() == _PREFERRED_SCORE_CHANNEL.casefold():
+                return option
+        return POP_ALL
+
+    def _resolve_nps_group(self, frame: pd.DataFrame, nps_group: Optional[str]) -> str:
+        available = _DEFAULT_NPS_GROUPS
+        requested = str(nps_group or "").strip()
+        if requested:
+            for option in available:
+                if option.casefold() == requested.casefold():
+                    return option
+            return POP_ALL
+        if "NPS Group" not in frame.columns:
+            return POP_ALL
+        groups = set(frame["NPS Group"].fillna("").astype(str).str.strip().str.casefold())
+        if _PREFERRED_NPS_GROUP.casefold() in groups or any(
+            value.startswith("detr") for value in groups
+        ):
+            return _PREFERRED_NPS_GROUP
+        return POP_ALL
+
     def _available_periods(self, frame: pd.DataFrame) -> tuple[list[str], dict[str, list[str]]]:
         if frame.empty or "Fecha" not in frame.columns:
             return [POP_ALL], {POP_ALL: [POP_ALL]}
@@ -2542,6 +2580,12 @@ class DashboardService:
             )
             months_by_year[year] = [POP_ALL] + months
         return [POP_ALL] + years, months_by_year
+
+    def _available_score_channels(self, frame: pd.DataFrame) -> list[str]:
+        if frame.empty or "Canal" not in frame.columns:
+            return _DEFAULT_SCORE_CHANNELS.copy()
+        values = _unique_string_values(frame["Canal"].tolist())
+        return [POP_ALL] + values if values else _DEFAULT_SCORE_CHANNELS.copy()
 
     def _helix_dataset_status(self, context: UploadContext) -> dict[str, object]:
         stored = self.helix_store.get(
@@ -2598,6 +2642,7 @@ class DashboardService:
         pop_year: str,
         pop_month: str,
         nps_group: str,
+        score_channel: str = POP_ALL,
     ) -> list[str]:
         month_label = (
             pop_month
@@ -2610,6 +2655,7 @@ class DashboardService:
             f"N2: {context.service_origin_n2 or '-'}",
             f"Año: {pop_year}",
             f"Mes: {month_label or POP_ALL}",
+            f"Canal: {score_channel or POP_ALL}",
             f"Grupo: {nps_group}",
         ]
 
@@ -2753,13 +2799,20 @@ class DashboardService:
         pop_year: str,
         pop_month: str,
         nps_group: str,
+        score_channel: str,
         focus_group: str,
         focus_label: str,
         empty_state: str,
     ) -> dict[str, object]:
         return {
             "available": False,
-            "context_pills": self._context_pills(context, pop_year, pop_month, nps_group),
+            "context_pills": self._context_pills(
+                context,
+                pop_year,
+                pop_month,
+                nps_group,
+                score_channel,
+            ),
             "focus_group": focus_group,
             "focus_label": focus_label,
             "empty_state": empty_state,

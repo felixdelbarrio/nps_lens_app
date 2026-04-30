@@ -63,7 +63,14 @@ class DimensionChangeSlideLayout:
     header_height: float = 0.42
     row_height: float = 0.44
     max_rows: int = 4
-    headers: tuple[str, ...] = ("Valor", "Δ NPS", "NPS actual", "NPS base", "n actual", "n base")
+    headers: tuple[str, ...] = (
+        "Valor",
+        "Delta Score",
+        "Score actual",
+        "Score base",
+        "n actual",
+        "n base",
+    )
     width_ratios: tuple[float, ...] = (2.80, 1.05, 1.30, 1.30, 1.05, 1.05)
 
 
@@ -119,7 +126,7 @@ EDITORIAL_COPY = EditorialCopy()
 SLIDE_TITLES: tuple[str, ...] = (
     "NPS Lens",
     "NPS térmico",
-    "Evolución del NPS del periodo",
+    "Evolución del NPS clásico del periodo",
     "Qué han dicho los clientes",
     "Qué ha cambiado en Palanca",
     "Qué ha cambiado en Subpalanca",
