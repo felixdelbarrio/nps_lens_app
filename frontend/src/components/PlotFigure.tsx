@@ -52,7 +52,10 @@ export function PlotFigure({ figure, emptyMessage, testId }: PlotFigureProps) {
       if (cancelled) {
         return;
       }
-      const layout = currentFigure.layout || {};
+      const layout = {
+        autosize: true,
+        ...(currentFigure.layout || {})
+      };
       const config = {
         displayModeBar: false,
         responsive: true,

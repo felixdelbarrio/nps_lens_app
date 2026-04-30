@@ -49,7 +49,7 @@ def test_build_ppt_8slide_script_contains_all_slides() -> None:
     assert "Slide 1" in out
     assert "Slide 8" in out
     assert "Impact Chain" in out
-    assert "impacto total en NPS" in out
+    assert "impacto total en Score" in out
     assert "Gobierno y métricas" in out
 
 

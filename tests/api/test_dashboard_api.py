@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from pptx import Presentation
 
 from nps_lens.api.app import create_app
+from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
+from nps_lens.domain.models import UploadContext
 from nps_lens.settings import Settings
 from nps_lens.testing.fixtures import fixture_excel
 
@@ -99,7 +101,8 @@ def _build_helix_fixture(path: Path) -> Path:
 
 
 def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) -> None:
-    client = TestClient(create_app(_settings(tmp_path)))
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
     upload = _upload_nps_march(client)
 
     context_response = client.get(
@@ -114,6 +117,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     context_payload = context_response.json()
     assert "2026" in context_payload["available_years"]
     assert "03" in context_payload["available_months_by_year"]["2026"]
+    assert "Web" in context_payload["score_channels"]
     assert context_payload["nps_dataset"]["available"] is True
     assert context_payload["nps_dataset"]["rows"] == upload["inserted_rows"]
     assert "Downloads" in context_payload["preferences"]["downloads_path"]
@@ -141,6 +145,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     dashboard_payload = dashboard_response.json()
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
+    assert dashboard_payload["kpis"]["neutral_rate"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
     assert dashboard_payload["controls"]["dimensions"] == [
         "Palanca",
@@ -149,6 +154,38 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         "UsuarioDecisión",
     ]
     assert "report_markdown" not in dashboard_payload
+
+    records = app.state.repository.load_records_df(
+        UploadContext(
+            service_origin="BBVA México",
+            service_origin_n1="Senda",
+            service_origin_n2="",
+        )
+    )
+    scope_records = app.state.dashboard_service._apply_population_filters(
+        records,
+        "2026",
+        "03",
+    )
+    scores = pd.to_numeric(scope_records["NPS"], errors="coerce").dropna()
+    expected_neutral_rate = float(((scores >= 7) & (scores <= 8)).mean())
+    assert abs(dashboard_payload["kpis"]["neutral_rate"] - expected_neutral_rate) < 1e-9
+
+    filtered_dashboard_response = client.get(
+        "/api/dashboard/nps",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "score_channel": "Web",
+            "nps_group": "Detractores",
+        },
+    )
+    assert filtered_dashboard_response.status_code == 200
+    filtered_dashboard_payload = filtered_dashboard_response.json()
+    assert filtered_dashboard_payload["kpis"] == dashboard_payload["kpis"]
 
     data_response = client.get(
         "/api/dashboard/data/nps",
@@ -276,6 +313,42 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Ranking de hipótesis",
         "Evidence wall",
     ]
+
+
+def test_helix_links_resolve_incident_number_through_record_id() -> None:
+    base_url = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
+    incident_number = "INC000104366753"
+    record_id = "IDGH5CDNHIEUEAT2Q5F3T2Q5F3CHLN"
+    frame = pd.DataFrame(
+        {
+            "Incident Number": [incident_number],
+            "Record ID": [record_id],
+        }
+    )
+
+    lookup = build_helix_incident_url_lookup(frame, base_url=base_url)
+    expected_url = f"{base_url}{record_id}"
+
+    assert lookup[incident_number] == expected_url
+    enriched = enrich_helix_incident_links(frame, base_url=base_url)
+    assert enriched.loc[0, "Incident Number__href"] == expected_url
+
+
+def test_helix_links_prioritize_explicit_valid_url_and_do_not_fallback_to_incident_number() -> None:
+    base_url = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
+    explicit_url = f"{base_url}EXPLICIT_RECORD"
+    frame = pd.DataFrame(
+        {
+            "Incident Number": ["INC-EXPLICIT", "INC-NO-RECORD"],
+            "Record ID": ["RID-SHOULD-NOT-WIN", ""],
+            "Incident URL": [explicit_url, base_url],
+        }
+    )
+
+    lookup = build_helix_incident_url_lookup(frame, base_url=base_url)
+
+    assert lookup["INC-EXPLICIT"] == explicit_url
+    assert "INC-NO-RECORD" not in lookup
 
 
 def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) -> None:

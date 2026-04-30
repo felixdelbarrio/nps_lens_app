@@ -13,8 +13,8 @@ Este documento define:
 ### Columnas mínimas esperadas
 - `Fecha` (o equivalente; se normaliza a `Fecha`)
 - `ID` (si existe; recomendable)
-- `NPS` (score numérico)
-- `NPS Group` (Promotor/Pasivo/Detractor) o derivable
+- `NPS` (score numérico 0-10; se conserva el nombre histórico de columna)
+- `NPS Group` (Promotor/Pasivo/Detractor) o derivable; en UI/reportes se etiqueta como `Grupo Score`
 - `Comment` (texto)
 - `Canal`
 - `Palanca`
@@ -28,6 +28,12 @@ Este documento define:
   - `_text_norm`
   - `_service_origin_n2_key`
 
+### Semántica de negocio
+- `Score` = valor 0-10 individual o media 0-10.
+- `NPS clásico` = `% promotores - % detractores`.
+- `NPS térmico` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
+- El filtro `Canal` se calcula desde `Canal`; por defecto usa `Web` si existe y `Todos` si no.
+
 ---
 
 ## 2) Fuente: Incidencias Helix (Excel)
@@ -38,6 +44,8 @@ Soportadas (mapeadas a canónico):
 - `BBVA_SourceServiceN1` (o `Servicio Origen - Servicio N1`)
 - `BBVA_SourceServiceN2` (o `Servicio Origen - Servicio N2`)
 - `incident_id` / `ID incidencia` (si existe)
+- `Incident Number` / `ID de la Incidencia` / `id`
+- `Record ID` / `workItemId` / `InstanceId`
 - `Descripción` / `summary` / `Description`
 - timestamps:
   - `Fecha` canónica (se intenta derivar de `Submit Date`, `Last Modified Date`, `bbva_startdatetime`, etc.)
@@ -46,6 +54,12 @@ Soportadas (mapeadas a canónico):
 ### Reglas de filtrado por contexto
 - Si existen columnas Company/N1/N2: filtrar estrictamente por contexto.
 - Si el extract ya viene filtrado y faltan columnas: se ingesta bajo el contexto seleccionado con WARN (para no mezclar).
+
+### Enlaces Helix
+- La URL visible de una incidencia se resuelve por `Record ID`, no por el número `INC...`.
+- Se priorizan URLs explícitas válidas en columnas URL/link/href.
+- Si no hay URL explícita, se construye `helix_base_url + Record ID`.
+- Si no hay `Record ID`, no se inventa `helix_base_url + Incident Number`.
 
 ---
 
@@ -105,4 +119,3 @@ classDiagram
 - Si faltan columnas mínimas: **ERROR** y no se persiste.
 - Si hay degradación recuperable: **WARN** (se persiste pero se informa).
 - Los issues se devuelven siempre al caller (UI/Batch) para trazabilidad.
-

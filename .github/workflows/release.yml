@@ -2,7 +2,7 @@ name: release
 
 on:
   push:
-    branches: ["master"]
+    branches: ["develop"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -11,11 +11,54 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.9.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9.13"
+          cache: "pip"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          make python-dev
+          npm --prefix frontend ci
+
+      - name: Lint
+        shell: bash
+        run: make lint
+
+      - name: Typecheck
+        shell: bash
+        run: make typecheck
+
+      - name: Test
+        shell: bash
+        run: make test
+
+      - name: CI frontend and E2E
+        shell: bash
+        run: make ci
+
   build:
     name: build-${{ matrix.label }}
+    needs: quality
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -41,6 +84,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.9.13"
+          cache: "pip"
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
@@ -66,6 +110,24 @@ jobs:
         shell: bash
         run: make build
 
+      - name: Verify Linux build output
+        if: matrix.label == 'linux'
+        shell: bash
+        run: test -f build/pyinstaller/linux/dist/nps-lens
+
+      - name: Verify macOS build output
+        if: matrix.label == 'macos'
+        shell: bash
+        run: test -d build/pyinstaller/macos/dist/nps-lens.app
+
+      - name: Verify Windows build output
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build/pyinstaller/windows/dist/nps-lens.exe")) {
+            throw "Missing Windows build output: build/pyinstaller/windows/dist/nps-lens.exe"
+          }
+
       - name: Archive Linux build output
         if: matrix.label == 'linux'
         shell: bash
@@ -90,16 +152,23 @@ jobs:
             -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
             -Force
 
+      - name: Verify packaged artifact
+        shell: bash
+        run: test -f "${{ matrix.artifact_path }}"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Download release artifacts

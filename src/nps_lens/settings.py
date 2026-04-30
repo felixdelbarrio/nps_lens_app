@@ -17,6 +17,7 @@ DEFAULT_UI_MAX_DAYS_APART = 10
 DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
 DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Todos"
+DEFAULT_UI_SCORE_CHANNEL = "Todos"
 DEFAULT_UI_POP_VALUE = "Todos"
 
 SERVICE_ORIGIN_N2_MAP_ENV_KEY = "NPS_LENS_SERVICE_ORIGIN_N2_MAP"
@@ -28,6 +29,7 @@ UI_PREF_ENV_KEYS = {
     "pop_year": "NPS_LENS_UI_POP_YEAR",
     "pop_month": "NPS_LENS_UI_POP_MONTH",
     "nps_group_choice": "NPS_LENS_UI_NPS_GROUP",
+    "score_channel": "NPS_LENS_UI_SCORE_CHANNEL",
     "theme_mode": "NPS_LENS_UI_THEME_MODE",
     "downloads_path": "NPS_LENS_UI_DOWNLOADS_PATH",
     "helix_base_url": "NPS_LENS_UI_HELIX_BASE_URL",
@@ -549,6 +551,8 @@ class Settings:
             "pop_month": ui_pref("pop_month", DEFAULT_UI_POP_VALUE) or DEFAULT_UI_POP_VALUE,
             "nps_group_choice": ui_pref("nps_group_choice", DEFAULT_UI_NPS_GROUP)
             or DEFAULT_UI_NPS_GROUP,
+            "score_channel": ui_pref("score_channel", DEFAULT_UI_SCORE_CHANNEL)
+            or DEFAULT_UI_SCORE_CHANNEL,
             "theme_mode": theme_mode,
             "downloads_path": downloads_path,
             "helix_base_url": helix_base_url,

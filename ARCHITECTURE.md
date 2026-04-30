@@ -1,4 +1,4 @@
-# ARCHITECTURE — NPS Lens (NPS ↔ Helix) ⚙️
+# ARCHITECTURE — NPS Lens (NPS ↔ Helix)
 
 Este documento describe la arquitectura **end‑to‑end** de NPS Lens: ingesta, modelo canónico, analítica, linking multi‑fuente, generación de artefactos, UI y ejecución batch (plataforma).
 
@@ -8,10 +8,12 @@ Este documento describe la arquitectura **end‑to‑end** de NPS Lens: ingesta,
 
 ```mermaid
 flowchart TB
-  subgraph UI[UI (Streamlit)]
-    S1[Sidebar: Contexto + Población
-(Año/Mes/Grupo)]
-    S2[Tabs: Resumen · Drivers · Texto · Journey · Alertas · NPS↔Helix · LLM · Datos]
+  subgraph UI[UI (React + FastAPI)]
+    S1[Sidebar: SERVICE CONTAINER
+BUUG/N1/N2]
+    SPeriod[Sidebar: PERIOD CONTAINER
+Año/Mes]
+    S2[Tabs: Sumario del Periodo · Analítica NPS Térmico · Incidencias↔NPS · Datos]
   end
 
   subgraph Core[Core / Plataforma]
@@ -41,6 +43,7 @@ artifacts/]
   end
 
   S1 --> Cfg
+  SPeriod --> Cfg
   UI --> Store
   UI --> Analytics
   UI --> Link
@@ -64,13 +67,21 @@ artifacts/]
 ## 2) Modelo de ejecución
 
 ### 2.1 UI (exploración)
-- El usuario selecciona **contexto**: `service_origin` + `service_origin_n1` + (opcional) `service_origin_n2`.
-- Selecciona **población global** (transversal): `Año` / `Mes` / `Grupo NPS`.
-- La UI carga dataset desde `DatasetStore` con **pushdown temporal** cuando hay rango continuo (Año + Mes), y aplica el filtro de grupo.
+- El usuario selecciona **SERVICE CONTAINER**: `service_origin` + `service_origin_n1` + (opcional) `service_origin_n2`.
+- Selecciona **PERIOD CONTAINER**: `Año` / `Mes`. Es transversal a dashboard, tablas y reportes.
+- `Canal` y `Grupo Score` viven bajo **Analítica NPS Térmico** e **Incidencias ↔ NPS** y se mantienen sincronizados. `Método causal` solo pertenece a Incidencias.
+- **Sumario del Periodo** no aplica Canal ni Grupo Score: sus KPIs y gráficos dependen solo de Service + Period.
+- La UI consume payloads de `DashboardService`; no calcula KPIs, periodos, grupos ni URLs Helix.
 
 **Regla de oro**: la UI no “inventa” lógica; orquesta casos de uso del core y renderiza resultados.
 
-### 2.2 Batch (plataforma)
+### 2.2 Semántica Score/NPS
+- **Score** = valor individual 0-10 y medias 0-10.
+- **NPS clásico** = `% promotores - % detractores`.
+- **NPS térmico** = fuente/dominio; las columnas históricas `NPS` y `NPS Group` se conservan por contrato de ingesta.
+- Las etiquetas visuales y de PPT usan `Score medio`, `Score actual`, `Score base` o `Delta Score` cuando hablan de medias 0-10.
+
+### 2.3 Batch (plataforma)
 - Ejecuta specs (JSON) de múltiples contextos.
 - Genera artefactos versionados en `artifacts/<dataset_id>/<pipeline_version>/<ctx_sig>/...`.
 
@@ -103,6 +114,8 @@ En arranque se valida:
 
 ### 5.1 Objetivo
 Enlazar verbatims detractores ↔ incidencias Helix con evidencia trazable.
+
+Los enlaces Helix se resuelven en una única capa de dominio: se buscan identificadores de incidencia (`Incident Number`, `ID de la Incidencia`, `id`) y se construye la URL final con `Record ID`/`workItemId`/`InstanceId`. Si existe una URL explícita válida se prioriza; nunca se construye `base_url + incident_number`.
 
 ### 5.2 Implementación MVP
 - Limpieza de texto + TF‑IDF + cosine similarity
@@ -148,4 +161,3 @@ Incluye:
 - Embeddings para linking más robusto
 - API (FastAPI) para servir artefactos y KPIs
 - Scheduler/registry (Airflow/Jenkins) para batch recurrente
-

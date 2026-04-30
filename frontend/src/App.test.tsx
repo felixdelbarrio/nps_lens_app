@@ -18,6 +18,7 @@ const contextPayload = {
   available_years: ["Todos", "2026"],
   available_months_by_year: { Todos: ["Todos", "03"], "2026": ["Todos", "03"] },
   nps_groups: ["Todos", "Detractores", "Neutros", "Promotores"],
+  score_channels: ["Todos", "Web", "App"],
   causal_method_options: [
     {
       value: "domain_touchpoint",
@@ -39,6 +40,7 @@ const contextPayload = {
     pop_year: "Todos",
     pop_month: "Todos",
     nps_group_choice: "Todos",
+    score_channel: "Todos",
     theme_mode: "light",
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
@@ -106,6 +108,7 @@ const dashboardPayload = {
     samples: 26618,
     nps_average: 4.2,
     detractor_rate: 0.345,
+    neutral_rate: 0.435,
     promoter_rate: 0.22
   },
   overview: {
@@ -232,8 +235,8 @@ const linkingPayloadAvailable = {
     title: "Análisis de Tópicos de NPS afectados",
     subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
     kpis: [
-      { label: "NPS en riesgo", value: "3.90 pts" },
-      { label: "NPS recuperable", value: "2.40 pts" },
+      { label: "Score en riesgo", value: "3.90 pts" },
+      { label: "Score recuperable", value: "2.40 pts" },
       { label: "Concentración top-3", value: "74.0%" },
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
@@ -326,7 +329,7 @@ const linkingPayloadAvailable = {
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
           "Consulta / Operativa / Error funcional",
-          "Riesgo NPS"
+          "Riesgo Score"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
@@ -336,13 +339,13 @@ const linkingPayloadAvailable = {
           },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "60.0%" },
-          { label: "Delta NPS", value: "-0.0" },
+          { label: "Delta Score", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.16" },
           { label: "Links validados", value: "16" },
           { label: "Prioridad", value: "0.62" },
-          { label: "NPS en riesgo", value: "0.00 pts" },
-          { label: "NPS recuperable", value: "0.00 pts" },
+          { label: "Score en riesgo", value: "0.00 pts" },
+          { label: "Score recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "VoC + Analitica" }
         ],
         incident_records: [
@@ -397,20 +400,20 @@ const linkingPayloadAvailable = {
           "(8) Incidencias + comentarios",
           "Consulta de saldos",
           "Consulta / Disponibilidad / Saldos",
-          "Riesgo NPS"
+          "Riesgo Score"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
           { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "52.0%" },
-          { label: "Delta NPS", value: "-0.0" },
+          { label: "Delta Score", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.14" },
           { label: "Links validados", value: "14" },
           { label: "Prioridad", value: "0.51" },
-          { label: "NPS en riesgo", value: "0.00 pts" },
-          { label: "NPS recuperable", value: "0.00 pts" },
+          { label: "Score en riesgo", value: "0.00 pts" },
+          { label: "Score recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "Canal Digital" }
         ],
         incident_records: [
@@ -538,10 +541,12 @@ describe("App", () => {
     expect(
       screen.getByRole("tab", { name: "Evolución promotores vs detractores" })
     ).toBeInTheDocument();
-    expect(screen.getByText("Cambios respecto al histórico")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Sumario del Periodo" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Analítica NPS Térmico" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
+    expect(screen.getByText("PERIOD CONTAINER")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
     expect(screen.queryByRole("listbox", { name: "N2" })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Año" })).toHaveValue("2026");
@@ -550,11 +555,27 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
+    expect(screen.getByText("Score medio (0-10)")).toBeInTheDocument();
+    expect(screen.getByText("Neutros (7-8)")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();
     expect(opportunityNote).not.toHaveTextContent("**");
     expect(within(opportunityNote as HTMLElement).getByText("Palanca=Acceso").tagName).toBe("STRONG");
+
+    await user.click(screen.getByRole("tab", { name: "Analítica NPS Térmico" }));
+    expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
+    expect(screen.getByRole("tab", { name: "Qué dicen los clientes" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Canal" }), "App");
+    await waitFor(() =>
+      expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
+    );
+    await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("App");
+    expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
@@ -596,6 +617,18 @@ describe("App", () => {
     );
     expect(createObjectUrl).toHaveBeenCalled();
     expect(anchorClick).toHaveBeenCalled();
+  });
+
+  it("shows the operational state while loading and unlocks actions when stable", async () => {
+    renderApp();
+
+    expect(screen.getByTestId("operational-state")).toHaveTextContent("SINCRONIZANDO");
+    expect(screen.getByTestId("generate-report-button")).toBeDisabled();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
+    );
+    expect(screen.getByTestId("generate-report-button")).toBeEnabled();
   });
 
   it("renders the restored linking workspace with method-driven summary, deep dive and scenarios", async () => {
