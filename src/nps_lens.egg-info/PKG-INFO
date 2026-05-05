@@ -155,9 +155,10 @@ La experiencia operativa se organiza así:
 
 - **SERVICE CONTAINER**: contexto de servicio (`BUUG`, `N1`, `N2`).
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
-- **Sumario del Periodo**: KPIs y gráficos afectados solo por Service + Period.
+- **Sumario del Periodo**: KPIs y gráficos afectados solo por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
 - **Analítica NPS Térmico**: filtros sincronizados de `Canal` y `Grupo Score`; contiene “Qué dicen los clientes” y “Cambios respecto al histórico”.
-- **Incidencias ↔ NPS**: comparte `Canal` y `Grupo Score`; añade el método causal exclusivo de la sección.
+- **Incidencias ↔ NPS**: fija `Canal=Web`, oculta `Grupo Score` y usa `Método causal=Por Palanca` por defecto.
+- **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
 
 Semántica:
 
@@ -165,7 +166,7 @@ Semántica:
 - **NPS clásico** es el índice `% promotores - % detractores`.
 - **NPS térmico** se mantiene como nombre de fuente/dominio.
 
-El canal selecciona `Web` por defecto si existe; si no, `Todos`. El grupo selecciona `Detractores` si existe; si no, `Todos`. Los enlaces Helix se resuelven con `Record ID` y no con el número de incidencia.
+El canal selecciona `Web` por defecto si existe; si no, `Todos`. El grupo selecciona `Detractores` si existe; si no, `Todos`. En Incidencias ↔ NPS el canal queda fijado a `Web` y el histórico Helix no se recorta por la fecha NPS. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
 
 ---
 
