@@ -21,6 +21,12 @@ const contextPayload = {
   score_channels: ["Todos", "Web", "App"],
   causal_method_options: [
     {
+      value: "palanca_touchpoint",
+      label: "Por Palanca",
+      summary: "La lectura causal organiza la atribución por palanca.",
+      flow: "Incidencias -> Touchpoint afectado -> Palanca -> Comentario -> NPS"
+    },
+    {
       value: "domain_touchpoint",
       label: "Por Subpalanca",
       summary: "La lectura causal fija el touchpoint desde Subpalanca.",
@@ -44,7 +50,8 @@ const contextPayload = {
     theme_mode: "light",
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
-    touchpoint_source: "executive_journeys",
+    report_dimension_analysis: "palanca",
+    touchpoint_source: "palanca_touchpoint",
     min_similarity: 0.25,
     max_days_apart: 10,
     min_n_opportunities: 200,
@@ -117,8 +124,41 @@ const dashboardPayload = {
     topics_figure: null,
     topics_table: [],
     daily_volume_figure: null,
+    daily_volume_mix_figure: null,
     daily_mix_figure: null,
+    daily_explanation_bullets: [
+      "El periodo arranca con NPS clásico **-12.5** y termina en **4.0**."
+    ],
     insight_bullets: []
+  },
+  scope: {
+    cumulative: {
+      label: "Datos acumulados hasta Marzo 2026",
+      note: "KPIs calculados solo con Service Container y Period Container.",
+      kpis: {
+        samples: 50000,
+        nps_average: 4.5,
+        detractor_rate: 0.32,
+        neutral_rate: 0.42,
+        promoter_rate: 0.26
+      }
+    },
+    period: {
+      label: "Marzo 2026",
+      kpis: {
+        samples: 26618,
+        nps_average: 4.2,
+        detractor_rate: 0.345,
+        neutral_rate: 0.435,
+        promoter_rate: 0.22
+      },
+      deltas: {
+        nps_average: { value: -0.3, direction: "down", favorable: false },
+        detractor_rate: { value: 0.025, direction: "up", favorable: false },
+        neutral_rate: { value: 0.015, direction: "up", favorable: true },
+        promoter_rate: { value: -0.04, direction: "down", favorable: false }
+      }
+    }
   },
   comparison: { has_data: false, table: [] },
   cohorts: {},
@@ -538,9 +578,10 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: /NPS Lens/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Media semanal" })).toBeInTheDocument();
     expect(
-      screen.getByRole("tab", { name: "Evolución promotores vs detractores" })
-    ).toBeInTheDocument();
+      screen.queryByRole("tab", { name: "Evolución promotores vs detractores" })
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Sumario del Periodo" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Analítica NPS Térmico" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
@@ -555,8 +596,8 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
-    expect(screen.getByText("Score medio (0-10)")).toBeInTheDocument();
-    expect(screen.getByText("Neutros (7-8)")).toBeInTheDocument();
+    expect(screen.getAllByText("Score medio (0-10)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Neutros (7-8)").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();
@@ -574,8 +615,8 @@ describe("App", () => {
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
     await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
-    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("App");
-    expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
@@ -628,7 +669,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
-    expect(screen.getByTestId("generate-report-button")).toBeEnabled();
+    await waitFor(() => expect(screen.getByTestId("generate-report-button")).toBeEnabled());
   });
 
   it("renders the restored linking workspace with method-driven summary, deep dive and scenarios", async () => {
@@ -647,7 +688,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );
-    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
+    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("palanca_touchpoint");
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
     const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
     const incidentsMetric = screen.getByText("Incidencias del periodo");

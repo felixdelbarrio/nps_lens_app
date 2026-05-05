@@ -5,6 +5,13 @@ from typing import Any
 
 import pandas as pd
 
+from nps_lens.services.helix_service import (
+    build_helix_url,
+)
+from nps_lens.services.helix_service import (
+    normalize_helix_base_url as normalize_helix_incident_base_url,
+)
+
 INCIDENT_ID_COLUMNS: tuple[str, ...] = (
     "Incident Number",
     "ID de la Incidencia",
@@ -33,13 +40,6 @@ EXPLICIT_URL_COLUMNS: tuple[str, ...] = (
     "Href",
     "url",
 )
-
-
-def normalize_helix_incident_base_url(base_url: object) -> str:
-    raw = str(base_url or "").strip()
-    if not raw:
-        return ""
-    return raw.rstrip("/") + "/"
 
 
 def _text_series(frame: pd.DataFrame, column: str, *, default: str = "") -> pd.Series[Any]:
@@ -101,7 +101,7 @@ def _constructed_url_series(frame: pd.DataFrame, *, base_url: str) -> pd.Series[
         return pd.Series([""] * len(frame), index=frame.index, dtype=object)
     record_id = _coalesce_text_columns(frame, RECORD_ID_COLUMNS)
     return (
-        record_id.map(lambda value: f"{normalized_base}{value}" if str(value or "").strip() else "")
+        record_id.map(lambda value: build_helix_url(value, base_url=normalized_base))
         .astype(str)
         .fillna("")
         .str.strip()
@@ -115,12 +115,7 @@ def resolve_helix_incident_url(
     current_url: object = "",
     base_url: object = "",
 ) -> str:
-    current = str(current_url or "").strip()
-    normalized_base = normalize_helix_incident_base_url(base_url)
-    if current.lower().startswith(("http://", "https://")) and (
-        not normalized_base or current.rstrip("/") != normalized_base.rstrip("/")
-    ):
-        return current
+    del current_url, base_url
     key = str(incident_id or "").strip()
     return lookup.get(key, "")
 
@@ -134,9 +129,9 @@ def build_helix_incident_url_lookup(
         return {}
 
     normalized_base = normalize_helix_incident_base_url(base_url)
-    explicit_url = _explicit_url_series(helix_df, base_url=normalized_base)
     constructed_url = _constructed_url_series(helix_df, base_url=normalized_base)
-    resolved_url = explicit_url.where(explicit_url.ne(""), constructed_url)
+    explicit_url = _explicit_url_series(helix_df, base_url=normalized_base)
+    resolved_url = constructed_url.where(constructed_url.ne(""), explicit_url)
 
     lookup: dict[str, str] = {}
     lower_map = {str(column).strip().lower(): str(column) for column in helix_df.columns}
@@ -166,9 +161,9 @@ def enrich_helix_incident_links(
 
     out = helix_df.copy()
     normalized_base = normalize_helix_incident_base_url(base_url)
-    explicit_url = _explicit_url_series(out, base_url=normalized_base)
     constructed_url = _constructed_url_series(out, base_url=normalized_base)
-    resolved_url = explicit_url.where(explicit_url.ne(""), constructed_url)
+    explicit_url = _explicit_url_series(out, base_url=normalized_base)
+    resolved_url = constructed_url.where(constructed_url.ne(""), explicit_url)
     lower_map = {str(column).strip().lower(): str(column) for column in out.columns}
     for incident_column in INCIDENT_ID_COLUMNS:
         actual_column = lower_map.get(incident_column.strip().lower(), incident_column)

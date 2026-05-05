@@ -2,8 +2,10 @@ name: release
 
 on:
   push:
-    branches: ["develop"]
+    branches: ["develop", "feat/**"]
     tags: ["v*"]
+  pull_request:
+    branches: ["develop"]
   workflow_dispatch:
 
 concurrency:
@@ -124,8 +126,10 @@ jobs:
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
-          if (!(Test-Path "build/pyinstaller/windows/dist/nps-lens.exe")) {
-            throw "Missing Windows build output: build/pyinstaller/windows/dist/nps-lens.exe"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist/nps-lens.exe"
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) {
+            Get-ChildItem -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist") -Recurse -ErrorAction SilentlyContinue
+            throw "Missing Windows build output: $exe"
           }
 
       - name: Archive Linux build output
@@ -147,9 +151,11 @@ jobs:
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist/nps-lens.exe"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/nps-lens-windows.zip"
           Compress-Archive `
-            -Path build/pyinstaller/windows/dist/nps-lens.exe `
-            -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
+            -Path $exe `
+            -DestinationPath $zip `
             -Force
 
       - name: Verify packaged artifact
@@ -161,6 +167,14 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+
+      - name: Upload Windows executable artifact
+        if: matrix.label == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nps-lens-windows-exe
+          path: build/pyinstaller/windows/dist/nps-lens.exe
           if-no-files-found: error
 
   publish:

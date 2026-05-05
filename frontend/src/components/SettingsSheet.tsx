@@ -19,6 +19,8 @@ type SettingsSheetProps = {
   setDownloadsPath: (value: string) => void;
   helixBaseUrl: string;
   setHelixBaseUrl: (value: string) => void;
+  reportDimensionAnalysis: "palanca" | "subpalanca";
+  setReportDimensionAnalysis: (value: "palanca" | "subpalanca") => void;
   minSimilarity: number;
   setMinSimilarity: (value: number) => void;
   maxDaysApart: number;
@@ -54,6 +56,8 @@ export function SettingsSheet({
   setDownloadsPath,
   helixBaseUrl,
   setHelixBaseUrl,
+  reportDimensionAnalysis,
+  setReportDimensionAnalysis,
   minSimilarity,
   setMinSimilarity,
   maxDaysApart,
@@ -169,6 +173,28 @@ export function SettingsSheet({
                       Si introduces una ruta relativa, se resolverá sobre tu directorio de usuario.
                     </small>
                   </label>
+                </div>
+              </article>
+
+              <article className="settings-subsection">
+                <div className="settings-subsection-copy">
+                  <h4>Reporte</h4>
+                  <p className="secondary-copy">
+                    Define la dimensión que se mostrará en las slides analíticas del PPTX.
+                  </p>
+                </div>
+                <div className="choice-grid" role="group" aria-label="Dimensión de análisis">
+                  {(["palanca", "subpalanca"] as const).map((value) => (
+                    <button
+                      className={`choice-chip${reportDimensionAnalysis === value ? " is-selected" : ""}`}
+                      disabled={actionsDisabled}
+                      key={value}
+                      onClick={() => setReportDimensionAnalysis(value)}
+                      type="button"
+                    >
+                      {value === "palanca" ? "Palanca" : "Subpalanca"}
+                    </button>
+                  ))}
                 </div>
               </article>
 

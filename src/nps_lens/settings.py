@@ -10,7 +10,8 @@ from typing import Mapping, Optional
 from dotenv import load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
-DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "palanca_touchpoint"
+DEFAULT_UI_REPORT_DIMENSION_ANALYSIS = "palanca"
 DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
 DEFAULT_UI_MIN_SIMILARITY = 0.25
 DEFAULT_UI_MAX_DAYS_APART = 10
@@ -33,6 +34,7 @@ UI_PREF_ENV_KEYS = {
     "theme_mode": "NPS_LENS_UI_THEME_MODE",
     "downloads_path": "NPS_LENS_UI_DOWNLOADS_PATH",
     "helix_base_url": "NPS_LENS_UI_HELIX_BASE_URL",
+    "report_dimension_analysis": "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
     "touchpoint_source": "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
@@ -234,6 +236,11 @@ def safe_normalize_helix_base_url(value: object, fallback: object) -> str:
         return normalize_helix_base_url(fallback)
 
 
+def normalize_report_dimension_analysis(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in {"palanca", "subpalanca"} else DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
+
+
 def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
     if dotenv_path is None:
         return
@@ -249,6 +256,8 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
             value = normalize_downloads_path(raw_value)
         elif str(name) == "helix_base_url":
             value = normalize_helix_base_url(raw_value)
+        elif str(name) == "report_dimension_analysis":
+            value = normalize_report_dimension_analysis(raw_value)
         else:
             value = str(raw_value)
         os.environ[env_key] = value
@@ -302,6 +311,7 @@ class Settings:
     service_origin_n2_map: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
     default_touchpoint_source: str = DEFAULT_UI_TOUCHPOINT_SOURCE
+    default_report_dimension_analysis: str = DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
     default_downloads_path: str = field(default_factory=default_downloads_path)
     default_helix_base_url: str = DEFAULT_UI_HELIX_BASE_URL
     default_min_similarity: float = DEFAULT_UI_MIN_SIMILARITY
@@ -392,6 +402,12 @@ class Settings:
             os.getenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", DEFAULT_UI_TOUCHPOINT_SOURCE).strip()
             or DEFAULT_UI_TOUCHPOINT_SOURCE
         )
+        default_report_dimension_analysis = normalize_report_dimension_analysis(
+            os.getenv(
+                "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
+                DEFAULT_UI_REPORT_DIMENSION_ANALYSIS,
+            )
+        )
         default_downloads_dir = safe_normalize_downloads_path(
             os.getenv("NPS_LENS_UI_DOWNLOADS_PATH", default_downloads_path()),
             default_downloads_path(),
@@ -459,6 +475,7 @@ class Settings:
             service_origin_n2_map=service_origin_n2_map,
             default_theme_mode=default_theme_mode,
             default_touchpoint_source=default_touchpoint_source,
+            default_report_dimension_analysis=default_report_dimension_analysis,
             default_downloads_path=default_downloads_dir,
             default_helix_base_url=default_helix_base_url,
             default_min_similarity=default_min_similarity,
@@ -496,6 +513,9 @@ class Settings:
         touchpoint_source = (
             ui_pref("touchpoint_source", self.default_touchpoint_source)
             or self.default_touchpoint_source
+        )
+        report_dimension_analysis = normalize_report_dimension_analysis(
+            ui_pref("report_dimension_analysis", self.default_report_dimension_analysis)
         )
         downloads_path = safe_normalize_downloads_path(
             ui_pref("downloads_path", self.default_downloads_path),
@@ -556,6 +576,7 @@ class Settings:
             "theme_mode": theme_mode,
             "downloads_path": downloads_path,
             "helix_base_url": helix_base_url,
+            "report_dimension_analysis": report_dimension_analysis,
             "touchpoint_source": touchpoint_source,
             "min_similarity": min_similarity,
             "max_days_apart": max_days_apart,

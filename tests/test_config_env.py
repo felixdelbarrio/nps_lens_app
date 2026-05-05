@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 import nps_lens.config as config_module
-from nps_lens.config import DEFAULT_UI_HELIX_BASE_URL, Settings, persist_ui_prefs, ui_pref
+from nps_lens.config import (
+    DEFAULT_UI_HELIX_BASE_URL,
+    DEFAULT_UI_REPORT_DIMENSION_ANALYSIS,
+    Settings,
+    normalize_report_dimension_analysis,
+    persist_ui_prefs,
+    ui_pref,
+)
 
 
 def test_settings_reads_context_values_from_env(monkeypatch):
@@ -30,6 +37,7 @@ def test_settings_reads_context_values_from_env(monkeypatch):
     assert s.default_min_n_cross_comparisons == 40
     assert s.default_downloads_path.endswith("Downloads")
     assert s.default_helix_base_url == DEFAULT_UI_HELIX_BASE_URL
+    assert s.default_report_dimension_analysis == DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
 
 
 def test_settings_accepts_compact_n1_format(monkeypatch):
@@ -72,6 +80,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "Otro")
     monkeypatch.setenv("NPS_LENS_UI_THEME_MODE", "SEPIA")
     monkeypatch.setenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", "")
+    monkeypatch.setenv("NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS", "dimension")
     monkeypatch.setenv("NPS_LENS_UI_MIN_SIMILARITY", "2.0")
     monkeypatch.setenv("NPS_LENS_UI_MAX_DAYS_APART", "-5")
     monkeypatch.setenv("NPS_LENS_UI_MIN_N_OPPORTUNITIES", "10")
@@ -83,6 +92,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     assert s.default_service_origin_n1 == "Senda"
     assert s.default_theme_mode == "light"
     assert s.default_touchpoint_source
+    assert s.default_report_dimension_analysis == "palanca"
     assert s.default_min_similarity == 1.0
     assert s.default_max_days_apart == 0
     assert s.default_min_n_opportunities == 50
@@ -98,6 +108,7 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
             "theme_mode": "dark",
             "downloads_path": "~/Downloads/nps-lens",
             "helix_base_url": "https://example.com/helix",
+            "report_dimension_analysis": "subpalanca",
             "unknown": "ignored",
         },
     )
@@ -108,7 +119,9 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
     assert ui_pref("theme_mode") == "dark"
     assert ui_pref("downloads_path").endswith("Downloads/nps-lens")
     assert ui_pref("helix_base_url") == "https://example.com/helix/"
+    assert ui_pref("report_dimension_analysis") == "subpalanca"
     assert ui_pref("missing", default="fallback") == "fallback"
+    assert normalize_report_dimension_analysis("other") == "palanca"
 
     monkeypatch.delenv("NPS_LENS_UI_SERVICE_ORIGIN", raising=False)
     persist_ui_prefs(None, {"service_origin": "No-op"})

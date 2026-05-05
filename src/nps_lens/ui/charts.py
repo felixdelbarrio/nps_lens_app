@@ -447,13 +447,13 @@ def chart_daily_nps_committee_stack(
     days: int = 60,
     metrics: pd.DataFrame | None = None,
 ):
-    """Committee view with NPS/detractors and promoters/detractors stacked vertically."""
+    """Committee view with NPS/detractors and full group distribution stacked vertically."""
 
     if metrics is not None and not metrics.empty:
-        required = {"day", "n", "classic_nps", "det_pct", "pro_pct"}
+        required = {"day", "n", "classic_nps", "det_pct", "pas_pct", "pro_pct"}
         if not required.issubset(set(metrics.columns)):
             return None
-        agg = metrics[["day", "n", "classic_nps", "det_pct", "pro_pct"]].copy()
+        agg = metrics[["day", "n", "classic_nps", "det_pct", "pas_pct", "pro_pct"]].copy()
         agg = agg.sort_values("day")
     else:
         agg = shared_daily_metrics(df, days=int(days))
@@ -461,7 +461,7 @@ def chart_daily_nps_committee_stack(
             return None
 
     th = chart_theme(theme)
-    detr_c, _, pro_c = _status_colors(theme)
+    detr_c, pas_c, pro_c = _status_colors(theme)
     import plotly.graph_objects as go  # lazy import
     from plotly.subplots import make_subplots  # lazy import
 
@@ -519,6 +519,20 @@ def chart_daily_nps_committee_stack(
     fig.add_trace(
         go.Scatter(
             x=agg["day"],
+            y=agg["pas_pct"],
+            mode="lines+markers",
+            name="% pasivos",
+            line=dict(color=pas_c, width=2.4),
+            marker=dict(size=5, color=pas_c),
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% pasivos=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            customdata=agg["n"],
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["day"],
             y=agg["det_pct"],
             mode="lines+markers",
             name="% detractores",
@@ -546,6 +560,65 @@ def chart_daily_nps_committee_stack(
     fig.update_xaxes(title_text="Día", row=2, col=1)
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=16)
     fig.update_xaxes(ticklabelposition="outside bottom")
+    return apply_plotly_template(fig, theme)
+
+
+def chart_daily_volume_mix_business(
+    df: pd.DataFrame,
+    theme: Theme,
+    *,
+    days: int = 60,
+    metrics: pd.DataFrame | None = None,
+):
+    """Daily response volume colored by NPS group."""
+
+    source = metrics.copy() if metrics is not None else shared_daily_metrics(df, days=int(days))
+    if source.empty:
+        return None
+    required = {"day", "n", "det_pct", "pas_pct", "pro_pct"}
+    if not required.issubset(set(source.columns)):
+        return None
+    agg = source[["day", "n", "det_pct", "pas_pct", "pro_pct"]].copy()
+    agg["detractors"] = agg["n"] * agg["det_pct"] / 100.0
+    agg["passives"] = agg["n"] * agg["pas_pct"] / 100.0
+    agg["promoters"] = agg["n"] * agg["pro_pct"] / 100.0
+
+    th = chart_theme(theme)
+    detr_c, pas_c, pro_c = _status_colors(theme)
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    for key, label, color in [
+        ("detractors", "Detractores (0-6)", detr_c),
+        ("passives", "Pasivos (7-8)", pas_c),
+        ("promoters", "Promotores (9-10)", pro_c),
+    ]:
+        fig.add_trace(
+            go.Bar(
+                x=agg["day"],
+                y=agg[key],
+                name=label,
+                marker_color=color,
+                customdata=agg[["n"]],
+                hovertemplate=(
+                    "Día=%{x|%Y-%m-%d}<br>"
+                    f"{label}=%{{y:.0f}}<br>"
+                    "Total=%{customdata[0]}<extra></extra>"
+                ),
+            )
+        )
+
+    _layout_common(fig, th, height=320)
+    fig.update_layout(
+        barmode="stack",
+        yaxis_title="Respuestas (n)",
+        xaxis_title="Día",
+        legend=dict(orientation="h", x=0, y=1.18, title_text=""),
+        hovermode="x unified",
+        bargap=0.14,
+        margin=dict(l=10, r=10, t=92, b=18),
+    )
+    _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)
     return apply_plotly_template(fig, theme)
 
 
@@ -742,6 +815,7 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     fig.update_layout(
         xaxis_title="Impacto estimado (puntos Score)", yaxis_title="", showlegend=False
     )
+    fig.update_yaxes(categoryorder="array", categoryarray=list(reversed(d["label"].tolist())))
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
 
@@ -1350,8 +1424,11 @@ def chart_cohort_heatmap(
         return None
 
     pivot = agg.pivot(index=row_dim, columns=col_dim, values="nps")
+    row_width = 24 if str(row_dim).strip().lower() == "subpalanca" else 18
+    row_max_chars = 46 if str(row_dim).strip().lower() == "subpalanca" else 34
     pivot.index = [
-        _compact_axis_label(value, width=16, max_lines=2, max_chars=30) for value in pivot.index
+        _compact_axis_label(value, width=row_width, max_lines=2, max_chars=row_max_chars)
+        for value in pivot.index
     ]
     pivot.columns = [
         _compact_axis_label(value, width=12, max_lines=2, max_chars=22) for value in pivot.columns
@@ -1364,8 +1441,10 @@ def chart_cohort_heatmap(
         zmin=0,
         zmax=10,
     )
-    longest_row_label = max((len(str(value)) for value in pivot.index), default=0)
-    left_margin = min(220, max(96, 12 * longest_row_label))
+    longest_row_label = max(
+        (len(str(value).replace("<br>", " ")) for value in pivot.index), default=0
+    )
+    left_margin = min(280, max(108, 10 * longest_row_label))
     responsive_height = max(420, min(760, 56 + 34 * len(pivot.index)))
     fig.update_layout(
         coloraxis=dict(
@@ -1382,8 +1461,14 @@ def chart_cohort_heatmap(
         ),
         margin=dict(l=left_margin, r=86, t=82, b=78),
     )
+    fig.update_traces(xgap=2, ygap=2)
     fig.update_xaxes(tickangle=-28, side="bottom", automargin=True)
-    fig.update_yaxes(automargin=True, ticklabelposition="outside left")
+    fig.update_yaxes(
+        automargin=True,
+        ticklabelposition="outside left",
+        categoryorder="array",
+        categoryarray=list(pivot.index),
+    )
     _layout_common(fig, th, height=responsive_height)
     fig.update_layout(margin=dict(l=left_margin, r=86, t=82, b=78))
     return apply_plotly_template(fig, theme)
