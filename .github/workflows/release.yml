@@ -2,8 +2,10 @@ name: release
 
 on:
   push:
-    branches: ["develop"]
+    branches: ["develop", "feat/**"]
     tags: ["v*"]
+  pull_request:
+    branches: ["develop"]
   workflow_dispatch:
 
 concurrency:
@@ -161,6 +163,14 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_path }}
+          if-no-files-found: error
+
+      - name: Upload Windows executable artifact
+        if: matrix.label == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nps-lens-windows-exe
+          path: build/pyinstaller/windows/dist/nps-lens.exe
           if-no-files-found: error
 
   publish:

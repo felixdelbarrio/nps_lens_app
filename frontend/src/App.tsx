@@ -77,13 +77,11 @@ const INGEST_TABS = [
 ];
 
 const SUMMARY_TABS = [
-  { id: "promoters-vs-detractors", label: "Evolución promotores vs detractores" },
-  { id: "daily", label: "NPS clásico vs detractores" },
   { id: "weekly", label: "Media semanal" },
-  { id: "volume", label: "Cuándo lo dicen" },
-  { id: "mix", label: "Cómo lo dicen" },
+  { id: "daily", label: "NPS clásico vs detractores" },
+  { id: "volume-mix", label: "Como y Cuando lo dicen" },
+  { id: "gaps", label: "Donde se separa el NPS" },
   { id: "opportunities", label: "Oportunidades priorizadas" },
-  { id: "gaps", label: "Dónde el NPS se separa" },
   { id: "cohorts", label: "Comparativas cruzadas" }
 ];
 
@@ -98,6 +96,8 @@ const DATA_TABS = [
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
+const LINKING_SCORE_CHANNEL = "Web";
+const LINKING_NPS_GROUP = "Todos";
 type OperationalState = "operativo" | "sincronizando" | "generando";
 
 function renderStrongMarkdown(text: string): ReactNode[] {
@@ -194,6 +194,17 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
+type KpiPayload = DashboardPayload["kpis"];
+
+function formatDeltaValue(delta: number | null | undefined, kind: "number" | "percent") {
+  if (delta === null || delta === undefined || Number.isNaN(delta)) {
+    return "";
+  }
+  return kind === "percent"
+    ? `${formatNumber(delta * 100, { signed: true })} pp`
+    : formatNumber(delta, { signed: true });
+}
+
 export function App() {
   const [serviceOrigin, setServiceOrigin] = useState("");
   const [serviceOriginN1, setServiceOriginN1] = useState("");
@@ -205,7 +216,8 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
-  const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
+  const [reportDimensionAnalysis, setReportDimensionAnalysis] = useState<"palanca" | "subpalanca">("palanca");
+  const [touchpointSource, setTouchpointSource] = useState("palanca_touchpoint");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [opportunityDimension, setOpportunityDimension] = useState("Palanca");
@@ -217,7 +229,7 @@ export function App() {
   const [maxDaysApart, setMaxDaysApart] = useState(10);
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("summary");
-  const [summaryTab, setSummaryTab] = useState("promoters-vs-detractors");
+  const [summaryTab, setSummaryTab] = useState("weekly");
   const [thermalTab, setThermalTab] = useState("topics");
   const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
@@ -283,7 +295,8 @@ export function App() {
     setThemeMode(normalizeThemeMode(config.preferences.theme_mode));
     setDownloadsPath(config.preferences.downloads_path || "");
     setHelixBaseUrl(config.preferences.helix_base_url || "");
-    setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
+    setReportDimensionAnalysis(config.preferences.report_dimension_analysis || "palanca");
+    setTouchpointSource(config.preferences.touchpoint_source || "palanca_touchpoint");
     setMinSimilarity(config.preferences.min_similarity ?? 0.25);
     setMaxDaysApart(config.preferences.max_days_apart ?? 10);
     setMinN(config.preferences.min_n_opportunities ?? 200);
@@ -383,8 +396,8 @@ export function App() {
           serviceOriginN2,
           popYear,
           popMonth,
-          scoreChannel,
-          npsGroup,
+          LINKING_SCORE_CHANNEL,
+          LINKING_NPS_GROUP,
           minSimilarity,
           maxDaysApart,
           touchpointSource,
@@ -404,8 +417,8 @@ export function App() {
       service_origin_n2: serviceOriginN2,
       pop_year: popYear,
       pop_month: popMonth,
-      nps_group: npsGroup,
-      score_channel: scoreChannel,
+      nps_group: LINKING_NPS_GROUP,
+      score_channel: LINKING_SCORE_CHANNEL,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
       touchpoint_source: touchpointSource,
@@ -577,9 +590,9 @@ export function App() {
     }
     if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
       setTouchpointSource(
-        causalMethodOptions.find((option) => option.value === "executive_journeys")?.value ||
+        causalMethodOptions.find((option) => option.value === "palanca_touchpoint")?.value ||
           causalMethodOptions[0]?.value ||
-          "executive_journeys"
+          "palanca_touchpoint"
       );
     }
   }, [causalMethodOptions, touchpointSource]);
@@ -601,6 +614,7 @@ export function App() {
       theme_mode: themeMode,
       downloads_path: downloadsPath,
       helix_base_url: helixBaseUrl,
+      report_dimension_analysis: reportDimensionAnalysis,
       touchpoint_source: touchpointSource,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
@@ -614,6 +628,7 @@ export function App() {
       minSimilarity,
       downloadsPath,
       helixBaseUrl,
+      reportDimensionAnalysis,
       npsGroup,
       popMonth,
       popYear,
@@ -727,12 +742,13 @@ export function App() {
         service_origin_n2: serviceOriginN2,
         pop_year: popYear,
         pop_month: popMonth,
-        nps_group: npsGroup,
-        score_channel: scoreChannel,
+        nps_group: LINKING_NPS_GROUP,
+        score_channel: LINKING_SCORE_CHANNEL,
         min_n: minN,
         min_similarity: minSimilarity,
         max_days_apart: maxDaysApart,
-        touchpoint_source: touchpointSource
+        touchpoint_source: touchpointSource,
+        report_dimension_analysis: reportDimensionAnalysis
       });
       triggerBlobDownload(report.blob, report.fileName);
     } catch (caughtError) {
@@ -877,7 +893,7 @@ export function App() {
   }
 
   function renderAnalysisFiltersContainer(showCausalMethodFilter: boolean) {
-    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method" : ""}`;
+    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method fixed-causal-filters" : ""}`;
 
     return (
       <section className="surface-card context-strip-card" data-testid="analysis-filters">
@@ -895,32 +911,34 @@ export function App() {
             <span>Canal</span>
             <select
               data-testid="score-channel-select"
-              disabled={actionsDisabled}
+              disabled={actionsDisabled || showCausalMethodFilter}
               onChange={(event) => setScoreChannel(event.target.value)}
-              value={scoreChannel}
+              value={showCausalMethodFilter ? LINKING_SCORE_CHANNEL : scoreChannel}
             >
-              {(config?.score_channels || ["Todos"]).map((channel) => (
+              {(showCausalMethodFilter ? [LINKING_SCORE_CHANNEL] : config?.score_channels || ["Todos"]).map((channel) => (
                 <option key={channel} value={channel}>
                   {channel}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            <span>Grupo Score</span>
-            <select
-              data-testid="score-group-select"
-              disabled={actionsDisabled}
-              onChange={(event) => setNpsGroup(event.target.value)}
-              value={npsGroup}
-            >
-              {(config?.nps_groups || ["Todos"]).map((group) => (
-                <option key={group} value={group}>
-                  {group}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!showCausalMethodFilter ? (
+            <label>
+              <span>Grupo Score</span>
+              <select
+                data-testid="score-group-select"
+                disabled={actionsDisabled}
+                onChange={(event) => setNpsGroup(event.target.value)}
+                value={npsGroup}
+              >
+                {(config?.nps_groups || ["Todos"]).map((group) => (
+                  <option key={group} value={group}>
+                    {group}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método causal</span>
@@ -1152,35 +1170,87 @@ export function App() {
     );
   }
 
+  function renderScopeMetricCard(
+    label: string,
+    value: string,
+    deltaKey?: keyof KpiPayload,
+    deltaKind: "number" | "percent" = "number"
+  ) {
+    const delta = deltaKey ? dashboard?.scope?.period?.deltas?.[String(deltaKey)] : undefined;
+    const marker = delta?.direction === "up" ? "↑" : delta?.direction === "down" ? "↓" : "-";
+    const deltaText = delta ? formatDeltaValue(delta.value, deltaKind) : "";
+    const deltaClass =
+      delta?.favorable === true ? "is-positive" : delta?.favorable === false ? "is-negative" : "";
+    return (
+      <article className="metric-card metric-card-with-delta">
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {deltaKey ? (
+          <small className={`metric-delta ${deltaClass}`.trim()}>
+            {marker} {deltaText || "sin histórico"}
+          </small>
+        ) : null}
+      </article>
+    );
+  }
+
+  function renderKpiGrid(kpis: KpiPayload | undefined, withDeltas = false) {
+    return (
+      <div className="metric-grid metric-grid-5">
+        {renderScopeMetricCard("Muestras", formatNumber(kpis?.samples, { fallback: "0" }))}
+        {renderScopeMetricCard(
+          "Score medio (0-10)",
+          formatNumber(kpis?.nps_average),
+          withDeltas ? "nps_average" : undefined,
+          "number"
+        )}
+        {renderScopeMetricCard(
+          "Detractores (≤6)",
+          formatPercent(kpis?.detractor_rate),
+          withDeltas ? "detractor_rate" : undefined,
+          "percent"
+        )}
+        {renderScopeMetricCard(
+          "Neutros (7-8)",
+          formatPercent(kpis?.neutral_rate),
+          withDeltas ? "neutral_rate" : undefined,
+          "percent"
+        )}
+        {renderScopeMetricCard(
+          "Promotores (≥9)",
+          formatPercent(kpis?.promoter_rate),
+          withDeltas ? "promoter_rate" : undefined,
+          "percent"
+        )}
+      </div>
+    );
+  }
+
   function renderSummaryTabContent() {
     if (dashboard?.empty_state) {
       return <p className="empty-state">{dashboard.empty_state}</p>;
     }
 
-    if (summaryTab === "promoters-vs-detractors") {
-      return (
-        <section className="surface-card stack-panel">
-          <p className="secondary-copy">
-            Lectura diaria de la evolución del mix de promotores, neutros y detractores del periodo.
-          </p>
-          <PlotFigure
-            emptyMessage="No hay suficientes datos para construir la evolución diaria."
-            figure={dashboard?.overview.daily_mix_figure}
-            testId="promoters-vs-detractors-figure"
-          />
-        </section>
-      );
-    }
-
     if (summaryTab === "daily") {
       return (
-        <section className="surface-card">
-          <p className="secondary-copy">Lectura diaria del NPS clásico y del peso relativo de detractores en el periodo activo.</p>
+        <section className="surface-card stack-panel">
           <PlotFigure
             emptyMessage="No hay suficientes datos para construir la vista diaria."
             figure={dashboard?.overview.daily_kpis_figure}
             testId="daily-kpis-figure"
           />
+          <PlotFigure
+            emptyMessage="No hay suficientes datos para construir la distribución diaria por grupo."
+            figure={dashboard?.overview.daily_mix_figure}
+            testId="daily-mix-figure"
+          />
+          <article className="note-card">
+            <ul className="plain-list">
+              {(dashboard?.overview.daily_explanation_bullets || []).map((bullet) => (
+                <li key={bullet}>{renderStrongMarkdown(bullet)}</li>
+              ))}
+            </ul>
+          </article>
         </section>
       );
     }
@@ -1197,30 +1267,13 @@ export function App() {
       );
     }
 
-    if (summaryTab === "volume") {
+    if (summaryTab === "volume-mix") {
       return (
         <section className="surface-card">
           <PlotFigure
-            emptyMessage="No hay suficientes datos para construir la vista de volumen diario."
-            figure={dashboard?.overview.daily_volume_figure}
-            testId="daily-volume-figure"
-          />
-        </section>
-      );
-    }
-
-    if (summaryTab === "mix") {
-      return (
-        <section className="surface-card stack-panel">
-          <article className="note-card">
-            <p className="secondary-copy">
-              Cómo leerlo: más rojo empeora el score, más verde lo mejora. Usa el volumen para no sobre-interpretar días con pocas respuestas.
-            </p>
-          </article>
-          <PlotFigure
-            emptyMessage="No hay suficientes datos para construir la mezcla diaria."
-            figure={dashboard?.overview.daily_mix_figure}
-            testId="daily-mix-figure"
+            emptyMessage="No hay suficientes datos para construir la vista diaria."
+            figure={dashboard?.overview.daily_volume_mix_figure}
+            testId="daily-volume-mix-figure"
           />
         </section>
       );
@@ -1242,35 +1295,22 @@ export function App() {
           <div className="section-heading section-heading-inline">
             <div>
               <p className="eyebrow">ÁMBITO DE ANÁLISIS</p>
-              <h2>{dashboard?.context_label || "Periodo seleccionado"}</h2>
+              <h2>{dashboard?.scope?.cumulative?.label || `Datos acumulados hasta ${dashboard?.context_label || "periodo seleccionado"}`}</h2>
               <p className="secondary-copy">
-                KPIs calculados solo con Service Container y Period Container.
+                {dashboard?.scope?.cumulative?.note || "KPIs calculados solo con Service Container y Period Container."}
               </p>
             </div>
           </div>
 
-          <div className="metric-grid metric-grid-5">
-            <article className="metric-card">
-              <span>Muestras</span>
-              <strong>{formatNumber(dashboard?.kpis.samples, { fallback: "0" })}</strong>
-            </article>
-            <article className="metric-card">
-              <span>Score medio (0-10)</span>
-              <strong>{formatNumber(dashboard?.kpis.nps_average)}</strong>
-            </article>
-            <article className="metric-card">
-              <span>Detractores (≤6)</span>
-              <strong>{formatPercent(dashboard?.kpis.detractor_rate)}</strong>
-            </article>
-            <article className="metric-card">
-              <span>Neutros (7-8)</span>
-              <strong>{formatPercent(dashboard?.kpis.neutral_rate)}</strong>
-            </article>
-            <article className="metric-card">
-              <span>Promotores (≥9)</span>
-              <strong>{formatPercent(dashboard?.kpis.promoter_rate)}</strong>
-            </article>
+          {renderKpiGrid(dashboard?.scope?.cumulative?.kpis || dashboard?.kpis)}
+
+          <div className="section-heading section-heading-inline scope-period-heading">
+            <div>
+              <h3>{dashboard?.scope?.period?.label || dashboard?.context_label || "Periodo seleccionado"}</h3>
+            </div>
           </div>
+
+          {renderKpiGrid(dashboard?.scope?.period?.kpis || dashboard?.kpis, true)}
         </section>
 
         <NavigationTabs
@@ -1695,6 +1735,7 @@ export function App() {
         downloadsPath={downloadsPath}
         helixBaseUrl={helixBaseUrl}
         hierarchySaving={isSavingHierarchy}
+        reportDimensionAnalysis={reportDimensionAnalysis}
         onReprocess={handleReprocess}
         minN={minN}
         minNCross={minNCross}
@@ -1710,6 +1751,7 @@ export function App() {
         reprocessPending={isMutating}
         setDownloadsPath={setDownloadsPath}
         setHelixBaseUrl={setHelixBaseUrl}
+        setReportDimensionAnalysis={setReportDimensionAnalysis}
         setMinN={setMinN}
         setMinNCross={setMinNCross}
         setMinSimilarity={setMinSimilarity}

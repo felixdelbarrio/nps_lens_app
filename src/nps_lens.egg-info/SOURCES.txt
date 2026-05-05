@@ -42,6 +42,8 @@ src/nps_lens/design/__init__.py
 src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
+src/nps_lens/domain/helix_links.py
+src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py

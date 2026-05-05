@@ -47,8 +47,8 @@ Requires-Dist: Pillow<12.0,>=10.0; extra == "build"
 [![Typecheck](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml?query=branch%3Adevelop)
 [![Test](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml?query=branch%3Adevelop)
 
-`master`
-[![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg?branch=master&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml?query=branch%3Amaster)
+`develop`
+[![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml?query=branch%3Adevelop)
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-2ea44f.svg)](https://github.com/sponsors/felixdelbarrio)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/felixdelbarrio)
@@ -60,7 +60,7 @@ Requires-Dist: Pillow<12.0,>=10.0; extra == "build"
 
 **NPS Lens** es una plataforma para convertir señales de Voz del Cliente en **insights accionables**, combinando:
 
-- **NPS térmico** (score + texto + palanca/subpalanca/canal/segmento)
+- **NPS térmico** (score 0-10 + texto + palanca/subpalanca/canal/segmento)
 - **Incidencias Helix** (tickets/bugs) para correlación y causalidad pragmática
 - (Opcional) **Reviews** (stores) / **Feedback in‑app** (roadmap)
 
@@ -72,7 +72,7 @@ La aplicación une métricas + verbatims + evidencias multi‑fuente y genera un
 
 - Detectar **drivers reales** de detracción (y también de promoción) por palanca/subpalanca/canal.
 - Priorizar **causas raíz plausibles** con *causalidad pragmática* (no solo correlación).
-- Construir **journeys de caída** (ruta: palanca → subpalanca → tópico → incidencia → impacto NPS).
+- Construir **journeys de caída** (ruta: palanca → subpalanca → tópico → incidencia → impacto en Score).
 - Operar como **plataforma**: UI para exploración + Batch para generación de artefactos versionados.
 - Entregar un “paquete ejecutivo” reproducible: KPIs, hipótesis, evidencias, acciones sugeridas, trazabilidad.
 
@@ -107,14 +107,14 @@ ranked]
 ### Requisitos
 - **Python 3.9.13** (entorno corporativo)
 - `make` (macOS / Linux)
-- (Opcional) `xcode-select --install` en macOS para `watchdog` (Streamlit performance)
+- (Opcional) `xcode-select --install` en macOS para builds nativas.
 
 ### Setup
 ```bash
 make setup
 ```
 
-### Ejecutar UI (Streamlit)
+### Ejecutar UI
 ```bash
 make run
 ```
@@ -149,6 +149,26 @@ make build
 
 ---
 
+## Estructura funcional actual
+
+La experiencia operativa se organiza así:
+
+- **SERVICE CONTAINER**: contexto de servicio (`BUUG`, `N1`, `N2`).
+- **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
+- **Sumario del Periodo**: KPIs y gráficos afectados solo por Service + Period.
+- **Analítica NPS Térmico**: filtros sincronizados de `Canal` y `Grupo Score`; contiene “Qué dicen los clientes” y “Cambios respecto al histórico”.
+- **Incidencias ↔ NPS**: comparte `Canal` y `Grupo Score`; añade el método causal exclusivo de la sección.
+
+Semántica:
+
+- **Score** es el valor individual 0-10 o su media.
+- **NPS clásico** es el índice `% promotores - % detractores`.
+- **NPS térmico** se mantiene como nombre de fuente/dominio.
+
+El canal selecciona `Web` por defecto si existe; si no, `Todos`. El grupo selecciona `Detractores` si existe; si no, `Todos`. Los enlaces Helix se resuelven con `Record ID` y no con el número de incidencia.
+
+---
+
 ## Documentación imprescindible (léela en este orden)
 
 1. **Arquitectura** → `ARCHITECTURE.md`  
@@ -162,7 +182,7 @@ make build
 
 ## Estructura del repo (alto nivel)
 
-- `app/` → UI Streamlit (exploración interactiva)
+- `frontend/` → UI React (exploración interactiva)
 - `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, LLM packs)
 - `tests/` → tests unitarios y de plataforma
 - `docs/` → documentación técnica y operativa

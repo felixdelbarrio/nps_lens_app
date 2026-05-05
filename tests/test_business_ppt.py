@@ -393,7 +393,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 13
+    assert out.slide_count == 10
 
     prs = Presentation(BytesIO(out.content))
     assert len(prs.slides) == out.slide_count
@@ -416,18 +416,18 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("NPS térmico" in t for t in texts)
     assert any("% PROMOTORES" in t for t in texts)
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("2. Qué han dicho los clientes" in t for t in texts)
-    assert any("5. Qué ha cambiado en Palanca" in t for t in texts)
-    assert any("6. Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("7. Dónde duele en la Web · Palanca" in t for t in texts)
-    assert any("8. Dónde duele en la Web · Subpalanca" in t for t in texts)
-    assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
-    assert any("10. Oportunidades priorizadas · Subpalanca" in t for t in texts)
+    assert any("2. Que dicen los detractores" in t for t in texts)
+    assert any("3. Qué ha cambiado en Palanca" in t for t in texts)
+    assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
+    assert any("4. Dónde duele en la Web · Palanca" in t for t in texts)
+    assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
+    assert any("5. Oportunidades priorizadas · Palanca" in t for t in texts)
+    assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
     assert any("Bloque 1 · Analisis VoC" in t for t in texts)
     assert any("Highlights del periodo" in t for t in texts)
-    assert any("11. Análisis causal empleado · Por Subpalanca" in t for t in texts)
-    assert any("12. Journeys de detracción" in t for t in texts)
-    assert any("13.1 Acceso > Login" in t for t in texts)
+    assert any("Análisis causal empleado · Por Subpalanca" in t for t in texts)
+    assert any("6. Journeys de detracción" in t for t in texts)
+    assert any("7.1 Acceso > Login" in t for t in texts)
     assert any("Análisis causal de Subpalanca: Escenario #1 ·" in t for t in texts)
     assert any("Sumario del análisis del escenario" in t for t in texts)
     assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
@@ -461,7 +461,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         and any((paragraph.text or "").strip() for paragraph in shape.text_frame.paragraphs)
     )
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide13.xml.rels").decode("utf-8")
+        rels = archive.read("ppt/slides/_rels/slide10.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
 
 
@@ -551,7 +551,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("12. Journeys de detracción" in t for t in texts)
+    assert any("6. Journeys de detracción" in t for t in texts)
     assert any("Análisis causal de Journey de detracción: Escenario #1 ·" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
@@ -680,10 +680,10 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 15
-    assert any("13.1 Operativa crítica fallida" in t for t in texts)
-    assert any("13.2 Acceso bloqueado" in t for t in texts)
-    assert any("13.3 Rendimiento degradado" in t for t in texts)
+    assert out.slide_count == 12
+    assert any("7.1 Operativa crítica fallida" in t for t in texts)
+    assert any("7.2 Acceso bloqueado" in t for t in texts)
+    assert any("7.3 Rendimiento degradado" in t for t in texts)
     assert any("Sumario del análisis del escenario" in t for t in texts)
     assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
@@ -697,7 +697,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
     assert any("INC000104257175" in t for t in texts)
     assert any("VÍNCULOS VALIDADOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide13.xml.rels").decode("utf-8")
+        rels = archive.read("ppt/slides/_rels/slide10.xml.rels").decode("utf-8")
     assert "https://helix.example/INC000104257175" in rels
 
 
@@ -759,7 +759,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("12. Journeys rotos" in t for t in texts)
+    assert any("6. Journeys rotos" in t for t in texts)
     assert any("Análisis causal de Journey roto: Escenario #1 ·" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
@@ -1071,11 +1071,12 @@ def test_daily_kpis_chart_places_x_axis_labels_at_bottom() -> None:
         payload["selected_nps"], get_theme("light"), days=31
     )
     assert stacked is not None
-    assert len(stacked.data) == 4
+    assert len(stacked.data) == 5
     assert [trace.name for trace in stacked.data] == [
         "NPS clásico",
         "% detractores",
         "% promotores",
+        "% pasivos",
         "% detractores",
     ]
 
@@ -1119,8 +1120,8 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                     texts.append(paragraph.text or "")
 
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("12. Journeys de detracción" in t for t in texts)
-    assert not any("13.1" in t for t in texts)
+    assert any("6. Journeys de detracción" in t for t in texts)
+    assert not any("7.1" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:
@@ -1219,7 +1220,7 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                     texts.append(paragraph.text or "")
 
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("9. Oportunidades priorizadas · Palanca" in t for t in texts)
+    assert any("5. Oportunidades priorizadas · Palanca" in t for t in texts)
 
 
 def test_history_fig_daily_uses_requested_colors() -> None:

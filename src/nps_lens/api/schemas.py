@@ -83,7 +83,8 @@ class PreferencesResponse(BaseModel):
     theme_mode: str = "light"
     downloads_path: str = ""
     helix_base_url: str = ""
-    touchpoint_source: str = "executive_journeys"
+    report_dimension_analysis: str = "palanca"
+    touchpoint_source: str = "palanca_touchpoint"
     min_similarity: float = 0.25
     max_days_apart: int = 10
     min_n_opportunities: int = 200
@@ -126,6 +127,7 @@ class DashboardResponse(BaseModel):
     context_label: str = ""
     context_pills: list[str] = Field(default_factory=list)
     kpis: dict[str, Any] = Field(default_factory=dict)
+    scope: dict[str, Any] = Field(default_factory=dict)
     overview: dict[str, Any] = Field(default_factory=dict)
     comparison: dict[str, Any] = Field(default_factory=dict)
     cohorts: dict[str, Any] = Field(default_factory=dict)

@@ -69,24 +69,46 @@ export type PlotlyFigureSpec = {
   config?: Record<string, unknown>;
 };
 
+export type KpiDelta = {
+  value: number | null;
+  direction: "up" | "down" | "flat";
+  favorable: boolean | null;
+};
+
+export type DashboardKpis = {
+  samples: number;
+  nps_average: number | null;
+  detractor_rate: number | null;
+  neutral_rate: number | null;
+  promoter_rate: number | null;
+};
+
 export type DashboardPayload = {
   context_label: string;
   context_pills: string[];
-  kpis: {
-    samples: number;
-    nps_average: number | null;
-    detractor_rate: number | null;
-    neutral_rate: number | null;
-    promoter_rate: number | null;
-  };
+  kpis: DashboardKpis;
   overview: {
     daily_kpis_figure?: PlotlyFigureSpec | null;
     weekly_trend_figure?: PlotlyFigureSpec | null;
     topics_figure?: PlotlyFigureSpec | null;
     topics_table?: Array<Record<string, unknown>>;
     daily_volume_figure?: PlotlyFigureSpec | null;
+    daily_volume_mix_figure?: PlotlyFigureSpec | null;
     daily_mix_figure?: PlotlyFigureSpec | null;
+    daily_explanation_bullets?: string[];
     insight_bullets?: string[];
+  };
+  scope?: {
+    cumulative?: {
+      label: string;
+      note?: string;
+      kpis: DashboardKpis;
+    };
+    period?: {
+      label: string;
+      kpis: DashboardKpis;
+      deltas?: Record<string, KpiDelta>;
+    };
   };
   comparison: {
     summary?: {
@@ -231,6 +253,7 @@ export type PreferencesPayload = {
   theme_mode: "light" | "dark";
   downloads_path: string;
   helix_base_url: string;
+  report_dimension_analysis: "palanca" | "subpalanca";
   touchpoint_source: string;
   min_similarity: number;
   max_days_apart: number;
@@ -475,6 +498,7 @@ export async function downloadExecutiveReport(params: {
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
+  report_dimension_analysis: string;
 }): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
   const response = await fetch(buildUrl("/api/dashboard/report/pptx", params));
   if (!response.ok) {
