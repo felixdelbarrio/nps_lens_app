@@ -1369,8 +1369,9 @@ def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() 
         if getattr(shape, "has_text_frame", False)
         for paragraph in shape.text_frame.paragraphs
     ]
-    assert "1" in texts and "2" in texts and "3" in texts
-    assert "4" not in texts and "5" not in texts
+    assert "uno, dos" in texts
+    assert "ejemplo" in texts
+    assert not any(text in {"1", "2", "3", "4", "5"} for text in texts)
 
 
 def test_chain_helpers_cover_edge_cases() -> None:

@@ -596,8 +596,8 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
-    expect(screen.getByText("Score medio (0-10)")).toBeInTheDocument();
-    expect(screen.getByText("Neutros (7-8)")).toBeInTheDocument();
+    expect(screen.getAllByText("Score medio (0-10)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Neutros (7-8)").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();

@@ -25,6 +25,8 @@
   - `NPS_LENS_UI_POP_YEAR=...` / `NPS_LENS_UI_POP_MONTH=...`
   - `NPS_LENS_UI_SCORE_CHANNEL=...`
   - `NPS_LENS_UI_NPS_GROUP=...` (persistencia interna del Grupo Score)
+  - `NPS_LENS_UI_TOUCHPOINT_SOURCE=palanca_touchpoint`
+  - `NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS=palanca` (`palanca` o `subpalanca` para el deck PPT)
   - `NPS_LENS_UI_MIN_N_CROSS_COMPARISONS=...`
   - paths de data/knowledge
   - `NPS_LENS_PPT_TEMPLATE=...` (opcional)
@@ -53,11 +55,16 @@
 ### Enlaces Helix abren la base sin incidencia
 - Revisa que el extract Helix traiga `Record ID`, `workItemId` o `InstanceId`.
 - La app nunca debe construir `helix_base_url + Incident Number`.
-- Si existe una URL explícita válida, se usa; si no, se construye con `Record ID`.
+- La URL válida se construye como `helix_base_url + Record ID`; las URLs explícitas del extract no sustituyen al `Record ID`.
+
+### La PPT se genera pero no aparece en carpeta
+- Revisa `NPS_LENS_UI_DOWNLOADS_PATH` o la ruta configurada en la hoja de ajustes.
+- La API persiste una copia server-side, fuerza flush/fsync y expone `X-NPS-LENS-SAVED-PATH`.
+- En logs debe aparecer `[REPORT] Output path: ...`; si la ruta no es escribible se usa fallback en `data/reports`.
 
 ### KPIs de Ámbito de Análisis cambian al tocar Canal/Grupo
 - Es una regresión: el Sumario del Periodo solo debe depender de `SERVICE CONTAINER` + `PERIOD CONTAINER`.
-- Canal y Grupo Score solo afectan Analítica NPS Térmico, Incidencias ↔ NPS, datos tabulares filtrados y reportes causales.
+- Canal y Grupo Score solo afectan Analítica NPS Térmico y datos tabulares filtrados. Incidencias ↔ NPS fuerza `Canal=Web`, elimina `Grupo Score` y usa histórico completo de incidencias para no borrar causalidad pasada.
 
 ### Warnings de pandas (groupby observed)
 - El código fija `observed=True` donde aplica.

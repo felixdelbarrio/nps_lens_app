@@ -79,7 +79,12 @@ src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py
 src/nps_lens/services/dashboard_service.py
+src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
+src/nps_lens/services/analytics/__init__.py
+src/nps_lens/services/analytics/insights_service.py
+src/nps_lens/services/analytics/kpis_service.py
+src/nps_lens/services/analytics/nps_service.py
 src/nps_lens/testing/__init__.py
 src/nps_lens/testing/fixtures.py
 src/nps_lens/ui/__init__.py

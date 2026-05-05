@@ -28,8 +28,8 @@ NPS + Helix + (Reviews)]
 (results, deterministic, atomic)]
     Perf[PerfTracker + Profiling
 (optional)]
-    Analytics[Analytics
-Drivers · Topics · Journey · Changepoints · Causal]
+    Analytics[Analytics services
+KPIs · Insights · Drivers · Topics · Causal]
     Link[Linking
 TF‑IDF + cosine
 EvidenceLinks]
@@ -69,9 +69,10 @@ artifacts/]
 ### 2.1 UI (exploración)
 - El usuario selecciona **SERVICE CONTAINER**: `service_origin` + `service_origin_n1` + (opcional) `service_origin_n2`.
 - Selecciona **PERIOD CONTAINER**: `Año` / `Mes`. Es transversal a dashboard, tablas y reportes.
-- `Canal` y `Grupo Score` viven bajo **Analítica NPS Térmico** e **Incidencias ↔ NPS** y se mantienen sincronizados. `Método causal` solo pertenece a Incidencias.
+- `Canal` y `Grupo Score` viven bajo **Analítica NPS Térmico**. En **Incidencias ↔ NPS**, el canal queda fijado a `Web`, el grupo Score se elimina de la UI y `Método causal` queda por defecto en `Por Palanca`.
 - **Sumario del Periodo** no aplica Canal ni Grupo Score: sus KPIs y gráficos dependen solo de Service + Period.
 - La UI consume payloads de `DashboardService`; no calcula KPIs, periodos, grupos ni URLs Helix.
+- Los KPIs, deltas de ámbito, narrativas de gráficos y URLs Helix viven en `src/nps_lens/services/analytics/*` y `src/nps_lens/services/helix_service.py`, compartidos por UI, API y generación PPT.
 
 **Regla de oro**: la UI no “inventa” lógica; orquesta casos de uso del core y renderiza resultados.
 
@@ -115,7 +116,7 @@ En arranque se valida:
 ### 5.1 Objetivo
 Enlazar verbatims detractores ↔ incidencias Helix con evidencia trazable.
 
-Los enlaces Helix se resuelven en una única capa de dominio: se buscan identificadores de incidencia (`Incident Number`, `ID de la Incidencia`, `id`) y se construye la URL final con `Record ID`/`workItemId`/`InstanceId`. Si existe una URL explícita válida se prioriza; nunca se construye `base_url + incident_number`.
+Los enlaces Helix se resuelven en una única capa de dominio: se buscan identificadores de incidencia (`Incident Number`, `ID de la Incidencia`, `id`) y la URL final se construye con `buildHelixUrl(recordId)`, equivalente a `base_url + Record ID`/`workItemId`/`InstanceId`. No se usa `Incident Number` como sufijo de URL ni se priorizan URLs explícitas frente al `Record ID`.
 
 ### 5.2 Implementación MVP
 - Limpieza de texto + TF‑IDF + cosine similarity
