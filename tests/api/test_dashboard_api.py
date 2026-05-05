@@ -125,6 +125,8 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         context_payload["preferences"]["helix_base_url"]
         == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
     )
+    assert context_payload["preferences"]["report_dimension_analysis"] == "palanca"
+    assert context_payload["preferences"]["touchpoint_source"] == "palanca_touchpoint"
     assert any(
         option["value"] == "executive_journeys"
         for option in context_payload["causal_method_options"]
@@ -146,6 +148,8 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
+    assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
+    assert dashboard_payload["overview"]["daily_volume_mix_figure"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
     assert dashboard_payload["controls"]["dimensions"] == [
         "Palanca",
@@ -292,8 +296,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["causal_method"]["value"] == "executive_journeys"
-    assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"
+    assert linking_payload["causal_method"]["value"] == "palanca_touchpoint"
+    assert linking_payload["navigation"][1]["label"] == "Touchpoints afectados por Palanca"
     assert "situation" in linking_payload
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
@@ -334,7 +338,7 @@ def test_helix_links_resolve_incident_number_through_record_id() -> None:
     assert enriched.loc[0, "Incident Number__href"] == expected_url
 
 
-def test_helix_links_prioritize_explicit_valid_url_and_do_not_fallback_to_incident_number() -> None:
+def test_helix_links_build_urls_from_record_id_and_do_not_fallback_to_incident_number() -> None:
     base_url = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
     explicit_url = f"{base_url}EXPLICIT_RECORD"
     frame = pd.DataFrame(
@@ -347,7 +351,7 @@ def test_helix_links_prioritize_explicit_valid_url_and_do_not_fallback_to_incide
 
     lookup = build_helix_incident_url_lookup(frame, base_url=base_url)
 
-    assert lookup["INC-EXPLICIT"] == explicit_url
+    assert lookup["INC-EXPLICIT"] == f"{base_url}RID-SHOULD-NOT-WIN"
     assert "INC-NO-RECORD" not in lookup
 
 
@@ -470,5 +474,5 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("5. Qué ha cambiado en Palanca" in text for text in all_texts)
-    assert any("6. Qué ha cambiado en Subpalanca" in text for text in all_texts)
+    assert any("3. Qué ha cambiado en Palanca" in text for text in all_texts)
+    assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

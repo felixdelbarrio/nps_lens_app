@@ -3411,6 +3411,7 @@ def _add_grid_table(
     border_color: str,
     header_font_size_pt: float = 10.0,
     cell_font_size_pt: float = 10.0,
+    show_row_dividers: bool = True,
 ) -> None:
     ratio_sum = sum(col_width_ratios) or 1.0
     col_widths = [width * ratio / ratio_sum for ratio in col_width_ratios]
@@ -3448,16 +3449,17 @@ def _add_grid_table(
     line_height = 0.01
     for row_idx, row_values in enumerate(rows):
         current_top = top + header_height + row_height * row_idx
-        separator = slide.shapes.add_shape(
-            MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-            Inches(left),
-            Inches(current_top),
-            Inches(width),
-            Inches(line_height),
-        )
-        separator.fill.solid()
-        separator.fill.fore_color.rgb = _rgb(border_color)
-        separator.line.color.rgb = _rgb(border_color)
+        if show_row_dividers:
+            separator = slide.shapes.add_shape(
+                MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+                Inches(left),
+                Inches(current_top),
+                Inches(width),
+                Inches(line_height),
+            )
+            separator.fill.solid()
+            separator.fill.fore_color.rgb = _rgb(border_color)
+            separator.line.color.rgb = _rgb(border_color)
         for col_idx, value in enumerate(row_values[: len(headers)]):
             _add_table_text_cell(
                 slide,
@@ -3560,7 +3562,7 @@ def _add_compact_table(
             tf.clear()
             p = tf.paragraphs[0]
             if numeric_columns and col_idx in numeric_columns:
-                p.alignment = PP_ALIGN.RIGHT
+                p.alignment = PP_ALIGN.CENTER
             r = p.add_run()
             clip_len = (
                 clip_lengths[col_idx]
@@ -6012,7 +6014,12 @@ def _build_presentation_context(
         daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
 
     overview = _period_overview(selected_raw)
-    text_topics = _text_topics_table(selected_raw, top_k=EDITORIAL_LIMITS.max_text_chart_clusters)
+    detractor_raw = (
+        selected_raw[selected_raw["band"].astype(str).str.casefold().eq("detractor")].copy()
+        if "band" in selected_raw.columns
+        else selected_raw.copy()
+    )
+    text_topics = _text_topics_table(detractor_raw, top_k=EDITORIAL_LIMITS.max_text_chart_clusters)
     current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
     baseline_label = (
         f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
@@ -6250,15 +6257,17 @@ def _add_dimension_change_slide(
     *,
     context: PresentationContext,
     view_model: DimensionViewModel,
+    slide_number: Optional[int] = None,
 ) -> None:
     dimension = view_model.dimension
+    visible_slide_number = int(slide_number or view_model.slide_number)
     layout = CHANGE_SLIDE_LAYOUT
     table_style = EXECUTIVE_TABLE_STYLE
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title=f"{view_model.slide_number}. Qué ha cambiado en {dimension}",
+        title=f"{visible_slide_number}. Qué ha cambiado en {dimension}",
         subtitle=(
             f"Periodo actual frente a la base histórica anterior · actual {context.current_label} · "
             f"base {context.baseline_label}"
@@ -6328,7 +6337,8 @@ def _add_dimension_change_slide(
         header_fill=table_style.header_fill,
         border_color=table_style.panel_border,
         header_font_size_pt=10.0,
-        cell_font_size_pt=10.0,
+        cell_font_size_pt=9.4,
+        show_row_dividers=False,
     )
 
 
@@ -6358,10 +6368,10 @@ def _add_web_pain_dimension_slide(
     _figure_in_panel(
         slide,
         figure=view_model.web_heatmap_figure,
-        left=0.86,
+        left=0.94,
         top=1.68,
-        width=7.58,
-        height=5.02,
+        width=7.34,
+        height=4.86,
         empty_note=f"No hay señal suficiente para mostrar {dimension.lower()} en el canal Web.",
         target_ppi=178,
     )
@@ -6464,7 +6474,7 @@ def _add_overview_slide(
         top=1.48,
         width=9.00,
         height=5.42,
-        title="NPS clásico, promotores y detractores",
+        title="NPS clásico y distribución por grupo",
     )
     _figure_in_panel(
         slide,
@@ -6515,10 +6525,10 @@ def _add_deep_dive_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="2. Qué han dicho los clientes",
-        subtitle=f"Temas más repetidos en los comentarios del periodo · {period_label}",
+        title="2. Que dicen los detractores",
+        subtitle=f"Temas más repetidos en los comentarios detractores del periodo · {period_label}",
     )
-    _panel(slide, left=0.66, top=1.48, width=12.02, height=5.42, title="Top temas del periodo")
+    _panel(slide, left=0.66, top=1.48, width=12.02, height=5.42, title="Top temas detractores")
     _figure_in_panel(
         slide,
         figure=topic_fig,
@@ -6535,8 +6545,6 @@ def _add_deep_dive_slide(
     )
     table_rows = [
         [
-            str(row.cluster_id),
-            _fmt_count_or_nd(row.n),
             str(row.top_terms_txt),
             str(row.example_txt),
         ]
@@ -6548,16 +6556,15 @@ def _add_deep_dive_slide(
         top=5.08,
         width=11.62,
         title="",
-        headers=["cluster_id", "n", "top_terms", "examples"],
-        rows=table_rows or [["-", "-", "Sin datos", "Sin ejemplos"]],
+        headers=["top_terms", "examples"],
+        rows=table_rows or [["Sin datos", "Sin ejemplos"]],
         row_height=0.34,
-        col_width_ratios=[1.05, 0.80, 4.65, 4.10],
-        clip_lengths=[10, 8, 64, 58],
+        col_width_ratios=[4.20, 5.80],
+        clip_lengths=[74, 88],
         font_size_pt=9.8,
         header_font_size_pt=9.7,
         cell_height=0.26,
         max_rows=EDITORIAL_LIMITS.max_text_table_clusters,
-        numeric_columns={1},
     )
 
 
@@ -7235,6 +7242,7 @@ def _add_journeys_summary_slide(
     touchpoint_source: str,
     entity_summary_df: pd.DataFrame,
     entity_summary_kpis: list[dict[str, str]],
+    slide_number: int = 12,
     entity_summary_figure: Optional[go.Figure] = None,
     journey_table_df: Optional[pd.DataFrame] = None,
 ) -> None:
@@ -7244,9 +7252,9 @@ def _add_journeys_summary_slide(
     slide = _new_slide(prs)
     _add_bg(slide, BBVA_COLORS["bg_light"])
     journey_title = (
-        "12. Journeys rotos"
+        f"{slide_number}. Journeys rotos"
         if str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
-        else "12. Journeys de detracción"
+        else f"{slide_number}. Journeys de detracción"
     )
     _add_header(
         slide,
@@ -7404,6 +7412,7 @@ def _add_causal_analysis_slide(
     *,
     context: PresentationContext,
     scenario: CausalScenarioViewModel,
+    slide_number: int = 13,
 ) -> None:
     row = scenario.row
     method_spec = get_causal_method_spec(
@@ -7414,7 +7423,7 @@ def _add_causal_analysis_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title=f"13.{scenario.index} {title}",
+        title=f"{slide_number}.{scenario.index} {title}",
         subtitle=(
             f"Análisis causal de {method_spec.entity_singular}: "
             f"Escenario #{scenario.index} · {context.period_label}"
@@ -7719,6 +7728,7 @@ def generate_business_review_ppt(
     entity_summary_kpis: Optional[list[dict[str, str]]] = None,
     executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     broken_journeys_df: Optional[pd.DataFrame] = None,
+    report_dimension_analysis: str = "palanca",
 ) -> BusinessPptResult:
     """Build a business deck aligned to the selected period and BBVA corporate template."""
     del (
@@ -7739,6 +7749,9 @@ def generate_business_review_ppt(
         changepoints_by_topic,
         executive_journey_catalog,
     )
+    dimension_mode = str(report_dimension_analysis or "palanca").strip().lower()
+    if dimension_mode not in {"palanca", "subpalanca"}:
+        dimension_mode = "palanca"
 
     prs = build_presentation(template_path=template_path, workspace_root=Path.cwd())
     prs.slide_width = Inches(13.333)
@@ -7790,20 +7803,29 @@ def generate_business_review_ppt(
         text_topics_df=context.text_topics_df,
         topic_figure=context.text_topic_figure,
     )
-    _add_dimension_change_slide(prs, context=context, view_model=context.dimensions["Palanca"])
-    _add_dimension_change_slide(prs, context=context, view_model=context.dimensions["Subpalanca"])
+    visible_dimension = "Subpalanca" if dimension_mode == "subpalanca" else "Palanca"
+    next_slide_number = 3
+    _add_dimension_change_slide(
+        prs,
+        context=context,
+        view_model=context.dimensions[visible_dimension],
+        slide_number=next_slide_number,
+    )
+    next_slide_number += 1
     _add_web_pain_dimension_slide(
-        prs, context=context, view_model=context.dimensions["Palanca"], slide_number=7
+        prs,
+        context=context,
+        view_model=context.dimensions[visible_dimension],
+        slide_number=next_slide_number,
     )
-    _add_web_pain_dimension_slide(
-        prs, context=context, view_model=context.dimensions["Subpalanca"], slide_number=8
-    )
+    next_slide_number += 1
     _add_opportunity_dimension_slide(
-        prs, context=context, view_model=context.dimensions["Palanca"], slide_number=9
+        prs,
+        context=context,
+        view_model=context.dimensions[visible_dimension],
+        slide_number=next_slide_number,
     )
-    _add_opportunity_dimension_slide(
-        prs, context=context, view_model=context.dimensions["Subpalanca"], slide_number=10
-    )
+    next_slide_number += 1
     _add_causal_section_cover_slide(
         prs,
         context=context,
@@ -7819,9 +7841,16 @@ def generate_business_review_ppt(
         entity_summary_kpis=context.causal.entity_summary_kpis,
         entity_summary_figure=context.causal.entity_summary_figure,
         journey_table_df=context.causal.journey_table_df,
+        slide_number=next_slide_number,
     )
+    causal_scenario_slide_number = next_slide_number + 1
     for scenario in context.causal.scenarios:
-        _add_causal_analysis_slide(prs, context=context, scenario=scenario)
+        _add_causal_analysis_slide(
+            prs,
+            context=context,
+            scenario=scenario,
+            slide_number=causal_scenario_slide_number,
+        )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = f"nps-incidencias-{_slug(service_origin)}-{_slug(service_origin_n1)}-{stamp}.pptx"

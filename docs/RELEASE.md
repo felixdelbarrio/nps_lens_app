@@ -20,7 +20,7 @@ Salida:
 ---
 
 ## 2) Release automático en GitHub
-- Cada push a `develop` ejecuta `.github/workflows/release.yml`
+- Cada push a `develop` o a ramas `feat/**`, y cada PR contra `develop`, ejecuta `.github/workflows/release.yml`
 - Ese workflow construye binarios para:
   - Linux
   - macOS
@@ -29,6 +29,7 @@ Salida:
 - Si además el push corresponde a un tag semver `vX.Y.Z`, el mismo workflow publica un **GitHub Release** con los assets adjuntos.
 - Antes del build multi‑plataforma se ejecuta un job `quality` en Ubuntu con `make lint`, `make typecheck`, `make test` y `make ci`.
 - Los assets se verifican antes de subirlos con `actions/upload-artifact`.
+- En Windows se sube tanto el ZIP (`nps-lens-windows`) como el ejecutable directo (`nps-lens-windows-exe`, ruta `build/pyinstaller/windows/dist/nps-lens.exe`) para validar que el `.exe` se genera.
 - En Windows el venv actualiza `pip` con `python -m pip` para evitar el bloqueo de `.venv/Scripts/pip.exe`.
 - El workflow usa permisos mínimos: `contents: read` por defecto y `contents: write` solo en `publish`.
 

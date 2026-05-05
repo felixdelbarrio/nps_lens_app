@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -80,6 +81,11 @@ from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.analytics import (
+    build_scope_kpis,
+    cumulative_until_period,
+    daily_nps_explanation,
+)
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     default_windows,
@@ -94,6 +100,7 @@ from nps_lens.ui.charts import (
     chart_daily_kpis,
     chart_daily_mix_business,
     chart_daily_volume,
+    chart_daily_volume_mix_business,
     chart_driver_bar,
     chart_driver_delta,
     chart_incident_priority_matrix,
@@ -521,6 +528,7 @@ class DashboardService:
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
         scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
+        scope_cumulative_df = cumulative_until_period(scope_history_df, pop_year, pop_month)
         analysis_history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
         analysis_history_df = filter_by_nps_group(analysis_history_df, resolved_group)
         analysis_current_df = self._apply_population_filters(
@@ -550,6 +558,13 @@ class DashboardService:
                     "neutral_rate": None,
                     "promoter_rate": None,
                 },
+                "scope": build_scope_kpis(
+                    history_df=scope_history_df,
+                    current_df=scope_current_df,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    context_label=context_label,
+                ),
                 "overview": {},
                 "comparison": {},
                 "cohorts": {},
@@ -615,10 +630,22 @@ class DashboardService:
         opportunities_df = pd.DataFrame([item.__dict__ for item in opportunities])
         if not opportunities_df.empty:
             opportunities_df["label"] = opportunities_df.apply(
-                lambda row: f"{row['dimension']}={row['value']}",
+                lambda row: str(row.get("value", "") or "").strip()
+                or f"{row['dimension']}={row['value']}",
                 axis=1,
             )
+            opportunities_df = opportunities_df.sort_values(
+                ["potential_uplift", "confidence"], ascending=[False, False]
+            ).reset_index(drop=True)
         opportunity_bullets = explain_opportunities(opportunities_df, max_items=5)
+        scope_kpis = build_scope_kpis(
+            history_df=scope_history_df,
+            current_df=scope_current_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            context_label=context_label,
+        )
+        nps_explanation_bullets = daily_nps_explanation(scope_current_df)
 
         return {
             "context_label": context_label,
@@ -636,21 +663,26 @@ class DashboardService:
                 "neutral_rate": summary.neutral_rate,
                 "promoter_rate": summary.promoter_rate,
             },
+            "scope": scope_kpis,
             "overview": {
                 "daily_kpis_figure": self._serialize_figure(
                     chart_daily_kpis(scope_current_df, theme)
                 ),
                 "weekly_trend_figure": self._serialize_figure(
-                    chart_nps_trend(scope_current_df, theme, freq="W")
+                    chart_nps_trend(scope_cumulative_df, theme, freq="W")
                 ),
                 "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                 "topics_table": self._serialize_rows(topics_df),
                 "daily_volume_figure": self._serialize_figure(
                     chart_daily_volume(scope_current_df, theme)
                 ),
+                "daily_volume_mix_figure": self._serialize_figure(
+                    chart_daily_volume_mix_business(scope_current_df, theme)
+                ),
                 "daily_mix_figure": self._serialize_figure(
                     chart_daily_mix_business(scope_current_df, theme)
                 ),
+                "daily_explanation_bullets": nps_explanation_bullets,
                 "insight_bullets": topics_bullets,
             },
             "comparison": comparison_payload,
@@ -749,8 +781,10 @@ class DashboardService:
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
         nps_frame = self.repository.load_records_df(context)
-        resolved_channel = self._resolve_score_channel(nps_frame, score_channel)
-        resolved_group = self._resolve_nps_group(nps_frame, nps_group)
+        del nps_group
+        del score_channel
+        resolved_channel = self._resolve_score_channel(nps_frame, _PREFERRED_SCORE_CHANNEL)
+        resolved_group = POP_ALL
         nps_filtered = self._apply_score_channel_filter(nps_frame, resolved_channel)
         nps_slice = self._apply_population_filters(
             filter_by_nps_group(nps_filtered, resolved_group),
@@ -758,8 +792,7 @@ class DashboardService:
             pop_month,
         )
         helix_history = self._load_helix_df(context)
-        helix_slice = self._apply_population_filters(helix_history, pop_year, pop_month)
-        helix_slice = self._apply_score_channel_filter(helix_slice, resolved_channel)
+        helix_slice = self._apply_score_channel_filter(helix_history, resolved_channel)
 
         focus_group, focus_label = self._linking_focus_group(resolved_group)
         if nps_slice.empty or helix_slice.empty:
@@ -1168,12 +1201,14 @@ class DashboardService:
         min_similarity: float = 0.25,
         max_days_apart: int = 10,
         touchpoint_source: str = "",
+        report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
         scope_history_df = self.repository.load_records_df(context)
         if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
-        resolved_channel = self._resolve_score_channel(scope_history_df, score_channel)
-        resolved_group = self._resolve_nps_group(scope_history_df, nps_group)
+        del score_channel, nps_group
+        resolved_channel = self._resolve_score_channel(scope_history_df, _PREFERRED_SCORE_CHANNEL)
+        resolved_group = POP_ALL
         history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
         history_df = filter_by_nps_group(history_df, resolved_group)
         if history_df.empty:
@@ -1191,11 +1226,10 @@ class DashboardService:
             raise ValueError(
                 "El periodo filtrado no tiene respuestas NPS. Ajusta año, mes o grupo antes de generar la PPT."
             )
-        helix_current = self._apply_population_filters(helix_history, pop_year, pop_month)
-        helix_current = self._apply_score_channel_filter(helix_current, resolved_channel)
+        helix_current = self._apply_score_channel_filter(helix_history, resolved_channel)
         if helix_current.empty:
             raise ValueError(
-                "El periodo filtrado no tiene incidencias Helix. Ajusta año o mes para generar una PPT alineada con la vista causal."
+                "No hay incidencias Helix útiles para generar una PPT alineada con la vista causal."
             )
 
         focus_group, _ = self._linking_focus_group(resolved_group)
@@ -1210,6 +1244,11 @@ class DashboardService:
             touchpoint_source
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
+        ).strip()
+        resolved_report_dimension_analysis = str(
+            report_dimension_analysis
+            or self.settings.ui_defaults().get("report_dimension_analysis", "palanca")
+            or "palanca"
         ).strip()
         operational_benchmark = build_helix_operational_benchmark(helix_history)
 
@@ -1338,6 +1377,7 @@ class DashboardService:
             entity_summary_kpis=entity_summary_kpis,
             executive_journey_catalog=executive_journey_catalog,
             broken_journeys_df=broken_journeys_df,
+            report_dimension_analysis=resolved_report_dimension_analysis,
         )
         saved_path = self._persist_report_copy(report)
         return BusinessPptResult(
@@ -1358,7 +1398,14 @@ class DashboardService:
             try:
                 target_dir.mkdir(parents=True, exist_ok=True)
                 saved_path = target_dir / report.file_name
-                saved_path.write_bytes(report.content)
+                with saved_path.open("wb") as handle:
+                    handle.write(report.content)
+                    handle.flush()
+                    with contextlib.suppress(OSError):
+                        os.fsync(handle.fileno())
+                if not saved_path.exists() or saved_path.stat().st_size <= 0:
+                    raise OSError("El fichero PPTX no existe tras persistirlo.")
+                print(f"[REPORT] Output path: {saved_path}")
                 return saved_path
             except OSError:
                 continue

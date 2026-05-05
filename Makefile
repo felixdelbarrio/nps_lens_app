@@ -179,6 +179,7 @@ build:
 		mkdir -p $$out/dist $$out/work $$out/spec; \
 		"$(VENV_BIN)/pyinstaller$(BIN_EXT)" --clean --noconfirm \
 			--name nps-lens \
+			--onefile \
 			--windowed \
 			--icon "$(ROOT)/$(ICON_ICO)" \
 			--add-data="$(ROOT)/frontend/dist;frontend/dist" \
