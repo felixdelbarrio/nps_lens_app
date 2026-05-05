@@ -669,7 +669,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
-    expect(screen.getByTestId("generate-report-button")).toBeEnabled();
+    await waitFor(() => expect(screen.getByTestId("generate-report-button")).toBeEnabled());
   });
 
   it("renders the restored linking workspace with method-driven summary, deep dive and scenarios", async () => {
