@@ -126,8 +126,10 @@ jobs:
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
-          if (!(Test-Path "build/pyinstaller/windows/dist/nps-lens.exe")) {
-            throw "Missing Windows build output: build/pyinstaller/windows/dist/nps-lens.exe"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist/nps-lens.exe"
+          if (!(Test-Path -LiteralPath $exe -PathType Leaf)) {
+            Get-ChildItem -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist") -Recurse -ErrorAction SilentlyContinue
+            throw "Missing Windows build output: $exe"
           }
 
       - name: Archive Linux build output
@@ -149,9 +151,11 @@ jobs:
         if: matrix.label == 'windows'
         shell: pwsh
         run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist/nps-lens.exe"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/nps-lens-windows.zip"
           Compress-Archive `
-            -Path build/pyinstaller/windows/dist/nps-lens.exe `
-            -DestinationPath build/pyinstaller/windows/nps-lens-windows.zip `
+            -Path $exe `
+            -DestinationPath $zip `
             -Force
 
       - name: Verify packaged artifact
