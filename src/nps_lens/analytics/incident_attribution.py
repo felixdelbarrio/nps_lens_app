@@ -1261,7 +1261,7 @@ def build_broken_journey_catalog(
                 "journey_cx_readout": (
                     f"{linked_pairs} links Helix↔VoC convergen en este journey roto; "
                     f"predominan {palanca or 'sin palanca'} / {subpalanca or 'sin subpalanca'} "
-                    f"y el Score medio asociado es {avg_nps:.1f}."
+                    f"y el Score medio asociado es {avg_nps:.2f}."
                 ),
                 "journey_impact_label": impact_label,
                 "journey_confidence_label": confidence_label,

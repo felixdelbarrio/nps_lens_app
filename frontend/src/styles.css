@@ -599,6 +599,12 @@ ul {
 
 .metric-grid-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.metric-grid-5 .metric-card {
+  min-width: 0;
+  padding: var(--space-3);
 }
 
 .metric-card,
@@ -625,6 +631,12 @@ ul {
   line-height: 40px;
   font-weight: 500;
   color: var(--color-brand);
+}
+
+.metric-grid-5 .metric-card strong {
+  font-size: 24px;
+  line-height: 30px;
+  overflow-wrap: anywhere;
 }
 
 .metric-delta {
@@ -1597,5 +1609,13 @@ input:disabled {
 
   .narrative-pill-row {
     margin-top: 0;
+  }
+}
+
+@media (max-width: 1080px) {
+  .metric-grid-5 {
+    grid-template-columns: repeat(5, minmax(124px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 }

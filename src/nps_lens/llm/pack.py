@@ -10,6 +10,7 @@ import pandas as pd
 from nps_lens.analytics.causal import CausalHypothesis
 from nps_lens.llm.knowledge_cache import stable_signature
 from nps_lens.llm.schemas import InsightPackV1
+from nps_lens.services.analytics.kpis_service import format_metric, format_percentage, format_volume
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -53,9 +54,9 @@ def render_pack_markdown(pack: InsightPackV1) -> str:
 {ctx}
 
 ## Métricas clave
-- **NPS**: {pack.metrics.get('nps', float('nan')):.1f}
-- **% Detractores**: {pack.metrics.get('detractor_rate', float('nan')):.3f}
-- **N (respuestas)**: {n_val}
+- **NPS**: {format_metric(pack.metrics.get('nps', float('nan')))}
+- **% Detractores**: {format_percentage(pack.metrics.get('detractor_rate', float('nan')))}
+- **N (respuestas)**: {format_volume(n_val)}
 
 ## Evidencia cuantitativa
 ```json

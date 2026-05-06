@@ -18,9 +18,11 @@ import type {
   DashboardPayload,
   DatasetStatus,
   HelixUploadResult,
+  KpiDelta,
   LinkingPayload,
   PreferencesPayload,
   ServiceOriginHierarchyPayload,
+  ScopeKpiBlock,
   UploadSelectionPayload,
   UploadResult
 } from "./api";
@@ -41,7 +43,13 @@ import {
   readStoredThemeMode,
   type ThemeMode
 } from "./theme";
-import { formatNumber, formatPercent } from "./utils/numberFormat";
+import {
+  formatDelta,
+  formatMetric,
+  formatNumber,
+  formatPercentage,
+  formatVolume
+} from "./utils/numberFormat";
 
 const MAIN_AREAS = [
   {
@@ -195,14 +203,26 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
 }
 
 type KpiPayload = DashboardPayload["kpis"];
+type KpiKind = "metric" | "percentage" | "volume";
 
-function formatDeltaValue(delta: number | null | undefined, kind: "number" | "percent") {
-  if (delta === null || delta === undefined || Number.isNaN(delta)) {
-    return "";
+function formatKpiValue(
+  kpis: KpiPayload | undefined,
+  display: Record<string, string> | undefined,
+  key: keyof KpiPayload,
+  kind: KpiKind
+) {
+  const displayValue = display?.[String(key)];
+  if (displayValue) {
+    return displayValue;
   }
-  return kind === "percent"
-    ? `${formatNumber(delta * 100, { signed: true })} pp`
-    : formatNumber(delta, { signed: true });
+  const rawValue = kpis?.[key];
+  if (kind === "percentage") {
+    return formatPercentage(rawValue);
+  }
+  if (kind === "volume") {
+    return formatVolume(rawValue);
+  }
+  return formatMetric(rawValue);
 }
 
 export function App() {
@@ -1181,54 +1201,64 @@ export function App() {
   function renderScopeMetricCard(
     label: string,
     value: string,
-    deltaKey?: keyof KpiPayload,
-    deltaKind: "number" | "percent" = "number"
+    delta?: KpiDelta,
+    deltaKind: KpiKind = "metric"
   ) {
-    const delta = deltaKey ? dashboard?.scope?.period?.deltas?.[String(deltaKey)] : undefined;
-    const marker = delta?.direction === "up" ? "↑" : delta?.direction === "down" ? "↓" : "-";
-    const deltaText = delta ? formatDeltaValue(delta.value, deltaKind) : "";
+    const deltaText = delta?.display || (delta ? formatDelta(delta.value, deltaKind) : "");
     const deltaClass =
       delta?.favorable === true ? "is-positive" : delta?.favorable === false ? "is-negative" : "";
     return (
       <article className="metric-card metric-card-with-delta">
         <span>{label}</span>
         <strong>{value}</strong>
-        {deltaKey ? (
+        {delta ? (
           <small className={`metric-delta ${deltaClass}`.trim()}>
-            {marker} {deltaText || "sin histórico"}
+            {deltaText || "sin histórico"}
           </small>
         ) : null}
       </article>
     );
   }
 
-  function renderKpiGrid(kpis: KpiPayload | undefined, withDeltas = false) {
+  function renderKpiGrid(
+    block: ScopeKpiBlock | undefined,
+    fallbackKpis: KpiPayload | undefined,
+    withDeltas = false
+  ) {
+    const kpis = block?.kpis || fallbackKpis;
+    const display = block?.display;
+    const deltas = withDeltas ? block?.deltas : undefined;
     return (
       <div className="metric-grid metric-grid-5">
-        {renderScopeMetricCard("Muestras", formatNumber(kpis?.samples, { fallback: "0" }))}
         {renderScopeMetricCard(
-          "Score medio (0-10)",
-          formatNumber(kpis?.nps_average),
-          withDeltas ? "nps_average" : undefined,
-          "number"
+          "Score Medio",
+          formatKpiValue(kpis, display, "nps_average", "metric"),
+          deltas?.nps_average,
+          "metric"
         )}
         {renderScopeMetricCard(
-          "Detractores (≤6)",
-          formatPercent(kpis?.detractor_rate),
-          withDeltas ? "detractor_rate" : undefined,
-          "percent"
+          "NPS Clásico",
+          formatKpiValue(kpis, display, "classic_nps", "metric"),
+          deltas?.classic_nps,
+          "metric"
         )}
         {renderScopeMetricCard(
-          "Neutros (7-8)",
-          formatPercent(kpis?.neutral_rate),
-          withDeltas ? "neutral_rate" : undefined,
-          "percent"
+          "Detractores",
+          formatKpiValue(kpis, display, "detractor_rate", "percentage"),
+          deltas?.detractor_rate,
+          "percentage"
         )}
         {renderScopeMetricCard(
-          "Promotores (≥9)",
-          formatPercent(kpis?.promoter_rate),
-          withDeltas ? "promoter_rate" : undefined,
-          "percent"
+          "Promotores",
+          formatKpiValue(kpis, display, "promoter_rate", "percentage"),
+          deltas?.promoter_rate,
+          "percentage"
+        )}
+        {renderScopeMetricCard(
+          "Comentarios",
+          formatKpiValue(kpis, display, "comments", "volume"),
+          deltas?.comments,
+          "volume"
         )}
       </div>
     );
@@ -1310,7 +1340,7 @@ export function App() {
             </div>
           </div>
 
-          {renderKpiGrid(dashboard?.scope?.cumulative?.kpis || dashboard?.kpis)}
+          {renderKpiGrid(dashboard?.scope?.cumulative, dashboard?.kpis, true)}
 
           <div className="section-heading section-heading-inline scope-period-heading">
             <div>
@@ -1318,7 +1348,7 @@ export function App() {
             </div>
           </div>
 
-          {renderKpiGrid(dashboard?.scope?.period?.kpis || dashboard?.kpis, true)}
+          {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis, true)}
         </section>
 
         <NavigationTabs

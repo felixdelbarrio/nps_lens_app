@@ -414,7 +414,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert any("Análisis NPS térmico y causalidad" in t for t in texts)
     assert any("NPS térmico" in t for t in texts)
-    assert any("% PROMOTORES" in t for t in texts)
+    assert any("PROMOTORES" in t for t in texts)
+    assert any("Se analizaron" in t for t in texts)
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
     assert any("2. Que dicen los detractores" in t for t in texts)
     assert any("3. Qué ha cambiado en Palanca" in t for t in texts)
@@ -939,7 +940,7 @@ def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
 
 
 def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> None:
-    assert executive_ppt._fmt_pct_or_nd(0.25) == "25%"
+    assert executive_ppt._fmt_pct_or_nd(0.25) == "25,00%"
     assert executive_ppt._fmt_pct_or_nd(float("nan")) == "n/d"
     assert (
         executive_ppt._fmt_count_with_label(1, singular="incidencia", plural="incidencias")
@@ -1122,7 +1123,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
     assert any("6. Journeys de detracción" in t for t in texts)
     assert any("7. Análisis causal no concluyente" in t for t in texts)
-    assert any("No se identificaron patrones causales estadísticamente defendibles" in t for t in texts)
+    assert any(
+        "No se identificaron patrones causales estadísticamente defendibles" in t for t in texts
+    )
     assert not any("7.1" in t for t in texts)
 
 

@@ -393,7 +393,7 @@ def chart_daily_kpis(
             mode="lines+markers",
             name="NPS clásico",
             hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>" "NPS clásico=%{y:.1f}<br>" "n=%{customdata}<extra></extra>"
+                "Día=%{x|%Y-%m-%d}<br>" "NPS clásico=%{y:.2f}<br>" "n=%{customdata}<extra></extra>"
             ),
             customdata=agg["n"],
         ),
@@ -407,7 +407,7 @@ def chart_daily_kpis(
             name="% detractores",
             hovertemplate=(
                 "Día=%{x|%Y-%m-%d}<br>"
-                "% detractores=%{y:.1f}%<br>"
+                "% detractores=%{y:.2f}%<br>"
                 "n=%{customdata}<extra></extra>"
             ),
             customdata=agg["n"],
@@ -480,7 +480,7 @@ def chart_daily_nps_committee_stack(
             name="NPS clásico",
             line=dict(color=th.accent, width=3),
             marker=dict(size=7, color=th.accent),
-            hovertemplate="Día=%{x|%Y-%m-%d}<br>NPS clásico=%{y:.1f}<br>n=%{customdata}<extra></extra>",
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>NPS clásico=%{y:.2f}<br>n=%{customdata}<extra></extra>",
             customdata=agg["n"],
         ),
         row=1,
@@ -495,7 +495,7 @@ def chart_daily_nps_committee_stack(
             name="% detractores",
             line=dict(color=detr_c, width=2.4, dash="dot"),
             marker=dict(size=5, color=detr_c),
-            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.2f}%<br>n=%{customdata}<extra></extra>",
             customdata=agg["n"],
         ),
         row=1,
@@ -510,7 +510,7 @@ def chart_daily_nps_committee_stack(
             name="% promotores",
             line=dict(color=pro_c, width=2.8),
             marker=dict(size=6, color=pro_c),
-            hovertemplate="Día=%{x|%Y-%m-%d}<br>% promotores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% promotores=%{y:.2f}%<br>n=%{customdata}<extra></extra>",
             customdata=agg["n"],
         ),
         row=2,
@@ -524,7 +524,7 @@ def chart_daily_nps_committee_stack(
             name="% pasivos",
             line=dict(color=pas_c, width=2.4),
             marker=dict(size=5, color=pas_c),
-            hovertemplate="Día=%{x|%Y-%m-%d}<br>% pasivos=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% pasivos=%{y:.2f}%<br>n=%{customdata}<extra></extra>",
             customdata=agg["n"],
         ),
         row=2,
@@ -538,7 +538,7 @@ def chart_daily_nps_committee_stack(
             name="% detractores",
             line=dict(color=detr_c, width=2.4, dash="dot"),
             marker=dict(size=5, color=detr_c),
-            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.1f}%<br>n=%{customdata}<extra></extra>",
+            hovertemplate="Día=%{x|%Y-%m-%d}<br>% detractores=%{y:.2f}%<br>n=%{customdata}<extra></extra>",
             customdata=agg["n"],
             showlegend=False,
         ),
@@ -665,7 +665,7 @@ def chart_daily_mix_business(
             customdata=agg[["n"]],
             hovertemplate=(
                 "Día=%{x|%Y-%m-%d}<br>"
-                "Detractores=%{y:.1f}%<br>"
+                "Detractores=%{y:.2f}%<br>"
                 "n=%{customdata[0]}<extra></extra>"
             ),
         )
@@ -678,7 +678,7 @@ def chart_daily_mix_business(
             marker_color=pas_c,
             customdata=agg[["n"]],
             hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>" "Pasivos=%{y:.1f}%<br>" "n=%{customdata[0]}<extra></extra>"
+                "Día=%{x|%Y-%m-%d}<br>" "Pasivos=%{y:.2f}%<br>" "n=%{customdata[0]}<extra></extra>"
             ),
         )
     )
@@ -691,7 +691,7 @@ def chart_daily_mix_business(
             customdata=agg[["n"]],
             hovertemplate=(
                 "Día=%{x|%Y-%m-%d}<br>"
-                "Promotores=%{y:.1f}%<br>"
+                "Promotores=%{y:.2f}%<br>"
                 "n=%{customdata[0]}<extra></extra>"
             ),
         )
@@ -782,9 +782,9 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         hovertemplate=(
             "%{y}<br>"
             "n: %{customdata[0]}<br>"
-            "NPS Clásico: %{customdata[1]:.1f}<br>"
-            "Brecha vs Global: %{customdata[2]:.1f} pts<br>"
-            "Esta palanca presenta un NPS %{customdata[3]:.1f} puntos "
+            "NPS Clásico: %{customdata[1]:.2f}<br>"
+            "Brecha vs Global: %{customdata[2]:.2f} pts<br>"
+            "Esta palanca presenta un NPS %{customdata[3]:.2f} puntos "
             "%{customdata[4]}.<extra></extra>"
         ),
     )
@@ -825,12 +825,10 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
         x="potential_uplift",
         y="label",
         orientation="h",
-        hover_data={"n": True, "confidence": ":.2f", "potential_uplift": ":.1f"},
+        hover_data={"n": True, "confidence": ":.2f", "potential_uplift": ":.2f"},
     )
     fig.update_traces(marker_color=colors)
-    fig.update_layout(
-        xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False
-    )
+    fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
     fig.update_yaxes(categoryorder="array", categoryarray=list(reversed(d["label"].tolist())))
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)
@@ -1401,7 +1399,9 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         },
     )
     fig.update_traces(marker_color=_diverging_colors(theme, plot_df["delta_nps"]))
-    fig.update_layout(xaxis_title="Delta NPS Clásico (actual - base)", yaxis_title="", showlegend=False)
+    fig.update_layout(
+        xaxis_title="Delta NPS Clásico (actual - base)", yaxis_title="", showlegend=False
+    )
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)

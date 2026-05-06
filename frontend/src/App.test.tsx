@@ -114,9 +114,11 @@ const dashboardPayload = {
   kpis: {
     samples: 26618,
     nps_average: 4.2,
+    classic_nps: -12.5,
     detractor_rate: 0.345,
     neutral_rate: 0.435,
-    promoter_rate: 0.22
+    promoter_rate: 0.22,
+    comments: 21967
   },
   overview: {
     daily_kpis_figure: null,
@@ -127,7 +129,7 @@ const dashboardPayload = {
     daily_volume_mix_figure: null,
     daily_mix_figure: null,
     daily_explanation_bullets: [
-      "El periodo arranca con NPS clásico **-12.5** y termina en **4.0**."
+      "El periodo arranca con NPS clásico **-12,50** y termina en **4,00**."
     ],
     insight_bullets: []
   },
@@ -138,9 +140,11 @@ const dashboardPayload = {
       kpis: {
         samples: 50000,
         nps_average: 4.5,
+        classic_nps: -6.0,
         detractor_rate: 0.32,
         neutral_rate: 0.42,
-        promoter_rate: 0.26
+        promoter_rate: 0.26,
+        comments: 50000
       }
     },
     period: {
@@ -148,15 +152,19 @@ const dashboardPayload = {
       kpis: {
         samples: 26618,
         nps_average: 4.2,
+        classic_nps: -12.5,
         detractor_rate: 0.345,
         neutral_rate: 0.435,
-        promoter_rate: 0.22
+        promoter_rate: 0.22,
+        comments: 21967
       },
       deltas: {
         nps_average: { value: -0.3, direction: "down", favorable: false },
+        classic_nps: { value: -6.5, direction: "down", favorable: false },
         detractor_rate: { value: 0.025, direction: "up", favorable: false },
         neutral_rate: { value: 0.015, direction: "up", favorable: true },
-        promoter_rate: { value: -0.04, direction: "down", favorable: false }
+        promoter_rate: { value: -0.04, direction: "down", favorable: false },
+        comments: { value: 21967, direction: "up", favorable: null }
       }
     }
   },
@@ -596,8 +604,9 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
-    expect(screen.getAllByText("Score medio (0-10)").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Neutros (7-8)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Score Medio").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("NPS Clásico").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comentarios").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();

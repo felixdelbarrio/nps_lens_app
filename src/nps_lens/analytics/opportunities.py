@@ -54,7 +54,7 @@ def rank_opportunities(
                     current_nps=float(nps),
                     potential_uplift=uplift,
                     confidence=conf,
-                    why=f"'{dim}={value}' está {delta:.1f} pts por debajo del NPS global",
+                    why=f"'{dim}={value}' está {delta:.2f} pts por debajo del NPS global",
                 )
             )
     out.sort(key=lambda o: (o.potential_uplift * o.confidence, o.n), reverse=True)

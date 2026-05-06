@@ -82,9 +82,11 @@ from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analytics import (
-    build_scope_kpis,
+    build_period_kpis,
     cumulative_until_period,
     daily_nps_explanation,
+    format_metric,
+    format_percentage,
 )
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -541,6 +543,13 @@ class DashboardService:
             pop_month=pop_month,
             df=scope_history_df,
         )
+        scope_kpis = build_period_kpis(
+            history_df=scope_history_df,
+            current_df=scope_current_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            context_label=context_label,
+        )
 
         if scope_current_df.empty:
             return {
@@ -554,17 +563,13 @@ class DashboardService:
                 "kpis": {
                     "samples": 0,
                     "nps_average": None,
+                    "classic_nps": None,
                     "detractor_rate": None,
                     "neutral_rate": None,
                     "promoter_rate": None,
+                    "comments": 0,
                 },
-                "scope": build_scope_kpis(
-                    history_df=scope_history_df,
-                    current_df=scope_current_df,
-                    pop_year=pop_year,
-                    pop_month=pop_month,
-                    context_label=context_label,
-                ),
+                "scope": scope_kpis,
                 "overview": {},
                 "comparison": {},
                 "cohorts": {},
@@ -639,14 +644,9 @@ class DashboardService:
                 ["potential_uplift", "confidence"], ascending=[False, False]
             ).reset_index(drop=True)
         opportunity_bullets = explain_opportunities(opportunities_df, max_items=5)
-        scope_kpis = build_scope_kpis(
-            history_df=scope_history_df,
-            current_df=scope_current_df,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            context_label=context_label,
-        )
         nps_explanation_bullets = daily_nps_explanation(scope_current_df)
+        period_scope = cast(dict[str, Any], scope_kpis.get("period", {}))
+        period_scope_kpis = cast(dict[str, Any], period_scope.get("kpis", {}))
 
         return {
             "context_label": context_label,
@@ -660,9 +660,11 @@ class DashboardService:
             "kpis": {
                 "samples": summary.n,
                 "nps_average": summary.nps_avg,
+                "classic_nps": period_scope_kpis.get("classic_nps"),
                 "detractor_rate": summary.detractor_rate,
                 "neutral_rate": summary.neutral_rate,
                 "promoter_rate": summary.promoter_rate,
+                "comments": period_scope_kpis.get("comments", 0),
             },
             "scope": scope_kpis,
             "overview": {
@@ -1139,24 +1141,22 @@ class DashboardService:
                 "kpis": [
                     {
                         "label": "NPS en riesgo",
-                        "value": f"{float(active_rationale_summary.nps_points_at_risk):.2f} pts",
+                        "value": f"{format_metric(active_rationale_summary.nps_points_at_risk)} pts",
                     },
                     {
                         "label": "NPS recuperable",
                         "value": (
-                            f"{float(active_rationale_summary.nps_points_recoverable):.2f} pts"
+                            f"{format_metric(active_rationale_summary.nps_points_recoverable)} pts"
                         ),
                     },
                     {
                         "label": "Concentración top-3",
-                        "value": (
-                            f"{float(active_rationale_summary.top3_incident_share)*100.0:.1f}%"
-                        ),
+                        "value": format_percentage(active_rationale_summary.top3_incident_share),
                     },
                     {
                         "label": "Tiempo de reacción",
                         "value": (
-                            f"{float(median_lag_value):.1f} semanas"
+                            f"{format_metric(median_lag_value)} semanas"
                             if median_lag_value is not None
                             else "n/d"
                         ),
@@ -1357,6 +1357,18 @@ class DashboardService:
             pop_month=pop_month,
             min_n=min_n,
         )
+        context_label = selected_month_label(
+            pop_year=pop_year,
+            pop_month=pop_month,
+            df=scope_history_df,
+        )
+        period_kpis = build_period_kpis(
+            history_df=scope_history_df,
+            current_df=scope_current_df if not scope_current_df.empty else current_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            context_label=context_label,
+        )
 
         period_start, period_end = self._period_bounds(current_df)
         overall_series = overall_daily if not overall_daily.empty else overall_weekly
@@ -1385,6 +1397,7 @@ class DashboardService:
             executive_journey_catalog=executive_journey_catalog,
             broken_journeys_df=broken_journeys_df,
             report_dimension_analysis=resolved_report_dimension_analysis,
+            period_kpis=period_kpis,
         )
         saved_path = self._persist_report_copy(report)
         return BusinessPptResult(
@@ -1541,7 +1554,7 @@ class DashboardService:
             },
             {
                 "label": f"{focus_label} medio",
-                "value": f"{float(average_focus_rate) * 100.0:.1f}%",
+                "value": format_percentage(average_focus_rate),
             },
         ]
 
@@ -2253,7 +2266,9 @@ class DashboardService:
                         {
                             "label": f"Prob. {focus_name}",
                             "value": (
-                                f"{float(_metric_number(row.get('detractor_probability')) or 0.0)*100.0:.1f}%"
+                                format_percentage(
+                                    _metric_number(row.get("detractor_probability")) or 0.0
+                                )
                                 if _metric_number(row.get("detractor_probability")) is not None
                                 else "n/d"
                             ),
@@ -2261,7 +2276,10 @@ class DashboardService:
                         {
                             "label": "Delta NPS Clásico",
                             "value": (
-                                f"{float(_metric_number(row.get('nps_delta_expected')) or 0.0):+.1f}"
+                                format_metric(
+                                    _metric_number(row.get("nps_delta_expected")) or 0.0,
+                                    signed=True,
+                                )
                                 if _metric_number(row.get("nps_delta_expected")) is not None
                                 else "n/d"
                             ),
@@ -2539,8 +2557,8 @@ class DashboardService:
         subpalanca_ratio = float(ratios.get("Subpalanca", 0.0)) if isinstance(ratios, dict) else 0.0
         note = (
             f"Eje seleccionado para el racional: {axis} "
-            f"(cobertura Helix en rojos: Palanca {palanca_ratio*100:.1f}% · "
-            f"Subpalanca {subpalanca_ratio*100:.1f}%)."
+            f"(cobertura Helix en rojos: Palanca {format_percentage(palanca_ratio)} · "
+            f"Subpalanca {format_percentage(subpalanca_ratio)})."
         )
         return (aligned if not aligned.empty else evidence_df), note
 
