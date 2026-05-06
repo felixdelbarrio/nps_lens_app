@@ -2,11 +2,7 @@ name: release
 
 on:
   push:
-    branches: ["develop", "feat/**"]
-    tags: ["v*"]
-  pull_request:
-    branches: ["develop"]
-  workflow_dispatch:
+    branches: ["master"]
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
