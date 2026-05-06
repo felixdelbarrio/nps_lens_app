@@ -88,12 +88,14 @@ export type DashboardKpis = {
 
 export type ScopeKpiBlock = {
   label: string;
+  period_type?: string;
   base_label?: string;
   actual_label?: string;
   note?: string;
   kpis: DashboardKpis;
   base_kpis?: DashboardKpis;
   deltas?: Record<string, KpiDelta>;
+  show_deltas?: boolean;
   display?: Record<string, string>;
   base_display?: Record<string, string>;
   temporal?: ScopeKpiBlock;
@@ -115,8 +117,10 @@ export type DashboardPayload = {
     insight_bullets?: string[];
   };
   scope?: {
+    historical?: ScopeKpiBlock;
     cumulative?: ScopeKpiBlock;
     period?: ScopeKpiBlock;
+    temporal?: ScopeKpiBlock;
   };
   comparison: {
     summary?: {
