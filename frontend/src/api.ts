@@ -131,6 +131,9 @@ export type DashboardPayload = {
   };
   gaps: {
     dimension?: string;
+    overall_nps?: number;
+    title?: string;
+    subtitle?: string;
     figure?: PlotlyFigureSpec | null;
     table?: Array<Record<string, unknown>>;
     has_data?: boolean;

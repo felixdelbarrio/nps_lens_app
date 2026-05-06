@@ -764,16 +764,32 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         raise ValueError("driver_df must include gap_vs_overall")
     d = d.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(top_k).copy()
     plot_df = d.iloc[::-1].copy()
+    plot_df["gap_direction"] = np.where(
+        pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").fillna(0.0) < 0.0,
+        "por debajo del promedio global",
+        "por encima del promedio global",
+    )
+    plot_df["abs_gap"] = pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").abs()
     fig = px.bar(
         plot_df,
         x="gap_vs_overall",
         y="value",
         orientation="h",
-        hover_data={"n": True, "nps": ":.2f", "gap_vs_overall": ":.2f"},
+        custom_data=["n", "nps", "gap_vs_overall", "abs_gap", "gap_direction"],
     )
-    fig.update_traces(marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]))
+    fig.update_traces(
+        marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]),
+        hovertemplate=(
+            "%{y}<br>"
+            "n: %{customdata[0]}<br>"
+            "NPS Clásico: %{customdata[1]:.1f}<br>"
+            "Brecha vs Global: %{customdata[2]:.1f} pts<br>"
+            "Esta palanca presenta un NPS %{customdata[3]:.1f} puntos "
+            "%{customdata[4]}.<extra></extra>"
+        ),
+    )
     fig.update_layout(
-        xaxis_title="Diferencia vs Score global (puntos)",
+        xaxis_title="Brecha vs NPS Global (pts)",
         yaxis_title="",
         showlegend=False,
     )
@@ -813,7 +829,7 @@ def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12)
     )
     fig.update_traces(marker_color=colors)
     fig.update_layout(
-        xaxis_title="Impacto estimado (puntos Score)", yaxis_title="", showlegend=False
+        xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False
     )
     fig.update_yaxes(categoryorder="array", categoryarray=list(reversed(d["label"].tolist())))
     _layout_common(fig, th, height=360)
@@ -942,7 +958,7 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="Score en riesgo",
+                title="NPS en riesgo",
                 tickfont=dict(size=10),
             )
         ),
@@ -1024,7 +1040,7 @@ def chart_incident_priority_matrix(
             hovertemplate=(
                 "Tópico=%{y}<br>Prioridad=%{x:.2f}<br>"
                 "Confianza=%{customdata[0]:.2f}<br>"
-                "Score en riesgo=%{customdata[1]:.2f}<br>"
+                "NPS en riesgo=%{customdata[1]:.2f}<br>"
                 "Incidencias=%{customdata[2]:.0f}<extra></extra>"
             ),
         )
@@ -1110,12 +1126,12 @@ def chart_incident_risk_recovery(
             x=d["nps_points_at_risk"],
             y=d["topic"],
             mode="markers+text",
-            name="Score en riesgo",
+            name="NPS en riesgo",
             marker=dict(color=detr_c, size=11),
             text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
             textposition="middle right",
             cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>Score en riesgo=%{x:.2f}<extra></extra>",
+            hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
         )
     )
     fig.add_trace(
@@ -1123,16 +1139,16 @@ def chart_incident_risk_recovery(
             x=d["nps_points_recoverable"],
             y=d["topic"],
             mode="markers+text",
-            name="Score recuperable",
+            name="NPS recuperable",
             marker=dict(color=pro_c, size=11, symbol="diamond"),
             text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
             textposition="middle left",
             cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>Score recuperable=%{x:.2f}<extra></extra>",
+            hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
         )
     )
     fig.update_layout(
-        xaxis_title="Puntos Score",
+        xaxis_title="Puntos NPS",
         yaxis_title="",
         legend_title_text="Metricas",
         legend=dict(orientation="h", y=1.08, x=0),
@@ -1385,7 +1401,7 @@ def chart_driver_delta(delta_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         },
     )
     fig.update_traces(marker_color=_diverging_colors(theme, plot_df["delta_nps"]))
-    fig.update_layout(xaxis_title="Delta Score (actual - base)", yaxis_title="", showlegend=False)
+    fig.update_layout(xaxis_title="Delta NPS Clásico (actual - base)", yaxis_title="", showlegend=False)
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)

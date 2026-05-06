@@ -124,17 +124,19 @@ class AppService:
         df: pd.DataFrame,
         *,
         dimension: str,
-        score_col: str = "NPS",
+        survey_score_col: str = "NPS",
         dataset_id: Optional[str] = None,
     ) -> pd.DataFrame:
         """Driver table (cached) returned as a DataFrame."""
         from nps_lens.analytics.drivers import driver_table
 
         ds_sig = dataset_id or _df_sig_light(df)
-        params = {"dimension": str(dimension), "score_col": str(score_col)}
+        params = {"dimension": str(dimension), "survey_score_col": str(survey_score_col)}
 
         def _compute() -> pd.DataFrame:
-            stats = driver_table(df, dimension=str(dimension), score_col=str(score_col))
+            stats = driver_table(
+                df, dimension=str(dimension), survey_score_col=str(survey_score_col)
+            )
             return pd.DataFrame([s.__dict__ for s in stats])
 
         out, _hit = self.cached(

@@ -13,7 +13,7 @@ from typing import Any, Optional, Sequence, cast
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.helix_operational_metrics import (
     HelixOperationalBenchmark,
     build_helix_operational_benchmark,
@@ -617,6 +617,7 @@ class DashboardService:
         gap_stats = pd.DataFrame(
             [stat.__dict__ for stat in driver_table(scope_current_df, gap_dimension)]
         )
+        overall_nps = compute_nps_from_scores(scope_current_df["NPS"])
         if not gap_stats.empty:
             gap_stats = gap_stats.sort_values(
                 ["gap_vs_overall", "n"], ascending=[True, False]
@@ -701,6 +702,12 @@ class DashboardService:
             },
             "gaps": {
                 "dimension": gap_dimension,
+                "overall_nps": overall_nps,
+                "title": "Palancas con mayor brecha de NPS",
+                "subtitle": (
+                    "Las barras muestran cuánto se desvía el NPS de cada palanca "
+                    "respecto al NPS global del período."
+                ),
                 "figure": self._serialize_figure(chart_driver_bar(gap_stats, theme)),
                 "table": self._serialize_rows(gap_stats.head(30)),
                 "has_data": not gap_stats.empty,
@@ -1131,11 +1138,11 @@ class DashboardService:
                 "subtitle": method_spec.deep_dive_subtitle,
                 "kpis": [
                     {
-                        "label": "Score en riesgo",
+                        "label": "NPS en riesgo",
                         "value": f"{float(active_rationale_summary.nps_points_at_risk):.2f} pts",
                     },
                     {
-                        "label": "Score recuperable",
+                        "label": "NPS recuperable",
                         "value": (
                             f"{float(active_rationale_summary.nps_points_recoverable):.2f} pts"
                         ),
@@ -1962,7 +1969,7 @@ class DashboardService:
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
                     "avg_nps": "Score medio",
-                    "nps_points_at_risk": "Score en riesgo (pts)",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -1993,7 +2000,7 @@ class DashboardService:
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
                     "avg_nps": "Score medio",
-                    "nps_points_at_risk": "Score en riesgo (pts)",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -2024,7 +2031,7 @@ class DashboardService:
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
                     "avg_nps": "Score medio",
-                    "nps_points_at_risk": "Score en riesgo (pts)",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -2055,7 +2062,7 @@ class DashboardService:
                     "linked_comments": "Comentarios VoC",
                     "linked_pairs": "Links validados",
                     "avg_nps": "Score medio",
-                    "nps_points_at_risk": "Score en riesgo (pts)",
+                    "nps_points_at_risk": "NPS en riesgo (pts)",
                     "confidence": "Confianza",
                 }
             )
@@ -2081,7 +2088,7 @@ class DashboardService:
                 "linked_comments": "Comentarios VoC",
                 "linked_pairs": "Links validados",
                 "avg_nps": "Score medio",
-                "nps_points_at_risk": "Score en riesgo (pts)",
+                "nps_points_at_risk": "NPS en riesgo (pts)",
                 "confidence": "Confianza",
             }
         )
@@ -2252,7 +2259,7 @@ class DashboardService:
                             ),
                         },
                         {
-                            "label": "Delta Score",
+                            "label": "Delta NPS Clásico",
                             "value": (
                                 f"{float(_metric_number(row.get('nps_delta_expected')) or 0.0):+.1f}"
                                 if _metric_number(row.get("nps_delta_expected")) is not None
@@ -2276,11 +2283,11 @@ class DashboardService:
                             "value": f"{float(_metric_number(row.get('priority')) or 0.0):.2f}",
                         },
                         {
-                            "label": "Score en riesgo",
+                            "label": "NPS en riesgo",
                             "value": f"{float(_metric_number(row.get('nps_points_at_risk')) or 0.0):.2f} pts",
                         },
                         {
-                            "label": "Score recuperable",
+                            "label": "NPS recuperable",
                             "value": f"{float(_metric_number(row.get('nps_points_recoverable')) or 0.0):.2f} pts",
                         },
                         {
@@ -2413,11 +2420,11 @@ class DashboardService:
                 "touchpoint": touchpoint_label,
                 "priority": "Prioridad",
                 "confidence": "Confianza",
-                "nps_points_at_risk": "Score en riesgo (pts)",
-                "nps_points_recoverable": "Score recuperable (pts)",
+                "nps_points_at_risk": "NPS en riesgo (pts)",
+                "nps_points_recoverable": "NPS recuperable (pts)",
                 "detractor_probability": f"Prob. {focus_name} con incidencia",
-                "nps_delta_expected": "Delta Score esperado",
-                "total_nps_impact": "Impacto total Score (pts)",
+                "nps_delta_expected": "Delta NPS Clásico esperado",
+                "total_nps_impact": "Impacto total NPS (pts)",
                 "causal_score": "Causal score",
                 "delta_focus_rate_pp": f"Δ % {focus_name.capitalize()} (pp)",
                 "incident_rate_per_100_responses": "Incidencias por 100 respuestas",

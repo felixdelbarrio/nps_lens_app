@@ -987,7 +987,7 @@ export function App() {
   function renderComparisonPanel() {
     const comparisonRows = (dashboard?.comparison.table || []).map((row) => ({
       Valor: row.value ?? "",
-      "Delta Score": row.delta_nps ?? "",
+      "Delta NPS Clásico": row.delta_nps ?? "",
       "Score actual": row.nps_current ?? "",
       "Score base": row.nps_baseline ?? "",
       "n actual": row.n_current ?? "",
@@ -1017,7 +1017,7 @@ export function App() {
               </label>
             </div>
             <div className="delta-strip">
-              <span>Delta Score: {formatNumber(dashboard?.comparison.summary?.delta_nps, { signed: true })}</span>
+              <span>Delta NPS Clásico: {formatNumber(dashboard?.comparison.summary?.delta_nps, { signed: true })}</span>
               <span>
                 Δ detractores: {formatNumber(dashboard?.comparison.summary?.delta_detr_pp, { signed: true })} pp
               </span>
@@ -1086,16 +1086,24 @@ export function App() {
     const gapRows = (dashboard?.gaps.table || []).map((row) => ({
       Valor: row.value ?? "",
       n: row.n ?? "",
-      Score: row.nps ?? "",
-      Gap: row.gap_vs_overall ?? ""
+      "NPS Clásico": row.nps ?? "",
+      "Brecha vs Global": row.gap_vs_overall ?? ""
     }));
+    const gapTitle = dashboard?.gaps.title || "Palancas con mayor brecha de NPS";
+    const gapSubtitle =
+      dashboard?.gaps.subtitle ||
+      "Las barras muestran cuánto se desvía el NPS de cada palanca respecto al NPS global del período.";
 
     return (
       <section className="surface-card stack-panel">
             <div className="section-heading section-heading-inline">
               <div>
                 <p className="eyebrow">Brechas</p>
-                <h2>Dónde el NPS se separa del global</h2>
+                <h2>{gapTitle}</h2>
+                <p>{gapSubtitle}</p>
+                <p className="metric-note">
+                  NPS Global del período: {formatNumber(dashboard?.gaps.overall_nps)}
+                </p>
               </div>
               <label className="inline-field">
                 <span>Dimensión</span>
@@ -1113,11 +1121,11 @@ export function App() {
               </label>
             </div>
             <PlotFigure
-              emptyMessage="No hay datos suficientes para calcular gaps."
+              emptyMessage="No hay datos suficientes para calcular brechas."
               figure={dashboard?.gaps.figure}
               testId="gaps-figure"
             />
-            <RecordTable emptyMessage="No hay gaps disponibles." rows={gapRows} />
+            <RecordTable emptyMessage="No hay brechas disponibles." rows={gapRows} />
       </section>
     );
   }

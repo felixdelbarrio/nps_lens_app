@@ -65,9 +65,9 @@ class DimensionChangeSlideLayout:
     max_rows: int = 4
     headers: tuple[str, ...] = (
         "Valor",
-        "Delta Score",
-        "Score actual",
-        "Score base",
+        "Delta NPS Clásico",
+        "NPS Clásico actual",
+        "NPS Clásico base",
         "n actual",
         "n base",
     )

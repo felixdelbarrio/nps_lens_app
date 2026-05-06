@@ -30,7 +30,7 @@ def grouped_driver_stats(
     df: pd.DataFrame,
     dimension: str,
     *,
-    score_col: str = "NPS",
+    survey_score_col: str = "NPS",
 ) -> pd.DataFrame:
     """Vectorized grouped NPS stats used by driver and opportunities ranking."""
     if dimension not in df.columns:
@@ -39,7 +39,7 @@ def grouped_driver_stats(
         )
 
     work = pd.DataFrame(
-        {dimension: df[dimension], "_score": pd.to_numeric(df[score_col], errors="coerce")}
+        {dimension: df[dimension], "_score": pd.to_numeric(df[survey_score_col], errors="coerce")}
     )
     work["_valid"] = work["_score"].notna()
     work["_det"] = work["_score"] <= 6.0
@@ -63,11 +63,13 @@ def grouped_driver_stats(
     return grouped[[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]]
 
 
-def driver_table(df: pd.DataFrame, dimension: str, score_col: str = "NPS") -> list[DriverStat]:
+def driver_table(
+    df: pd.DataFrame, dimension: str, survey_score_col: str = "NPS"
+) -> list[DriverStat]:
     if dimension not in df.columns:
         return []
-    overall = compute_nps_from_scores(df[score_col])
-    grouped = grouped_driver_stats(df, dimension, score_col=score_col)
+    overall = compute_nps_from_scores(df[survey_score_col])
+    grouped = grouped_driver_stats(df, dimension, survey_score_col=survey_score_col)
     out: list[DriverStat] = []
     for _, row in grouped.iterrows():
         n = int(row["n"])

@@ -23,7 +23,7 @@ const PERCENT_COLUMN_PATTERN =
   /%|percent|percentage|porcentaje|share|ratio|rate|prob(?:ability|\.)?/i;
 const NON_PERCENT_COLUMN_PATTERN =
   /\bpp\b|por 100|per 100|score|confidence|confianza|similaridad|cohesi|corr|lag|eta|pts?\b/i;
-const SIGNED_COLUMN_PATTERN = /\bgap\b|diferencia|difference/i;
+const SIGNED_COLUMN_PATTERN = /\bgap\b|brecha|diferencia|difference/i;
 const PLAIN_NUMERIC_PATTERN = /^[+-]?\d+(?:[.,]\d+)?$/;
 const PERCENT_VALUE_PATTERN = /^([+-]?\d+(?:[.,]\d+)?)\s*%$/;
 const NUMERIC_WITH_UNIT_PATTERN =
@@ -64,6 +64,7 @@ const NON_PERCENT_TOKENS = [
   "nps",
   "uplift",
   "gap",
+  "brecha",
   "impacto",
   "impact",
   "delta"

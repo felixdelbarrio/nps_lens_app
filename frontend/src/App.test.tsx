@@ -275,8 +275,8 @@ const linkingPayloadAvailable = {
     title: "Análisis de Tópicos de NPS afectados",
     subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
     kpis: [
-      { label: "Score en riesgo", value: "3.90 pts" },
-      { label: "Score recuperable", value: "2.40 pts" },
+      { label: "NPS en riesgo", value: "3.90 pts" },
+      { label: "NPS recuperable", value: "2.40 pts" },
       { label: "Concentración top-3", value: "74.0%" },
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
@@ -369,7 +369,7 @@ const linkingPayloadAvailable = {
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
           "Consulta / Operativa / Error funcional",
-          "Riesgo Score"
+          "Riesgo NPS"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
@@ -379,13 +379,13 @@ const linkingPayloadAvailable = {
           },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "60.0%" },
-          { label: "Delta Score", value: "-0.0" },
+          { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.16" },
           { label: "Links validados", value: "16" },
           { label: "Prioridad", value: "0.62" },
-          { label: "Score en riesgo", value: "0.00 pts" },
-          { label: "Score recuperable", value: "0.00 pts" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "VoC + Analitica" }
         ],
         incident_records: [
@@ -440,20 +440,20 @@ const linkingPayloadAvailable = {
           "(8) Incidencias + comentarios",
           "Consulta de saldos",
           "Consulta / Disponibilidad / Saldos",
-          "Riesgo Score"
+          "Riesgo NPS"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
           { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "52.0%" },
-          { label: "Delta Score", value: "-0.0" },
+          { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.14" },
           { label: "Links validados", value: "14" },
           { label: "Prioridad", value: "0.51" },
-          { label: "Score en riesgo", value: "0.00 pts" },
-          { label: "Score recuperable", value: "0.00 pts" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "Canal Digital" }
         ],
         incident_records: [
