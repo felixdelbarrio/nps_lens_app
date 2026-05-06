@@ -9,14 +9,14 @@ describe("numberFormat", () => {
   });
 
   it("renders percentages with fixed two-decimal locale format", () => {
-    expect(formatPercent(0.345)).toBe("34,50 %");
-    expect(formatPercent(0.6)).toBe("60,00 %");
+    expect(formatPercent(0.345)).toBe("34,50%");
+    expect(formatPercent(0.6)).toBe("60,00%");
   });
 
   it("detects percent-like columns centrally", () => {
-    expect(formatDisplayValue(0.5795254182580882, "detractor_probability")).toBe("57,95 %");
-    expect(formatDisplayValue(0.1524, "average_focus_rate")).toBe("15,24 %");
-    expect(formatDisplayValue(0.22, "% promotores")).toBe("22,00 %");
+    expect(formatDisplayValue(0.5795254182580882, "detractor_probability")).toBe("57,95%");
+    expect(formatDisplayValue(0.1524, "average_focus_rate")).toBe("15,24%");
+    expect(formatDisplayValue(0.22, "% promotores")).toBe("22,00%");
   });
 
   it("does not mistake non-percent metrics for percentages", () => {
@@ -27,7 +27,7 @@ describe("numberFormat", () => {
   });
 
   it("normalizes incoming strings that already contain a percent sign", () => {
-    expect(formatDisplayValue("34.5%", "any_column")).toBe("34,50 %");
-    expect(formatDisplayValue("34,5 %", "any_column")).toBe("34,50 %");
+    expect(formatDisplayValue("34.5%", "any_column")).toBe("34,50%");
+    expect(formatDisplayValue("34,5 %", "any_column")).toBe("34,50%");
   });
 });

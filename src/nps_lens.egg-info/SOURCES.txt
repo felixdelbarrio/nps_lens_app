@@ -112,6 +112,7 @@ tests/test_llm_insight_response.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
 tests/test_nps_parser.py
+tests/test_period_kpis.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py
 tests/test_plotly_theme.py
