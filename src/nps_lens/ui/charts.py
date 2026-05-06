@@ -629,18 +629,13 @@ def chart_daily_mix_business(
     days: int = 60,
     metrics: pd.DataFrame | None = None,
 ):
-    """Business-friendly daily view: promoters/passives/detractors mix.
-
-    This is intentionally easier to interpret than the heatmap ladder:
-    - Detractors (0-6) penalize NPS
-    - Passives (7-8) are neutral
-    - Promoters (9-10) are favorable
-
-    Output: 100% stacked bars by day.
-    """
+    """Business-friendly daily view: promoters/passives/detractors mix as lines."""
 
     agg = metrics.copy() if metrics is not None else shared_daily_metrics(df, days=int(days))
     if agg.empty:
+        return None
+    required = {"day", "n", "det_pct", "pas_pct", "pro_pct"}
+    if not required.issubset(set(agg.columns)):
         return None
     agg = agg.rename(
         columns={
@@ -656,55 +651,34 @@ def chart_daily_mix_business(
     import plotly.graph_objects as go  # lazy import
 
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=agg["day"],
-            y=agg["detractors"],
-            name="Detractores (0-6)",
-            marker_color=detr_c,
-            customdata=agg[["n"]],
-            hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>"
-                "Detractores=%{y:.2f}%<br>"
-                "n=%{customdata[0]}<extra></extra>"
-            ),
+    for key, label, color, dash in [
+        ("promoters", "% Promotores", pro_c, "solid"),
+        ("passives", "% Pasivos", pas_c, "solid"),
+        ("detractors", "% Detractores", detr_c, "dot"),
+    ]:
+        fig.add_trace(
+            go.Scatter(
+                x=agg["day"],
+                y=agg[key],
+                mode="lines+markers",
+                name=label,
+                line=dict(color=color, width=2.6, dash=dash),
+                marker=dict(color=color, size=6),
+                customdata=agg[["n"]],
+                hovertemplate=(
+                    "Día=%{x|%Y-%m-%d}<br>"
+                    f"{label}=%{{y:.2f}}%<br>"
+                    "n=%{customdata[0]}<extra></extra>"
+                ),
+            )
         )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=agg["day"],
-            y=agg["passives"],
-            name="Pasivos (7-8)",
-            marker_color=pas_c,
-            customdata=agg[["n"]],
-            hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>" "Pasivos=%{y:.2f}%<br>" "n=%{customdata[0]}<extra></extra>"
-            ),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=agg["day"],
-            y=agg["promoters"],
-            name="Promotores (9-10)",
-            marker_color=pro_c,
-            customdata=agg[["n"]],
-            hovertemplate=(
-                "Día=%{x|%Y-%m-%d}<br>"
-                "Promotores=%{y:.2f}%<br>"
-                "n=%{customdata[0]}<extra></extra>"
-            ),
-        )
-    )
 
     _layout_common(fig, th, height=320)
     fig.update_layout(
-        barmode="stack",
-        yaxis_title="Mix diario (% de respuestas)",
+        yaxis_title="% diario",
         xaxis_title="Día",
         legend=dict(orientation="h", x=0, y=1.18, title_text=""),
         hovermode="x unified",
-        bargap=0.14,
         margin=dict(l=10, r=10, t=92, b=18),
     )
     _apply_day_ticks(fig, [pd.Timestamp(d) for d in agg["day"].tolist()], max_ticks=31)

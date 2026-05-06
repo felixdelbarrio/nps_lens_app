@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from pptx import Presentation
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
+from nps_lens.reports import BusinessPptResult
 from nps_lens.settings import Settings
 from nps_lens.testing.fixtures import fixture_excel
 
@@ -100,6 +102,45 @@ def _build_helix_fixture(path: Path) -> Path:
     return path
 
 
+def _build_helix_out_of_period_fixture(path: Path) -> Path:
+    pd.DataFrame(
+        {
+            "BBVA_SourceServiceCompany": ["BBVA México", "BBVA México"],
+            "BBVA_SourceServiceN1": ["Senda", "Senda"],
+            "BBVA_SourceServiceN2": ["", ""],
+            "CreatedDate": ["2026-02-01", "2026-02-03"],
+            "Incident Number": ["INC-FEB-1", "INC-FEB-2"],
+            "Record ID": ["RID-FEB-1", "RID-FEB-2"],
+            "Detailed Description": [
+                "Cliente no puede acceder al portal en febrero",
+                "Fallo en autenticacion web en febrero",
+            ],
+            "Short Description": ["Acceso febrero", "Autenticacion febrero"],
+        }
+    ).to_excel(path, index=False)
+    return path
+
+
+def _persist_report_in_tmp(tmp_path: Path) -> Callable[[BusinessPptResult], Path]:
+    def _persist(report: BusinessPptResult) -> Path:
+        target = tmp_path / report.file_name
+        target.write_bytes(report.content)
+        return target
+
+    return _persist
+
+
+def _ppt_texts(content: bytes) -> list[str]:
+    prs = Presentation(BytesIO(content))
+    texts: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+    return texts
+
+
 def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) -> None:
     app = create_app(_settings(tmp_path))
     client = TestClient(app)
@@ -148,6 +189,13 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
+    assert (
+        abs(
+            dashboard_payload["gaps"]["overall_nps"]
+            - dashboard_payload["scope"]["period"]["kpis"]["classic_nps"]
+        )
+        < 1e-9
+    )
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
     assert dashboard_payload["overview"]["daily_volume_mix_figure"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
@@ -209,6 +257,82 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert data_payload["total_rows"] > 0
     assert "Browser" in data_payload["columns"]
     assert len(data_payload["rows"]) == 5
+
+
+def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_march(client)
+    service = app.state.dashboard_service
+    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+
+    report = service.generate_ppt_report(
+        context=UploadContext(
+            service_origin="BBVA México",
+            service_origin_n1="Senda",
+            service_origin_n2="",
+        ),
+        pop_year="2026",
+        pop_month="03",
+        nps_group="Todos",
+        score_channel="Web",
+    )
+
+    assert report.content
+    assert report.slide_count > 0
+    texts = _ppt_texts(report.content)
+    assert not any("Análisis causal no concluyente" in text for text in texts)
+    assert not any("Journeys de detracción" in text for text in texts)
+
+
+def test_generate_ppt_report_with_helix_outside_period_omits_causal_section(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_march(client)
+    helix_fixture = _build_helix_out_of_period_fixture(tmp_path / "helix-february.xlsx")
+    with helix_fixture.open("rb") as handle:
+        upload_response = client.post(
+            "/api/uploads/helix",
+            data={
+                "service_origin": "BBVA México",
+                "service_origin_n1": "Senda",
+                "service_origin_n2": "",
+            },
+            files={
+                "file": (
+                    helix_fixture.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    assert upload_response.status_code == 200
+    service = app.state.dashboard_service
+    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+
+    report = service.generate_ppt_report(
+        context=UploadContext(
+            service_origin="BBVA México",
+            service_origin_n1="Senda",
+            service_origin_n2="",
+        ),
+        pop_year="2026",
+        pop_month="03",
+        nps_group="Todos",
+        score_channel="Web",
+    )
+
+    assert report.content
+    assert report.slide_count > 0
+    texts = _ppt_texts(report.content)
+    assert not any("Análisis causal no concluyente" in text for text in texts)
+    assert not any("Journeys de detracción" in text for text in texts)
 
 
 def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) -> None:

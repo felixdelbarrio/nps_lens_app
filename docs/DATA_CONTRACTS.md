@@ -34,6 +34,14 @@ Este documento define:
 - `NPS térmico` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
 - El filtro `Canal` se calcula desde `Canal`; por defecto usa `Web` si existe y `Todos` si no.
 
+### Taxonomía temporal oficial
+- `historical_previous`: histórico anterior al inicio del Period Container. No muestra deltas.
+- `current_period`: rango seleccionado en el Period Container. Sus KPIs son agregados de todas las respuestas del período, no snapshots diarios.
+- `cumulative_to_current`: histórico anterior + período actual hasta el último día disponible del Period Container. No muestra deltas por defecto.
+- `internal_period_evolution`: serie/bordes internos del período, usada solo para explicar evolución diaria o inicio-fin.
+
+El `NPS clásico` ejecutivo se calcula siempre sobre el conjunto agregado de respuestas correspondiente: `(% promotores - % detractores) * 100`, con promotores `score >= 9`, pasivos `7 <= score <= 8` y detractores `score <= 6`. La serie diaria se usa para gráficos de evolución, no para sustituir KPIs agregados.
+
 ---
 
 ## 2) Fuente: Incidencias Helix (Excel)

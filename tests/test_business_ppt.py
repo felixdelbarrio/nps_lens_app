@@ -30,9 +30,14 @@ from nps_lens.reports.ppt_template import (
     find_corporate_template_path,
     resolve_layout,
 )
+from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.settings import Settings
-from nps_lens.ui.charts import chart_daily_kpis, chart_incident_risk_recovery
+from nps_lens.ui.charts import (
+    chart_daily_kpis,
+    chart_daily_mix_business,
+    chart_incident_risk_recovery,
+)
 from nps_lens.ui.theme import get_theme
 
 
@@ -788,6 +793,33 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert "delta_nps" in palanca_change.columns
 
 
+def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
+    raw = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-02-01", "2026-02-02"]),
+            "date": pd.to_datetime(["2026-01-01", "2026-02-01", "2026-02-02"]),
+            "NPS": [0, 10, 10],
+            "Comment": ["base", "actual", "actual"],
+        }
+    )
+    period_kpis = build_period_kpis(
+        history_df=raw,
+        current_df=raw[raw["date"].dt.month == 2],
+        pop_year="2026",
+        pop_month="02",
+        context_label="Febrero 2026",
+    )
+
+    overview = executive_ppt._period_overview(
+        raw[raw["date"].dt.month == 1],
+        period_kpis=period_kpis,
+    )
+
+    assert overview["comments"] == period_kpis["period"]["kpis"]["comments"]
+    assert overview["classic_nps"] == period_kpis["period"]["kpis"]["classic_nps"]
+    assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
+
+
 def test_add_topic_timing_slide_reuses_app_charts_and_handles_empty_state() -> None:
     payload = _sample_payload()
     current = executive_ppt._coerce_nps_records(payload["selected_nps"])
@@ -857,6 +889,7 @@ def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
     mix_fig = executive_ppt._daily_group_mix_fig(daily_mix)
     assert mix_fig is not None
     assert len(mix_fig.data) == 3
+    assert {trace.type for trace in mix_fig.data} == {"scatter"}
 
     themed = executive_ppt._apply_ppt_figure_theme(
         go.Figure(
@@ -1081,6 +1114,15 @@ def test_daily_kpis_chart_places_x_axis_labels_at_bottom() -> None:
         "% detractores",
     ]
 
+    mix = chart_daily_mix_business(payload["selected_nps"], get_theme("light"), days=31)
+    assert mix is not None
+    assert {trace.type for trace in mix.data} == {"scatter"}
+    assert [trace.name for trace in mix.data] == [
+        "% Promotores",
+        "% Pasivos",
+        "% Detractores",
+    ]
+
 
 def test_generate_business_review_ppt_handles_selected_period_without_history_or_chains() -> None:
     payload = _sample_payload()
@@ -1127,6 +1169,42 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
         "No se identificaron patrones causales estadísticamente defendibles" in t for t in texts
     )
     assert not any("7.1" in t for t in texts)
+
+
+def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> None:
+    payload = _sample_payload()
+    out = generate_business_review_ppt(
+        service_origin="BBVA México",
+        service_origin_n1="Empresas Mobile",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        overall_weekly=pd.DataFrame(),
+        rationale_df=pd.DataFrame(),
+        nps_points_at_risk=0.0,
+        nps_points_recoverable=0.0,
+        top3_incident_share=0.0,
+        median_lag_weeks=0.0,
+        story_md="",
+        script_8slides_md="",
+        attribution_df=pd.DataFrame(),
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
+        include_causal_section=False,
+    )
+
+    prs = Presentation(BytesIO(out.content))
+    texts = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                for paragraph in shape.text_frame.paragraphs:
+                    texts.append(paragraph.text or "")
+
+    assert out.slide_count > 0
+    assert not any("6. Journeys de detracción" in t for t in texts)
+    assert not any("7. Análisis causal no concluyente" in t for t in texts)
 
 
 def test_ppt_template_fallback_builds_default_presentation() -> None:

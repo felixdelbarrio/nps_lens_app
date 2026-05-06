@@ -39,6 +39,7 @@ from nps_lens.analytics.incident_attribution import (
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import extract_topics
+from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
     DesignTokens,
     bbva_typography_tokens,
@@ -505,9 +506,29 @@ def _split_source_period_frames(
     return current, baseline
 
 
-def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
-    aggregate_kpis = compute_score_kpis(current_nps_df)
-    temporal_kpis = build_period_boundary_kpis(current_nps_df)
+def _period_overview(
+    current_nps_df: pd.DataFrame,
+    *,
+    period_kpis: Optional[dict[str, object]] = None,
+) -> dict[str, object]:
+    period_block = (
+        period_kpis.get("period", {})
+        if isinstance(period_kpis, dict) and isinstance(period_kpis.get("period"), dict)
+        else {}
+    )
+    aggregate_payload = (
+        period_block.get("kpis", {}) if isinstance(period_block.get("kpis"), dict) else {}
+    )
+    aggregate_kpis = (
+        compute_score_kpis(pd.DataFrame())
+        if aggregate_payload
+        else compute_score_kpis(current_nps_df)
+    )
+    temporal_kpis = (
+        period_kpis.get("temporal", {})
+        if isinstance(period_kpis, dict) and isinstance(period_kpis.get("temporal"), dict)
+        else build_period_boundary_kpis(current_nps_df)
+    )
     temporal_base = temporal_kpis.get("base_kpis", {})
     temporal_actual = temporal_kpis.get("kpis", {})
     temporal_deltas = temporal_kpis.get("deltas", {})
@@ -557,25 +578,28 @@ def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
                     pain_point = str(ranking.index[0])
                     strength_point = str(ranking.index[-1])
     return {
-        "comments": aggregate_kpis.comments,
-        "nps_mean": (
-            aggregate_kpis.nps_average if aggregate_kpis.nps_average is not None else float("nan")
+        "comments": _safe_int(
+            aggregate_payload.get("comments", aggregate_kpis.comments), default=0
         ),
-        "detractor_rate": (
-            aggregate_kpis.detractor_rate
-            if aggregate_kpis.detractor_rate is not None
-            else float("nan")
+        "nps_mean": _safe_float(
+            aggregate_payload.get("nps_average", aggregate_kpis.nps_average),
+            default=float("nan"),
         ),
-        "promoter_rate": (
-            aggregate_kpis.promoter_rate
-            if aggregate_kpis.promoter_rate is not None
-            else float("nan")
+        "detractor_rate": _safe_float(
+            aggregate_payload.get("detractor_rate", aggregate_kpis.detractor_rate),
+            default=float("nan"),
         ),
-        "passive_rate": (
-            aggregate_kpis.neutral_rate if aggregate_kpis.neutral_rate is not None else float("nan")
+        "promoter_rate": _safe_float(
+            aggregate_payload.get("promoter_rate", aggregate_kpis.promoter_rate),
+            default=float("nan"),
         ),
-        "classic_nps": (
-            aggregate_kpis.classic_nps if aggregate_kpis.classic_nps is not None else float("nan")
+        "passive_rate": _safe_float(
+            aggregate_payload.get("neutral_rate", aggregate_kpis.neutral_rate),
+            default=float("nan"),
+        ),
+        "classic_nps": _safe_float(
+            aggregate_payload.get("classic_nps", aggregate_kpis.classic_nps),
+            default=float("nan"),
         ),
         "start_classic": start_classic,
         "end_classic": end_classic,
@@ -605,43 +629,65 @@ def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
     }
 
 
-def _daily_group_mix(nps_df: pd.DataFrame) -> pd.DataFrame:
+def _daily_metrics_for_ppt(nps_df: pd.DataFrame) -> pd.DataFrame:
     if nps_df is None or nps_df.empty:
         return pd.DataFrame(
             columns=[
-                "date",
-                "responses",
+                "day",
+                "n",
+                "det_pct",
+                "pas_pct",
+                "pro_pct",
+                "classic_nps",
                 "detractor_rate",
                 "passive_rate",
                 "promoter_rate",
-                "nps_classic",
-                "nps_mean",
+                "nps_avg",
             ]
         )
-
-    work = nps_df.copy()
-    work["date"] = _coerce_datetime_series(work["date"])
-    work = work.dropna(subset=["date"]).copy()
-    if work.empty:
+    date_col = "date" if "date" in nps_df.columns else "Fecha"
+    if date_col not in nps_df.columns or "NPS" not in nps_df.columns:
         return pd.DataFrame()
+    return shared_daily_metrics(nps_df, days=None, date_col=date_col, score_col="NPS")
 
-    grouped = (
-        work.groupby("date")
-        .agg(
-            responses=("NPS", "count"),
-            detractors=("band", lambda s: int((s == "Detractor").sum())),
-            passives=("band", lambda s: int((s == "Pasivo").sum())),
-            promoters=("band", lambda s: int((s == "Promotor").sum())),
-            nps_mean=("NPS", "mean"),
-        )
-        .reset_index()
-        .sort_values("date")
+
+def _daily_group_mix_from_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
+    if metrics is None or metrics.empty:
+        return pd.DataFrame()
+    required = {
+        "day",
+        "n",
+        "detractor_rate",
+        "passive_rate",
+        "promoter_rate",
+        "classic_nps",
+        "nps_avg",
+    }
+    if not required.issubset(set(metrics.columns)):
+        return pd.DataFrame()
+    out = metrics[
+        [
+            "day",
+            "n",
+            "detractor_rate",
+            "passive_rate",
+            "promoter_rate",
+            "classic_nps",
+            "nps_avg",
+        ]
+    ].copy()
+    return out.rename(
+        columns={
+            "day": "date",
+            "n": "responses",
+            "classic_nps": "nps_classic",
+            "nps_avg": "nps_mean",
+        }
     )
-    grouped["detractor_rate"] = grouped["detractors"] / grouped["responses"].replace({0: np.nan})
-    grouped["passive_rate"] = grouped["passives"] / grouped["responses"].replace({0: np.nan})
-    grouped["promoter_rate"] = grouped["promoters"] / grouped["responses"].replace({0: np.nan})
-    grouped["nps_classic"] = (grouped["promoter_rate"] - grouped["detractor_rate"]) * 100.0
-    return grouped
+
+
+def _daily_group_mix(nps_df: pd.DataFrame) -> pd.DataFrame:
+    return _daily_group_mix_from_metrics(_daily_metrics_for_ppt(nps_df))
 
 
 def _merge_daily_incidents(base_df: pd.DataFrame, overall_daily: pd.DataFrame) -> pd.DataFrame:
@@ -1053,37 +1099,28 @@ def _daily_group_mix_fig(daily_mix: pd.DataFrame) -> Optional[go.Figure]:
     if daily_mix is None or daily_mix.empty:
         return None
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=daily_mix["date"],
-            y=daily_mix["promoter_rate"] * 100.0,
-            name="Promotores",
-            marker=dict(color="#" + BBVA_COLORS["green"]),
+    for key, label, color, dash in [
+        ("promoter_rate", "% Promotores", BBVA_COLORS["green"], "solid"),
+        ("passive_rate", "% Pasivos", BBVA_COLORS["yellow"], "solid"),
+        ("detractor_rate", "% Detractores", BBVA_COLORS["red"], "dot"),
+    ]:
+        fig.add_trace(
+            go.Scatter(
+                x=daily_mix["date"],
+                y=daily_mix[key] * 100.0,
+                name=label,
+                mode="lines+markers",
+                line=dict(color="#" + color, width=2.6, dash=dash),
+                marker=dict(color="#" + color, size=6),
+            )
         )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=daily_mix["date"],
-            y=daily_mix["passive_rate"] * 100.0,
-            name="Pasivos",
-            marker=dict(color="#" + BBVA_COLORS["yellow"]),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=daily_mix["date"],
-            y=daily_mix["detractor_rate"] * 100.0,
-            name="Detractores",
-            marker=dict(color="#" + BBVA_COLORS["red"]),
-        )
-    )
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=24, r=16, t=20, b=24),
-        barmode="stack",
         legend=dict(orientation="h", x=0.0, y=1.08),
         xaxis_title="Día",
-        yaxis=dict(title="% sobre comentarios del día", range=[0, 100]),
+        yaxis=dict(title="% diario", range=[0, 100]),
+        hovermode="x unified",
     )
     return fig
 
@@ -1230,12 +1267,16 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
 
 
 def _build_overview_figure(
-    selected_nps_df: Optional[pd.DataFrame], *, period_days: int
+    selected_nps_df: Optional[pd.DataFrame],
+    *,
+    period_days: int,
+    metrics: Optional[pd.DataFrame] = None,
 ) -> Optional[go.Figure]:
     fig = chart_daily_nps_committee_stack(
         selected_nps_df.copy() if selected_nps_df is not None else pd.DataFrame(),
         get_theme("light"),
         days=max(int(period_days), 1),
+        metrics=metrics,
     )
     if fig is None:
         return None
@@ -6161,7 +6202,8 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
     )
-    daily_mix = _daily_group_mix(selected_raw)
+    selected_daily_metrics = _daily_metrics_for_ppt(selected_raw)
+    daily_mix = _daily_group_mix_from_metrics(selected_daily_metrics)
     if daily_mix.empty and not daily_signals.empty:
         daily_mix = daily_signals[["date", "nps_mean", "detractor_rate"]].copy()
         daily_mix["responses"] = 0.0
@@ -6184,7 +6226,7 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
     )
-    overview = _period_overview(selected_raw)
+    overview = _period_overview(selected_raw, period_kpis=resolved_period_kpis)
     detractor_raw = (
         selected_raw[selected_raw["band"].astype(str).str.casefold().eq("detractor")].copy()
         if "band" in selected_raw.columns
@@ -6256,7 +6298,11 @@ def _build_presentation_context(
         selected_raw=selected_raw,
         daily_mix=daily_mix,
         daily_signals=daily_signals,
-        overview_figure=_build_overview_figure(selected_nps_df, period_days=period_days),
+        overview_figure=_build_overview_figure(
+            selected_nps_df,
+            period_days=period_days,
+            metrics=selected_daily_metrics,
+        ),
         text_topics_df=text_topics,
         text_topic_figure=_build_text_topic_figure(text_topics),
         current_label=f"{_safe_date(period_start)} -> {_safe_date(period_end)}",
@@ -6365,11 +6411,9 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     sr.font.color.rgb = _rgb("C7D3EA")
 
     period_scope = _dict_payload(context.period_kpis.get("period"))
-    temporal_scope = _dict_payload(period_scope.get("temporal"))
-    temporal_display = _dict_payload(temporal_scope.get("display"))
-    temporal_base_display = _dict_payload(temporal_scope.get("base_display"))
-    temporal_deltas = _dict_payload(temporal_scope.get("deltas"))
     period_display = _dict_payload(period_scope.get("display"))
+    period_base_display = _dict_payload(period_scope.get("base_display"))
+    period_deltas = _dict_payload(period_scope.get("deltas"))
     comment_total = str(
         period_display.get(
             "comments",
@@ -6397,22 +6441,23 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
         body_font_size_pt=12.8,
     )
     card_specs = [
+        ("Comentarios", "comments", BBVA_COLORS["sky"]),
         ("Score medio", "nps_average", BBVA_COLORS["green"]),
         ("NPS Clásico", "classic_nps", BBVA_COLORS["blue"]),
         ("Detractores", "detractor_rate", BBVA_COLORS["orange"]),
         ("Promotores", "promoter_rate", BBVA_COLORS["green"]),
     ]
     for index, (label, kpi_key, accent) in enumerate(card_specs):
-        delta_payload = _dict_payload(temporal_deltas.get(kpi_key))
+        delta_payload = _dict_payload(period_deltas.get(kpi_key))
         _add_comparative_stat_card(
             slide,
             left=8.55,
-            top=1.04 + index * 1.34,
+            top=0.84 + index * 1.18,
             width=3.72,
-            height=1.14,
+            height=1.02,
             label=label,
-            base_value=str(temporal_base_display.get(kpi_key, "n/d")),
-            actual_value=str(temporal_display.get(kpi_key, "n/d")),
+            base_value=str(period_base_display.get(kpi_key, "n/d")),
+            actual_value=str(period_display.get(kpi_key, "n/d")),
             delta_text=str(
                 delta_payload.get(
                     "display", format_delta(delta_payload.get("value"), kpi_key=kpi_key)
@@ -6420,8 +6465,8 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
             ),
             accent=accent,
             delta_accent=_delta_accent(delta_payload, default=BBVA_COLORS["muted"]),
-            base_label="Inicio periodo",
-            actual_label="Fin periodo",
+            base_label=str(period_scope.get("base_label", "Histórico anterior")),
+            actual_label=str(period_scope.get("actual_label", context.period_label)),
         )
 
 
@@ -8006,6 +8051,7 @@ def generate_business_review_ppt(
     broken_journeys_df: Optional[pd.DataFrame] = None,
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
+    include_causal_section: bool = True,
 ) -> BusinessPptResult:
     """Build a business deck aligned to the selected period and BBVA corporate template."""
     del (
@@ -8104,37 +8150,38 @@ def generate_business_review_ppt(
         slide_number=next_slide_number,
     )
     next_slide_number += 1
-    _add_causal_section_cover_slide(
-        prs,
-        context=context,
-        nps_points_at_risk=nps_points_at_risk,
-        nps_points_recoverable=nps_points_recoverable,
-        top3_incident_share=top3_incident_share,
-    )
-    _add_journeys_summary_slide(
-        prs,
-        period_label=context.period_label,
-        touchpoint_source=context.causal.touchpoint_source,
-        entity_summary_df=context.causal.entity_summary_df,
-        entity_summary_kpis=context.causal.entity_summary_kpis,
-        entity_summary_figure=context.causal.entity_summary_figure,
-        journey_table_df=context.causal.journey_table_df,
-        slide_number=next_slide_number,
-    )
-    causal_scenario_slide_number = next_slide_number + 1
-    if not context.causal.scenarios:
-        _add_causal_fallback_slide(
+    if include_causal_section:
+        _add_causal_section_cover_slide(
             prs,
             context=context,
-            slide_number=causal_scenario_slide_number,
+            nps_points_at_risk=nps_points_at_risk,
+            nps_points_recoverable=nps_points_recoverable,
+            top3_incident_share=top3_incident_share,
         )
-    for scenario in context.causal.scenarios:
-        _add_causal_analysis_slide(
+        _add_journeys_summary_slide(
             prs,
-            context=context,
-            scenario=scenario,
-            slide_number=causal_scenario_slide_number,
+            period_label=context.period_label,
+            touchpoint_source=context.causal.touchpoint_source,
+            entity_summary_df=context.causal.entity_summary_df,
+            entity_summary_kpis=context.causal.entity_summary_kpis,
+            entity_summary_figure=context.causal.entity_summary_figure,
+            journey_table_df=context.causal.journey_table_df,
+            slide_number=next_slide_number,
         )
+        causal_scenario_slide_number = next_slide_number + 1
+        if not context.causal.scenarios:
+            _add_causal_fallback_slide(
+                prs,
+                context=context,
+                slide_number=causal_scenario_slide_number,
+            )
+        for scenario in context.causal.scenarios:
+            _add_causal_analysis_slide(
+                prs,
+                context=context,
+                scenario=scenario,
+                slide_number=causal_scenario_slide_number,
+            )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = f"nps-incidencias-{_slug(service_origin)}-{_slug(service_origin_n1)}-{stamp}.pptx"

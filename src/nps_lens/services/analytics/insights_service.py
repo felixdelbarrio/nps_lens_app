@@ -5,7 +5,11 @@ import pandas as pd
 from nps_lens.services.analytics.kpis_service import build_period_boundary_kpis
 
 
-def daily_nps_explanation(current_df: pd.DataFrame) -> list[str]:
+def daily_nps_explanation(
+    current_df: pd.DataFrame,
+    *,
+    temporal_kpis: dict[str, object] | None = None,
+) -> list[str]:
     if current_df is None or current_df.empty or "NPS" not in current_df.columns:
         return []
     scores = pd.to_numeric(current_df["NPS"], errors="coerce").dropna()
@@ -17,7 +21,7 @@ def daily_nps_explanation(current_df: pd.DataFrame) -> list[str]:
     if "Fecha" not in current_df.columns:
         return fallback
 
-    temporal = build_period_boundary_kpis(current_df)
+    temporal = temporal_kpis or build_period_boundary_kpis(current_df)
     base_display = temporal.get("base_display", {})
     actual_display = temporal.get("display", {})
     if not isinstance(base_display, dict) or not isinstance(actual_display, dict):
