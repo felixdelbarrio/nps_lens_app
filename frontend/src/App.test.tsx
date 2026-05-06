@@ -122,7 +122,7 @@ const dashboardPayload = {
   },
   overview: {
     daily_kpis_figure: null,
-    weekly_trend_figure: null,
+    period_aggregates_figure: null,
     topics_figure: null,
     topics_table: [],
     daily_volume_figure: null,
@@ -136,7 +136,7 @@ const dashboardPayload = {
   scope: {
     cumulative: {
       label: "Datos acumulados hasta Marzo 2026",
-      note: "KPIs calculados solo con Service Container y Period Container.",
+      note: "KPIs agregados para el periodo del 2026-01-01 al 2026-03-31.",
       kpis: {
         samples: 50000,
         nps_average: 4.5,
@@ -145,6 +145,19 @@ const dashboardPayload = {
         neutral_rate: 0.42,
         promoter_rate: 0.26,
         comments: 50000
+      }
+    },
+    historical: {
+      label: "Febrero 2026",
+      note: "KPIs agregados del periodo anterior disponible.",
+      kpis: {
+        samples: 36872,
+        nps_average: 4.7,
+        classic_nps: -6.0,
+        detractor_rate: 0.32,
+        neutral_rate: 0.42,
+        promoter_rate: 0.26,
+        comments: 12577
       }
     },
     period: {
@@ -586,7 +599,8 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: /NPS Lens/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Media semanal" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Media semanal" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Agregados por periodo" })).toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "Evolución promotores vs detractores" })
     ).not.toBeInTheDocument();
@@ -607,6 +621,11 @@ describe("App", () => {
     expect(screen.getAllByText("Score Medio").length).toBeGreaterThan(0);
     expect(screen.getAllByText("NPS Clásico").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Comentarios").length).toBeGreaterThan(0);
+    expect(screen.getByText("Febrero 2026")).toBeInTheDocument();
+    expect(screen.getByText("Marzo 2026")).toBeInTheDocument();
+    expect(
+      screen.getByText("KPIs agregados para el periodo del 2026-01-01 al 2026-03-31.")
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();

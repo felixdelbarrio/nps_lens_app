@@ -10,6 +10,9 @@ from nps_lens.analytics.helix_operational_metrics import (
     enrich_rationale_with_operational_metrics,
     summarize_operational_metrics_for_incidents,
 )
+from nps_lens.ingest.helix_dates import coerce_helix_datetime_series
+from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.testing.fixtures import fixture_excel
 
 
 def test_build_helix_operational_benchmark_aggregates_support_orgs_and_eta() -> None:
@@ -39,6 +42,65 @@ def test_build_helix_operational_benchmark_aggregates_support_orgs_and_eta() -> 
     metrics = summarize_operational_metrics_for_incidents(["INC-1", "INC-2"], benchmark)
     assert metrics.owner_role == "Producto · Tecnologia · Operaciones"
     assert math.isclose(metrics.eta_weeks, (1.0 + 1.0 + 2.0) / 3.0)
+
+
+def test_build_helix_operational_benchmark_handles_iteracion_17_fixture() -> None:
+    path = fixture_excel("issues_20260506_173749.xlsx")
+    result = read_helix_incidents_excel(
+        str(path),
+        service_origin="BBVA México",
+        service_origin_n1="ENTERPRISE WEB",
+        service_origin_n2="",
+    )
+
+    benchmark = build_helix_operational_benchmark(result.df)
+
+    assert len(result.df) == 2255
+    assert len(benchmark.incident_to_support_orgs) == 2255
+    assert benchmark.overall_eta_weeks is not None
+
+
+def test_helix_mixed_datetime_values_are_homogeneous_and_controlled() -> None:
+    parsed = coerce_helix_datetime_series(
+        pd.Series(
+            [
+                "2026-05-06T05:00:00+00:00",
+                1778052089000,
+                1778052089,
+                46148,
+                "06/05/2026 07:30",
+                None,
+                "no-es-fecha",
+            ]
+        )
+    )
+
+    assert str(parsed.dtype) == "datetime64[ns]"
+    assert parsed.notna().sum() == 5
+
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["INC-ISO", "INC-EPOCH", "INC-NULL", "INC-NEG"],
+            "Assigned Support Organization": ["Producto", "Producto", "Producto", "Producto"],
+            "CreatedDate": [
+                "2026-05-06T05:00:00+00:00",
+                1778052089000,
+                None,
+                "2026-05-10T05:00:00+00:00",
+            ],
+            "Resolved Date": [
+                "2026-05-13T05:00:00+00:00",
+                1778656889000,
+                1778656889000,
+                "2026-05-09T05:00:00+00:00",
+            ],
+        }
+    )
+
+    benchmark = build_helix_operational_benchmark(helix)
+
+    assert math.isclose(benchmark.support_org_eta_weeks["Producto"], 1.0)
+    assert math.isclose(benchmark.overall_eta_weeks or 0.0, 1.0)
 
 
 def test_enrich_rationale_with_operational_metrics_overrides_heuristic_values_when_helix_has_data() -> (

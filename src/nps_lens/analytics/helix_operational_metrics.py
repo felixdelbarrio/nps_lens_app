@@ -7,6 +7,8 @@ from typing import Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from nps_lens.ingest.helix_dates import coerce_helix_datetime_series
+
 _SUPPORT_ORG_SPLIT_RE = re.compile(r"[\n,;|]+")
 _MAX_REASONABLE_RESOLUTION_WEEKS = 104.0
 
@@ -115,9 +117,9 @@ def _coalesce_text_columns(
 def _coalesce_datetime_columns(frame: pd.DataFrame, candidates: Sequence[str]) -> pd.Series:
     output = pd.Series([pd.NaT] * len(frame), index=frame.index, dtype="datetime64[ns]")
     for column in _resolve_columns(frame, candidates):
-        candidate = pd.to_datetime(frame[column], errors="coerce")
+        candidate = coerce_helix_datetime_series(frame[column])
         output = output.where(output.notna(), candidate)
-    return output
+    return pd.to_datetime(output, errors="coerce")
 
 
 def _unique_preserve_order(values: Sequence[object]) -> tuple[str, ...]:
@@ -163,14 +165,18 @@ def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationa
     if base.empty:
         return HelixOperationalBenchmark({}, {}, None)
 
-    resolution_weeks = (base["resolved_at"] - base["opened_at"]).dt.total_seconds() / (
-        86400.0 * 7.0
-    )
-    base["resolution_weeks"] = resolution_weeks.where(
-        resolution_weeks.notna()
-        & resolution_weeks.ge(0.0)
-        & resolution_weeks.le(_MAX_REASONABLE_RESOLUTION_WEEKS)
-    )
+    base["resolution_weeks"] = np.nan
+    valid_resolution_dates = base["opened_at"].notna() & base["resolved_at"].notna()
+    if bool(valid_resolution_dates.any()):
+        resolution_weeks = (
+            base.loc[valid_resolution_dates, "resolved_at"]
+            - base.loc[valid_resolution_dates, "opened_at"]
+        ).dt.total_seconds() / (86400.0 * 7.0)
+        base.loc[valid_resolution_dates, "resolution_weeks"] = resolution_weeks.where(
+            resolution_weeks.notna()
+            & resolution_weeks.ge(0.0)
+            & resolution_weeks.le(_MAX_REASONABLE_RESOLUTION_WEEKS)
+        )
 
     incident_to_support_orgs: dict[str, tuple[str, ...]] = {}
     for incident_id, group in base.groupby("incident_id", dropna=False, observed=True):

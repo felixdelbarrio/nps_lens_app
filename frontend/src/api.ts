@@ -101,13 +101,26 @@ export type ScopeKpiBlock = {
   temporal?: ScopeKpiBlock;
 };
 
+export type PeriodAggregate = {
+  label: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  samples: number;
+  comments: number;
+  nps_average: number | null;
+  classic_nps: number | null;
+  detractor_rate: number | null;
+  promoter_rate: number | null;
+  display?: Record<string, string>;
+};
+
 export type DashboardPayload = {
   context_label: string;
   context_pills: string[];
   kpis: DashboardKpis;
   overview: {
     daily_kpis_figure?: PlotlyFigureSpec | null;
-    weekly_trend_figure?: PlotlyFigureSpec | null;
+    period_aggregates_figure?: PlotlyFigureSpec | null;
     topics_figure?: PlotlyFigureSpec | null;
     topics_table?: Array<Record<string, unknown>>;
     daily_volume_figure?: PlotlyFigureSpec | null;
@@ -121,6 +134,7 @@ export type DashboardPayload = {
     cumulative?: ScopeKpiBlock;
     period?: ScopeKpiBlock;
     temporal?: ScopeKpiBlock;
+    period_aggregates?: PeriodAggregate[];
   };
   comparison: {
     summary?: {
