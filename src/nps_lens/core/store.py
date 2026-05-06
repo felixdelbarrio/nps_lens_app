@@ -11,6 +11,11 @@ from typing import Optional, Sequence, Tuple
 
 import pandas as pd
 
+from nps_lens.ingest.helix_dates import (
+    coerce_helix_datetime_series,
+    looks_like_helix_datetime_column,
+)
+
 # ---------------------------
 # In-process dataset cache
 # ---------------------------
@@ -846,70 +851,22 @@ class HelixIncidentStore:
         except ValueError:
             return pd.DataFrame()
 
-        def _looks_like_datetime_col(col: str) -> bool:
-            lc = str(col).lower()
-            return (
-                "fecha" in lc
-                or "date" in lc
-                or "datetime" in lc
-                or "timestamp" in lc
-                or "datt" in lc
-                or lc.endswith("_date")
-                or lc.endswith("_datetime")
-            )
-
-        def _recover_epoch_ms(series: pd.Series) -> pd.Series:
-            s = series
-
-            def _epoch_to_dt(num: pd.Series) -> pd.Series:
-                n = pd.to_numeric(num, errors="coerce")
-                if len(n) == 0:
-                    return pd.to_datetime(n, errors="coerce")
-                if float(n.notna().mean()) < 0.6:
-                    return pd.to_datetime(n, errors="coerce")
-                med = float(n.dropna().median())
-                if med >= 1e12:
-                    return pd.to_datetime(n, unit="ms", utc=True, errors="coerce").dt.tz_localize(
-                        None
-                    )
-                if med >= 1e9:
-                    return pd.to_datetime(n, unit="s", utc=True, errors="coerce").dt.tz_localize(
-                        None
-                    )
-                return pd.to_datetime(n, errors="coerce")
-
-            # If numeric, treat as epoch first (avoid pandas default ns parsing)
-            if pd.api.types.is_numeric_dtype(s):
-                return _epoch_to_dt(s)
-
-            # Try numeric epoch from strings (handles thousand separators)
-            try:
-                cleaned = s.astype("string").str.replace(r"[^0-9\\-]", "", regex=True)
-                num = pd.to_numeric(cleaned, errors="coerce")
-                if len(num) and float(num.notna().mean()) >= 0.6:
-                    return _epoch_to_dt(num)
-            except Exception:
-                pass
-
-            # Fallback: normal parse for ISO strings
-            return pd.to_datetime(s, errors="coerce")
-
         if columns:
             keep = [c for c in columns if c in df.columns]
             if keep:
                 df = df[keep]
 
         if "Fecha" in df.columns:
-            df["Fecha"] = _recover_epoch_ms(df["Fecha"])
+            df["Fecha"] = coerce_helix_datetime_series(df["Fecha"])
 
         # Best-effort: convert any other date-like columns from epoch/strings to datetime
         for c in list(df.columns):
             if c == "Fecha":
                 continue
-            if not _looks_like_datetime_col(str(c)):
+            if not looks_like_helix_datetime_column(c):
                 continue
             try:
-                dt = _recover_epoch_ms(df[c])
+                dt = coerce_helix_datetime_series(df[c])
                 if len(dt) and float(dt.notna().mean()) >= 0.6:
                     df[c] = dt
             except Exception:
@@ -928,7 +885,7 @@ class HelixIncidentStore:
                 "bbva_closeddate",
             ]:
                 if c in df.columns:
-                    dt = _recover_epoch_ms(df[c])
+                    dt = coerce_helix_datetime_series(df[c])
                     if float(dt.notna().mean()) >= 0.4:
                         df["Fecha"] = dt
                         break

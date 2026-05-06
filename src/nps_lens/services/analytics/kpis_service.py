@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import contextlib
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Optional, cast
@@ -103,27 +104,66 @@ def _coerce_dates(frame: pd.DataFrame) -> pd.Series[Any]:
     return pd.Series(dtype="datetime64[ns]")
 
 
+def _period_container_bounds(
+    pop_year: str,
+    pop_month: str,
+) -> tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    year_value = str(pop_year or POP_ALL).strip()
+    month_value = str(pop_month or POP_ALL).strip()
+    if year_value == POP_ALL:
+        return None, None
+    try:
+        year = int(year_value)
+    except ValueError:
+        return None, None
+    if month_value == POP_ALL:
+        return pd.Timestamp(year=year, month=1, day=1), pd.Timestamp(year=year, month=12, day=31)
+    try:
+        month = int(month_value)
+    except ValueError:
+        return pd.Timestamp(year=year, month=1, day=1), pd.Timestamp(year=year, month=12, day=31)
+    return (
+        pd.Timestamp(year=year, month=month, day=1),
+        pd.Timestamp(year=year, month=month, day=calendar.monthrange(year, month)[1]),
+    )
+
+
+def _period_container_date_mask(
+    dates: pd.Series[Any],
+    pop_year: str,
+    pop_month: str,
+) -> pd.Series[Any]:
+    normalized = dates.dt.normalize()
+    valid = dates.notna()
+    start, end = _period_container_bounds(pop_year, pop_month)
+    if start is not None:
+        valid = valid & normalized.ge(start)
+    if end is not None:
+        valid = valid & normalized.le(end)
+    year_value = str(pop_year or POP_ALL).strip()
+    month_value = str(pop_month or POP_ALL).strip()
+    if year_value == POP_ALL and month_value != POP_ALL:
+        with contextlib.suppress(ValueError):
+            valid = valid & dates.dt.month.eq(int(month_value))
+    return valid
+
+
 def _selection_end_date(
     frame: pd.DataFrame, pop_year: str, pop_month: str
 ) -> Optional[pd.Timestamp]:
     dates = _coerce_dates(frame).dropna()
     if dates.empty:
         return None
-    year_value = str(pop_year or POP_ALL).strip()
-    month_value = str(pop_month or POP_ALL).strip()
-    if year_value == POP_ALL:
-        return pd.Timestamp(dates.max()).normalize()
-    try:
-        year = int(year_value)
-    except ValueError:
-        return pd.Timestamp(dates.max()).normalize()
-    if month_value == POP_ALL:
-        return pd.Timestamp(year=year, month=12, day=31)
-    try:
-        month = int(month_value)
-    except ValueError:
-        return pd.Timestamp(year=year, month=12, day=31)
-    return pd.Timestamp(year=year, month=month, day=calendar.monthrange(year, month)[1])
+    all_dates = _coerce_dates(frame)
+    in_selection = all_dates.loc[_period_container_date_mask(all_dates, pop_year, pop_month)]
+    if in_selection.dropna().empty:
+        _, container_end = _period_container_bounds(pop_year, pop_month)
+        return (
+            container_end.normalize()
+            if container_end is not None
+            else pd.Timestamp(dates.max()).normalize()
+        )
+    return pd.Timestamp(in_selection.dropna().max()).normalize()
 
 
 def _selection_start_date(
@@ -132,32 +172,52 @@ def _selection_start_date(
     dates = _coerce_dates(frame).dropna()
     if dates.empty:
         return None
-    year_value = str(pop_year or POP_ALL).strip()
-    month_value = str(pop_month or POP_ALL).strip()
-    if year_value == POP_ALL:
-        return pd.Timestamp(dates.min()).normalize()
-    try:
-        year = int(year_value)
-    except ValueError:
-        return pd.Timestamp(dates.min()).normalize()
-    if month_value == POP_ALL:
-        return pd.Timestamp(year=year, month=1, day=1)
-    try:
-        month = int(month_value)
-    except ValueError:
-        return pd.Timestamp(year=year, month=1, day=1)
-    return pd.Timestamp(year=year, month=month, day=1)
+    del pop_year, pop_month
+    return pd.Timestamp(dates.min()).normalize()
 
 
-def _explicit_or_selection_start_date(
+def _current_period_start_date(
     frame: pd.DataFrame,
     pop_year: str,
     pop_month: str,
-    period_start: Optional[date],
 ) -> Optional[pd.Timestamp]:
-    if period_start is not None:
-        return pd.Timestamp(period_start).normalize()
-    return _selection_start_date(frame, pop_year, pop_month)
+    dates = _coerce_dates(frame).dropna()
+    if dates.empty:
+        return None
+    start, _ = _period_container_bounds(pop_year, pop_month)
+    if start is not None:
+        return start.normalize()
+    all_dates = _coerce_dates(frame)
+    in_selection = all_dates.loc[_period_container_date_mask(all_dates, pop_year, pop_month)]
+    if in_selection.dropna().empty:
+        return pd.Timestamp(dates.min()).normalize()
+    return pd.Timestamp(in_selection.dropna().min()).normalize()
+
+
+def _previous_period_bounds(
+    pop_year: str,
+    pop_month: str,
+    current_start: Optional[pd.Timestamp],
+) -> tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    if current_start is None:
+        return None, None
+    year_value = str(pop_year or POP_ALL).strip()
+    month_value = str(pop_month or POP_ALL).strip()
+    if year_value != POP_ALL and month_value != POP_ALL:
+        previous_start = pd.Timestamp(current_start).normalize() - pd.offsets.MonthBegin(1)
+        previous_end = pd.Timestamp(current_start).normalize() - pd.Timedelta(days=1)
+        return previous_start.normalize(), previous_end.normalize()
+    if year_value != POP_ALL and month_value == POP_ALL:
+        try:
+            year = int(year_value)
+        except ValueError:
+            return None, None
+        return pd.Timestamp(year=year - 1, month=1, day=1), pd.Timestamp(
+            year=year - 1,
+            month=12,
+            day=31,
+        )
+    return None, pd.Timestamp(current_start).normalize() - pd.Timedelta(days=1)
 
 
 def _explicit_or_selection_end_date(
@@ -184,7 +244,7 @@ def cumulative_until_period(frame: pd.DataFrame, pop_year: str, pop_month: str) 
 def history_before_period(frame: pd.DataFrame, pop_year: str, pop_month: str) -> pd.DataFrame:
     if frame is None or frame.empty:
         return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
-    start_date = _selection_start_date(frame, pop_year, pop_month)
+    start_date = _current_period_start_date(frame, pop_year, pop_month)
     if start_date is None:
         return pd.DataFrame(columns=list(frame.columns))
     dates = _coerce_dates(frame)
@@ -198,6 +258,22 @@ def _slice_until(frame: pd.DataFrame, end_date: Optional[pd.Timestamp]) -> pd.Da
         return frame.copy()
     dates = _coerce_dates(frame)
     return frame.loc[dates.notna() & (dates.dt.normalize() <= end_date)].copy()
+
+
+def _slice_between(
+    frame: pd.DataFrame,
+    start_date: Optional[pd.Timestamp],
+    end_date: Optional[pd.Timestamp],
+) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=list(frame.columns) if frame is not None else [])
+    dates = _coerce_dates(frame)
+    mask = dates.notna()
+    if start_date is not None:
+        mask = mask & dates.dt.normalize().ge(pd.Timestamp(start_date).normalize())
+    if end_date is not None:
+        mask = mask & dates.dt.normalize().le(pd.Timestamp(end_date).normalize())
+    return frame.loc[mask].copy()
 
 
 def _slice_before(frame: pd.DataFrame, start_date: Optional[pd.Timestamp]) -> pd.DataFrame:
@@ -405,6 +481,57 @@ def build_period_boundary_kpis(current_df: pd.DataFrame) -> dict[str, object]:
     )
 
 
+def _month_label(ts: pd.Timestamp) -> str:
+    month = str(int(ts.month)).zfill(2)
+    return f"{MONTH_LABELS_ES.get(month, month)} {int(ts.year)}"
+
+
+def _period_aggregate_payload(label: str, frame: pd.DataFrame) -> dict[str, object]:
+    dates = _coerce_dates(frame).dropna()
+    kpis = compute_score_kpis(frame)
+    start = pd.Timestamp(dates.min()).date().isoformat() if not dates.empty else None
+    end = pd.Timestamp(dates.max()).date().isoformat() if not dates.empty else None
+    payload = kpis.to_dict()
+    return {
+        "label": label,
+        "start_date": start,
+        "end_date": end,
+        "samples": kpis.samples,
+        "comments": kpis.comments,
+        "nps_average": payload["nps_average"],
+        "classic_nps": payload["classic_nps"],
+        "detractor_rate": payload["detractor_rate"],
+        "promoter_rate": payload["promoter_rate"],
+        "display": _display_payload(kpis),
+    }
+
+
+def build_period_aggregates(
+    frame: pd.DataFrame,
+    pop_year: str,
+    pop_month: str,
+) -> list[dict[str, object]]:
+    if frame is None or frame.empty:
+        return []
+    dates = _coerce_dates(frame)
+    end_date = _selection_end_date(frame, pop_year, pop_month)
+    mask = dates.notna()
+    if end_date is not None:
+        mask = mask & dates.dt.normalize().le(end_date)
+    scoped = frame.loc[mask].copy()
+    if scoped.empty:
+        return []
+    scoped_dates = _coerce_dates(scoped)
+    scoped = scoped.assign(_period_key=scoped_dates.dt.to_period("M").astype(str))
+    aggregates: list[dict[str, object]] = []
+    for period_key, group in scoped.groupby("_period_key", sort=True):
+        if pd.isna(period_key):
+            continue
+        period_start = pd.Timestamp(pd.Period(str(period_key), freq="M").start_time)
+        aggregates.append(_period_aggregate_payload(_month_label(period_start), group))
+    return aggregates
+
+
 def _previous_period_label(
     *,
     pop_year: str,
@@ -445,25 +572,39 @@ def build_period_kpis(
     period_start: Optional[date] = None,
     period_end: Optional[date] = None,
 ) -> dict[str, object]:
-    start_date = _explicit_or_selection_start_date(history_df, pop_year, pop_month, period_start)
+    cumulative_start = _selection_start_date(history_df, pop_year, pop_month)
     end_date = _explicit_or_selection_end_date(history_df, pop_year, pop_month, period_end)
-    cumulative_df = _slice_until(history_df, end_date)
-    baseline_df = _slice_before(history_df, start_date)
+    current_start = (
+        pd.Timestamp(period_start).normalize()
+        if period_start is not None
+        else _current_period_start_date(history_df, pop_year, pop_month)
+    )
+    previous_start, previous_end = _previous_period_bounds(pop_year, pop_month, current_start)
+    cumulative_df = _slice_between(history_df, cumulative_start, end_date)
+    baseline_df = _slice_between(history_df, previous_start, previous_end)
     current = compute_score_kpis(current_df)
     cumulative = compute_score_kpis(cumulative_df)
     baseline = compute_score_kpis(baseline_df)
     previous_label = _previous_period_label(
         pop_year=pop_year,
         pop_month=pop_month,
-        start_date=start_date,
+        start_date=current_start,
     )
     temporal = build_period_boundary_kpis(current_df)
+    if cumulative_start is not None and end_date is not None:
+        cumulative_note = (
+            "KPIs agregados para el periodo del "
+            f"{pd.Timestamp(cumulative_start).date().isoformat()} al "
+            f"{pd.Timestamp(end_date).date().isoformat()}."
+        )
+    else:
+        cumulative_note = "KPIs agregados para el periodo disponible; no hay fechas suficientes para mostrar el rango."
     period_payload = _comparison_payload(
         label=context_label,
         period_type="current_period",
         actual=current,
         baseline=baseline,
-        base_label=f"Histórico anterior a {context_label}",
+        base_label=previous_label,
         actual_label=context_label,
         note=(
             "NPS Global del período: NPS Clásico agregado sobre todas las respuestas "
@@ -473,19 +614,20 @@ def build_period_kpis(
     period_payload["temporal"] = temporal
     return {
         "historical": _kpi_payload(
-            label=f"Datos acumulados hasta {previous_label}",
+            label=previous_label,
             period_type="historical_previous",
             kpis=baseline,
-            note="Histórico anterior al inicio del Period Container seleccionado.",
+            note="KPIs agregados del periodo anterior disponible.",
         ),
         "period": period_payload,
         "cumulative": _kpi_payload(
             label=f"Datos acumulados hasta {context_label}",
             period_type="cumulative_to_current",
             kpis=cumulative,
-            note="KPIs calculados solo con Service Container y Period Container.",
+            note=cumulative_note,
         ),
         "temporal": temporal,
+        "period_aggregates": build_period_aggregates(history_df, pop_year, pop_month),
     }
 
 

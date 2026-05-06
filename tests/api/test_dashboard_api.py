@@ -121,6 +121,36 @@ def _build_helix_out_of_period_fixture(path: Path) -> Path:
     return path
 
 
+def _build_helix_mixed_dates_fixture(path: Path) -> Path:
+    pd.DataFrame(
+        {
+            "BBVA_SourceServiceCompany": ["BBVA México", "BBVA México", "BBVA México"],
+            "BBVA_SourceServiceN1": ["Senda", "Senda", "Senda"],
+            "BBVA_SourceServiceN2": ["", "", ""],
+            "CreatedDate": [
+                "2026-03-01T05:00:00+00:00",
+                1778052089000,
+                "10/03/2026 11:00",
+            ],
+            "Resolved Date": [
+                "2026-03-08T05:00:00+00:00",
+                1778656889000,
+                None,
+            ],
+            "Incident Number": ["INC-MIX-1", "INC-MIX-2", "INC-MIX-3"],
+            "Record ID": ["RID-MIX-1", "RID-MIX-2", "RID-MIX-3"],
+            "Detailed Description": [
+                "Cliente no puede acceder al portal",
+                "Fallo en autenticacion web",
+                "Incidencia sin fecha de cierre",
+            ],
+            "Short Description": ["Acceso", "Autenticacion", "Sin cierre"],
+            "Assigned Support Organization": ["Producto", "Tecnologia", "Operaciones"],
+        }
+    ).to_excel(path, index=False)
+    return path
+
+
 def _persist_report_in_tmp(tmp_path: Path) -> Callable[[BusinessPptResult], Path]:
     def _persist(report: BusinessPptResult) -> Path:
         target = tmp_path / report.file_name
@@ -197,6 +227,16 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         < 1e-9
     )
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
+    assert dashboard_payload["scope"]["cumulative"]["note"].startswith(
+        "KPIs agregados para el periodo del "
+    )
+    assert dashboard_payload["scope"]["historical"]["label"] == "Febrero 2026"
+    assert dashboard_payload["overview"]["period_aggregates_figure"] is not None
+    assert dashboard_payload["scope"]["period_aggregates"][-1]["label"] == "Marzo 2026"
+    assert (
+        dashboard_payload["scope"]["period_aggregates"][-1]["nps_average"]
+        == dashboard_payload["scope"]["period"]["kpis"]["nps_average"]
+    )
     assert dashboard_payload["overview"]["daily_volume_mix_figure"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
     assert dashboard_payload["controls"]["dimensions"] == [
@@ -441,6 +481,104 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Ranking de hipótesis",
         "Evidence wall",
     ]
+
+
+def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    _upload_nps_march(client)
+    helix_fixture = _build_helix_mixed_dates_fixture(tmp_path / "helix-mixed-dates.xlsx")
+
+    with helix_fixture.open("rb") as handle:
+        upload_response = client.post(
+            "/api/uploads/helix",
+            data={
+                "service_origin": "BBVA México",
+                "service_origin_n1": "Senda",
+                "service_origin_n2": "",
+            },
+            files={
+                "file": (
+                    helix_fixture.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 200
+    assert upload_response.json()["dataset"]["available"] is True
+
+    linking_response = client.get(
+        "/api/dashboard/linking",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "nps_group": "Todos",
+            "score_channel": "Web",
+        },
+    )
+
+    assert linking_response.status_code == 200
+    payload = linking_response.json()
+    assert "El dataset Helix aún no está cargado" not in payload.get("empty_state", "")
+
+
+def test_generate_ppt_report_falls_back_to_nps_when_causal_helix_block_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_march(client)
+    helix_fixture = _build_helix_mixed_dates_fixture(tmp_path / "helix-mixed-dates-report.xlsx")
+    with helix_fixture.open("rb") as handle:
+        upload_response = client.post(
+            "/api/uploads/helix",
+            data={
+                "service_origin": "BBVA México",
+                "service_origin_n1": "Senda",
+                "service_origin_n2": "",
+            },
+            files={
+                "file": (
+                    helix_fixture.name,
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    assert upload_response.status_code == 200
+
+    service = app.state.dashboard_service
+    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("causal unavailable")
+
+    monkeypatch.setattr(service, "_compute_linking_core", _boom)
+
+    report = service.generate_ppt_report(
+        context=UploadContext(
+            service_origin="BBVA México",
+            service_origin_n1="Senda",
+            service_origin_n2="",
+        ),
+        pop_year="2026",
+        pop_month="03",
+        nps_group="Todos",
+        score_channel="Web",
+    )
+
+    assert report.content
+    assert report.slide_count > 0
+    texts = _ppt_texts(report.content)
+    assert any("NPS" in text for text in texts)
+    assert not any("Journeys de detracción" in text for text in texts)
 
 
 def test_helix_links_resolve_incident_number_through_record_id() -> None:

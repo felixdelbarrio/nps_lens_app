@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -232,6 +233,61 @@ def chart_nps_trend(df: pd.DataFrame, theme: Theme, freq: str = "W"):
             ),
             customdata=agg["n"],
             hovertemplate="Periodo=%{x}<br>NPS=%{y:.2f}<br>Muestras=%{customdata}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        yaxis_title="Score medio (0-10)",
+        xaxis_title="Periodo",
+        showlegend=False,
+    )
+    _layout_common(fig, th, height=320)
+    return apply_plotly_template(fig, theme)
+
+
+def chart_period_aggregates(periods: list[dict[str, object]], theme: Theme):
+    """Score trend using backend-computed period aggregates."""
+    if not periods:
+        return None
+
+    agg = pd.DataFrame(periods)
+    if agg.empty or "nps_average" not in agg.columns:
+        return None
+    agg["nps_average"] = pd.to_numeric(agg["nps_average"], errors="coerce")
+    agg["classic_nps"] = pd.to_numeric(agg.get("classic_nps"), errors="coerce")
+    agg["samples"] = pd.to_numeric(agg.get("samples"), errors="coerce").fillna(0).astype(int)
+    agg["comments"] = pd.to_numeric(agg.get("comments"), errors="coerce").fillna(0).astype(int)
+    agg = agg.loc[agg["nps_average"].notna()].copy()
+    if agg.empty:
+        return None
+
+    th = chart_theme(theme)
+    import plotly.graph_objects as go
+
+    marker_colors = _nps_score_colors(theme, agg["nps_average"])
+    customdata: list[list[Any]] = agg[
+        ["samples", "comments", "classic_nps", "start_date", "end_date"]
+    ].values.tolist()
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=agg["label"],
+            y=agg["nps_average"],
+            mode="lines+markers",
+            line=dict(width=3, color=th.accent),
+            marker=dict(
+                size=8,
+                color=marker_colors,
+                line=dict(color=th.paper_bg, width=1),
+            ),
+            customdata=customdata,
+            hovertemplate=(
+                "Periodo=%{x}<br>"
+                "Score medio=%{y:.2f}<br>"
+                "NPS clásico=%{customdata[2]:.2f}<br>"
+                "Muestras=%{customdata[0]:.0f}<br>"
+                "Comentarios=%{customdata[1]:.0f}<br>"
+                "%{customdata[3]} → %{customdata[4]}<extra></extra>"
+            ),
         )
     )
     fig.update_layout(

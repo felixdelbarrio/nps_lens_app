@@ -173,8 +173,6 @@ def _business_key(row: pd.Series) -> str:
         "Canal": _coerce_string(row.get("Canal")),
         "Palanca": _coerce_string(row.get("Palanca")),
         "Subpalanca": _coerce_string(row.get("Subpalanca")),
-        "Browser": _coerce_string(row.get("Browser")),
-        "Operating System": _coerce_string(row.get("Operating System")),
         "service_origin": _coerce_string(row.get("service_origin")),
         "service_origin_n1": _coerce_string(row.get("service_origin_n1")),
         "service_origin_n2": _coerce_string(row.get("service_origin_n2")),

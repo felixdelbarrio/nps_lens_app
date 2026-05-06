@@ -88,7 +88,6 @@ from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analytics import (
     build_period_kpis,
-    cumulative_until_period,
     daily_nps_explanation,
     format_metric,
     format_percentage,
@@ -112,8 +111,8 @@ from nps_lens.ui.charts import (
     chart_driver_delta,
     chart_incident_priority_matrix,
     chart_incident_risk_recovery,
-    chart_nps_trend,
     chart_opportunities_bar,
+    chart_period_aggregates,
     chart_topic_bars,
 )
 from nps_lens.ui.historic_changes import get_changes_vs_historic
@@ -391,6 +390,22 @@ class DashboardService:
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self.logger = logging.getLogger(__name__)
 
+    def _safe_helix_operational_benchmark(
+        self,
+        helix_df: pd.DataFrame,
+        *,
+        context: str,
+    ) -> HelixOperationalBenchmark:
+        try:
+            return build_helix_operational_benchmark(helix_df)
+        except Exception as exc:
+            self.logger.warning(
+                "No se pudo construir el benchmark operativo Helix en %s; se usará payload parcial: %s",
+                context,
+                exc,
+            )
+            return HelixOperationalBenchmark({}, {}, None)
+
     def resolve_context(
         self,
         *,
@@ -535,7 +550,6 @@ class DashboardService:
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
         scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
-        scope_cumulative_df = cumulative_until_period(scope_history_df, pop_year, pop_month)
         analysis_history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
         analysis_history_df = filter_by_nps_group(analysis_history_df, resolved_group)
         analysis_current_df = self._apply_population_filters(
@@ -586,6 +600,7 @@ class DashboardService:
         period_scope = cast(dict[str, Any], scope_kpis.get("period", {}))
         period_scope_kpis = cast(dict[str, Any], period_scope.get("kpis", {}))
         period_temporal = cast(Optional[dict[str, object]], scope_kpis.get("temporal"))
+        period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
         topics_df = self._topics_df(analysis_current_df)
         if not topics_df.empty:
@@ -679,8 +694,8 @@ class DashboardService:
                 "daily_kpis_figure": self._serialize_figure(
                     chart_daily_kpis(scope_current_df, theme, metrics=scope_daily_metrics)
                 ),
-                "weekly_trend_figure": self._serialize_figure(
-                    chart_nps_trend(scope_cumulative_df, theme, freq="W")
+                "period_aggregates_figure": self._serialize_figure(
+                    chart_period_aggregates(period_aggregates, theme)
                 ),
                 "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                 "topics_table": self._serialize_rows(topics_df),
@@ -854,7 +869,10 @@ class DashboardService:
         ).strip()
         method_spec = get_causal_method_spec(active_touchpoint_source)
         focus_name = self._focus_name(focus_group)
-        operational_benchmark = build_helix_operational_benchmark(helix_history)
+        operational_benchmark = self._safe_helix_operational_benchmark(
+            helix_history,
+            context="linking_dashboard",
+        )
         core = self._compute_linking_core(
             nps_df=nps_slice,
             helix_df=helix_slice,
@@ -862,6 +880,7 @@ class DashboardService:
             focus_group=focus_group,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
+            operational_benchmark=operational_benchmark,
         )
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
@@ -1296,7 +1315,6 @@ class DashboardService:
 
         causal_nps_df = current_df if not current_df.empty else descriptive_current_df
         if not helix_current.empty and not causal_nps_df.empty:
-            include_causal_section = True
             executive_journey_catalog = load_executive_journey_catalog(
                 self.settings.knowledge_dir,
                 service_origin=context.service_origin,
@@ -1305,7 +1323,10 @@ class DashboardService:
             focus_current = causal_nps_df.loc[
                 focus_mask(causal_nps_df, focus_group=focus_group)
             ].copy()
-            operational_benchmark = build_helix_operational_benchmark(helix_current)
+            operational_benchmark = self._safe_helix_operational_benchmark(
+                helix_current,
+                context="generate_ppt_report",
+            )
             if not focus_current.empty:
                 try:
                     core = self._compute_linking_core(
@@ -1315,6 +1336,7 @@ class DashboardService:
                         focus_group=focus_group,
                         min_similarity=min_similarity,
                         max_days_apart=max_days_apart,
+                        operational_benchmark=operational_benchmark,
                     )
                     links_df = cast(pd.DataFrame, core["links_df"])
                     overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
@@ -1393,7 +1415,15 @@ class DashboardService:
                                 touchpoint_source=active_touchpoint_source,
                             )
                             attribution_df = self._select_top_chain_rows(attribution_all_df)
+                            include_causal_section = True
                 except Exception as exc:
+                    include_causal_section = False
+                    overall_series = pd.DataFrame()
+                    rationale_df = pd.DataFrame()
+                    attribution_df = pd.DataFrame()
+                    attribution_all_df = pd.DataFrame()
+                    entity_summary_kpis = []
+                    broken_journeys_df = pd.DataFrame()
                     self.logger.warning(
                         "No se pudo construir el bloque causal Helix para la PPT; se generará fallback: %s",
                         exc,
@@ -2604,7 +2634,8 @@ class DashboardService:
         if start is not None:
             result = result.loc[result["Fecha"] >= pd.Timestamp(start)]
         if end is not None:
-            result = result.loc[result["Fecha"] <= pd.Timestamp(end)]
+            end_exclusive = pd.Timestamp(end) + pd.Timedelta(days=1)
+            result = result.loc[result["Fecha"] < end_exclusive]
         if month_filter:
             result = result.loc[result["Fecha"].dt.month == int(str(month_filter).strip().zfill(2))]
         return result
@@ -2820,7 +2851,12 @@ class DashboardService:
         focus_group: str,
         min_similarity: float,
         max_days_apart: int,
+        operational_benchmark: Optional[HelixOperationalBenchmark] = None,
     ) -> dict[str, object]:
+        benchmark = operational_benchmark or self._safe_helix_operational_benchmark(
+            helix_df,
+            context="_compute_linking_core",
+        )
         assignments_df, links_df = link_incidents_to_nps_topics(
             focus_df,
             helix_df,
@@ -2850,7 +2886,7 @@ class DashboardService:
         rationale_df = enrich_rationale_with_operational_metrics(
             rationale_df,
             links_df=links_df,
-            benchmark=build_helix_operational_benchmark(helix_df),
+            benchmark=benchmark,
         )
         rationale_summary = summarize_incident_nps_rationale(rationale_df)
         lag_days = (

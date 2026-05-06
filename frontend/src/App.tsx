@@ -85,7 +85,7 @@ const INGEST_TABS = [
 ];
 
 const SUMMARY_TABS = [
-  { id: "weekly", label: "Media semanal" },
+  { id: "period-aggregates", label: "Agregados por periodo" },
   { id: "daily", label: "NPS clásico vs detractores" },
   { id: "volume-mix", label: "Como y Cuando lo dicen" },
   { id: "gaps", label: "Donde se separa el NPS" },
@@ -249,7 +249,7 @@ export function App() {
   const [maxDaysApart, setMaxDaysApart] = useState(10);
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("summary");
-  const [summaryTab, setSummaryTab] = useState("weekly");
+  const [summaryTab, setSummaryTab] = useState("period-aggregates");
   const [thermalTab, setThermalTab] = useState("topics");
   const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
@@ -1294,13 +1294,34 @@ export function App() {
       );
     }
 
-    if (summaryTab === "weekly") {
+    if (summaryTab === "period-aggregates") {
       return (
-        <section className="surface-card">
+        <section className="surface-card stack-panel">
+          {dashboard?.scope?.historical ? (
+            <>
+              <div className="section-heading section-heading-inline scope-period-heading">
+                <div>
+                  <h3>{dashboard.scope.historical.label}</h3>
+                  {dashboard.scope.historical.note ? (
+                    <p className="secondary-copy">{dashboard.scope.historical.note}</p>
+                  ) : null}
+                </div>
+              </div>
+              {renderKpiGrid(dashboard.scope.historical, dashboard?.kpis, false)}
+            </>
+          ) : null}
+
+          <div className="section-heading section-heading-inline scope-period-heading">
+            <div>
+              <h3>{dashboard?.scope?.period?.label || dashboard?.context_label || "Periodo seleccionado"}</h3>
+            </div>
+          </div>
+          {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis)}
+
           <PlotFigure
-            emptyMessage="No hay suficientes datos para construir una tendencia."
-            figure={dashboard?.overview.weekly_trend_figure}
-            testId="weekly-trend-figure"
+            emptyMessage="No hay suficientes datos para construir los agregados por periodo."
+            figure={dashboard?.overview.period_aggregates_figure}
+            testId="period-aggregates-figure"
           />
         </section>
       );
@@ -1336,34 +1357,12 @@ export function App() {
               <p className="eyebrow">ÁMBITO DE ANÁLISIS</p>
               <h2>{dashboard?.scope?.cumulative?.label || `Datos acumulados hasta ${dashboard?.context_label || "periodo seleccionado"}`}</h2>
               <p className="secondary-copy">
-                {dashboard?.scope?.cumulative?.note || "KPIs calculados solo con Service Container y Period Container."}
+                {dashboard?.scope?.cumulative?.note || "KPIs agregados para el periodo disponible."}
               </p>
             </div>
           </div>
 
           {renderKpiGrid(dashboard?.scope?.cumulative, dashboard?.kpis, false)}
-
-          {dashboard?.scope?.historical ? (
-            <>
-              <div className="section-heading section-heading-inline scope-period-heading">
-                <div>
-                  <h3>{dashboard.scope.historical.label}</h3>
-                  {dashboard.scope.historical.note ? (
-                    <p className="secondary-copy">{dashboard.scope.historical.note}</p>
-                  ) : null}
-                </div>
-              </div>
-              {renderKpiGrid(dashboard.scope.historical, dashboard?.kpis, false)}
-            </>
-          ) : null}
-
-          <div className="section-heading section-heading-inline scope-period-heading">
-            <div>
-              <h3>{dashboard?.scope?.period?.label || dashboard?.context_label || "Periodo seleccionado"}</h3>
-            </div>
-          </div>
-
-          {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis)}
         </section>
 
         <NavigationTabs

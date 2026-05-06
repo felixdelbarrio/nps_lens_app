@@ -78,6 +78,67 @@ def test_historical_merge_keeps_single_record_per_business_key(tmp_path: Path) -
     assert len(frame) == len(frame["_business_key"].drop_duplicates())
 
 
+def test_cumulative_then_monthly_upload_updates_overlapping_ids_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    repository = SqliteNpsRepository(settings.database_path)
+    service = NpsService(repository, settings)
+    context = UploadContext(service_origin="BBVA México", service_origin_n1="Senda")
+
+    cumulative_path = tmp_path / "acumulado.xlsx"
+    monthly_path = tmp_path / "marzo.xlsx"
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-01-10", "2026-02-10", "2026-03-10"],
+            "ID": ["ID-ENE", "ID-FEB", "ID-MAR"],
+            "NPS Group": ["DETRACTOR", "PROMOTOR", "PASIVO"],
+            "NPS": [0, 10, 8],
+            "Comment": ["ene", "feb", "mar viejo"],
+            "UsuarioDecisión": ["Sí", "Sí", "Sí"],
+            "Canal": ["Web", "Web", "Web"],
+            "Palanca": ["Acceso", "Uso", "Uso"],
+            "Subpalanca": ["Login", "Flujo", "Flujo"],
+        }
+    ).to_excel(cumulative_path, index=False)
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-03-10"],
+            "ID": ["ID-MAR"],
+            "NPS Group": ["PROMOTOR"],
+            "NPS": [10],
+            "Comment": ["mar corregido"],
+            "UsuarioDecisión": ["Sí"],
+            "Browser": ["Chrome"],
+            "Operating System": ["Windows"],
+            "Canal": ["Web"],
+            "Palanca": ["Uso"],
+            "Subpalanca": ["Flujo"],
+        }
+    ).to_excel(monthly_path, index=False)
+
+    first = service.ingest_excel(
+        filename=cumulative_path.name,
+        payload=cumulative_path.read_bytes(),
+        context=context,
+    )
+    second = service.ingest_excel(
+        filename=monthly_path.name,
+        payload=monthly_path.read_bytes(),
+        context=context,
+    )
+    frame = repository.load_records_df(context)
+
+    assert first["inserted_rows"] == 3
+    assert second["inserted_rows"] == 0
+    assert second["updated_rows"] == 1
+    assert len(frame) == 3
+    assert frame["_business_key"].nunique() == 3
+    march = frame.loc[frame["ID"] == "ID-MAR"].iloc[0]
+    assert march["NPS"] == 10
+    assert march["Comment"] == "mar corregido"
+
+
 def test_large_upload_is_persisted_without_hitting_sqlite_variable_limits(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     service = NpsService(SqliteNpsRepository(settings.database_path), settings)
