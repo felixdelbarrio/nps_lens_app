@@ -6,6 +6,10 @@ from typing import List, Optional, Union
 import pandas as pd
 
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
+from nps_lens.ingest.helix_dates import (
+    coerce_helix_datetime_series,
+    looks_like_helix_datetime_column,
+)
 
 # Canonical context columns used by the app.
 # We require N1 (channel) to be present. Company/N2 are optional because some
@@ -61,99 +65,11 @@ def _detect_fecha_column(df: pd.DataFrame) -> Optional[str]:
 
 
 def _parse_helix_datetime(series: pd.Series) -> pd.Series:
-    """Parse Helix datetime values robustly.
-
-    Helix exports (and API/log-derived extracts) commonly encode timestamps as
-    Unix epoch **milliseconds** (e.g. 1767576293000). Pandas' default
-    to_datetime() can misinterpret these depending on dtype.
-
-    Strategy:
-      1) Try regular to_datetime (handles ISO strings, Excel datetimes, etc.).
-      2) If most values are NaT and the series looks numeric, interpret as:
-         - milliseconds if magnitude ~ 1e12 or higher
-         - seconds if magnitude ~ 1e9
-
-    Output is timezone-naive to keep analysis consistent across the app.
-    """
-
-    s = series.copy()
-
-    def _epoch_to_dt(num: pd.Series) -> pd.Series:
-        """Convert numeric epoch series to datetime (robust to mixed units).
-
-        Helix extracts are usually **epoch milliseconds**, but in practice we
-        also see seconds, microseconds or nanoseconds (e.g. logs / API joins).
-        Passing a nanosecond value with unit='ms' triggers overflow.
-
-        Strategy:
-          - Coerce to numeric.
-          - If the column is "mostly numeric", detect unit by magnitude.
-          - Handle mixed magnitudes by converting subsets with different units.
-
-        Output is timezone-naive.
-        """
-
-        n = pd.to_numeric(num, errors="coerce")
-        if len(n) == 0 or float(n.notna().mean()) < 0.6:
-            return pd.to_datetime(n, errors="coerce")
-
-        abs_n = n.abs()
-        # Heuristic thresholds (order matters):
-        #   ns ~ 1e18, us ~ 1e15, ms ~ 1e12, s ~ 1e9
-        mask_ns = abs_n >= 1e17
-        mask_us = (abs_n >= 1e14) & ~mask_ns
-        mask_ms = (abs_n >= 1e11) & ~(mask_ns | mask_us)
-        mask_s = (abs_n >= 1e9) & ~(mask_ns | mask_us | mask_ms)
-
-        out = pd.Series(pd.NaT, index=n.index)
-
-        def _convert(mask: pd.Series, unit: str) -> None:
-            if not bool(mask.any()):
-                return
-            out.loc[mask] = pd.to_datetime(
-                n.loc[mask], unit=unit, utc=True, errors="coerce"
-            ).dt.tz_localize(None)
-
-        _convert(mask_ns, "ns")
-        _convert(mask_us, "us")
-        _convert(mask_ms, "ms")
-        _convert(mask_s, "s")
-
-        # If some numeric values are too small for epoch heuristics, try generic.
-        mask_rest = n.notna() & out.isna()
-        if bool(mask_rest.any()):
-            out.loc[mask_rest] = pd.to_datetime(n.loc[mask_rest], errors="coerce")
-
-        return out
-
-    # 1) If already numeric -> treat as epoch first (avoid ns default)
-    if pd.api.types.is_numeric_dtype(s):
-        return _epoch_to_dt(s)
-
-    # 2) If object dtype -> try to coerce to numeric epoch (handles thousands separators)
-    try:
-        cleaned = s.astype("string").str.replace(r"[^0-9\\-]", "", regex=True)
-        num = pd.to_numeric(cleaned, errors="coerce")
-        if len(num) and float(num.notna().mean()) >= 0.6:
-            return _epoch_to_dt(num)
-    except Exception:
-        pass
-
-    # 3) Fallback: general parser for ISO/excel date strings
-    return pd.to_datetime(s, errors="coerce")
+    return coerce_helix_datetime_series(series)
 
 
 def _looks_like_datetime_col(col: str) -> bool:
-    lc = str(col).lower()
-    return (
-        "fecha" in lc
-        or "date" in lc
-        or "datetime" in lc
-        or "timestamp" in lc
-        or "datt" in lc
-        or lc.endswith("_date")
-        or lc.endswith("_datetime")
-    )
+    return looks_like_helix_datetime_column(col)
 
 
 def _auto_parse_epoch_datetime_columns(

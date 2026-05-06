@@ -61,6 +61,35 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
     assert {"Palanca", "Subpalanca"}.issubset(missing_columns)
 
 
+def test_parser_fingerprint_business_key_ignores_non_business_schema_drift(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "fingerprint-business-key.xlsx"
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-03-01 10:00:00", "2026-03-01 10:00:00"],
+            "ID": ["", ""],
+            "NPS": [5, 5],
+            "Comment": ["mismo comentario", "mismo comentario"],
+            "Canal": ["Web", "Web"],
+            "Palanca": ["Acceso", "Acceso"],
+            "Subpalanca": ["Login", "Login"],
+            "Browser": ["Chrome", "Safari"],
+            "Operating System": ["Windows", "Mac OS X"],
+        }
+    ).to_excel(path, index=False)
+
+    result = read_nps_thermal_excel(
+        str(path),
+        service_origin="BBVA México",
+        service_origin_n1="Senda",
+    )
+
+    assert not any(issue.level == "ERROR" for issue in result.issues)
+    assert len(result.df) == 1
+    assert result.meta["duplicate_rows_in_file"] == 1
+
+
 def test_regression_parser_handles_march_file_with_schema_drift() -> None:
     path = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
 

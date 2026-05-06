@@ -48,6 +48,7 @@ src/nps_lens/domain/models.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
+src/nps_lens/ingest/helix_dates.py
 src/nps_lens/ingest/helix_incidents.py
 src/nps_lens/ingest/incidents.py
 src/nps_lens/ingest/nps_thermal.py
