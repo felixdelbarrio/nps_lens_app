@@ -64,6 +64,7 @@ class PresentationContext:
     period_days: int
     focus_name: str
     overview: dict[str, object]
+    period_kpis: dict[str, object]
     story_md: str
     selected_raw: pd.DataFrame
     daily_mix: pd.DataFrame

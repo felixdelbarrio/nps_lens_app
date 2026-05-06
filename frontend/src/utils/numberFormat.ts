@@ -9,6 +9,26 @@ const SIGNED_NUMBER_FORMATTER = new Intl.NumberFormat(LOCALE, {
   signDisplay: "exceptZero"
 });
 
+const METRIC_FORMATTER = new Intl.NumberFormat(LOCALE, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+const SIGNED_METRIC_FORMATTER = new Intl.NumberFormat(LOCALE, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  signDisplay: "exceptZero"
+});
+
+const VOLUME_FORMATTER = new Intl.NumberFormat(LOCALE, {
+  maximumFractionDigits: 0
+});
+
+const SIGNED_VOLUME_FORMATTER = new Intl.NumberFormat(LOCALE, {
+  maximumFractionDigits: 0,
+  signDisplay: "exceptZero"
+});
+
 const PERCENT_FORMATTER = new Intl.NumberFormat(LOCALE, {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -23,7 +43,7 @@ const PERCENT_COLUMN_PATTERN =
   /%|percent|percentage|porcentaje|share|ratio|rate|prob(?:ability|\.)?/i;
 const NON_PERCENT_COLUMN_PATTERN =
   /\bpp\b|por 100|per 100|score|confidence|confianza|similaridad|cohesi|corr|lag|eta|pts?\b/i;
-const SIGNED_COLUMN_PATTERN = /\bgap\b|diferencia|difference/i;
+const SIGNED_COLUMN_PATTERN = /\bgap\b|brecha|diferencia|difference/i;
 const PLAIN_NUMERIC_PATTERN = /^[+-]?\d+(?:[.,]\d+)?$/;
 const PERCENT_VALUE_PATTERN = /^([+-]?\d+(?:[.,]\d+)?)\s*%$/;
 const NUMERIC_WITH_UNIT_PATTERN =
@@ -64,6 +84,7 @@ const NON_PERCENT_TOKENS = [
   "nps",
   "uplift",
   "gap",
+  "brecha",
   "impacto",
   "impact",
   "delta"
@@ -71,6 +92,10 @@ const NON_PERCENT_TOKENS = [
 
 function normalizeSpacing(value: string) {
   return value.replace(/\u00a0/g, " ");
+}
+
+function normalizePercentSpacing(value: string) {
+  return normalizeSpacing(value).replace(/\s+%$/, "%");
 }
 
 function normalizeColumnName(columnName: string) {
@@ -111,7 +136,52 @@ export function formatPercent(value: unknown, { fallback = "—" } = {}) {
   if (numeric === null) {
     return fallback;
   }
-  return normalizeSpacing(PERCENT_FORMATTER.format(numeric));
+  return normalizePercentSpacing(PERCENT_FORMATTER.format(numeric));
+}
+
+export function formatMetric(value: unknown, { signed = false, fallback = "—" } = {}) {
+  const numeric = coerceFiniteNumber(value);
+  if (numeric === null) {
+    return fallback;
+  }
+  return normalizeSpacing((signed ? SIGNED_METRIC_FORMATTER : METRIC_FORMATTER).format(numeric));
+}
+
+export function formatPercentage(value: unknown, { signed = false, fallback = "—" } = {}) {
+  const numeric = coerceFiniteNumber(value);
+  if (numeric === null) {
+    return fallback;
+  }
+  if (!signed) {
+    return formatPercent(numeric, { fallback });
+  }
+  return `${formatMetric(numeric * 100, { signed: true, fallback })}%`;
+}
+
+export function formatVolume(value: unknown, { signed = false, fallback = "0" } = {}) {
+  const numeric = coerceFiniteNumber(value);
+  if (numeric === null) {
+    return fallback;
+  }
+  return normalizeSpacing((signed ? SIGNED_VOLUME_FORMATTER : VOLUME_FORMATTER).format(numeric));
+}
+
+export function formatDelta(
+  value: unknown,
+  kind: "metric" | "percentage" | "volume" = "metric"
+) {
+  const numeric = coerceFiniteNumber(value);
+  if (numeric === null) {
+    return "sin histórico";
+  }
+  const marker = numeric > 0 ? "↑" : numeric < 0 ? "↓" : "→";
+  if (kind === "percentage") {
+    return `${marker} ${formatMetric(numeric * 100, { signed: true })} pp`;
+  }
+  if (kind === "volume") {
+    return `${marker} ${formatVolume(numeric, { signed: true })}`;
+  }
+  return `${marker} ${formatMetric(numeric, { signed: true })} pts`;
 }
 
 function isPercentColumn(columnName?: string) {

@@ -114,9 +114,11 @@ const dashboardPayload = {
   kpis: {
     samples: 26618,
     nps_average: 4.2,
+    classic_nps: -12.5,
     detractor_rate: 0.345,
     neutral_rate: 0.435,
-    promoter_rate: 0.22
+    promoter_rate: 0.22,
+    comments: 21967
   },
   overview: {
     daily_kpis_figure: null,
@@ -127,7 +129,7 @@ const dashboardPayload = {
     daily_volume_mix_figure: null,
     daily_mix_figure: null,
     daily_explanation_bullets: [
-      "El periodo arranca con NPS clásico **-12.5** y termina en **4.0**."
+      "El periodo arranca con NPS clásico **-12,50** y termina en **4,00**."
     ],
     insight_bullets: []
   },
@@ -138,9 +140,11 @@ const dashboardPayload = {
       kpis: {
         samples: 50000,
         nps_average: 4.5,
+        classic_nps: -6.0,
         detractor_rate: 0.32,
         neutral_rate: 0.42,
-        promoter_rate: 0.26
+        promoter_rate: 0.26,
+        comments: 50000
       }
     },
     period: {
@@ -148,15 +152,19 @@ const dashboardPayload = {
       kpis: {
         samples: 26618,
         nps_average: 4.2,
+        classic_nps: -12.5,
         detractor_rate: 0.345,
         neutral_rate: 0.435,
-        promoter_rate: 0.22
+        promoter_rate: 0.22,
+        comments: 21967
       },
       deltas: {
         nps_average: { value: -0.3, direction: "down", favorable: false },
+        classic_nps: { value: -6.5, direction: "down", favorable: false },
         detractor_rate: { value: 0.025, direction: "up", favorable: false },
         neutral_rate: { value: 0.015, direction: "up", favorable: true },
-        promoter_rate: { value: -0.04, direction: "down", favorable: false }
+        promoter_rate: { value: -0.04, direction: "down", favorable: false },
+        comments: { value: 21967, direction: "up", favorable: null }
       }
     }
   },
@@ -275,8 +283,8 @@ const linkingPayloadAvailable = {
     title: "Análisis de Tópicos de NPS afectados",
     subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
     kpis: [
-      { label: "Score en riesgo", value: "3.90 pts" },
-      { label: "Score recuperable", value: "2.40 pts" },
+      { label: "NPS en riesgo", value: "3.90 pts" },
+      { label: "NPS recuperable", value: "2.40 pts" },
       { label: "Concentración top-3", value: "74.0%" },
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
@@ -369,7 +377,7 @@ const linkingPayloadAvailable = {
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
           "Consulta / Operativa / Error funcional",
-          "Riesgo Score"
+          "Riesgo NPS"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
@@ -379,13 +387,13 @@ const linkingPayloadAvailable = {
           },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "60.0%" },
-          { label: "Delta Score", value: "-0.0" },
+          { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.16" },
           { label: "Links validados", value: "16" },
           { label: "Prioridad", value: "0.62" },
-          { label: "Score en riesgo", value: "0.00 pts" },
-          { label: "Score recuperable", value: "0.00 pts" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "VoC + Analitica" }
         ],
         incident_records: [
@@ -440,20 +448,20 @@ const linkingPayloadAvailable = {
           "(8) Incidencias + comentarios",
           "Consulta de saldos",
           "Consulta / Disponibilidad / Saldos",
-          "Riesgo Score"
+          "Riesgo NPS"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
           { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
           { label: "Prob. detractores", value: "52.0%" },
-          { label: "Delta Score", value: "-0.0" },
+          { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.14" },
           { label: "Links validados", value: "14" },
           { label: "Prioridad", value: "0.51" },
-          { label: "Score en riesgo", value: "0.00 pts" },
-          { label: "Score recuperable", value: "0.00 pts" },
+          { label: "NPS en riesgo", value: "0.00 pts" },
+          { label: "NPS recuperable", value: "0.00 pts" },
           { label: "Owner (rol)", value: "Canal Digital" }
         ],
         incident_records: [
@@ -596,8 +604,9 @@ describe("App", () => {
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
-    expect(screen.getAllByText("Score medio (0-10)").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Neutros (7-8)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Score Medio").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("NPS Clásico").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comentarios").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
     const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
     expect(opportunityNote).not.toBeNull();

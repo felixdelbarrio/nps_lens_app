@@ -23,7 +23,7 @@ from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
+from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.hotspot_metrics import (
     HOTSPOT_EVIDENCE_COLUMNS,
     summarize_hotspot_counts,
@@ -76,6 +76,15 @@ from nps_lens.reports.presentation_context import (
     DimensionViewModel,
     PresentationContext,
 )
+from nps_lens.services.analytics.kpis_service import (
+    build_period_boundary_kpis,
+    build_period_kpis,
+    compute_score_kpis,
+    format_delta,
+    format_metric,
+    format_percentage,
+    format_volume,
+)
 from nps_lens.ui.business import driver_delta_table
 from nps_lens.ui.charts import (
     _compact_axis_label,
@@ -91,6 +100,7 @@ from nps_lens.ui.charts import (
 )
 from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.narratives import explain_opportunities
+from nps_lens.ui.population import POP_ALL
 from nps_lens.ui.theme import get_theme
 
 BBVA_COLORS = executive_report_palette(DesignTokens.default(), mode="light")
@@ -181,7 +191,7 @@ def _fmt_locale_number(
 
 
 def _fmt_count_or_nd(v: object) -> str:
-    return _fmt_locale_number(v, decimals=0)
+    return format_volume(v, default="n/d")
 
 
 def _fmt_count_with_label(v: object, *, singular: str, plural: str) -> str:
@@ -190,16 +200,22 @@ def _fmt_count_with_label(v: object, *, singular: str, plural: str) -> str:
     return f"**{_fmt_count_or_nd(v)}** {label}"
 
 
-def _fmt_pct_or_nd(v: object, decimals: int = 0) -> str:
+def _fmt_pct_or_nd(v: object, decimals: int = 2) -> str:
+    if decimals == 2:
+        return format_percentage(v)
     f = _safe_float(v, default=float("nan"))
     return "n/d" if not np.isfinite(f) else f"{_fmt_locale_number(f * 100.0, decimals=decimals)}%"
 
 
-def _fmt_signed_or_nd(v: object, decimals: int = 1) -> str:
+def _fmt_signed_or_nd(v: object, decimals: int = 2) -> str:
+    if decimals == 2:
+        return format_metric(v, signed=True)
     return _fmt_locale_number(v, decimals=decimals, signed=True)
 
 
 def _fmt_num_or_nd(v: object, decimals: int = 2) -> str:
+    if decimals == 2:
+        return format_metric(v)
     return _fmt_locale_number(v, decimals=decimals)
 
 
@@ -490,36 +506,36 @@ def _split_source_period_frames(
 
 
 def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
-    scores = pd.to_numeric(current_nps_df.get("NPS"), errors="coerce").dropna()
-    comment_series = current_nps_df.get("comment_txt", pd.Series(dtype=str)).astype(str).str.strip()
-    comment_count = (
-        int(comment_series.ne("").sum()) if not comment_series.empty else int(len(scores))
-    )
-    detr = float((scores <= 6).mean()) if not scores.empty else 0.0
-    prom = float((scores >= 9).mean()) if not scores.empty else 0.0
-    pas = float(((scores >= 7) & (scores <= 8)).mean()) if not scores.empty else 0.0
-    nps_mean = float(scores.mean()) if not scores.empty else float("nan")
-    classic_nps = compute_nps_from_scores(scores) if not scores.empty else float("nan")
-    daily_mix = _daily_group_mix(current_nps_df)
+    aggregate_kpis = compute_score_kpis(current_nps_df)
+    temporal_kpis = build_period_boundary_kpis(current_nps_df)
+    temporal_base = temporal_kpis.get("base_kpis", {})
+    temporal_actual = temporal_kpis.get("kpis", {})
+    temporal_deltas = temporal_kpis.get("deltas", {})
     start_classic = (
-        float(pd.to_numeric(daily_mix["nps_classic"], errors="coerce").iloc[0])
-        if not daily_mix.empty
+        _safe_float(temporal_base.get("classic_nps"), default=float("nan"))
+        if isinstance(temporal_base, dict)
         else float("nan")
     )
     end_classic = (
-        float(pd.to_numeric(daily_mix["nps_classic"], errors="coerce").iloc[-1])
-        if not daily_mix.empty
+        _safe_float(temporal_actual.get("classic_nps"), default=float("nan"))
+        if isinstance(temporal_actual, dict)
         else float("nan")
     )
     start_detr = (
-        float(pd.to_numeric(daily_mix["detractor_rate"], errors="coerce").iloc[0])
-        if not daily_mix.empty
+        _safe_float(temporal_base.get("detractor_rate"), default=float("nan"))
+        if isinstance(temporal_base, dict)
         else float("nan")
     )
     end_detr = (
-        float(pd.to_numeric(daily_mix["detractor_rate"], errors="coerce").iloc[-1])
-        if not daily_mix.empty
+        _safe_float(temporal_actual.get("detractor_rate"), default=float("nan"))
+        if isinstance(temporal_actual, dict)
         else float("nan")
+    )
+    classic_delta_payload = (
+        temporal_deltas.get("classic_nps", {}) if isinstance(temporal_deltas, dict) else {}
+    )
+    detractor_delta_payload = (
+        temporal_deltas.get("detractor_rate", {}) if isinstance(temporal_deltas, dict) else {}
     )
     driver_col = "Subpalanca" if current_nps_df.get("Subpalanca") is not None else "Palanca"
     if driver_col not in current_nps_df.columns:
@@ -541,25 +557,48 @@ def _period_overview(current_nps_df: pd.DataFrame) -> dict[str, object]:
                     pain_point = str(ranking.index[0])
                     strength_point = str(ranking.index[-1])
     return {
-        "comments": comment_count,
-        "nps_mean": nps_mean,
-        "detractor_rate": detr,
-        "promoter_rate": prom,
-        "passive_rate": pas,
-        "classic_nps": classic_nps,
+        "comments": aggregate_kpis.comments,
+        "nps_mean": (
+            aggregate_kpis.nps_average if aggregate_kpis.nps_average is not None else float("nan")
+        ),
+        "detractor_rate": (
+            aggregate_kpis.detractor_rate
+            if aggregate_kpis.detractor_rate is not None
+            else float("nan")
+        ),
+        "promoter_rate": (
+            aggregate_kpis.promoter_rate
+            if aggregate_kpis.promoter_rate is not None
+            else float("nan")
+        ),
+        "passive_rate": (
+            aggregate_kpis.neutral_rate if aggregate_kpis.neutral_rate is not None else float("nan")
+        ),
+        "classic_nps": (
+            aggregate_kpis.classic_nps if aggregate_kpis.classic_nps is not None else float("nan")
+        ),
         "start_classic": start_classic,
         "end_classic": end_classic,
-        "classic_delta": (
-            end_classic - start_classic
-            if np.isfinite(start_classic) and np.isfinite(end_classic)
-            else float("nan")
+        "classic_delta": _safe_float(
+            (
+                classic_delta_payload.get("value")
+                if isinstance(classic_delta_payload, dict)
+                else np.nan
+            ),
+            default=float("nan"),
         ),
         "start_detr": start_detr,
         "end_detr": end_detr,
         "detractor_delta_pp": (
-            ((end_detr - start_detr) * 100.0)
-            if np.isfinite(start_detr) and np.isfinite(end_detr)
-            else float("nan")
+            _safe_float(
+                (
+                    detractor_delta_payload.get("value")
+                    if isinstance(detractor_delta_payload, dict)
+                    else np.nan
+                ),
+                default=float("nan"),
+            )
+            * 100.0
         ),
         "pain_point": pain_point,
         "strength_point": strength_point,
@@ -880,7 +919,7 @@ def _chain_portfolio_fig(
         template="plotly_white",
         margin=dict(l=24, r=16, t=20, b=30),
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
-        yaxis=dict(title="Impacto total (pts Score)", rangemode="tozero"),
+        yaxis=dict(title="Impacto total (pts NPS)", rangemode="tozero"),
         showlegend=False,
     )
     return fig
@@ -1101,9 +1140,9 @@ def _group_heatmap_fig(matrix_df: pd.DataFrame, *, dimension: str) -> Optional[g
             y=list(pivot.index),
             colorscale=plotly_risk_scale(DesignTokens.default(), "light"),
             showscale=False,
-            text=np.vectorize(lambda v: f"{v:.0f}%")(pivot.to_numpy() * 100.0),
+            text=np.vectorize(lambda v: f"{v:.2f}%")(pivot.to_numpy() * 100.0),
             texttemplate="%{text}",
-            hovertemplate="%{y}<br>%{x}: %{z:.1f}%<extra></extra>",
+            hovertemplate="%{y}<br>%{x}: %{z:.2f}%<extra></extra>",
         )
     )
     fig.update_layout(
@@ -1126,7 +1165,7 @@ def _gap_vs_overall_fig(gap_df: pd.DataFrame) -> Optional[go.Figure]:
             y=d["axis_label"],
             orientation="h",
             marker=dict(color="#" + BBVA_COLORS["red"]),
-            text=[_fmt_signed_or_nd(v, decimals=1) for v in d["gap_vs_overall"].tolist()],
+            text=[_fmt_signed_or_nd(v, decimals=2) for v in d["gap_vs_overall"].tolist()],
             textposition="outside",
             cliponaxis=False,
         )
@@ -1135,7 +1174,7 @@ def _gap_vs_overall_fig(gap_df: pd.DataFrame) -> Optional[go.Figure]:
     fig.update_layout(
         template="plotly_white",
         margin=dict(l=32, r=28, t=20, b=24),
-        xaxis_title="Diferencia frente al Score medio",
+        xaxis_title="Brecha vs NPS Global (pts)",
         yaxis_title="",
         showlegend=False,
     )
@@ -1174,7 +1213,7 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
                 opacity=0.82,
             ),
             hovertemplate=(
-                "%{customdata[2]}<br>Dimensión=%{customdata[0]}<br>Potencial=%{y:.1f} pts"
+                "%{customdata[2]}<br>Dimensión=%{customdata[0]}<br>Potencial=%{y:.2f} pts"
                 "<br>Confianza=%{x:.2f}<br>n=%{customdata[1]:.0f}<extra></extra>"
             ),
             customdata=d[["dimension", "n", "value"]].to_numpy(),
@@ -1184,7 +1223,7 @@ def _opportunity_bubble_fig(opps_df: pd.DataFrame) -> Optional[go.Figure]:
         template="plotly_white",
         margin=dict(l=24, r=24, t=20, b=24),
         xaxis=dict(title="Solidez de la evidencia", range=[0, 1]),
-        yaxis=dict(title="Impacto potencial (pts Score)", rangemode="tozero"),
+        yaxis=dict(title="Impacto potencial (pts NPS)", rangemode="tozero"),
         showlegend=False,
     )
     return fig
@@ -1286,7 +1325,7 @@ def _build_driver_delta_figure(
         title_text="",
     )
     fig.update_xaxes(
-        title_text="Delta Score (actual - base)",
+        title_text="Delta NPS Clásico (actual - base)",
         tickfont=dict(size=10, family=BBVA_FONT_BODY),
         title_font=dict(size=11, family=BBVA_FONT_MEDIUM),
         nticks=5,
@@ -1631,7 +1670,7 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="Score en riesgo", side="right", font=dict(size=15)),
+            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -2917,6 +2956,122 @@ def _add_stat_card(
         r2.font.color.rgb = _rgb(BBVA_COLORS["muted"])
 
 
+def _dict_payload(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _delta_accent(delta_payload: dict[str, object], *, default: str) -> str:
+    favorable = delta_payload.get("favorable")
+    if favorable is True:
+        return BBVA_COLORS["green"]
+    if favorable is False:
+        return BBVA_COLORS["red"]
+    return default
+
+
+def _add_comparative_stat_card(
+    slide: object,
+    *,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    label: str,
+    base_value: str,
+    actual_value: str,
+    delta_text: str,
+    accent: str,
+    delta_accent: str,
+    base_label: str = "Inicio periodo",
+    actual_label: str = "Fin periodo",
+) -> None:
+    box = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(left),
+        Inches(top),
+        Inches(width),
+        Inches(height),
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = _rgb(BBVA_COLORS["white"])
+    box.line.color.rgb = _rgb(BBVA_COLORS["line"])
+
+    accent_bar = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE,
+        Inches(left),
+        Inches(top),
+        Inches(0.10),
+        Inches(height),
+    )
+    accent_bar.fill.solid()
+    accent_bar.fill.fore_color.rgb = _rgb(accent)
+    accent_bar.line.fill.background()
+
+    title = slide.shapes.add_textbox(
+        Inches(left + 0.18), Inches(top + 0.08), Inches(width - 0.34), Inches(0.18)
+    )
+    tf = title.text_frame
+    _configure_text_frame(tf)
+    tf.clear()
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    r = p.add_run()
+    r.text = label.upper()
+    r.font.name = BBVA_FONT_MEDIUM
+    r.font.size = Pt(8.6)
+    r.font.bold = True
+    r.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+    col_w = (width - 0.44) / 2.0
+    for idx, (column_label, value) in enumerate(
+        [(base_label, base_value), (actual_label, actual_value)]
+    ):
+        x = left + 0.22 + idx * col_w
+        header = slide.shapes.add_textbox(
+            Inches(x), Inches(top + 0.34), Inches(col_w), Inches(0.18)
+        )
+        htf = header.text_frame
+        _configure_text_frame(htf)
+        htf.clear()
+        hp = htf.paragraphs[0]
+        hp.alignment = PP_ALIGN.CENTER
+        hr = hp.add_run()
+        hr.text = column_label
+        hr.font.name = BBVA_FONT_BODY
+        hr.font.size = Pt(7.6)
+        hr.font.color.rgb = _rgb(BBVA_COLORS["muted"])
+
+        value_box = slide.shapes.add_textbox(
+            Inches(x), Inches(top + 0.52), Inches(col_w), Inches(0.30)
+        )
+        vtf = value_box.text_frame
+        _configure_text_frame(vtf)
+        vtf.clear()
+        vp = vtf.paragraphs[0]
+        vp.alignment = PP_ALIGN.CENTER
+        vr = vp.add_run()
+        vr.text = value
+        vr.font.name = BBVA_FONT_DISPLAY
+        vr.font.size = Pt(16 if len(value) <= 8 else 13)
+        vr.font.bold = True
+        vr.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    delta = slide.shapes.add_textbox(
+        Inches(left + 0.18), Inches(top + height - 0.28), Inches(width - 0.34), Inches(0.22)
+    )
+    dtf = delta.text_frame
+    _configure_text_frame(dtf)
+    dtf.clear()
+    dp = dtf.paragraphs[0]
+    dp.alignment = PP_ALIGN.CENTER
+    dr = dp.add_run()
+    dr.text = delta_text
+    dr.font.name = BBVA_FONT_MEDIUM
+    dr.font.size = Pt(9.2)
+    dr.font.bold = True
+    dr.font.color.rgb = _rgb(delta_accent)
+
+
 def _add_markdown_runs(
     paragraph: object,
     *,
@@ -3761,13 +3916,13 @@ def _cover_summary_lines(overview: dict[str, object], story_md: str) -> list[str
         direction = "sube" if classic_delta > 0 else "cae"
         lines.append(
             "Del inicio al cierre del periodo, el NPS clásico "
-            f"{direction} {_fmt_num_or_nd(abs(classic_delta), decimals=1)} puntos."
+            f"{direction} {_fmt_num_or_nd(abs(classic_delta), decimals=2)} puntos."
         )
     if np.isfinite(detractor_delta_pp) and abs(detractor_delta_pp) >= 0.1:
         direction = "sube" if detractor_delta_pp > 0 else "baja"
         lines.append(
             "El peso detractor "
-            f"{direction} {_fmt_num_or_nd(abs(detractor_delta_pp), decimals=1)} puntos porcentuales "
+            f"{direction} {_fmt_num_or_nd(abs(detractor_delta_pp), decimals=2)} puntos porcentuales "
             "en la ventana analizada."
         )
 
@@ -3968,8 +4123,8 @@ def _add_impact_chain_slide(
                 "Se muestran verbatims reales enlazados con el cluster, no frases genéricas ni heurísticas aisladas.",
             ),
             (
-                "5. Score",
-                f"El efecto final se expresa en riesgo de {focus_name}, delta Score e impacto total.",
+                "5. NPS Clásico",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS Clásico e impacto total.",
             ),
         ]
         if is_broken_journey_mode
@@ -3988,8 +4143,8 @@ def _add_impact_chain_slide(
                 "Se muestran verbatims reales enlazados con el caso Helix, no frases genéricas.",
             ),
             (
-                "5. Score",
-                f"El efecto final se expresa en riesgo de {focus_name}, delta Score e impacto total.",
+                "5. NPS Clásico",
+                f"El efecto final se expresa en riesgo de {focus_name}, delta NPS Clásico e impacto total.",
             ),
         ]
     )
@@ -4101,7 +4256,7 @@ def _add_executive_journey_summary_slide(
     catalog_rows = list(executive_journey_catalog or EXECUTIVE_JOURNEY_CATALOG)
     row_y = 2.92
     cols = [0.92, 3.15, 6.45, 10.15]
-    headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en Score"]
+    headers = ["Journey", "Qué ocurre", "Evidencia esperada", "Impacto en NPS"]
     for idx, header in enumerate(headers):
         tb = slide.shapes.add_textbox(Inches(cols[idx]), Inches(row_y), Inches(2.2), Inches(0.26))
         ttf = tb.text_frame
@@ -4276,8 +4431,8 @@ def _chain_priority_summary(  # pragma: no cover - legacy helper for compatibili
     parts_top = [
         f"Prioridad {_fmt_num_or_nd(priority)}",
         f"Confianza {_fmt_num_or_nd(confidence)}",
-        f"Score en riesgo {_fmt_num_or_nd(risk)} pts",
-        f"Score recuperable {_fmt_num_or_nd(recoverable)} pts",
+        f"NPS en riesgo {_fmt_num_or_nd(risk)} pts",
+        f"NPS recuperable {_fmt_num_or_nd(recoverable)} pts",
     ]
     parts_bottom = [
         f"Delta % {focus_name} {_fmt_signed_or_nd(delta_focus)} pp",
@@ -4408,7 +4563,7 @@ def _add_chain_evidence_slide(
     mtf.clear()
     metrics = [
         f"Prob. {focus_name}: {_fmt_pct_or_nd(chain_row.get('detractor_probability', np.nan))}",
-        f"Delta Score: {_fmt_signed_or_nd(chain_row.get('nps_delta_expected', np.nan))}",
+        f"Delta NPS Clásico: {_fmt_signed_or_nd(chain_row.get('nps_delta_expected', np.nan))}",
         f"Impacto total: {_fmt_num_or_nd(chain_row.get('total_nps_impact', 0.0))} pts",
         f"Links validados: {int(_safe_int(chain_row.get('linked_pairs', 0), default=0))}",
         f"Confianza: {_fmt_num_or_nd(chain_row.get('confidence', 0.0))}",
@@ -5899,7 +6054,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["sky"],
             ),
             (
-                "Cambio esperado en Score",
+                "Cambio esperado en NPS Clásico",
                 _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
                 BBVA_COLORS["orange"],
             ),
@@ -5971,6 +6126,7 @@ def _build_presentation_context(
     entity_summary_df: Optional[pd.DataFrame],
     entity_summary_kpis: Optional[list[dict[str, str]]],
     broken_journeys_df: Optional[pd.DataFrame],
+    period_kpis: Optional[dict[str, object]] = None,
 ) -> PresentationContext:
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
     period_days = (pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1
@@ -6013,6 +6169,21 @@ def _build_presentation_context(
         daily_mix["promoter_rate"] = 0.0
         daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
 
+    kpi_history_df = (
+        comparison_nps_df
+        if comparison_nps_df is not None
+        else selected_nps_df if selected_nps_df is not None else pd.DataFrame()
+    )
+    kpi_current_df = selected_nps_df if selected_nps_df is not None else current_period
+    resolved_period_kpis = period_kpis or build_period_kpis(
+        history_df=kpi_history_df,
+        current_df=kpi_current_df,
+        pop_year=POP_ALL,
+        pop_month=POP_ALL,
+        context_label=period_label,
+        period_start=period_start,
+        period_end=period_end,
+    )
     overview = _period_overview(selected_raw)
     detractor_raw = (
         selected_raw[selected_raw["band"].astype(str).str.casefold().eq("detractor")].copy()
@@ -6080,6 +6251,7 @@ def _build_presentation_context(
         period_days=period_days,
         focus_name=focus_name,
         overview=overview,
+        period_kpis=resolved_period_kpis,
         story_md=story_md,
         selected_raw=selected_raw,
         daily_mix=daily_mix,
@@ -6192,9 +6364,27 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     sr.font.size = Pt(16)
     sr.font.color.rgb = _rgb("C7D3EA")
 
-    summary = _cover_summary_lines(context.overview, context.story_md)[:3] or [
-        "El bloque ordena la señal del periodo desde evolución, comentario y deterioros por dimensión.",
-    ]
+    period_scope = _dict_payload(context.period_kpis.get("period"))
+    temporal_scope = _dict_payload(period_scope.get("temporal"))
+    temporal_display = _dict_payload(temporal_scope.get("display"))
+    temporal_base_display = _dict_payload(temporal_scope.get("base_display"))
+    temporal_deltas = _dict_payload(temporal_scope.get("deltas"))
+    period_display = _dict_payload(period_scope.get("display"))
+    comment_total = str(
+        period_display.get(
+            "comments",
+            format_volume(context.overview.get("comments", 0)),
+        )
+    )
+    summary = (
+        _cover_summary_lines(context.overview, context.story_md)
+        or [
+            "El bloque ordena la señal del periodo desde evolución, comentario y deterioros por dimensión.",
+        ]
+    )[:3]
+    comment_line = f"Se analizaron **{comment_total}** comentarios útiles durante el período."
+    if comment_line not in summary:
+        summary.append(comment_line)
     _add_bullet_lines(
         slide,
         left=0.82,
@@ -6204,52 +6394,35 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
         title=EDITORIAL_COPY.nps_highlights_title,
         lines=summary,
         accent=BBVA_COLORS["sky"],
-        body_font_size_pt=13.8,
+        body_font_size_pt=12.8,
     )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=1.10,
-        width=3.40,
-        height=1.12,
-        label="Score medio",
-        value=_fmt_num_or_nd(context.overview.get("nps_mean", np.nan), decimals=1),
-        accent=BBVA_COLORS["green"],
-        hint="Escala 0-10",
-    )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=2.52,
-        width=3.40,
-        height=1.12,
-        label="Detractores",
-        value=_fmt_pct_or_nd(context.overview.get("detractor_rate", np.nan)),
-        accent=BBVA_COLORS["red"],
-        hint="Peso sobre respuestas",
-    )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=3.94,
-        width=3.40,
-        height=1.12,
-        label="% promotores",
-        value=_fmt_pct_or_nd(context.overview.get("promoter_rate", np.nan)),
-        accent=BBVA_COLORS["green"],
-        hint="Valoraciones >= 9",
-    )
-    _add_stat_card(
-        slide,
-        left=8.70,
-        top=5.36,
-        width=3.40,
-        height=1.12,
-        label="Comentarios",
-        value=_fmt_count_or_nd(context.overview.get("comments", 0)),
-        accent=BBVA_COLORS["blue"],
-        hint="Base útil analizada",
-    )
+    card_specs = [
+        ("Score medio", "nps_average", BBVA_COLORS["green"]),
+        ("NPS Clásico", "classic_nps", BBVA_COLORS["blue"]),
+        ("Detractores", "detractor_rate", BBVA_COLORS["orange"]),
+        ("Promotores", "promoter_rate", BBVA_COLORS["green"]),
+    ]
+    for index, (label, kpi_key, accent) in enumerate(card_specs):
+        delta_payload = _dict_payload(temporal_deltas.get(kpi_key))
+        _add_comparative_stat_card(
+            slide,
+            left=8.55,
+            top=1.04 + index * 1.34,
+            width=3.72,
+            height=1.14,
+            label=label,
+            base_value=str(temporal_base_display.get(kpi_key, "n/d")),
+            actual_value=str(temporal_display.get(kpi_key, "n/d")),
+            delta_text=str(
+                delta_payload.get(
+                    "display", format_delta(delta_payload.get("value"), kpi_key=kpi_key)
+                )
+            ),
+            accent=accent,
+            delta_accent=_delta_accent(delta_payload, default=BBVA_COLORS["muted"]),
+            base_label="Inicio periodo",
+            actual_label="Fin periodo",
+        )
 
 
 def _add_dimension_change_slide(
@@ -6495,7 +6668,8 @@ def _add_overview_slide(
     trend_lines = [
         f"El periodo arranca con NPS clásico **{_fmt_num_or_nd(overview.get('start_classic', np.nan))}** y termina en **{_fmt_num_or_nd(overview.get('end_classic', np.nan))}**.",
         f"El peso detractor pasa de **{_fmt_pct_or_nd(overview.get('start_detr', np.nan))}** a **{_fmt_pct_or_nd(overview.get('end_detr', np.nan))}**.",
-        "NPS clásico = promotores menos detractores; se usa para seguir la señal neta del periodo.",
+        "NPS Clásico = % Promotores - % Detractores. Rango: -100 a +100.",
+        "Se utiliza para seguir la señal neta del período.",
     ]
     _add_bullet_lines(
         slide,
@@ -6658,7 +6832,7 @@ def _add_change_vs_past_slide(
             automargin=True,
         )
         fig.update_xaxes(
-            title_text="Delta Score",
+            title_text="Delta NPS Clásico",
             tickfont=dict(size=18),
             title_font=dict(size=20),
             nticks=5,
@@ -6920,7 +7094,7 @@ def _add_gap_slide(
             automargin=True,
         )
         fig.update_xaxes(
-            title_text="Gap Score",
+            title_text="Brecha vs NPS Global (pts)",
             tickfont=dict(size=16),
             title_font=dict(size=17),
             nticks=4,
@@ -6939,8 +7113,11 @@ def _add_gap_slide(
     _add_bg(slide, BBVA_COLORS["bg_light"])
     _add_header(
         slide,
-        title="5. Casos más alejados del promedio",
-        subtitle=f"Top de casos con peor diferencia frente al Score medio general · {period_label}",
+        title="5. Palancas con mayor brecha de NPS",
+        subtitle=(
+            "La brecha representa la diferencia entre el NPS de la palanca y el NPS global "
+            f"del período · {period_label}"
+        ),
     )
     _panel(slide, left=0.66, top=1.48, width=8.70, height=2.38, title="Palanca")
     _figure_in_panel(
@@ -6956,7 +7133,8 @@ def _add_gap_slide(
 
     palanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
-        f"Score {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
+        f"NPS Clásico {_fmt_num_or_nd(row.nps)} · Brecha vs Global "
+        f"{_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(palanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -6983,7 +7161,8 @@ def _add_gap_slide(
     )
     subpalanca_lines = [
         f"{idx + 1}. {_clip(row.value, 30)} · n={_fmt_count_or_nd(row.n)} · "
-        f"Score {_fmt_num_or_nd(row.nps)} · gap {_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
+        f"NPS Clásico {_fmt_num_or_nd(row.nps)} · Brecha vs Global "
+        f"{_fmt_signed_or_nd(row.gap_vs_overall, decimals=1)}"
         for idx, row in enumerate(subpalanca_gap_df.head(5).itertuples())
     ]
     _add_bullet_lines(
@@ -7219,7 +7398,7 @@ def _add_causal_timeline_slide(
         top=4.94,
         width=1.60,
         height=1.12,
-        label="Score en riesgo",
+        label="NPS en riesgo",
         value=f"{_fmt_num_or_nd(nps_points_at_risk)} pts",
         accent=BBVA_COLORS["orange"],
     )
@@ -7229,7 +7408,7 @@ def _add_causal_timeline_slide(
         top=4.94,
         width=1.60,
         height=1.12,
-        label="Score recuperable",
+        label="NPS recuperable",
         value=f"{_fmt_num_or_nd(nps_points_recoverable)} pts",
         accent=BBVA_COLORS["green"],
     )
@@ -7496,6 +7675,103 @@ def _add_causal_analysis_slide(
     )
 
 
+def _add_causal_fallback_slide(
+    prs: Presentation,
+    *,
+    context: PresentationContext,
+    slide_number: int = 13,
+) -> None:
+    slide = _new_slide(prs)
+    _add_bg(slide, BBVA_COLORS["bg_light"])
+    _add_header(
+        slide,
+        title=f"{slide_number}. Análisis causal no concluyente",
+        subtitle=(
+            "No se identificaron suficientes evidencias para construir escenarios causales "
+            f"robustos durante el período analizado · {context.period_label}"
+        ),
+    )
+
+    selected = context.selected_raw if context.selected_raw is not None else pd.DataFrame()
+    comments = (
+        int(selected.get("comment_txt", pd.Series(dtype=str)).astype(str).str.strip().ne("").sum())
+        if not selected.empty
+        else 0
+    )
+    active_levers = (
+        int(
+            selected.get("Palanca", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .replace("", np.nan)
+            .nunique()
+        )
+        if not selected.empty
+        else 0
+    )
+    entity_summary = context.causal.entity_summary_df
+    linked_pairs = (
+        float(pd.to_numeric(entity_summary.get("linked_pairs"), errors="coerce").fillna(0.0).sum())
+        if entity_summary is not None
+        and not entity_summary.empty
+        and "linked_pairs" in entity_summary.columns
+        else 0.0
+    )
+    incidents = (
+        float(
+            pd.to_numeric(entity_summary.get("linked_incidents"), errors="coerce").fillna(0.0).sum()
+        )
+        if entity_summary is not None
+        and not entity_summary.empty
+        and "linked_incidents" in entity_summary.columns
+        else 0.0
+    )
+    confidence = (
+        float(pd.to_numeric(entity_summary.get("confidence"), errors="coerce").dropna().mean())
+        if entity_summary is not None
+        and not entity_summary.empty
+        and "confidence" in entity_summary.columns
+        else float("nan")
+    )
+    coverage = linked_pairs / max(float(len(selected)), 1.0)
+    metrics = [
+        ("Volumen analizado", _fmt_count_or_nd(len(selected)), BBVA_COLORS["blue"]),
+        ("Incidencias observadas", _fmt_count_or_nd(incidents), BBVA_COLORS["orange"]),
+        ("Comentarios útiles", _fmt_count_or_nd(comments), BBVA_COLORS["sky"]),
+        ("Palancas activas", _fmt_count_or_nd(active_levers), BBVA_COLORS["green"]),
+        ("Cobertura causal", _fmt_pct_or_nd(coverage), BBVA_COLORS["red"]),
+        ("Confianza promedio", _fmt_num_or_nd(confidence), BBVA_COLORS["green"]),
+    ]
+    for idx, (label, value, accent) in enumerate(metrics):
+        row = idx // 3
+        col = idx % 3
+        _add_stat_card(
+            slide,
+            left=0.66 + col * 4.05,
+            top=1.62 + row * 1.36,
+            width=3.72,
+            height=1.08,
+            label=label,
+            value=value,
+            accent=accent,
+        )
+    _add_bullet_lines(
+        slide,
+        left=0.66,
+        top=4.52,
+        width=12.02,
+        height=1.78,
+        title="Lectura ejecutiva",
+        lines=[
+            "No se identificaron patrones causales estadísticamente defendibles para el período analizado.",
+            "El deck mantiene el análisis descriptivo de NPS Clásico, brechas, detracción, temas y evolución.",
+            "La ausencia de escenarios no modifica la lectura de NPS ni las brechas frente al NPS global.",
+        ],
+        accent=BBVA_COLORS["orange"],
+        body_font_size_pt=13.0,
+    )
+
+
 def _add_causal_evidence_slide(
     prs: Presentation,
     *,
@@ -7612,7 +7888,7 @@ def _add_chain_scenario_slide(
             BBVA_COLORS["red"],
         ),
         (
-            "Cambio esperado en Score",
+            "Cambio esperado en NPS Clásico",
             _fmt_signed_or_nd(chain_row.get("nps_delta_expected", np.nan)),
             BBVA_COLORS["orange"],
         ),
@@ -7637,12 +7913,12 @@ def _add_chain_scenario_slide(
             BBVA_COLORS["red"],
         ),
         (
-            "Score en riesgo",
+            "NPS en riesgo",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_at_risk', np.nan))} pts",
             BBVA_COLORS["red"],
         ),
         (
-            "Score recuperable",
+            "NPS recuperable",
             f"{_fmt_num_or_nd(chain_row.get('nps_points_recoverable', np.nan))} pts",
             BBVA_COLORS["green"],
         ),
@@ -7729,6 +8005,7 @@ def generate_business_review_ppt(
     executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     broken_journeys_df: Optional[pd.DataFrame] = None,
     report_dimension_analysis: str = "palanca",
+    period_kpis: Optional[dict[str, object]] = None,
 ) -> BusinessPptResult:
     """Build a business deck aligned to the selected period and BBVA corporate template."""
     del (
@@ -7773,6 +8050,7 @@ def generate_business_review_ppt(
         entity_summary_df=entity_summary_df,
         entity_summary_kpis=entity_summary_kpis,
         broken_journeys_df=broken_journeys_df,
+        period_kpis=period_kpis,
     )
 
     _add_cover_slide(
@@ -7844,6 +8122,12 @@ def generate_business_review_ppt(
         slide_number=next_slide_number,
     )
     causal_scenario_slide_number = next_slide_number + 1
+    if not context.causal.scenarios:
+        _add_causal_fallback_slide(
+            prs,
+            context=context,
+            slide_number=causal_scenario_slide_number,
+        )
     for scenario in context.causal.scenarios:
         _add_causal_analysis_slide(
             prs,

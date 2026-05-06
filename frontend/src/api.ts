@@ -73,14 +73,30 @@ export type KpiDelta = {
   value: number | null;
   direction: "up" | "down" | "flat";
   favorable: boolean | null;
+  display?: string;
 };
 
 export type DashboardKpis = {
   samples: number;
   nps_average: number | null;
+  classic_nps?: number | null;
   detractor_rate: number | null;
   neutral_rate: number | null;
   promoter_rate: number | null;
+  comments?: number;
+};
+
+export type ScopeKpiBlock = {
+  label: string;
+  base_label?: string;
+  actual_label?: string;
+  note?: string;
+  kpis: DashboardKpis;
+  base_kpis?: DashboardKpis;
+  deltas?: Record<string, KpiDelta>;
+  display?: Record<string, string>;
+  base_display?: Record<string, string>;
+  temporal?: ScopeKpiBlock;
 };
 
 export type DashboardPayload = {
@@ -99,16 +115,8 @@ export type DashboardPayload = {
     insight_bullets?: string[];
   };
   scope?: {
-    cumulative?: {
-      label: string;
-      note?: string;
-      kpis: DashboardKpis;
-    };
-    period?: {
-      label: string;
-      kpis: DashboardKpis;
-      deltas?: Record<string, KpiDelta>;
-    };
+    cumulative?: ScopeKpiBlock;
+    period?: ScopeKpiBlock;
   };
   comparison: {
     summary?: {
@@ -131,6 +139,9 @@ export type DashboardPayload = {
   };
   gaps: {
     dimension?: string;
+    overall_nps?: number;
+    title?: string;
+    subtitle?: string;
     figure?: PlotlyFigureSpec | null;
     table?: Array<Record<string, unknown>>;
     has_data?: boolean;

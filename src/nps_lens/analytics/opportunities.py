@@ -23,15 +23,15 @@ class Opportunity:
 def rank_opportunities(
     df: pd.DataFrame,
     dimensions: Sequence[str],
-    score_col: str = "NPS",
+    survey_score_col: str = "NPS",
     min_n: int = 200,
 ) -> list[Opportunity]:
-    overall = compute_nps_from_scores(df[score_col])
+    overall = compute_nps_from_scores(df[survey_score_col])
     out: list[Opportunity] = []
     for dim in dimensions:
         if dim not in df.columns:
             continue
-        grouped = grouped_driver_stats(df, dim, score_col=score_col)
+        grouped = grouped_driver_stats(df, dim, survey_score_col=survey_score_col)
         grouped = grouped.loc[grouped["n"] >= int(min_n)].copy()
         if grouped.empty:
             continue
@@ -54,7 +54,7 @@ def rank_opportunities(
                     current_nps=float(nps),
                     potential_uplift=uplift,
                     confidence=conf,
-                    why=f"'{dim}={value}' está {delta:.1f} pts por debajo del NPS global",
+                    why=f"'{dim}={value}' está {delta:.2f} pts por debajo del NPS global",
                 )
             )
     out.sort(key=lambda o: (o.potential_uplift * o.confidence, o.n), reverse=True)
