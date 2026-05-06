@@ -1223,13 +1223,20 @@ export function App() {
   function renderKpiGrid(
     block: ScopeKpiBlock | undefined,
     fallbackKpis: KpiPayload | undefined,
-    withDeltas = false
+    withDeltas?: boolean
   ) {
     const kpis = block?.kpis || fallbackKpis;
     const display = block?.display;
-    const deltas = withDeltas ? block?.deltas : undefined;
+    const shouldShowDeltas = withDeltas ?? Boolean(block?.show_deltas);
+    const deltas = shouldShowDeltas ? block?.deltas : undefined;
     return (
       <div className="metric-grid metric-grid-5">
+        {renderScopeMetricCard(
+          "Comentarios",
+          formatKpiValue(kpis, display, "comments", "volume"),
+          deltas?.comments,
+          "volume"
+        )}
         {renderScopeMetricCard(
           "Score Medio",
           formatKpiValue(kpis, display, "nps_average", "metric"),
@@ -1253,12 +1260,6 @@ export function App() {
           formatKpiValue(kpis, display, "promoter_rate", "percentage"),
           deltas?.promoter_rate,
           "percentage"
-        )}
-        {renderScopeMetricCard(
-          "Comentarios",
-          formatKpiValue(kpis, display, "comments", "volume"),
-          deltas?.comments,
-          "volume"
         )}
       </div>
     );
@@ -1340,7 +1341,21 @@ export function App() {
             </div>
           </div>
 
-          {renderKpiGrid(dashboard?.scope?.cumulative, dashboard?.kpis, true)}
+          {renderKpiGrid(dashboard?.scope?.cumulative, dashboard?.kpis, false)}
+
+          {dashboard?.scope?.historical ? (
+            <>
+              <div className="section-heading section-heading-inline scope-period-heading">
+                <div>
+                  <h3>{dashboard.scope.historical.label}</h3>
+                  {dashboard.scope.historical.note ? (
+                    <p className="secondary-copy">{dashboard.scope.historical.note}</p>
+                  ) : null}
+                </div>
+              </div>
+              {renderKpiGrid(dashboard.scope.historical, dashboard?.kpis, false)}
+            </>
+          ) : null}
 
           <div className="section-heading section-heading-inline scope-period-heading">
             <div>
@@ -1348,7 +1363,7 @@ export function App() {
             </div>
           </div>
 
-          {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis, true)}
+          {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis)}
         </section>
 
         <NavigationTabs
