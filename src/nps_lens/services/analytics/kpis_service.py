@@ -8,9 +8,9 @@ from typing import Any, Optional, cast
 import numpy as np
 import pandas as pd
 
-from nps_lens.ui.population import POP_ALL
+from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL
 
-_KPI_ORDER = ("nps_average", "classic_nps", "detractor_rate", "promoter_rate", "comments")
+_KPI_ORDER = ("comments", "nps_average", "classic_nps", "detractor_rate", "promoter_rate")
 _PERCENTAGE_KPIS = {"detractor_rate", "neutral_rate", "promoter_rate"}
 _VOLUME_KPIS = {"samples", "comments"}
 _DELTA_UNITS = {
@@ -309,7 +309,6 @@ def format_delta(value: object, *, kpi_key: str) -> str:
     numeric = _finite_float(value)
     if numeric is None:
         return "sin histórico"
-    direction = "↑" if numeric > 0 else "↓" if numeric < 0 else "→"
     if kpi_key in _PERCENTAGE_KPIS:
         amount = _format_locale_number(numeric * 100.0, decimals=2, signed=True)
     elif kpi_key in _VOLUME_KPIS:
@@ -317,7 +316,7 @@ def format_delta(value: object, *, kpi_key: str) -> str:
     else:
         amount = format_metric(numeric, signed=True)
     unit = _DELTA_UNITS.get(kpi_key, "")
-    return f"{direction} {amount}{f' {unit}' if unit else ''}".strip()
+    return f"{amount}{f' {unit}' if unit else ''}".strip()
 
 
 def _score_value(kpis: ScoreKpis, kpi_key: str) -> Optional[float]:
@@ -345,9 +344,30 @@ def _display_payload(kpis: ScoreKpis) -> dict[str, str]:
     return {key: format_kpi_value(key, getattr(kpis, key)) for key in _KPI_ORDER}
 
 
+def _kpi_payload(
+    *,
+    label: str,
+    period_type: str,
+    kpis: ScoreKpis,
+    note: str = "",
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "label": label,
+        "period_type": period_type,
+        "kpis": kpis.to_dict(),
+        "display": _display_payload(kpis),
+        "deltas": None,
+        "show_deltas": False,
+    }
+    if note:
+        payload["note"] = note
+    return payload
+
+
 def _comparison_payload(
     *,
     label: str,
+    period_type: str,
     actual: ScoreKpis,
     baseline: ScoreKpis,
     base_label: str,
@@ -356,6 +376,7 @@ def _comparison_payload(
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "label": label,
+        "period_type": period_type,
         "base_label": base_label,
         "actual_label": actual_label,
         "kpis": actual.to_dict(),
@@ -363,6 +384,7 @@ def _comparison_payload(
         "deltas": _delta_payloads(actual, baseline),
         "display": _display_payload(actual),
         "base_display": _display_payload(baseline),
+        "show_deltas": True,
     }
     if note:
         payload["note"] = note
@@ -375,11 +397,42 @@ def build_period_boundary_kpis(current_df: pd.DataFrame) -> dict[str, object]:
     actual = compute_score_kpis(end_frame)
     return _comparison_payload(
         label="Evolución temporal del periodo",
+        period_type="internal_period_evolution",
         actual=actual,
         baseline=baseline,
         base_label=_date_label(start_frame, default="Inicio periodo"),
         actual_label=_date_label(end_frame, default="Fin periodo"),
     )
+
+
+def _previous_period_label(
+    *,
+    pop_year: str,
+    pop_month: str,
+    start_date: Optional[pd.Timestamp],
+) -> str:
+    year_value = str(pop_year or POP_ALL).strip()
+    month_value = str(pop_month or POP_ALL).strip()
+    if year_value != POP_ALL:
+        try:
+            year = int(year_value)
+        except ValueError:
+            year = 0
+        if year and month_value != POP_ALL:
+            try:
+                month = int(month_value)
+            except ValueError:
+                month = 0
+            if 1 <= month <= 12:
+                previous = pd.Timestamp(year=year, month=month, day=1) - pd.offsets.MonthBegin(1)
+                previous_month = str(int(previous.month)).zfill(2)
+                return f"{MONTH_LABELS_ES.get(previous_month, previous_month)} {int(previous.year)}"
+        if year:
+            return str(year - 1)
+    if start_date is not None:
+        previous_day = pd.Timestamp(start_date).normalize() - pd.Timedelta(days=1)
+        return previous_day.date().isoformat()
+    return "periodo anterior"
 
 
 def build_period_kpis(
@@ -399,25 +452,40 @@ def build_period_kpis(
     current = compute_score_kpis(current_df)
     cumulative = compute_score_kpis(cumulative_df)
     baseline = compute_score_kpis(baseline_df)
+    previous_label = _previous_period_label(
+        pop_year=pop_year,
+        pop_month=pop_month,
+        start_date=start_date,
+    )
+    temporal = build_period_boundary_kpis(current_df)
+    period_payload = _comparison_payload(
+        label=context_label,
+        period_type="current_period",
+        actual=current,
+        baseline=baseline,
+        base_label=f"Histórico anterior a {context_label}",
+        actual_label=context_label,
+        note=(
+            "NPS Global del período: NPS Clásico agregado sobre todas las respuestas "
+            "del Period Container. Baseline usado para calcular la brecha de cada palanca."
+        ),
+    )
+    period_payload["temporal"] = temporal
     return {
-        "cumulative": _comparison_payload(
+        "historical": _kpi_payload(
+            label=f"Datos acumulados hasta {previous_label}",
+            period_type="historical_previous",
+            kpis=baseline,
+            note="Histórico anterior al inicio del Period Container seleccionado.",
+        ),
+        "period": period_payload,
+        "cumulative": _kpi_payload(
             label=f"Datos acumulados hasta {context_label}",
-            actual=cumulative,
-            baseline=baseline,
-            base_label="Inicio periodo",
-            actual_label="Fin periodo",
+            period_type="cumulative_to_current",
+            kpis=cumulative,
             note="KPIs calculados solo con Service Container y Period Container.",
         ),
-        "period": {
-            **_comparison_payload(
-                label=context_label,
-                actual=current,
-                baseline=baseline,
-                base_label="Base histórica anterior",
-                actual_label=context_label,
-            ),
-            "temporal": build_period_boundary_kpis(current_df),
-        },
+        "temporal": temporal,
     }
 
 

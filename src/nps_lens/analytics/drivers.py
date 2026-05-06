@@ -64,11 +64,19 @@ def grouped_driver_stats(
 
 
 def driver_table(
-    df: pd.DataFrame, dimension: str, survey_score_col: str = "NPS"
+    df: pd.DataFrame,
+    dimension: str,
+    survey_score_col: str = "NPS",
+    *,
+    overall_nps: float | None = None,
 ) -> list[DriverStat]:
     if dimension not in df.columns:
         return []
-    overall = compute_nps_from_scores(df[survey_score_col])
+    overall = (
+        float(overall_nps)
+        if overall_nps is not None and np.isfinite(float(overall_nps))
+        else compute_nps_from_scores(df[survey_score_col])
+    )
     grouped = grouped_driver_stats(df, dimension, survey_score_col=survey_score_col)
     out: list[DriverStat] = []
     for _, row in grouped.iterrows():
