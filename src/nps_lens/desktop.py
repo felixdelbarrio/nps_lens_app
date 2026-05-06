@@ -18,6 +18,8 @@ from typing import Any, Optional
 
 import uvicorn
 
+from nps_lens.logging import setup_logging
+
 DEFAULT_PORT = 8617
 STARTUP_TIMEOUT_SECONDS = 90
 HEALTH_PATH = "/api/health"
@@ -104,12 +106,15 @@ def _run_api_server(port: int) -> None:
             f"Frontend dist not found at {frontend_dist_dir}. Run the frontend build first."
         )
     os.environ["NPS_LENS_FRONTEND_DIST_DIR"] = str(frontend_dist_dir)
+    log_level = str(os.environ.get("NPS_LENS_LOG_LEVEL", "info")).lower()
+    setup_logging(log_level)
     uvicorn.run(
         "nps_lens.api.app:create_app",
         factory=True,
         host="127.0.0.1",
         port=port,
-        log_level=str(os.environ.get("NPS_LENS_LOG_LEVEL", "info")).lower(),
+        log_config=None,
+        log_level=log_level,
     )
 
 
