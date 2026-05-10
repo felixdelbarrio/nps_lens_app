@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional
 
-from dotenv import load_dotenv, set_key
+from dotenv import dotenv_values, load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
 DEFAULT_UI_TOUCHPOINT_SOURCE = "palanca_touchpoint"
@@ -20,6 +20,28 @@ DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Todos"
 DEFAULT_UI_SCORE_CHANNEL = "Todos"
 DEFAULT_UI_POP_VALUE = "Todos"
+DEFAULT_SERVICE_ORIGINS = [
+    "BBVA México",
+    "BBVA España",
+    "BBVA Colombia",
+    "BBVA Perú",
+    "BBVA Argentina",
+]
+DEFAULT_SERVICE_ORIGIN = DEFAULT_SERVICE_ORIGINS[0]
+DEFAULT_SERVICE_ORIGIN_N1 = "ENTERPRISE WEB"
+DEFAULT_SERVICE_ORIGIN_N1_MAP = {
+    "BBVA México": ["ENTERPRISE WEB", "MOBILE ENTERPRISE"],
+    "BBVA España": ["ENTERPRISE MOBILE CHANNEL", "ENTERPRISES CHANNEL"],
+    "BBVA Colombia": ["ENTERPRISE MOBILE (GEMA)", "ENTERPRISE WEB CHANNEL"],
+    "BBVA Perú": ["ENTERPRISE BANKING CANALES WEB & MOBILE"],
+    "BBVA Argentina": ["AR44 PLATAFORMA SENDA ARG", "AR46 GEMA ARG"],
+}
+BOOTSTRAP_CONTEXT_ENV_KEYS = {
+    "NPS_LENS_SERVICE_ORIGIN_BUUG",
+    "NPS_LENS_SERVICE_ORIGIN_N1",
+    "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
+    "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
+}
 
 SERVICE_ORIGIN_N2_MAP_ENV_KEY = "NPS_LENS_SERVICE_ORIGIN_N2_MAP"
 
@@ -145,10 +167,21 @@ def _resolve_runtime_dir(env_key: str, default_rel: str) -> Path:
     if candidate.is_absolute():
         return candidate
     if getattr(sys, "frozen", False):
-        app_home_raw = str(os.getenv("NPS_LENS_APP_HOME", "")).strip()
-        app_home = Path(app_home_raw).expanduser() if app_home_raw else (Path.home() / ".nps-lens")
-        return app_home / candidate
+        return _runtime_app_home() / candidate
     return candidate
+
+
+def _runtime_app_home() -> Path:
+    app_home_raw = str(os.getenv("NPS_LENS_APP_HOME", "")).strip()
+    return Path(app_home_raw).expanduser() if app_home_raw else (Path.home() / ".nps-lens")
+
+
+def _resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(str(meipass))
+    return Path(__file__).resolve().parents[2]
 
 
 def resolve_dotenv_path() -> Optional[Path]:
@@ -157,7 +190,10 @@ def resolve_dotenv_path() -> Optional[Path]:
         candidate = Path(explicit).expanduser()
         return candidate if candidate.exists() else candidate
 
-    repo_root = Path(__file__).resolve().parents[2]
+    if getattr(sys, "frozen", False):
+        return _runtime_app_home() / ".env"
+
+    repo_root = _resource_root()
     candidates = [
         Path.cwd() / ".env",
         repo_root / ".env",
@@ -169,10 +205,71 @@ def resolve_dotenv_path() -> Optional[Path]:
     return repo_root / ".env"
 
 
+def resolve_dotenv_example_path() -> Optional[Path]:
+    candidates = [
+        _resource_root() / ".env.example",
+        Path.cwd() / ".env.example",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _env_template_values(dotenv_example_path: Optional[Path]) -> dict[str, str]:
+    if dotenv_example_path is None or not dotenv_example_path.exists():
+        return {}
+    values = dotenv_values(dotenv_example_path)
+    return {
+        str(key): str(value)
+        for key, value in values.items()
+        if key is not None and value is not None
+    }
+
+
+def _should_bootstrap_value(env_key: str, current_value: Optional[str]) -> bool:
+    if current_value is None:
+        return True
+    return env_key in BOOTSTRAP_CONTEXT_ENV_KEYS and not str(current_value).strip()
+
+
+def ensure_runtime_dotenv(dotenv_path: Optional[Path]) -> Optional[Path]:
+    if dotenv_path is None:
+        return None
+
+    dotenv_example_path = resolve_dotenv_example_path()
+    template_values = _env_template_values(dotenv_example_path)
+    try:
+        dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+        if not dotenv_path.exists():
+            if dotenv_example_path and dotenv_example_path.exists():
+                dotenv_path.write_text(
+                    dotenv_example_path.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+            else:
+                dotenv_path.touch()
+            return dotenv_path
+
+        if not template_values:
+            return dotenv_path
+
+        current_values = dotenv_values(dotenv_path)
+        for env_key, template_value in template_values.items():
+            current_value = current_values.get(env_key)
+            if _should_bootstrap_value(env_key, current_value):
+                set_key(str(dotenv_path), env_key, template_value, quote_mode="auto")
+    except OSError:
+        return dotenv_path
+    return dotenv_path
+
+
 def load_runtime_dotenv(*, override: bool = False) -> Optional[Path]:
-    dotenv_path = resolve_dotenv_path()
+    dotenv_path = ensure_runtime_dotenv(resolve_dotenv_path())
     if dotenv_path and dotenv_path.exists():
         load_dotenv(dotenv_path, override=override)
+    dotenv_example_path = resolve_dotenv_example_path()
+    if dotenv_example_path and dotenv_example_path.exists() and dotenv_example_path != dotenv_path:
+        load_dotenv(dotenv_example_path, override=False)
     return dotenv_path
 
 
@@ -292,6 +389,21 @@ def persist_service_origin_hierarchy(
         set_key(str(dotenv_path), env_key, value, quote_mode="auto")
 
 
+def _fallback_n1_values(service_origin: str) -> list[str]:
+    configured = DEFAULT_SERVICE_ORIGIN_N1_MAP.get(str(service_origin).strip())
+    return list(configured) if configured else [DEFAULT_SERVICE_ORIGIN_N1]
+
+
+def _complete_origin_n1_map(
+    service_origins: list[str], origin_n1_map: dict[str, list[str]]
+) -> dict[str, list[str]]:
+    completed: dict[str, list[str]] = {}
+    for origin in service_origins:
+        values = origin_n1_map.get(origin) or _fallback_n1_values(origin)
+        completed[origin] = _dedupe(values) or _fallback_n1_values(origin)
+    return completed
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -345,31 +457,19 @@ class Settings:
 
         origins_raw = os.getenv(
             "NPS_LENS_SERVICE_ORIGIN_BUUG",
-            os.getenv("NPS_LENS_SERVICE_ORIGIN", "BBVA México"),
+            os.getenv("NPS_LENS_SERVICE_ORIGIN", ", ".join(DEFAULT_SERVICE_ORIGINS)),
         )
         allowed_service_origins = (
-            _parse_json_list(origins_raw) or _dedupe(_split_csv(origins_raw)) or ["BBVA México"]
+            _parse_json_list(origins_raw)
+            or _dedupe(_split_csv(origins_raw))
+            or DEFAULT_SERVICE_ORIGINS
         )
 
         origin_n1_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", "")
-        origin_n1_map = _parse_origin_map(origin_n1_raw)
-        missing_env: list[str] = []
-        if not str(origins_raw).strip() or not allowed_service_origins:
-            missing_env.append("NPS_LENS_SERVICE_ORIGIN_BUUG")
-        if not origin_n1_raw.strip() or not origin_n1_map:
-            missing_env.append("NPS_LENS_SERVICE_ORIGIN_N1")
-        incomplete = [origin for origin in allowed_service_origins if not origin_n1_map.get(origin)]
-        if missing_env or incomplete:
-            lines = ["Invalid .env configuration for context dimensions:"]
-            if missing_env:
-                lines.append("- Missing/empty required env var(s):")
-                lines.extend([f"  - {name}" for name in missing_env])
-            if incomplete:
-                lines.append(
-                    "- service_origin_n1 map is missing entries (or empty lists) for: "
-                    + ", ".join(incomplete)
-                )
-            raise RuntimeError("\n".join(lines))
+        origin_n1_map = _complete_origin_n1_map(
+            allowed_service_origins,
+            _parse_origin_map(origin_n1_raw),
+        )
 
         service_origin_n2_values = _parse_json_list(
             os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")
@@ -377,15 +477,17 @@ class Settings:
         service_origin_n2_map = _parse_origin_n2_map(os.getenv(SERVICE_ORIGIN_N2_MAP_ENV_KEY, ""))
 
         default_service_origin = (
-            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", allowed_service_origins[0]).strip()
+            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", DEFAULT_SERVICE_ORIGIN).strip()
             or allowed_service_origins[0]
         )
         if default_service_origin not in allowed_service_origins:
             default_service_origin = allowed_service_origins[0]
 
-        default_n1_candidates = origin_n1_map.get(default_service_origin) or ["ENTERPRISE WEB"]
+        default_n1_candidates = origin_n1_map.get(default_service_origin) or _fallback_n1_values(
+            default_service_origin
+        )
         default_service_origin_n1 = (
-            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", default_n1_candidates[0]).strip()
+            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", DEFAULT_SERVICE_ORIGIN_N1).strip()
             or default_n1_candidates[0]
         )
         if default_service_origin_n1 not in default_n1_candidates:

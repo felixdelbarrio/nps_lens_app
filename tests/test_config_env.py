@@ -1,16 +1,59 @@
 from pathlib import Path
 
-import pytest
+from dotenv import dotenv_values
 
 import nps_lens.config as config_module
+import nps_lens.settings as settings_module
 from nps_lens.config import (
     DEFAULT_UI_HELIX_BASE_URL,
     DEFAULT_UI_REPORT_DIMENSION_ANALYSIS,
     Settings,
+    load_runtime_dotenv,
     normalize_report_dimension_analysis,
     persist_ui_prefs,
     ui_pref,
 )
+
+DOTENV_TEST_KEYS = {
+    "NPS_LENS_DATA_DIR",
+    "NPS_LENS_KNOWLEDGE_DIR",
+    "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
+    "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
+    "NPS_LENS_SERVICE_ORIGIN",
+    "NPS_LENS_SERVICE_ORIGIN_BUUG",
+    "NPS_LENS_SERVICE_ORIGIN_N1",
+    "NPS_LENS_SERVICE_ORIGIN_N2",
+    "NPS_LENS_SERVICE_ORIGIN_N2_MAP",
+    "NPS_LENS_LOG_LEVEL",
+    "NPS_LENS_UI_SERVICE_ORIGIN",
+    "NPS_LENS_UI_SERVICE_ORIGIN_N1",
+    "NPS_LENS_UI_SERVICE_ORIGIN_N2",
+    "NPS_LENS_UI_POP_YEAR",
+    "NPS_LENS_UI_POP_MONTH",
+    "NPS_LENS_UI_NPS_GROUP",
+    "NPS_LENS_UI_THEME_MODE",
+    "NPS_LENS_UI_DOWNLOADS_PATH",
+    "NPS_LENS_UI_HELIX_BASE_URL",
+    "NPS_LENS_UI_TOUCHPOINT_SOURCE",
+    "NPS_LENS_UI_MIN_SIMILARITY",
+    "NPS_LENS_UI_MAX_DAYS_APART",
+    "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+    "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
+    "NPS_LENS_UI_SCORE_CHANNEL",
+    "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
+    "NPS_LENS_PORT",
+    "NPS_LENS_PPT_TEMPLATE",
+    "NPS_LENS_OPENAI_API_KEY",
+    "NPS_LENS_OPENAI_MODEL",
+    "NPS_LENS_OPENAI_TEMPERATURE",
+    "NPS_LENS_OPENAI_TIMEOUT_S",
+    "NPS_LENS_PROFILE",
+}
+
+
+def clear_dotenv_test_keys(monkeypatch) -> None:
+    for env_key in DOTENV_TEST_KEYS:
+        monkeypatch.delenv(env_key, raising=False)
 
 
 def test_settings_reads_context_values_from_env(monkeypatch):
@@ -49,27 +92,38 @@ def test_settings_accepts_compact_n1_format(monkeypatch):
     assert s.service_origin_n1_map["BBVA México"] == ["Senda", "Helix"]
 
 
-def test_settings_fails_fast_when_required_env_missing(monkeypatch):
-    # Missing NPS_LENS_SERVICE_ORIGIN_N1
+def test_settings_uses_safe_defaults_when_context_env_missing(monkeypatch):
+    clear_dotenv_test_keys(monkeypatch)
+
+    s = Settings.from_env()
+
+    assert "BBVA México" in s.service_origin_values
+    assert s.service_origin_n1_map["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
+    assert s.default_service_origin == "BBVA México"
+    assert s.default_service_origin_n1 == "ENTERPRISE WEB"
+
+
+def test_settings_repairs_missing_n1_map_from_defaults(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México")
     monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N1", raising=False)
     monkeypatch.delenv("SERVICE_ORIGIN_N1", raising=False)
 
-    with pytest.raises(RuntimeError) as e:
-        Settings.from_env()
-    assert "NPS_LENS_SERVICE_ORIGIN_N1" in str(e.value)
+    s = Settings.from_env()
+
+    assert s.service_origin_n1_map["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
 
 
-def test_settings_fails_fast_when_n1_map_incomplete(monkeypatch):
+def test_settings_repairs_incomplete_n1_map_from_defaults(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México, BBVA España")
-    # Map only defines México
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"BBVA México": ["Senda"]}')
 
-    with pytest.raises(RuntimeError) as e:
-        Settings.from_env()
-    msg = str(e.value)
-    assert "missing entries" in msg
-    assert "BBVA España" in msg
+    s = Settings.from_env()
+
+    assert s.service_origin_n1_map["BBVA México"] == ["Senda"]
+    assert s.service_origin_n1_map["BBVA España"] == [
+        "ENTERPRISE MOBILE CHANNEL",
+        "ENTERPRISES CHANNEL",
+    ]
 
 
 def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
@@ -153,3 +207,84 @@ def test_settings_uses_user_writable_dirs_for_relative_paths_in_frozen_mode(
     s = Settings.from_env()
     assert s.data_dir == fake_home / ".nps-lens" / "data"
     assert s.knowledge_dir == fake_home / ".nps-lens" / "knowledge"
+
+
+def test_load_runtime_dotenv_bootstraps_missing_file_from_example(
+    monkeypatch, tmp_path: Path
+) -> None:
+    clear_dotenv_test_keys(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    monkeypatch.setenv("NPS_LENS_DOTENV_PATH", str(dotenv_path))
+
+    loaded_path = load_runtime_dotenv()
+
+    assert loaded_path == dotenv_path
+    assert dotenv_path.exists()
+    values = dotenv_values(dotenv_path)
+    assert values["NPS_LENS_SERVICE_ORIGIN_N1"]
+    assert "NPS_LENS_UI_SERVICE_ORIGIN" in values
+    assert "NPS_LENS_SERVICE_ORIGIN_N1" in settings_module.os.environ
+
+
+def test_load_runtime_dotenv_repairs_existing_empty_context_keys(
+    monkeypatch, tmp_path: Path
+) -> None:
+    clear_dotenv_test_keys(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "NPS_LENS_DATA_DIR=./custom-data\nNPS_LENS_SERVICE_ORIGIN_N1=\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NPS_LENS_DOTENV_PATH", str(dotenv_path))
+
+    load_runtime_dotenv()
+
+    values = dotenv_values(dotenv_path)
+    assert values["NPS_LENS_DATA_DIR"] == "./custom-data"
+    assert values["NPS_LENS_SERVICE_ORIGIN_N1"]
+
+
+def test_missing_dotenv_example_does_not_block_startup(monkeypatch, tmp_path: Path) -> None:
+    clear_dotenv_test_keys(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    monkeypatch.setenv("NPS_LENS_DOTENV_PATH", str(dotenv_path))
+    monkeypatch.setattr(settings_module, "resolve_dotenv_example_path", lambda: None)
+
+    loaded_path = settings_module.load_runtime_dotenv()
+    settings = Settings.from_env()
+
+    assert loaded_path == dotenv_path
+    assert dotenv_path.exists()
+    assert settings.default_service_origin == "BBVA México"
+    assert settings.service_origin_n1_map["BBVA México"]
+
+
+def test_frozen_runtime_bootstraps_dotenv_in_user_app_home(monkeypatch, tmp_path: Path) -> None:
+    clear_dotenv_test_keys(monkeypatch)
+    fake_home = tmp_path / "home"
+    resource_root = tmp_path / "bundle"
+    resource_root.mkdir(parents=True)
+    (resource_root / ".env.example").write_text(
+        "\n".join(
+            [
+                "NPS_LENS_SERVICE_ORIGIN_BUUG=BBVA México",
+                'NPS_LENS_SERVICE_ORIGIN_N1={"BBVA México": ["ENTERPRISE WEB"]}',
+                "NPS_LENS_DEFAULT_SERVICE_ORIGIN=BBVA México",
+                "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1=ENTERPRISE WEB",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("NPS_LENS_APP_HOME", raising=False)
+    monkeypatch.delenv("NPS_LENS_DOTENV_PATH", raising=False)
+    monkeypatch.setattr(settings_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(settings_module.sys, "_MEIPASS", str(resource_root), raising=False)
+
+    loaded_path = settings_module.load_runtime_dotenv()
+    settings = Settings.from_env()
+
+    assert loaded_path == fake_home / ".nps-lens" / ".env"
+    assert loaded_path.exists()
+    assert settings.dotenv_path == loaded_path
+    assert settings.service_origin_n1_map == {"BBVA México": ["ENTERPRISE WEB"]}
