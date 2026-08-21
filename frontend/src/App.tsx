@@ -270,6 +270,7 @@ export function App() {
   const [latestNpsUpload, setLatestNpsUpload] = useState<UploadResult | null>(null);
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
   const didHydrate = useRef(false);
+  const didApplyCausalDefault = useRef(false);
 
   const configKey = serviceOrigin || serviceOriginN1 || serviceOriginN2
     ? ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2]
@@ -331,11 +332,21 @@ export function App() {
   }, [config, popYear]);
 
   useEffect(() => {
-    const latestMonth = getLatestAvailableMonth(monthOptions);
-    if (!monthOptions.includes(popMonth) || (popMonth === "Todos" && latestMonth !== "Todos")) {
-      setPopMonth(latestMonth);
+    if (!monthOptions.includes(popMonth)) {
+      setPopMonth(monthOptions.includes("Todos") ? "Todos" : getLatestAvailableMonth(monthOptions));
     }
   }, [monthOptions, popMonth]);
+
+  useEffect(() => {
+    if (!config || insightTab !== "linking" || didApplyCausalDefault.current) {
+      return;
+    }
+    didApplyCausalDefault.current = true;
+    const causalYear = config.causal_default_year || "Todos";
+    const causalMonth = config.causal_default_month || "Todos";
+    setPopYear(causalYear);
+    setPopMonth(causalMonth);
+  }, [config, insightTab]);
 
   useEffect(() => {
     if (!config) {

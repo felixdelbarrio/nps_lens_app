@@ -420,28 +420,28 @@ def build_incident_display_text(df: pd.DataFrame) -> pd.Series:
 
 
 def build_incident_topic(df: pd.DataFrame) -> pd.Series:
-    t1 = df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index)).astype(
-        str
+    # Fill missing values before casting to string. Casting NaN first produces
+    # the literal text "nan", which prevents the fallback to service/summary.
+    tiers = pd.concat(
+        [
+            df.get(column, pd.Series([""] * len(df), index=df.index))
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            for column in (
+                "Product Categorization Tier 1",
+                "Product Categorization Tier 2",
+                "Product Categorization Tier 3",
+            )
+        ],
+        axis=1,
     )
-    t2 = df.get("Product Categorization Tier 2", pd.Series([""] * len(df), index=df.index)).astype(
-        str
-    )
-    t3 = df.get("Product Categorization Tier 3", pd.Series([""] * len(df), index=df.index)).astype(
-        str
-    )
-    base = (
-        t1.fillna("").str.strip()
-        + " > "
-        + t2.fillna("").str.strip()
-        + " > "
-        + t3.fillna("").str.strip()
-    ).str.replace(r"\s*>\s*>\s*", " > ", regex=True)
-    base = base.str.replace(r"^>\s*", "", regex=True).str.replace(r"\s*>$", "", regex=True)
+    base = tiers.apply(lambda row: " > ".join(value for value in row.tolist() if value), axis=1)
     # fallback to service / summary
     svc = (
         df.get("service", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
     desc = build_incident_display_text(df)

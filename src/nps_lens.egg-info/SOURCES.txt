@@ -98,7 +98,9 @@ src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_config_env.py
+tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
+tests/test_desktop_runtime.py
 tests/test_drivers.py
 tests/test_helix_ingest_filtering.py
 tests/test_helix_operational_metrics.py

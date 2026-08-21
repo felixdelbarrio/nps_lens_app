@@ -435,6 +435,10 @@ class DashboardService:
         preferences = self.settings.ui_defaults()
         records = self.repository.load_records_df(context)
         years, months_by_year = self._available_periods(records)
+        helix_records = self._load_helix_df(context)
+        causal_default_year, causal_default_month = self._latest_common_period(
+            records, helix_records
+        )
         score_channels = self._available_score_channels(records)
         latest_upload = self.repository.list_uploads(limit=1, context=context)
         nps_dataset = {
@@ -459,6 +463,8 @@ class DashboardService:
             ),
             "available_years": years,
             "available_months_by_year": months_by_year,
+            "causal_default_year": causal_default_year,
+            "causal_default_month": causal_default_month,
             "nps_groups": _DEFAULT_NPS_GROUPS,
             "score_channels": score_channels,
             "causal_method_options": causal_method_options(),
@@ -2711,6 +2717,35 @@ class DashboardService:
             months_by_year[year] = [POP_ALL] + months
         return [POP_ALL] + years, months_by_year
 
+    @staticmethod
+    def _latest_common_period(
+        nps_frame: pd.DataFrame, helix_frame: pd.DataFrame
+    ) -> tuple[str, str]:
+        """Return the latest year/month with records in both NPS and Helix.
+
+        The causal view needs temporal coverage on both sides. Falling back to
+        ``Todos`` is safer than selecting the latest NPS-only month, which can
+        make every causal mode look empty when Helix has an older cutoff.
+        """
+        if nps_frame.empty or helix_frame.empty:
+            return POP_ALL, POP_ALL
+        if "Fecha" not in nps_frame.columns or "Fecha" not in helix_frame.columns:
+            return POP_ALL, POP_ALL
+
+        nps_dates = pd.to_datetime(nps_frame["Fecha"], errors="coerce").dropna()
+        helix_dates = pd.to_datetime(helix_frame["Fecha"], errors="coerce").dropna()
+        if nps_dates.empty or helix_dates.empty:
+            return POP_ALL, POP_ALL
+
+        nps_periods = {(int(value.year), int(value.month)) for value in nps_dates.tolist()}
+        helix_periods = {(int(value.year), int(value.month)) for value in helix_dates.tolist()}
+        common = nps_periods & helix_periods
+        if not common:
+            return POP_ALL, POP_ALL
+
+        year, month = max(common)
+        return str(year), str(month).zfill(2)
+
     def _available_score_channels(self, frame: pd.DataFrame) -> list[str]:
         if frame.empty or "Canal" not in frame.columns:
             return _DEFAULT_SCORE_CHANNELS.copy()
@@ -3132,19 +3167,49 @@ class DashboardService:
 
     @staticmethod
     def _serialize_rows(frame: pd.DataFrame) -> list[dict[str, object]]:
+        """Serialize a DataFrame into strict-JSON-safe records.
+
+        Pandas keeps ``NaN`` values in numeric columns when ``None`` is assigned
+        unless the column is first converted to ``object``. Starlette/FastAPI
+        rejects non-finite floats (NaN/inf) during strict JSON encoding, so each
+        scalar is normalized explicitly before returning it to the API layer.
+        """
         if frame.empty:
             return []
+
         serialized = frame.copy()
         for column in serialized.columns:
             if pd.api.types.is_datetime64_any_dtype(serialized[column]):
-                serialized[column] = (
-                    pd.to_datetime(serialized[column], errors="coerce")
-                    .dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    .where(serialized[column].notna(), None)
-                )
-        serialized = serialized.where(serialized.notna(), None)
+                serialized[column] = pd.to_datetime(
+                    serialized[column], errors="coerce"
+                ).dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        serialized = serialized.astype(object)
+        serialized = serialized.where(pd.notna(serialized), None)
+
+        def _json_safe_scalar(value: object) -> object:
+            if value is None:
+                return None
+            if isinstance(value, (float, np.floating)):
+                return float(value) if np.isfinite(value) else None
+            if isinstance(value, np.integer):
+                return int(value)
+            if isinstance(value, np.bool_):
+                return bool(value)
+            if isinstance(value, (pd.Timestamp, datetime, date)):
+                if pd.isna(value):
+                    return None
+                return value.isoformat()
+            try:
+                missing = pd.isna(value)
+            except (TypeError, ValueError):
+                missing = False
+            if isinstance(missing, (bool, np.bool_)) and bool(missing):
+                return None
+            return value
+
         return [
-            {str(key): value for key, value in row.items()}
+            {str(key): _json_safe_scalar(value) for key, value in row.items()}
             for row in serialized.to_dict(orient="records")
         ]
 

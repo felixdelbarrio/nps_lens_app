@@ -64,6 +64,8 @@ class ContextOptionsResponse(BaseModel):
     service_origin_n2_options: list[str] = Field(default_factory=list)
     available_years: list[str] = Field(default_factory=list)
     available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
+    causal_default_year: str = "Todos"
+    causal_default_month: str = "Todos"
     nps_groups: list[str] = Field(default_factory=list)
     score_channels: list[str] = Field(default_factory=list)
     causal_method_options: list[CausalMethodOption] = Field(default_factory=list)
