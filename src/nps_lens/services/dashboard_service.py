@@ -3188,7 +3188,7 @@ class DashboardService:
         serialized = serialized.where(pd.notna(serialized), None)
 
         def _json_safe_scalar(value: object) -> object:
-            if value is None:
+            if value is None or value is pd.NA or value is pd.NaT:
                 return None
             if isinstance(value, (float, np.floating)):
                 return float(value) if np.isfinite(value) else None
@@ -3197,15 +3197,7 @@ class DashboardService:
             if isinstance(value, np.bool_):
                 return bool(value)
             if isinstance(value, (pd.Timestamp, datetime, date)):
-                if pd.isna(value):
-                    return None
                 return value.isoformat()
-            try:
-                missing = pd.isna(value)
-            except (TypeError, ValueError):
-                missing = False
-            if isinstance(missing, (bool, np.bool_)) and bool(missing):
-                return None
             return value
 
         return [
