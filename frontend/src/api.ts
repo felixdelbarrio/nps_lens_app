@@ -47,6 +47,8 @@ export type DashboardConfig = {
   service_origin_n2_options: string[];
   available_years: string[];
   available_months_by_year: Record<string, string[]>;
+  causal_default_year: string;
+  causal_default_month: string;
   nps_groups: string[];
   score_channels: string[];
   causal_method_options: CausalMethodOption[];

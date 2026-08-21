@@ -13,7 +13,7 @@ from nps_lens.core.store import DatasetContext
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.04.17"
+PARSER_VERSION = "2026.08.21.casefold1"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -133,6 +133,19 @@ def _split_csvish(value: object) -> list[str]:
 
 def _normalize_comment(value: object) -> str:
     return _coerce_string(value)
+
+
+def _normalize_dimension_label(value: object) -> str:
+    """Return a stable, case-insensitive display label for categorical dimensions.
+
+    Values that only differ by letter case collapse to the same representation while
+    keeping accents and normalized whitespace. Examples: PAGOS/pagos/Pagos -> Pagos.
+    """
+    text = _coerce_string(value)
+    if not text:
+        return ""
+    folded = text.casefold()
+    return folded[:1].upper() + folded[1:]
 
 
 def _normalize_nps_group(score: object, group: object) -> str:
@@ -413,6 +426,11 @@ def read_nps_thermal_excel(
         work[column] = work[column].apply(
             _normalize_comment if column == "Comment" else _coerce_string
         )
+
+    # Canonicalize user-facing categorical dimensions so values that only differ
+    # by case do not appear as separate filters/groups (e.g. PAGOS/pagos/Pagos).
+    for column in ["Canal", "Palanca", "Subpalanca"]:
+        work[column] = work[column].apply(_normalize_dimension_label)
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")

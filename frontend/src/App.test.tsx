@@ -17,6 +17,8 @@ const contextPayload = {
   service_origin_n2_options: [],
   available_years: ["Todos", "2026"],
   available_months_by_year: { Todos: ["Todos", "03"], "2026": ["Todos", "03"] },
+  causal_default_year: "2026",
+  causal_default_month: "03",
   nps_groups: ["Todos", "Detractores", "Neutros", "Promotores"],
   score_channels: ["Todos", "Web", "App"],
   causal_method_options: [
