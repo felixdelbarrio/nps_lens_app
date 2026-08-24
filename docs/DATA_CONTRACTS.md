@@ -1,5 +1,22 @@
 # Contratos de datos (Fuentes) y modelo canónico
 
+## Identidad canónica de dimensiones
+
+La ingesta aplica un registro versionado en `NPS_LENS_EQUIVALENCES_PATH`. La identidad es
+insensible a mayúsculas, acentos, espacios y separadores, y elimina las conjunciones españolas
+`y/e`. Así, `Pagos y transferencias`, `Pagos/ transferencias` y
+`Pagos/transferencias` comparten clave. No se usa distancia difusa: una similitud textual nunca
+fusiona conceptos de negocio sin una equivalencia explícita.
+
+El registro incluye `DETRACTOR`, `PASIVO` (`NEUTRO`, `NEUTROS`, `neutral`, `passive`) y
+`PROMOTOR`, además de las colisiones observadas en Palanca/Subpalanca. La edición desde
+Configuración valida alias ambiguos y recanoniza el histórico mediante una operación SQL.
+
+Los esquemas NPS admitidos incluyen las cabeceras actuales de Senda:
+`gf_cust_survey_response_date`, `gf_cust_survey_opinion_id`, `user_type`, `nps_response`,
+`comment_response`, `toma_desicion`, `gf_operating_system_name` y
+`gf_survey_acc_user_device_desc`.
+
 Este documento define:
 - columnas mínimas por Fuente
 - normalización

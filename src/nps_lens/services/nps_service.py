@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import uuid4
 
 from nps_lens.domain.models import UploadAttempt, UploadContext
+from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.nps_thermal import PARSER_VERSION, read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
@@ -73,6 +74,7 @@ class NpsService:
             service_origin_n1=context.service_origin_n1,
             service_origin_n2=context.service_origin_n2,
             sheet_name=sheet_name or None,
+            equivalences=EquivalenceRegistry.load(self.settings.equivalences_path),
         )
         raw_rows = self._meta_int(result.meta, "raw_rows", len(result.df))
         normalized_rows = self._meta_int(result.meta, "normalized_rows", len(result.df))

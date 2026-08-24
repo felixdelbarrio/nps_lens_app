@@ -38,18 +38,18 @@
   --bbva-color-primary-accent-value-07-default: #ff5252;
   --bbva-color-primary-bg-alternative-default: #ffffff;
   --bbva-color-app-surface-default: #ffffff;
-  --bbva-color-app-surface-raised: #f7f8fa;
+  --bbva-color-app-surface-raised: #f7f8f8;
   --bbva-color-app-chart-paper: #ffffff;
-  --bbva-color-app-chart-plot: #f7f8fa;
+  --bbva-color-app-chart-plot: #f7f8f8;
   --bbva-color-app-chart-grid: #cad1d8;
   --bbva-color-app-chart-zero-line: #adb8c2;
   --bbva-color-app-table-bg: #ffffff;
-  --bbva-color-app-table-bg-alt: #f7f8fa;
+  --bbva-color-app-table-bg-alt: #f7f8f8;
   --bbva-color-app-table-bg-hover: #edf3ff;
   --bbva-color-app-table-header-bg: #f2f5fa;
   --bbva-color-app-table-header-text: #46536d;
   --bbva-color-app-table-border: #cad1d8;
-  --bbva-color-app-control-bg: #f7f8fa;
+  --bbva-color-app-control-bg: #f7f8f8;
   --bbva-color-app-control-bg-hover: #edf3ff;
   --bbva-color-app-control-border: #cad1d8;
   --bbva-color-app-control-text: #070e46;
@@ -178,6 +178,56 @@
   box-sizing: border-box;
 }
 
+.equivalence-example {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-container);
+  background: linear-gradient(120deg, var(--color-brand-soft), var(--color-surface));
+}
+
+.equivalence-example-before { color: var(--color-text-secondary); text-decoration: line-through; }
+.equivalence-example p { color: var(--color-text-secondary); }
+.equivalence-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.equivalence-table { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-container); background: var(--color-surface); }
+.equivalence-table-header, .equivalence-row { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(280px, 1.7fr); gap: var(--space-4); padding: var(--space-4); }
+.equivalence-table-header { background: var(--bbva-color-app-table-header-bg); color: var(--color-text-secondary); font-size: var(--font-size-caption); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.equivalence-row + .equivalence-row { border-top: 1px solid var(--color-border); }
+.equivalence-row > input { background: var(--color-surface-subtle); color: var(--color-brand); font-weight: 700; }
+.alias-editor { display: grid; gap: var(--space-2); }
+.alias-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.alias-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; border-radius: 999px; background: var(--color-brand-soft); color: var(--color-brand); font-size: var(--font-size-caption); font-weight: 700; }
+.alias-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 17px; line-height: 1; }
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.telemetry-metric {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  background: var(--color-surface-subtle);
+}
+
+.telemetry-metric span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.telemetry-metric strong {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: var(--font-size-section);
+}
+
 html,
 body,
 #root {
@@ -280,15 +330,23 @@ textarea:focus-visible {
   color: var(--color-brand);
 }
 
+.brand-logo {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: min(100%, 238px);
+  height: auto;
+}
+
 .brand-card {
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--color-brand-soft) 88%, transparent), transparent 46%),
-    linear-gradient(145deg, color-mix(in srgb, var(--color-hero-start) 78%, white 22%), transparent 64%),
-    linear-gradient(180deg, var(--color-surface), var(--color-surface));
+  background: linear-gradient(145deg, #070e46, #001391);
   position: relative;
   overflow: hidden;
   gap: var(--space-3);
 }
+
+.brand-card h1 { color: #ffffff; }
+.brand-card .secondary-copy { color: #d6e9f8; }
 
 .brand-card::after {
   content: "";
