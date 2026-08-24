@@ -5,8 +5,10 @@ import type { ThemeMode } from "../theme";
 import { Icon } from "./Icon";
 import { NavigationTabs } from "./NavigationTabs";
 import { ServiceOriginMaintenance } from "./ServiceOriginMaintenance";
+import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
+import { TelemetryPanel } from "./TelemetryPanel";
 
-export type SettingsTab = "appearance" | "advanced" | "maintenance";
+export type SettingsTab = "appearance" | "advanced" | "maintenance" | "equivalences" | "telemetry";
 
 type SettingsSheetProps = {
   open: boolean;
@@ -42,6 +44,8 @@ type SettingsSheetProps = {
 const SETTINGS_TABS = [
   { id: "appearance", label: "Configuración" },
   { id: "advanced", label: "Ajustes avanzados" },
+  { id: "equivalences", label: "Equivalencias" },
+  { id: "telemetry", label: "Telemetría" },
   { id: "maintenance", label: "Mantenimiento Service Origin" }
 ] as const;
 
@@ -328,6 +332,28 @@ export function SettingsSheet({
               serviceOrigins={serviceOrigins}
               saving={hierarchySaving}
             />
+          </section>
+        ) : null}
+
+        {activeTab === "equivalences" ? (
+          <section className="settings-group">
+            <div className="section-heading"><div>
+              <h3>Unificar conceptos</h3>
+              <p className="secondary-copy">
+                Decide qué nombre verá el cliente y agrupa debajo todas las formas equivalentes de escribirlo.
+              </p>
+            </div></div>
+            <EquivalenceMaintenance disabled={actionsDisabled} />
+          </section>
+        ) : null}
+
+        {activeTab === "telemetry" ? (
+          <section className="settings-group">
+            <div className="section-heading"><div>
+              <h3>Telemetría</h3>
+              <p className="secondary-copy">Exporta un diagnóstico reproducible y seguro para mejorar el código.</p>
+            </div></div>
+            <TelemetryPanel disabled={actionsDisabled} />
           </section>
         ) : null}
       </aside>

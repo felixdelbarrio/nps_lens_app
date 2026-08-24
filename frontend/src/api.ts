@@ -55,6 +55,7 @@ export type DashboardConfig = {
   preferences: PreferencesPayload;
   nps_dataset: DatasetStatus;
   helix_dataset: DatasetStatus;
+  access?: { email: string; role: "admin" | "viewer"; is_admin: boolean; allowed_domain: string };
 };
 
 export type CausalMethodOption = {
@@ -304,6 +305,34 @@ export type ReprocessSummary = {
   duplicates_prevented: number;
 };
 
+export type EquivalenceRegistryPayload = {
+  schema_version: string;
+  dimensions: Record<string, Array<{ canonical: string; aliases: string[] }>>;
+  updated_records?: number;
+};
+
+export type TelemetryPayload = {
+  schema_version: string;
+  generated_at: string;
+  summary: Record<string, unknown>;
+  routes: Array<Record<string, string | number>>;
+  events: Array<Record<string, string | number>>;
+};
+
+export type ExportQuery = {
+  service_origin: string;
+  service_origin_n1: string;
+  service_origin_n2: string;
+  pop_year: string;
+  pop_month: string;
+  nps_group: string;
+  score_channel: string;
+  min_n: number;
+  min_similarity: number;
+  max_days_apart: number;
+  touchpoint_source: string;
+};
+
 function buildUrl(pathname: string, params?: Record<string, string | number | undefined>) {
   const url = new URL(pathname, window.location.origin);
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -318,19 +347,24 @@ function buildUrl(pathname: string, params?: Record<string, string | number | un
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
+    let detail = "";
     try {
       const payload = JSON.parse(text) as { detail?: string };
-      throw new Error(payload.detail || `Request failed with ${response.status}`);
+      detail = payload.detail || "";
     } catch {
-      throw new Error(text || `Request failed with ${response.status}`);
+      detail = "";
     }
+    throw new Error(detail || text || `Request failed with ${response.status}`);
   }
   return (await response.json()) as T;
 }
 
-function parseContentDispositionFilename(headerValue: string | null): string {
+function parseContentDispositionFilename(
+  headerValue: string | null,
+  fallback = "reporte-ejecutivo.pptx"
+): string {
   if (!headerValue) {
-    return "reporte-ejecutivo.pptx";
+    return fallback;
   }
   const encodedMatch = headerValue.match(/filename\*\=UTF-8''([^;]+)/i);
   if (encodedMatch?.[1]) {
@@ -340,7 +374,7 @@ function parseContentDispositionFilename(headerValue: string | null): string {
   if (plainMatch?.[1]) {
     return plainMatch[1];
   }
-  return "reporte-ejecutivo.pptx";
+  return fallback;
 }
 
 function getDesktopBridge(): DesktopBridgeApi | undefined {
@@ -517,6 +551,55 @@ export async function updateServiceOrigins(
   );
 }
 
+export async function fetchEquivalences(): Promise<EquivalenceRegistryPayload> {
+  return parseResponse<EquivalenceRegistryPayload>(await fetch("/api/settings/equivalences"));
+}
+
+export async function updateEquivalences(
+  payload: EquivalenceRegistryPayload
+): Promise<EquivalenceRegistryPayload> {
+  return parseResponse<EquivalenceRegistryPayload>(
+    await fetch("/api/settings/equivalences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function fetchTelemetry(): Promise<TelemetryPayload> {
+  return parseResponse<TelemetryPayload>(await fetch("/api/telemetry"));
+}
+
+async function downloadArtifact(
+  pathname: string,
+  params: Record<string, string | number | undefined>,
+  fallbackName: string
+): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
+  const response = await fetch(buildUrl(pathname, params));
+  if (!response.ok) {
+    await parseResponse(response);
+  }
+  return {
+    blob: await response.blob(),
+    fileName:
+      parseContentDispositionFilename(response.headers.get("content-disposition"), fallbackName),
+    savedPath: response.headers.get("x-nps-lens-saved-path") || ""
+  };
+}
+
+export function downloadExclusiveReport(params: ExportQuery) {
+  return downloadArtifact("/api/dashboard/report/exclusive.pptx", params, "informe-exclusivo.pptx");
+}
+
+export function downloadWebPublication(params: ExportQuery) {
+  return downloadArtifact("/api/dashboard/publication.zip", params, "nps-lens-publicacion.zip");
+}
+
+export function downloadTelemetry() {
+  return downloadArtifact("/api/telemetry/export", {}, "nps-lens-telemetria.json");
+}
+
 export async function downloadExecutiveReport(params: {
   service_origin: string;
   service_origin_n1: string;
@@ -533,13 +616,7 @@ export async function downloadExecutiveReport(params: {
 }): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
   const response = await fetch(buildUrl("/api/dashboard/report/pptx", params));
   if (!response.ok) {
-    const text = await response.text();
-    try {
-      const payload = JSON.parse(text) as { detail?: string };
-      throw new Error(payload.detail || `Request failed with ${response.status}`);
-    } catch {
-      throw new Error(text || `Request failed with ${response.status}`);
-    }
+    await parseResponse(response);
   }
   return {
     blob: await response.blob(),

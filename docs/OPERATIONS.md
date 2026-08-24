@@ -1,11 +1,25 @@
 # Operación y troubleshooting
 
+## Telemetría y edición WebApp
+
+- Configuración → Telemetría exporta un JSON acotado a 2.000 eventos con latencia, CPU, RSS,
+  estado HTTP y tamaño de respuesta. No registra consultas, cuerpos ni opiniones.
+- `GET /api/dashboard/publication.zip` genera la edición de datos, newsletter e informe
+  exclusivo. El ZIP nunca supera 30 MiB; cualquier reducción de
+  filas queda declarada en el manifiesto.
+- `GET /api/dashboard/report/exclusive.pptx` conserva el informe existente y añade el formato
+  basado en `assets/ppt/templates/nuevo-informe-bbva.pptx`.
+- La vista compartida vive en `webapp/apps-script`: Apps Script limita el acceso al dominio,
+  sirve la edición sin filtros y reserva publicación y telemetría a administradores.
+
 ---
 
 ## 1) Targets Make
 
 - `make setup` — crea `.venv` e instala dependencias
 - `make run` — app de escritorio/local
+- `make kill` — detiene únicamente procesos de este proyecto
+- `make WebApp` — previsualiza la última edición en `http://127.0.0.1:8625`
 - `make lint` — ruff + black
 - `make typecheck` — mypy
 - `make test` — pytest + coverage

@@ -3,6 +3,8 @@ import useSWR from "swr";
 
 import {
   downloadExecutiveReport,
+  downloadExclusiveReport,
+  downloadWebPublication,
   fetchConfig,
   fetchDashboard,
   fetchDatasetTable,
@@ -34,6 +36,7 @@ import { PlotFigure } from "./components/PlotFigure";
 import { PrimaryNav } from "./components/PrimaryNav";
 import { RecordTable } from "./components/RecordTable";
 import { SettingsSheet } from "./components/SettingsSheet";
+import type { SettingsTab } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
 import { Icon } from "./components/Icon";
 import {
@@ -255,9 +258,7 @@ export function App() {
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"appearance" | "advanced" | "maintenance">(
-    "appearance"
-  );
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [historyFilter, setHistoryFilter] = useState("");
   const [activeUploadId, setActiveUploadId] = useState<string | null>(null);
   const [tableLimit, setTableLimit] = useState(200);
@@ -580,6 +581,7 @@ export function App() {
   ]);
 
   const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
+  const isAdmin = config?.access?.is_admin ?? true;
   const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
   const hasConfiguredN2 = n2Options.length > 0;
   const causalMethodOptions = config?.causal_method_options || [];
@@ -782,6 +784,37 @@ export function App() {
         report_dimension_analysis: reportDimensionAnalysis
       });
       triggerBlobDownload(report.blob, report.fileName);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
+  function exportQuery() {
+    return {
+      service_origin: serviceOrigin,
+      service_origin_n1: serviceOriginN1,
+      service_origin_n2: serviceOriginN2,
+      pop_year: popYear,
+      pop_month: popMonth,
+      nps_group: LINKING_NPS_GROUP,
+      score_channel: LINKING_SCORE_CHANNEL,
+      min_n: minN,
+      min_similarity: minSimilarity,
+      max_days_apart: maxDaysApart,
+      touchpoint_source: touchpointSource
+    };
+  }
+
+  async function handleDownloadExclusive(kind: "report" | "publication") {
+    setIsGeneratingReport(true);
+    setError(null);
+    try {
+      const artifact = kind === "publication"
+        ? await downloadWebPublication(exportQuery())
+        : await downloadExclusiveReport(exportQuery());
+      triggerBlobDownload(artifact.blob, artifact.fileName);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -1704,10 +1737,10 @@ export function App() {
       <main className="app-shell">
         <aside className="app-sidebar">
           <div className="brand-card">
-            <p className="eyebrow">BBVA</p>
+            <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Análisis del NPS Térmico y causalidad con incidencias de clientes.
+              Banca de Empresas e Instituciones · NPS Térmico y causalidad operativa.
             </p>
           </div>
 
@@ -1716,7 +1749,7 @@ export function App() {
 
           <PrimaryNav
             disabled={actionsDisabled}
-            items={MAIN_AREAS}
+            items={MAIN_AREAS.filter((item) => isAdmin || item.id !== "ingest")}
             onChange={(value) => startTransition(() => setMainArea(value))}
             value={mainArea}
           />
@@ -1735,18 +1768,40 @@ export function App() {
               >
                 <Icon name="presentation" />
               </button>
-              <button
-                aria-label="Abrir configuración global"
-                className="icon-button topbar-icon-button"
-                disabled={actionsDisabled}
-                onClick={() => setSettingsOpen(true)}
-                type="button"
-              >
-                <Icon name="settings" />
-              </button>
+              {isAdmin ? (
+                <>
+                  <button
+                    aria-label="Generar informe exclusivo para newsletter"
+                    className="icon-button topbar-icon-button"
+                    disabled={actionsDisabled}
+                    onClick={() => void handleDownloadExclusive("report")}
+                    type="button"
+                  >
+                    <Icon name="presentation" />
+                  </button>
+                  <button
+                    aria-label="Descargar edición web actualizada"
+                    className="icon-button topbar-icon-button"
+                    disabled={actionsDisabled}
+                    onClick={() => void handleDownloadExclusive("publication")}
+                    type="button"
+                  >
+                    <Icon name="document" />
+                  </button>
+                  <button
+                    aria-label="Abrir configuración global"
+                    className="icon-button topbar-icon-button"
+                    disabled={actionsDisabled}
+                    onClick={() => setSettingsOpen(true)}
+                    type="button"
+                  >
+                    <Icon name="settings" />
+                  </button>
+                </>
+              ) : null}
             </div>
             <div className="topbar-copy">
-              <p className="eyebrow">NPS Lens</p>
+              <p className="eyebrow">BBVA · Banca de Empresas e Instituciones</p>
               <h2>Orquestación operativa</h2>
               <p data-testid="status-copy">{statusCopy}</p>
             </div>
@@ -1792,36 +1847,38 @@ export function App() {
         </section>
       </main>
 
-      <SettingsSheet
-        actionsDisabled={actionsDisabled}
-        activeTab={settingsTab}
-        downloadsPath={downloadsPath}
-        helixBaseUrl={helixBaseUrl}
-        hierarchySaving={isSavingHierarchy}
-        reportDimensionAnalysis={reportDimensionAnalysis}
-        onReprocess={handleReprocess}
-        minN={minN}
-        minNCross={minNCross}
-        minSimilarity={minSimilarity}
-        maxDaysApart={maxDaysApart}
-        onClose={() => setSettingsOpen(false)}
-        onSaveHierarchy={handleSaveHierarchy}
-        onTabChange={setSettingsTab}
-        open={settingsOpen}
-        serviceOriginN1Map={config?.service_origin_n1_map || {}}
-        serviceOriginN2Map={config?.service_origin_n2_map || {}}
-        serviceOrigins={config?.service_origins || []}
-        reprocessPending={isMutating}
-        setDownloadsPath={setDownloadsPath}
-        setHelixBaseUrl={setHelixBaseUrl}
-        setReportDimensionAnalysis={setReportDimensionAnalysis}
-        setMinN={setMinN}
-        setMinNCross={setMinNCross}
-        setMinSimilarity={setMinSimilarity}
-        setMaxDaysApart={setMaxDaysApart}
-        setThemeMode={setThemeMode}
-        themeMode={themeMode}
-      />
+      {isAdmin ? (
+        <SettingsSheet
+          actionsDisabled={actionsDisabled}
+          activeTab={settingsTab}
+          downloadsPath={downloadsPath}
+          helixBaseUrl={helixBaseUrl}
+          hierarchySaving={isSavingHierarchy}
+          reportDimensionAnalysis={reportDimensionAnalysis}
+          onReprocess={handleReprocess}
+          minN={minN}
+          minNCross={minNCross}
+          minSimilarity={minSimilarity}
+          maxDaysApart={maxDaysApart}
+          onClose={() => setSettingsOpen(false)}
+          onSaveHierarchy={handleSaveHierarchy}
+          onTabChange={setSettingsTab}
+          open={settingsOpen}
+          serviceOriginN1Map={config?.service_origin_n1_map || {}}
+          serviceOriginN2Map={config?.service_origin_n2_map || {}}
+          serviceOrigins={config?.service_origins || []}
+          reprocessPending={isMutating}
+          setDownloadsPath={setDownloadsPath}
+          setHelixBaseUrl={setHelixBaseUrl}
+          setReportDimensionAnalysis={setReportDimensionAnalysis}
+          setMinN={setMinN}
+          setMinNCross={setMinNCross}
+          setMinSimilarity={setMinSimilarity}
+          setMaxDaysApart={setMaxDaysApart}
+          setThemeMode={setThemeMode}
+          themeMode={themeMode}
+        />
+      ) : null}
     </>
   );
 }

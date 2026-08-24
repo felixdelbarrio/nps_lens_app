@@ -8,6 +8,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from nps_lens.domain.models import SummarySnapshot, UploadAttempt, UploadContext
+from nps_lens.domain.normalization import EquivalenceRegistry
 
 CORE_COLUMNS = {
     "ID",
@@ -29,6 +30,9 @@ CORE_COLUMNS = {
     "_source_row_number",
     "_service_origin_n2_key",
     "_text_norm",
+    "_palanca_key",
+    "_subpalanca_key",
+    "_canal_key",
 }
 _SQLITE_IN_BATCH_SIZE = 900
 
@@ -578,6 +582,47 @@ class SqliteNpsRepository:
             return frame
         frame["Fecha"] = pd.to_datetime(frame["Fecha"], errors="coerce")
         return frame
+
+    def canonicalize_records(
+        self,
+        registry: EquivalenceRegistry,
+        context: Optional[UploadContext] = None,
+    ) -> int:
+        query = "SELECT business_key, nps_group, channel, lever, sublever FROM records"
+        params: list[Any] = []
+        if context is not None:
+            query += (
+                " WHERE service_origin = ? AND service_origin_n1 = ? " "AND service_origin_n2 = ?"
+            )
+            params.extend(
+                [context.service_origin, context.service_origin_n1, context.service_origin_n2]
+            )
+
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+            updates: list[tuple[str, str, str, str, str]] = []
+            for row in rows:
+                nps_group = registry.normalize("NPS Group", row["nps_group"])
+                channel = registry.normalize("Canal", row["channel"])
+                lever = registry.normalize("Palanca", row["lever"])
+                sublever = registry.normalize("Subpalanca", row["sublever"])
+                if (
+                    nps_group != str(row["nps_group"])
+                    or channel != str(row["channel"])
+                    or lever != str(row["lever"])
+                    or sublever != str(row["sublever"])
+                ):
+                    updates.append((nps_group, channel, lever, sublever, str(row["business_key"])))
+            if updates:
+                connection.executemany(
+                    """
+                    UPDATE records
+                    SET nps_group = ?, channel = ?, lever = ?, sublever = ?
+                    WHERE business_key = ?
+                    """,
+                    updates,
+                )
+        return len(updates)
 
     def build_summary(self, context: Optional[UploadContext] = None) -> SummarySnapshot:
         records = self.load_records_df(context)

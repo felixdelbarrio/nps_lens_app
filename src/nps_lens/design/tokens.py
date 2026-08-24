@@ -2,10 +2,9 @@
 
 This app follows BBVA Experience token naming (e.g. "color.primary.*").
 
-Important:
-- We do NOT ship design-spec PDFs, icon packs, or font assets in this repository.
-- Tokens are centralized here as a curated subset used by the UI.
-- If you have access to the official token package, swap the values here only.
+Tokens are centralized here as the runtime subset derived from BBVA Experience. The source
+design PDFs remain external reference material; only approved fonts, icons and the report
+template required by the product are bundled.
 """
 
 from __future__ import annotations
@@ -34,21 +33,21 @@ class DesignTokens:
             "color.primary.bg.alternative.default": "#ffffff",
             # App semantic surfaces (centralized; avoid hardcoding in pages)
             "color.app.surface.default": "#ffffff",
-            "color.app.surface.raised": "#f7f8fa",
+            "color.app.surface.raised": "#f7f8f8",
             # Chart surfaces
             "color.app.chart.paper": "#ffffff",
-            "color.app.chart.plot": "#f7f8fa",
+            "color.app.chart.plot": "#f7f8f8",
             "color.app.chart.grid": "#cad1d8",
             "color.app.chart.zero-line": "#adb8c2",
             # Dataframe / table surfaces
             "color.app.table.bg": "#ffffff",
-            "color.app.table.bg.alt": "#f7f8fa",
+            "color.app.table.bg.alt": "#f7f8f8",
             "color.app.table.bg.hover": "#edf3ff",
             "color.app.table.header.bg": "#f2f5fa",
             "color.app.table.header.text": "#46536d",
             "color.app.table.border": "#cad1d8",
             # Control surfaces (selects/combos/popovers)
-            "color.app.control.bg": "#f7f8fa",
+            "color.app.control.bg": "#f7f8f8",
             "color.app.control.bg.hover": "#edf3ff",
             "color.app.control.border": "#cad1d8",
             "color.app.control.text": "#070e46",

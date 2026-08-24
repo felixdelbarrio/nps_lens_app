@@ -72,6 +72,7 @@ class ContextOptionsResponse(BaseModel):
     preferences: dict[str, Any] = Field(default_factory=dict)
     nps_dataset: dict[str, Any] = Field(default_factory=dict)
     helix_dataset: dict[str, Any] = Field(default_factory=dict)
+    access: dict[str, Any] = Field(default_factory=dict)
 
 
 class PreferencesResponse(BaseModel):
@@ -101,6 +102,16 @@ class ServiceOriginHierarchyRequest(BaseModel):
     service_origins: list[str] = Field(default_factory=list)
     service_origin_n1_map: dict[str, list[str]] = Field(default_factory=dict)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+
+
+class EquivalenceGroupRequest(BaseModel):
+    canonical: str
+    aliases: list[str] = Field(default_factory=list)
+
+
+class EquivalenceRegistryRequest(BaseModel):
+    schema_version: str = "1.0"
+    dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 
 class HelixUploadResponse(BaseModel):

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from hashlib import sha1
 from typing import List, Optional, Union
+from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 
+from nps_lens.domain.normalization import equivalence_key
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.ingest.helix_dates import (
     coerce_helix_datetime_series,
@@ -112,6 +114,21 @@ def _auto_parse_epoch_datetime_columns(
     return out
 
 
+def _workbook_has_external_hyperlinks(path: str) -> bool:
+    """Inspect the OOXML relationship parts before loading the workbook in memory."""
+
+    try:
+        with ZipFile(path, "r") as archive:
+            for name in archive.namelist():
+                if not name.startswith("xl/worksheets/_rels/") or not name.endswith(".rels"):
+                    continue
+                if b"/hyperlink" in archive.read(name):
+                    return True
+    except (BadZipFile, OSError):
+        return False
+    return False
+
+
 def read_helix_incidents_excel(
     path: str,
     service_origin: str,
@@ -155,6 +172,8 @@ def read_helix_incidents_excel(
     if isinstance(df, dict):
         df = list(df.values())[0]
     try:
+        if not _workbook_has_external_hyperlinks(path):
+            raise LookupError("workbook_without_external_hyperlinks")
         import openpyxl  # type: ignore
 
         wb_links = openpyxl.load_workbook(path, read_only=False, data_only=False)
@@ -181,7 +200,7 @@ def read_helix_incidents_excel(
                 hyperlink_payload[f"{header}__hyperlink"] = values
         if hyperlink_payload:
             df = pd.concat([df, pd.DataFrame(hyperlink_payload, index=df.index)], axis=1)
-    except Exception:
+    except (Exception, LookupError):
         pass
 
     # Canonicalize / robust column names (tolerate minor variants)
@@ -228,8 +247,8 @@ def read_helix_incidents_excel(
 
     # Normalize N2 column to stable CSV-ish string
     d = df.copy()
-    d["BBVA_SourceServiceCompany"] = d["BBVA_SourceServiceCompany"].astype(str)
-    d["BBVA_SourceServiceN1"] = d["BBVA_SourceServiceN1"].astype(str)
+    d["BBVA_SourceServiceCompany"] = d["BBVA_SourceServiceCompany"].astype(str).str.strip()
+    d["BBVA_SourceServiceN1"] = d["BBVA_SourceServiceN1"].astype(str).str.strip()
     d["BBVA_SourceServiceN2"] = d["BBVA_SourceServiceN2"].apply(
         lambda v: ", ".join(_split_csvish(v))
     )
@@ -238,7 +257,8 @@ def read_helix_incidents_excel(
     # Company filter is best-effort: if the column was missing we filled it with the selected origin.
     if "BBVA_SourceServiceCompany" in d.columns:
         before = len(d)
-        d = d.loc[d["BBVA_SourceServiceCompany"].astype(str) == str(service_origin)]
+        selected_company_key = equivalence_key(service_origin)
+        d = d.loc[d["BBVA_SourceServiceCompany"].map(equivalence_key) == selected_company_key]
         dropped = before - len(d)
         if dropped:
             issues.append(
@@ -249,7 +269,8 @@ def read_helix_incidents_excel(
             )
 
     before = len(d)
-    d = d.loc[d["BBVA_SourceServiceN1"].astype(str) == str(service_origin_n1)]
+    selected_n1_key = equivalence_key(service_origin_n1)
+    d = d.loc[d["BBVA_SourceServiceN1"].map(equivalence_key) == selected_n1_key]
     dropped = before - len(d)
     if dropped:
         issues.append(
@@ -263,10 +284,12 @@ def read_helix_incidents_excel(
     # Semantics: strict token-set equality (order-insensitive).
     sel_n2 = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
     if sel_n2:
-        sel = {v.strip() for v in sel_n2 if v.strip()}
+        sel = {equivalence_key(v) for v in sel_n2 if equivalence_key(v)}
 
         def _row_matches_exact(v: object) -> bool:
-            toks = {p.strip() for p in str(v or "").split(",") if p.strip()}
+            toks = {
+                equivalence_key(part) for part in str(v or "").split(",") if equivalence_key(part)
+            }
             return toks == sel
 
         before = len(d)
@@ -277,7 +300,7 @@ def read_helix_incidents_excel(
                 ValidationIssue(
                     level="INFO",
                     message=(
-                        f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN2 == {{{', '.join(sorted(sel))}}}."
+                        f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN2 == {{{', '.join(sorted(sel_n2))}}}."
                     ),
                 )
             )

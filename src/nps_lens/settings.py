@@ -417,8 +417,12 @@ class Settings:
     allowed_service_origins: list[str]
     allowed_service_origin_n1: dict[str, list[str]]
     log_level: str
+    auth_mode: str = "local"
+    allowed_email_domain: str = "bbva.com"
+    admin_emails: tuple[str, ...] = ()
     dotenv_path: Optional[Path] = None
     knowledge_dir: Path = Path("./knowledge")
+    equivalences_path: Path = Path("./data/config/equivalences.json")
     service_origin_n2_values: list[str] = field(default_factory=list)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
@@ -454,6 +458,12 @@ class Settings:
             os.getenv("NPS_LENS_FRONTEND_PUBLIC_DIR", "./frontend/public")
         ).expanduser()
         knowledge_dir = _resolve_runtime_dir("NPS_LENS_KNOWLEDGE_DIR", "./knowledge")
+        equivalences_path = Path(
+            os.getenv(
+                "NPS_LENS_EQUIVALENCES_PATH",
+                str(data_dir / "config" / "equivalences.json"),
+            )
+        ).expanduser()
 
         origins_raw = os.getenv(
             "NPS_LENS_SERVICE_ORIGIN_BUUG",
@@ -571,8 +581,18 @@ class Settings:
             allowed_service_origins=allowed_service_origins,
             allowed_service_origin_n1=origin_n1_map,
             log_level=os.getenv("NPS_LENS_LOG_LEVEL", "INFO").strip().upper() or "INFO",
+            auth_mode=os.getenv("NPS_LENS_AUTH_MODE", "local").strip().lower() or "local",
+            allowed_email_domain=(
+                os.getenv("NPS_LENS_ALLOWED_EMAIL_DOMAIN", "bbva.com").strip().lower().lstrip("@")
+                or "bbva.com"
+            ),
+            admin_emails=tuple(
+                value.casefold()
+                for value in _dedupe(_split_csv(os.getenv("NPS_LENS_ADMIN_EMAILS", "")))
+            ),
             dotenv_path=resolve_dotenv_path(),
             knowledge_dir=knowledge_dir,
+            equivalences_path=equivalences_path,
             service_origin_n2_values=service_origin_n2_values,
             service_origin_n2_map=service_origin_n2_map,
             default_theme_mode=default_theme_mode,
