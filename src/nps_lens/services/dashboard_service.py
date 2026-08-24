@@ -396,7 +396,6 @@ class DashboardService:
         self.settings = settings
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self.logger = logging.getLogger(__name__)
-        self.repository.canonicalize_records(EquivalenceRegistry.load(settings.equivalences_path))
 
     def _safe_helix_operational_benchmark(
         self,
