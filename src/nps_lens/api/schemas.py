@@ -64,12 +64,15 @@ class ContextOptionsResponse(BaseModel):
     service_origin_n2_options: list[str] = Field(default_factory=list)
     available_years: list[str] = Field(default_factory=list)
     available_months_by_year: dict[str, list[str]] = Field(default_factory=dict)
+    causal_default_year: str = "Todos"
+    causal_default_month: str = "Todos"
     nps_groups: list[str] = Field(default_factory=list)
     score_channels: list[str] = Field(default_factory=list)
     causal_method_options: list[CausalMethodOption] = Field(default_factory=list)
     preferences: dict[str, Any] = Field(default_factory=dict)
     nps_dataset: dict[str, Any] = Field(default_factory=dict)
     helix_dataset: dict[str, Any] = Field(default_factory=dict)
+    access: dict[str, Any] = Field(default_factory=dict)
 
 
 class PreferencesResponse(BaseModel):
@@ -99,6 +102,16 @@ class ServiceOriginHierarchyRequest(BaseModel):
     service_origins: list[str] = Field(default_factory=list)
     service_origin_n1_map: dict[str, list[str]] = Field(default_factory=dict)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+
+
+class EquivalenceGroupRequest(BaseModel):
+    canonical: str
+    aliases: list[str] = Field(default_factory=list)
+
+
+class EquivalenceRegistryRequest(BaseModel):
+    schema_version: str = "1.0"
+    dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 
 class HelixUploadResponse(BaseModel):

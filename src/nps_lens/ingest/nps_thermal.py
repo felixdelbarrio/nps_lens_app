@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
-from hashlib import sha1, sha256
+from hashlib import sha1
 from typing import Optional, Union
 
 import pandas as pd
 
 from nps_lens import PIPELINE_VERSION
 from nps_lens.core.store import DatasetContext
+from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.04.17"
+PARSER_VERSION = "2026.08.24.canonical2"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -46,16 +46,23 @@ _EMPTY_MARKERS = {"", "nan", "none", "null", "nat"}
 
 _HEADER_ALIASES = {
     "fecha": "Fecha",
+    "gfcustsurveyresponsedate": "Fecha",
     "id": "ID",
+    "gfcustsurveyopinionid": "ID",
     "nps": "NPS",
+    "npsresponse": "NPS",
     "npsgroup": "NPS Group",
+    "usertype": "NPS Group",
     "gruponps": "NPS Group",
     "nps_group": "NPS Group",
     "comment": "Comment",
+    "commentresponse": "Comment",
     "comments": "Comment",
     "comentario": "Comment",
     "texto": "Comment",
     "usuariodecision": "UsuarioDecisión",
+    "tomadesicion": "UsuarioDecisión",
+    "tomadecision": "UsuarioDecisión",
     "usuariodecisionfinal": "UsuarioDecisión",
     "decisionusuario": "UsuarioDecisión",
     "usuario decision": "UsuarioDecisión",
@@ -68,6 +75,8 @@ _HEADER_ALIASES = {
     "browser": "Browser",
     "navegador": "Browser",
     "operatingsystem": "Operating System",
+    "gfoperatingsystemname": "Operating System",
+    "gfsurveyaccuserdevicedesc": "Browser",
     "operatingsystemname": "Operating System",
     "sistemaoperativo": "Operating System",
     "serviceoriginbuug": "service_origin",
@@ -135,8 +144,12 @@ def _normalize_comment(value: object) -> str:
     return _coerce_string(value)
 
 
-def _normalize_nps_group(score: object, group: object) -> str:
-    explicit = _coerce_string(group).upper()
+def _normalize_nps_group(
+    score: object,
+    group: object,
+    registry: EquivalenceRegistry,
+) -> str:
+    explicit = registry.normalize("NPS Group", group).upper()
     if explicit:
         if "PROM" in explicit:
             return "PROMOTOR"
@@ -156,55 +169,16 @@ def _normalize_nps_group(score: object, group: object) -> str:
     return "PASIVO"
 
 
-def _business_key(row: pd.Series) -> str:
-    external_id = _coerce_string(row.get("ID"))
-    if external_id and external_id.lower() not in _EMPTY_MARKERS:
-        return f"id:{external_id}"
-
-    payload = {
-        "Fecha": row.get("Fecha").isoformat() if isinstance(row.get("Fecha"), pd.Timestamp) else "",
-        "NPS": (
-            None
-            if pd.isna(row.get("NPS"))
-            else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0])
-        ),
-        "Comment": _normalize_comment(row.get("Comment")),
-        "UsuarioDecisión": _coerce_string(row.get("UsuarioDecisión")),
-        "Canal": _coerce_string(row.get("Canal")),
-        "Palanca": _coerce_string(row.get("Palanca")),
-        "Subpalanca": _coerce_string(row.get("Subpalanca")),
-        "service_origin": _coerce_string(row.get("service_origin")),
-        "service_origin_n1": _coerce_string(row.get("service_origin_n1")),
-        "service_origin_n2": _coerce_string(row.get("service_origin_n2")),
-    }
-    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    return f"fp:{sha256(encoded.encode('utf-8')).hexdigest()}"
-
-
-def _record_fingerprint(row: pd.Series, extra_columns: list[str]) -> str:
-    payload = {
-        "ID": _coerce_string(row.get("ID")),
-        "Fecha": row.get("Fecha").isoformat() if isinstance(row.get("Fecha"), pd.Timestamp) else "",
-        "NPS": (
-            None
-            if pd.isna(row.get("NPS"))
-            else float(pd.to_numeric(pd.Series([row.get("NPS")]), errors="coerce").iloc[0])
-        ),
-        "NPS Group": _coerce_string(row.get("NPS Group")),
-        "Comment": _normalize_comment(row.get("Comment")),
-        "UsuarioDecisión": _coerce_string(row.get("UsuarioDecisión")),
-        "Canal": _coerce_string(row.get("Canal")),
-        "Palanca": _coerce_string(row.get("Palanca")),
-        "Subpalanca": _coerce_string(row.get("Subpalanca")),
-        "Browser": _coerce_string(row.get("Browser")),
-        "Operating System": _coerce_string(row.get("Operating System")),
-        "service_origin": _coerce_string(row.get("service_origin")),
-        "service_origin_n1": _coerce_string(row.get("service_origin_n1")),
-        "service_origin_n2": _coerce_string(row.get("service_origin_n2")),
-        "extra": {column: _coerce_string(row.get(column)) for column in extra_columns},
-    }
-    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
-    return sha256(encoded.encode("utf-8")).hexdigest()
+def _vectorized_hash(frame: pd.DataFrame, columns: list[str], prefix: str = "") -> pd.Series:
+    """Hash normalized rows in native pandas code instead of Python per-row callbacks."""
+    stable = frame.reindex(columns=columns).copy()
+    for column in stable.columns:
+        if pd.api.types.is_datetime64_any_dtype(stable[column]):
+            stable[column] = stable[column].dt.strftime("%Y-%m-%dT%H:%M:%S.%f").fillna("")
+        else:
+            stable[column] = stable[column].astype("string").fillna("")
+    hashes = pd.util.hash_pandas_object(stable, index=False, categorize=True)
+    return hashes.map(lambda value: prefix + format(int(value), "016x"))
 
 
 def _infer_context(
@@ -270,7 +244,9 @@ def read_nps_thermal_excel(
     service_origin_n1: Optional[str] = None,
     service_origin_n2: Optional[str] = None,
     sheet_name: Optional[Union[str, int]] = None,
+    equivalences: Optional[EquivalenceRegistry] = None,
 ) -> IngestResult:
+    registry = equivalences or EquivalenceRegistry.default()
     sheet: Union[str, int] = sheet_name if sheet_name is not None and sheet_name != "" else 0
     df = pd.read_excel(path, sheet_name=sheet, engine="openpyxl", dtype=object)
     if isinstance(df, dict):
@@ -414,10 +390,17 @@ def read_nps_thermal_excel(
             _normalize_comment if column == "Comment" else _coerce_string
         )
 
+    raw_dimensions = {column: work[column].copy() for column in ["Canal", "Palanca", "Subpalanca"]}
+    for column in ["Canal", "Palanca", "Subpalanca"]:
+        work[column] = registry.normalize_series(column, work[column])
+        work[f"_{column.casefold()}_key"] = work[column].map(
+            lambda value, dimension=column: registry.key(dimension, value)
+        )
+
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
     work["NPS Group"] = [
-        _normalize_nps_group(score, group)
+        _normalize_nps_group(score, group, registry)
         for score, group in zip(work["NPS"].tolist(), work["NPS Group"].tolist())
     ]
 
@@ -465,12 +448,59 @@ def read_nps_thermal_excel(
             },
         )
 
-    work["_source_row_number"] = range(2, len(work) + 2)
-    work["_business_key"] = work.apply(_business_key, axis=1)
-    work["_record_fingerprint"] = work.apply(
-        lambda row: _record_fingerprint(row, extra_columns),
-        axis=1,
-    )
+    collision_report = {
+        dimension: registry.collision_report(dimension, values.tolist())
+        for dimension, values in raw_dimensions.items()
+    }
+    collision_report = {key: value for key, value in collision_report.items() if value}
+    if collision_report:
+        issues.append(
+            ValidationIssue(
+                level="INFO",
+                code="equivalent_labels_merged",
+                message="Se unificaron etiquetas equivalentes antes de calcular agregados y cruces.",
+                details={"dimensions": collision_report},
+            )
+        )
+
+    work["_source_row_number"] = work.index.to_series().add(2).astype(int)
+    has_external_id = work["ID"].astype(str).str.strip().ne("")
+    work["_business_key"] = ""
+    work.loc[has_external_id, "_business_key"] = "id:" + work.loc[has_external_id, "ID"]
+    fallback_columns = [
+        "Fecha",
+        "NPS",
+        "Comment",
+        "UsuarioDecisión",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "service_origin",
+        "service_origin_n1",
+        "service_origin_n2",
+    ]
+    if (~has_external_id).any():
+        work.loc[~has_external_id, "_business_key"] = _vectorized_hash(
+            work.loc[~has_external_id], fallback_columns, prefix="fp:"
+        )
+    fingerprint_columns = [
+        "ID",
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Comment",
+        "UsuarioDecisión",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "Browser",
+        "Operating System",
+        "service_origin",
+        "service_origin_n1",
+        "service_origin_n2",
+        *extra_columns,
+    ]
+    work["_record_fingerprint"] = _vectorized_hash(work, fingerprint_columns)
     duplicate_rows_in_file = int(work.duplicated(subset=["_business_key"], keep="last").sum())
     if duplicate_rows_in_file:
         issues.append(
@@ -506,5 +536,7 @@ def read_nps_thermal_excel(
             "duplicate_rows_in_file": duplicate_rows_in_file,
             "extra_columns": extra_columns,
             "missing_optional_columns": missing_optional_columns,
+            "equivalence_schema_version": registry.to_dict()["schema_version"],
+            "equivalent_labels_merged": collision_report,
         },
     )

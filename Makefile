@@ -37,6 +37,7 @@ MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
 MACOS_INSTALL_TO_APPLICATIONS ?= 0
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
+WEBAPP_PORT ?= 8625
 PLAYWRIGHT_BROWSERS_PATH ?= $(ROOT)/$(FRONTEND_DIR)/.playwright-browsers
 
 PIP = $(VENV_BIN)/pip$(BIN_EXT)
@@ -47,7 +48,7 @@ MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
 PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
 
-.PHONY: default venv python-dev python-build setup frontend-install frontend-build frontend-test frontend-e2e build run lint typecheck test ci clean
+.PHONY: default venv python-dev python-build setup frontend-install frontend-build frontend-test frontend-e2e build run kill webapp WebApp lint typecheck test ci clean
 
 default:
 	@echo ""
@@ -55,6 +56,8 @@ default:
 	@printf "  %-18s %s\n" "setup" "Recrea .venv e instala dependencias backend/frontend/build"
 	@printf "  %-18s %s\n" "build" "Compila el frontend y empaqueta la app de escritorio"
 	@printf "  %-18s %s\n" "run" "Construye React y arranca la app de escritorio nativa"
+	@printf "  %-18s %s\n" "kill" "Detiene solo las instancias locales de NPS Lens"
+	@printf "  %-18s %s\n" "webapp / WebApp" "Prueba la WebApp estática con la última edición generada"
 	@printf "  %-18s %s\n" "lint" "Ejecuta ruff y black en modo verificación"
 	@printf "  %-18s %s\n" "typecheck" "Ejecuta mypy sobre el código backend tipado"
 	@printf "  %-18s %s\n" "test" "Ejecuta pytest backend con cobertura"
@@ -116,6 +119,7 @@ build:
 			--windowed \
 			--icon "$(ROOT)/$(ICON_ICNS)" \
 			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
+			--add-data="$(ROOT)/frontend/public/assets/brand:assets/brand" \
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
@@ -159,6 +163,7 @@ build:
 			--onefile \
 			--icon "$(ROOT)/$(ICON_PNG)" \
 			--add-data="$(ROOT)/frontend/dist:frontend/dist" \
+			--add-data="$(ROOT)/frontend/public/assets/brand:assets/brand" \
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
@@ -183,6 +188,7 @@ build:
 			--windowed \
 			--icon "$(ROOT)/$(ICON_ICO)" \
 			--add-data="$(ROOT)/frontend/dist;frontend/dist" \
+			--add-data="$(ROOT)/frontend/public/assets/brand;assets/brand" \
 			--add-data="$(ROOT)/assets;assets" \
 			--add-data="$(ROOT)/$(ICON_DIR);build/icons" \
 			--add-data="$(ROOT)/.env.example;." \
@@ -212,6 +218,14 @@ run:
 	NPS_LENS_ICON="$(ROOT)/$(ICON_RUNTIME)" \
 	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" \
 	$(PY) -m nps_lens.desktop
+
+kill:
+	@$(PYTHON) scripts/local_processes.py --root "$(ROOT)" --ports "$(APP_PORT)" 5173 "$(WEBAPP_PORT)"
+
+webapp: kill
+	@$(PYTHON) scripts/serve_webapp.py --port "$(WEBAPP_PORT)"
+
+WebApp: webapp
 
 lint:
 	@test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev

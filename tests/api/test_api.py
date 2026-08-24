@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -91,3 +92,24 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
     payload = response.json()
     assert payload["status"] == "failed"
     assert any(issue["code"] == "missing_required_column" for issue in payload["issues"])
+
+
+def test_gcp_iap_domain_and_admin_boundaries(tmp_path: Path) -> None:
+    settings = replace(
+        _settings(tmp_path),
+        auth_mode="gcp_iap",
+        allowed_email_domain="bbva.com",
+        admin_emails=("admin@bbva.com",),
+    )
+    client = TestClient(create_app(settings))
+    assert client.get("/api/summary").status_code == 403
+    outsider = {"X-Goog-Authenticated-User-Email": "accounts.google.com:user@example.com"}
+    assert client.get("/api/summary", headers=outsider).status_code == 403
+
+    viewer = {"X-Goog-Authenticated-User-Email": "accounts.google.com:user@bbva.com"}
+    assert client.get("/api/summary", headers=viewer).status_code == 200
+    assert client.get("/api/settings/equivalences", headers=viewer).status_code == 403
+
+    admin = {"X-Goog-Authenticated-User-Email": "accounts.google.com:admin@bbva.com"}
+    assert client.get("/api/settings/equivalences", headers=admin).status_code == 200
+    assert client.get("/api/telemetry/export", headers=admin).status_code == 200

@@ -1,22 +1,22 @@
 const LOCALE = "es-ES";
 
 const NUMBER_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  maximumFractionDigits: 2
+  maximumFractionDigits: 1
 });
 
 const SIGNED_NUMBER_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 1,
   signDisplay: "exceptZero"
 });
 
 const METRIC_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
 });
 
 const SIGNED_METRIC_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
   signDisplay: "exceptZero"
 });
 
@@ -30,13 +30,13 @@ const SIGNED_VOLUME_FORMATTER = new Intl.NumberFormat(LOCALE, {
 });
 
 const PERCENT_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
   style: "percent"
 });
 const FIXED_TWO_DECIMAL_FORMATTER = new Intl.NumberFormat(LOCALE, {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
 });
 
 const PERCENT_COLUMN_PATTERN =

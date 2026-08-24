@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex,nofollow">
+  <title>NPS Lens · BBVA</title>
+  <?!= include('BrandIdentity') ?>
+  <?!= include('DesignSystem') ?>
+</head>
+<body>
+  <div id="shell" class="shell">
+    <aside class="sidebar">
+      <div class="brand-lockup"><span class="bei-logo" aria-label="BBVA Banca de Empresas e Instituciones"></span><h1>NPS Lens</h1><p>La voz del cliente conectada con la operación.</p></div>
+      <nav id="primary-nav" aria-label="Navegación principal"></nav>
+      <div class="edition"><span>INFORMACIÓN ACTUALIZADA</span><strong id="edition-date">—</strong></div>
+    </aside>
+    <main class="workspace">
+      <header class="topbar"><div><p class="eyebrow">BANCA DE EMPRESAS E INSTITUCIONES</p><h2 id="screen-title">Sumario del periodo</h2></div><a id="report-link" class="button" hidden target="_blank">Abrir presentación</a></header>
+      <div id="secondary-nav" class="tabs"></div>
+      <section id="content" class="content" aria-live="polite"></section>
+    </main>
+  </div>
+  <script id="publication-data" type="application/json"><?!= publicationJson ?></script>
+  <script id="viewer-data" type="application/json"><?!= viewerJson ?></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+  <?!= include('App') ?>
+</body>
+</html>
