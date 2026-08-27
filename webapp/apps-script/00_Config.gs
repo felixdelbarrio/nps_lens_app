@@ -1,10 +1,12 @@
 const NPS_LENS = Object.freeze({
-  version: '2.0.0',
+  version: '2.1.0',
   domain: 'bbva.com',
   editionFileProperty: 'NPS_LENS_EDITION_FILE_ID',
   reportFileProperty: 'NPS_LENS_REPORT_FILE_ID',
+  publicationFolderProperty: 'NPS_LENS_PUBLICATION_FOLDER_ID',
   adminEmailsProperty: 'NPS_LENS_ADMIN_EMAILS',
-  telemetrySheet: 'TELEMETRIA',
+  telemetrySheet: 'TELEMETRIA_NPS_LENS',
+  maxPublicationBytes: 30 * 1024 * 1024,
   maxTelemetryRows: 10000
 });
 

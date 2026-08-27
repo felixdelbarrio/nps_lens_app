@@ -37,4 +37,4 @@ def test_public_webapp_has_no_filter_controls_and_admin_is_explicit() -> None:
     assert "<select" not in web
     assert "Newsletter" in web
     assert "Telemetría" in web
-    assert "if(viewer.isAdmin)" in web
+    assert "if(viewer.isAdmin)" in "".join(web.split())

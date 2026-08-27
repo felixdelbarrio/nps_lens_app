@@ -4,8 +4,8 @@ import contextlib
 import hashlib
 import json
 import logging
-import os
 import re
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence, cast
@@ -84,6 +84,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.platform.downloads import persist_download
 from nps_lens.platform.publication import PublicationArtifact, build_publication_archive
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
@@ -1496,28 +1497,14 @@ class DashboardService:
         )
 
     def _persist_report_copy(self, report: BusinessPptResult) -> Path:
-        # Desktop/webview downloads cannot target an arbitrary folder directly, so the API
-        # writes the canonical copy server-side into the configured downloads directory.
         preferred_dir = Path(
             normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
         )
-        fallback_dir = self.settings.data_dir / "reports"
-        for target_dir in [preferred_dir, fallback_dir]:
-            try:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                saved_path = target_dir / report.file_name
-                with saved_path.open("wb") as handle:
-                    handle.write(report.content)
-                    handle.flush()
-                    with contextlib.suppress(OSError):
-                        os.fsync(handle.fileno())
-                if not saved_path.exists() or saved_path.stat().st_size <= 0:
-                    raise OSError("El fichero PPTX no existe tras persistirlo.")
-                print(f"[REPORT] Output path: {saved_path}")
-                return saved_path
-            except OSError:
-                continue
-        raise OSError("No se pudo persistir la copia local del reporte generado.")
+        return persist_download(
+            report.content,
+            report.file_name,
+            [preferred_dir, self.settings.data_dir / "reports"],
+        )
 
     def generate_publication(
         self,
@@ -1642,12 +1629,21 @@ class DashboardService:
             },
         }
         date_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return build_publication_archive(
+        artifact = build_publication_archive(
             publication,
             report_name=report.file_name,
             report_content=report.content,
             file_name=f"nps-lens-publicacion-{date_stamp}.zip",
         )
+        preferred_dir = Path(
+            normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
+        )
+        saved_path = persist_download(
+            artifact.content,
+            artifact.file_name,
+            [preferred_dir, self.settings.data_dir / "publications"],
+        )
+        return replace(artifact, saved_path=str(saved_path))
 
     def _build_business_report_md(
         self,

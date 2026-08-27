@@ -25,6 +25,7 @@ from nps_lens.api.schemas import (
 from nps_lens.core.telemetry import RequestTimer, TelemetryCollector
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
@@ -202,10 +203,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def export_telemetry(request: Request) -> Response:
         require_admin(request)
         payload = request.app.state.telemetry.to_json_bytes()
+        current_settings = cast(Settings, request.app.state.settings)
+        file_name = "nps-lens-telemetria.json"
+        saved_path = persist_download(
+            payload,
+            file_name,
+            [
+                Path(
+                    normalize_downloads_path(
+                        current_settings.ui_defaults()["downloads_path"], create=True
+                    )
+                ),
+                current_settings.data_dir / "telemetry",
+            ],
+        )
         return Response(
             content=payload,
             media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="nps-lens-telemetria.json"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{file_name}"',
+                "X-NPS-LENS-SAVED-PATH": str(saved_path),
+            },
         )
 
     @app.get("/api/config", response_model=ContextOptionsResponse)
@@ -665,6 +683,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     f"filename*=UTF-8''{quote(artifact.file_name)}"
                 ),
                 "X-NPS-LENS-PUBLICATION-BYTES": str(artifact.size_bytes),
+                "X-NPS-LENS-SAVED-PATH": artifact.saved_path,
             },
         )
 

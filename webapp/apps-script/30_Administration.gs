@@ -5,8 +5,6 @@ function getAdministration() {
   return {
     version: NPS_LENS.version,
     generatedAt: edition.generated_at || '',
-    editionFileId: _property_(NPS_LENS.editionFileProperty),
-    reportFileId: _property_(NPS_LENS.reportFileProperty),
     reportUrl: getReportUrl(),
     telemetry: getTelemetry()
   };
@@ -19,7 +17,7 @@ function setupNpsLensWebApp(spreadsheetId, adminEmails) {
   const book = SpreadsheetApp.openById(String(spreadsheetId).trim());
   let sheet = book.getSheetByName(NPS_LENS.telemetrySheet);
   if (!sheet) sheet = book.insertSheet(NPS_LENS.telemetrySheet);
-  if (!sheet.getLastRow()) sheet.appendRow(['timestamp', 'email', 'type', 'screen', 'duration_ms', 'detail', 'version']);
+  if (!sheet.getLastRow()) sheet.appendRow(['timestamp', 'type', 'screen', 'duration_ms', 'detail', 'version']);
   sheet.setFrozenRows(1);
   return {ok: true, sheet: NPS_LENS.telemetrySheet};
 }
