@@ -1,25 +1,80 @@
 function getAdministration() {
   const viewer = _viewer_();
   _assertAdmin_(viewer);
-  const edition = _publishedEdition_();
   return {
     version: NPS_LENS.version,
-    generatedAt: edition.generated_at || '',
-    editionFileId: _property_(NPS_LENS.editionFileProperty),
-    reportFileId: _property_(NPS_LENS.reportFileProperty),
-    reportUrl: getReportUrl(),
-    telemetry: getTelemetry()
+    generatedAt: _property_(NPS_LENS.generatedAtProperty),
+    reportUrl: _reportUrl_(),
+    access: {
+      email: viewer.email,
+      role: viewer.role,
+      source: viewer.adminSource,
+      configurationReady: viewer.configurationReady
+    }
+  };
+}
+
+function diagnoseNpsLensAccess() {
+  const viewer = _viewer_();
+  _assertViewer_(viewer);
+  return {
+    version: NPS_LENS.version,
+    email: viewer.email,
+    role: viewer.role,
+    adminSource: viewer.adminSource,
+    configurationReady: viewer.configurationReady,
+    webAppUrl: ScriptApp.getService().getUrl()
   };
 }
 
 function setupNpsLensWebApp(spreadsheetId, adminEmails) {
-  const properties = PropertiesService.getScriptProperties();
-  properties.setProperty('NPS_LENS_SPREADSHEET_ID', String(spreadsheetId || '').trim());
-  properties.setProperty(NPS_LENS.adminEmailsProperty, String(adminEmails || '').trim());
-  const book = SpreadsheetApp.openById(String(spreadsheetId).trim());
-  let sheet = book.getSheetByName(NPS_LENS.telemetrySheet);
-  if (!sheet) sheet = book.insertSheet(NPS_LENS.telemetrySheet);
-  if (!sheet.getLastRow()) sheet.appendRow(['timestamp', 'email', 'type', 'screen', 'duration_ms', 'detail', 'version']);
-  sheet.setFrozenRows(1);
-  return {ok: true, sheet: NPS_LENS.telemetrySheet};
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+  const viewer = _viewer_();
+  const configuredAdmins = _property_(NPS_LENS.adminEmailsProperty);
+  if (configuredAdmins) {
+    _assertAdmin_(viewer);
+  } else if (!viewer.domainAllowed || viewer.adminSource !== 'initial-admin') {
+    throw new Error('La configuración inicial debe realizarla el administrador inicial.');
+  }
+  const adminSource = String(adminEmails || '').trim() || configuredAdmins || viewer.email;
+  const admins = Array.from(new Set(adminSource.split(/[;,\s]+/)
+    .map(value => value.trim().toLowerCase()).filter(Boolean)));
+  const corporateEmail = new RegExp('^[^\\s@]+@' + NPS_LENS.domain.replace('.', '\\.') + '$');
+  if (!admins.length || admins.some(email => !corporateEmail.test(email))) {
+    throw new Error('Configura al menos un administrador del dominio BBVA.');
+  }
+  const configuredSpreadsheetId = _property_('NPS_LENS_SPREADSHEET_ID');
+  const requestedSpreadsheetId = String(spreadsheetId || '').trim() || configuredSpreadsheetId;
+  const created = !requestedSpreadsheetId;
+  const book = created
+    ? SpreadsheetApp.create('NPS Lens · Administración')
+    : SpreadsheetApp.openById(requestedSpreadsheetId);
+  const cleanSpreadsheetId = book.getId();
+  const specifications = [[NPS_LENS.activitySheet, ACTIVITY_HEADERS], [NPS_LENS.recipientsSheet, NEWSLETTER_RECIPIENT_HEADERS]];
+  specifications.forEach(specification => {
+    let sheet = book.getSheetByName(specification[0]);
+    if (!sheet) sheet = book.insertSheet(specification[0]);
+    if (!sheet.getLastRow()) sheet.appendRow(specification[1]);
+    sheet.setFrozenRows(1);
+  });
+  if (created) {
+    const administrativeSheets = new Set(specifications.map(specification => specification[0]));
+    book.getSheets().filter(sheet => !administrativeSheets.has(sheet.getName())).forEach(sheet => book.deleteSheet(sheet));
+  }
+  PropertiesService.getScriptProperties().setProperties({
+    NPS_LENS_SPREADSHEET_ID: cleanSpreadsheetId,
+    [NPS_LENS.adminEmailsProperty]: admins.join(',')
+  });
+  const result = {
+    ok: true,
+    version: NPS_LENS.version,
+    created,
+    spreadsheetId: cleanSpreadsheetId,
+    spreadsheetUrl: book.getUrl(),
+    administrators: admins,
+    sheets: specifications.map(specification => specification[0]),
+    webAppUrl: ScriptApp.getService().getUrl()
+  };
+  console.log(JSON.stringify(result));
+  return result;
 }

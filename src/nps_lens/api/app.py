@@ -25,6 +25,7 @@ from nps_lens.api.schemas import (
 from nps_lens.core.telemetry import RequestTimer, TelemetryCollector
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
@@ -178,6 +179,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         reloaded = Settings.from_env()
         request.app.state.settings = reloaded
         request.app.state.service.settings = reloaded
+        request.app.state.dashboard_service.clear_caches()
         request.app.state.dashboard_service.settings = reloaded
         request.app.state.dashboard_service.helix_store = (
             request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
@@ -202,10 +204,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def export_telemetry(request: Request) -> Response:
         require_admin(request)
         payload = request.app.state.telemetry.to_json_bytes()
+        current_settings = cast(Settings, request.app.state.settings)
+        file_name = "nps-lens-telemetria.json"
+        saved_path = persist_download(
+            payload,
+            file_name,
+            [
+                Path(
+                    normalize_downloads_path(
+                        current_settings.ui_defaults()["downloads_path"], create=True
+                    )
+                ),
+                current_settings.data_dir / "telemetry",
+            ],
+        )
         return Response(
             content=payload,
             media_type="application/json",
-            headers={"Content-Disposition": 'attachment; filename="nps-lens-telemetria.json"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{file_name}"',
+                "X-NPS-LENS-SAVED-PATH": str(saved_path),
+            },
         )
 
     @app.get("/api/config", response_model=ContextOptionsResponse)
@@ -264,6 +283,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         service_origin_n2: str = Form(""),
         sheet_name: str = Form(""),
         service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         require_admin(request)
         filename = file.filename or "upload.xlsx"
@@ -275,7 +295,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
-        return service_layer.ingest_excel(
+        result = service_layer.ingest_excel(
             filename=filename,
             payload=payload,
             context=UploadContext(
@@ -285,6 +305,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        dashboard_layer.clear_caches()
+        return result
 
     @app.post("/api/uploads/helix", response_model=HelixUploadResponse)
     async def upload_helix(
@@ -306,7 +328,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
-        return dashboard_layer.ingest_helix_excel(
+        result = dashboard_layer.ingest_helix_excel(
             filename=filename,
             payload=payload,
             context=UploadContext(
@@ -316,6 +338,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        dashboard_layer.clear_caches()
+        return result
 
     @app.get("/api/dashboard/context", response_model=ContextOptionsResponse)
     def dashboard_context(
@@ -435,6 +459,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         payload: EquivalenceRegistryRequest,
         request: Request,
         service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         require_admin(request)
         current_settings = cast(Settings, request.app.state.settings)
@@ -444,6 +469,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         updated_records = service_layer.repository.canonicalize_records(registry)
+        dashboard_layer.clear_caches()
         return {**registry.to_dict(), "updated_records": updated_records}
 
     @app.get("/api/dashboard/nps", response_model=DashboardResponse)
@@ -665,6 +691,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     f"filename*=UTF-8''{quote(artifact.file_name)}"
                 ),
                 "X-NPS-LENS-PUBLICATION-BYTES": str(artifact.size_bytes),
+                "X-NPS-LENS-SAVED-PATH": artifact.saved_path,
             },
         )
 

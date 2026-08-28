@@ -76,6 +76,8 @@ def test_historical_merge_keeps_single_record_per_business_key(tmp_path: Path) -
     frame = repository.load_records_df(context)
 
     assert len(frame) == len(frame["_business_key"].drop_duplicates())
+    assert frame["service_origin"].dtype.name == "category"
+    assert frame["NPS Group"].dtype.name == "category"
 
 
 def test_cumulative_then_monthly_upload_updates_overlapping_ids_without_duplicates(

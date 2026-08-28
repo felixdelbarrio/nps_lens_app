@@ -581,6 +581,25 @@ class SqliteNpsRepository:
         if frame.empty:
             return frame
         frame["Fecha"] = pd.to_datetime(frame["Fecha"], errors="coerce")
+        # Business dimensions repeat heavily across the corpus. Categoricals preserve
+        # their exact labels while avoiding one Python string object per row.
+        for column in (
+            "NPS Group",
+            "UsuarioDecisión",
+            "Canal",
+            "Palanca",
+            "Subpalanca",
+            "Browser",
+            "Operating System",
+            "service_origin",
+            "service_origin_n1",
+            "service_origin_n2",
+        ):
+            if column not in frame.columns:
+                continue
+            unique_values = int(frame[column].nunique(dropna=False))
+            if unique_values <= max(64, len(frame) // 10):
+                frame[column] = frame[column].astype("category")
         return frame
 
     def canonicalize_records(

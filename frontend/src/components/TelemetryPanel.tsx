@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { downloadTelemetry, fetchTelemetry, type TelemetryPayload } from "../api";
+import {
+  canUseDesktopFileBridge,
+  downloadTelemetry,
+  fetchTelemetry,
+  type TelemetryPayload
+} from "../api";
 
 function saveBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
@@ -14,6 +19,7 @@ function saveBlob(blob: Blob, fileName: string) {
 export function TelemetryPanel({ disabled = false }: { disabled?: boolean }) {
   const [value, setValue] = useState<TelemetryPayload | null>(null);
   const [error, setError] = useState("");
+  const [downloadStatus, setDownloadStatus] = useState("");
   useEffect(() => {
     void fetchTelemetry().then(setValue).catch((caught: Error) => setError(caught.message));
   }, []);
@@ -43,14 +49,23 @@ export function TelemetryPanel({ disabled = false }: { disabled?: boolean }) {
           disabled={disabled}
           onClick={() => {
             setError("");
+            setDownloadStatus("");
             void downloadTelemetry()
-              .then(({ blob, fileName }) => saveBlob(blob, fileName))
+              .then(({ blob, fileName, savedPath }) => {
+                if (savedPath && canUseDesktopFileBridge()) {
+                  setDownloadStatus(`Fichero guardado en ${savedPath}`);
+                } else if (blob) {
+                  saveBlob(blob, fileName);
+                  setDownloadStatus("Descarga preparada correctamente.");
+                }
+              })
               .catch((caught: Error) => setError(caught.message));
           }}
           type="button"
         >
           Descargar JSON para CODEX
         </button>
+        {downloadStatus ? <p className="field-hint" role="status">{downloadStatus}</p> : null}
       </div>
     </div>
   );

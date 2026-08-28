@@ -16,6 +16,7 @@ class PublicationArtifact:
     size_bytes: int
     included_nps_rows: int
     included_helix_rows: int
+    saved_path: str = ""
 
 
 def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
