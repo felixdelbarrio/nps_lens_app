@@ -10,15 +10,15 @@ from typing import Mapping, Optional
 from dotenv import dotenv_values, load_dotenv, set_key
 
 DEFAULT_UI_THEME_MODE = "light"
-DEFAULT_UI_TOUCHPOINT_SOURCE = "palanca_touchpoint"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
 DEFAULT_UI_REPORT_DIMENSION_ANALYSIS = "palanca"
 DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
-DEFAULT_UI_MIN_SIMILARITY = 0.25
-DEFAULT_UI_MAX_DAYS_APART = 10
+DEFAULT_UI_MIN_SIMILARITY = 0.15
+DEFAULT_UI_MAX_DAYS_APART = 90
 DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
 DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
-DEFAULT_UI_NPS_GROUP = "Todos"
-DEFAULT_UI_SCORE_CHANNEL = "Todos"
+DEFAULT_UI_NPS_GROUP = "Detractores"
+DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
 DEFAULT_SERVICE_ORIGINS = [
     "BBVA México",

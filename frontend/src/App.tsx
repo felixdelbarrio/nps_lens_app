@@ -249,13 +249,13 @@ export function App() {
   const [serviceOriginN2, setServiceOriginN2] = useState("");
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
-  const [npsGroup, setNpsGroup] = useState("Todos");
-  const [scoreChannel, setScoreChannel] = useState("Todos");
+  const [npsGroup, setNpsGroup] = useState("Detractores");
+  const [scoreChannel, setScoreChannel] = useState("Web");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
   const [reportDimensionAnalysis, setReportDimensionAnalysis] = useState<"palanca" | "subpalanca">("palanca");
-  const [touchpointSource, setTouchpointSource] = useState("palanca_touchpoint");
+  const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [opportunityDimension, setOpportunityDimension] = useState("Palanca");
@@ -263,8 +263,8 @@ export function App() {
   const [cohortCol, setCohortCol] = useState("Canal");
   const [minN, setMinN] = useState(200);
   const [minNCross, setMinNCross] = useState(30);
-  const [minSimilarity, setMinSimilarity] = useState(0.25);
-  const [maxDaysApart, setMaxDaysApart] = useState(10);
+  const [minSimilarity, setMinSimilarity] = useState(0.15);
+  const [maxDaysApart, setMaxDaysApart] = useState(90);
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("summary");
   const [summaryTab, setSummaryTab] = useState("period-aggregates");
@@ -286,7 +286,6 @@ export function App() {
   const [latestNpsUpload, setLatestNpsUpload] = useState<UploadResult | null>(null);
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
   const didHydrate = useRef(false);
-  const didApplyCausalDefault = useRef(false);
   const initialContextKey = useRef("");
 
   const selectedContextKey = `${serviceOrigin}\u0000${serviceOriginN1}\u0000${serviceOriginN2}`;
@@ -337,9 +336,9 @@ export function App() {
     setDownloadsPath(config.preferences.downloads_path || "");
     setHelixBaseUrl(config.preferences.helix_base_url || "");
     setReportDimensionAnalysis(config.preferences.report_dimension_analysis || "palanca");
-    setTouchpointSource(config.preferences.touchpoint_source || "palanca_touchpoint");
-    setMinSimilarity(config.preferences.min_similarity ?? 0.25);
-    setMaxDaysApart(config.preferences.max_days_apart ?? 10);
+    setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
+    setMinSimilarity(config.preferences.min_similarity ?? 0.15);
+    setMaxDaysApart(config.preferences.max_days_apart ?? 90);
     setMinN(config.preferences.min_n_opportunities ?? 200);
     setMinNCross(config.preferences.min_n_cross_comparisons ?? 30);
   }, [config]);
@@ -356,17 +355,6 @@ export function App() {
       setPopMonth(monthOptions.includes("Todos") ? "Todos" : getLatestAvailableMonth(monthOptions));
     }
   }, [monthOptions, popMonth]);
-
-  useEffect(() => {
-    if (!config || insightTab !== "linking" || didApplyCausalDefault.current) {
-      return;
-    }
-    didApplyCausalDefault.current = true;
-    const causalYear = config.causal_default_year || "Todos";
-    const causalMonth = config.causal_default_month || "Todos";
-    setPopYear(causalYear);
-    setPopMonth(causalMonth);
-  }, [config, insightTab]);
 
   useEffect(() => {
     if (!config) {
@@ -642,9 +630,9 @@ export function App() {
     }
     if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
       setTouchpointSource(
-        causalMethodOptions.find((option) => option.value === "palanca_touchpoint")?.value ||
+        causalMethodOptions.find((option) => option.value === "executive_journeys")?.value ||
           causalMethodOptions[0]?.value ||
-          "palanca_touchpoint"
+          "executive_journeys"
       );
     }
   }, [causalMethodOptions, touchpointSource]);

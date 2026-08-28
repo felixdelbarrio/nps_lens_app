@@ -457,25 +457,51 @@ def build_nps_text(df: pd.DataFrame) -> pd.Series:
 
 
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
-    parts = [build_incident_display_text(df)]
-    aux_cols = _ordered_cols_ci(
+    """Build a compact, high-signal semantic document for each Helix incident.
+
+    Helix narratives contain long resolution templates and operational boilerplate.  Concatenating
+    them without bounds dilutes the few words that a short customer comment can share with an
+    incident.  The field order and per-field limits below preserve business meaning while keeping
+    vectorisation cost proportional and scores comparable across exports.
+    """
+
+    signal_cols = _ordered_cols_ci(
         df,
         [
-            "Resolution",
-            "Resolución",
-            "resolution",
+            "Description",
             "summary",
-            "Short Description",
-            "bbva_shortdescription",
+            "BBVA_SourceServiceN2",
+            "service",
+            "BBVA_RootCauseMain",
+            "BBVA_RootCause1",
+            "BBVA_RootCauseExecutive",
+            "BBVA_FinalImpact",
+            "BBVA_ExecutiveDescription",
+            "Detailed Description",
+            "Detailed Decription",
+            "Resolution",
         ],
     )
-    parts.extend([_txt_series(df, col) for col in aux_cols])
-    if not parts or len(parts[0]) == 0:
+    if not signal_cols:
         return pd.Series([""] * len(df), index=df.index)
-    s = parts[0]
-    for p in parts[1:]:
-        s = s + " " + p
-    return s.str.replace(r"\s+", " ", regex=True).str.strip()
+    limits = [180, 180, 100, 100, 160, 240, 260, 320, 320, 240]
+    parts = []
+    for position, column in enumerate(signal_cols):
+        limit = limits[min(position, len(limits) - 1)]
+        cleaned = (
+            _txt_series(df, column)
+            .str.replace(r"<[^>]+>", " ", regex=True)
+            .str.replace(r"https?://\S+|www\.\S+", " ", regex=True)
+            .str.replace(r"\b(?:INC|WO|REQ)\d{5,}\b", " ", regex=True, flags=0)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+            .str.slice(0, limit)
+        )
+        parts.append(cleaned)
+    compact = parts[0]
+    for part in parts[1:]:
+        compact = compact + " " + part
+    return compact.str.replace(r"\s+", " ", regex=True).str.strip()
 
 
 @dataclass(frozen=True)
@@ -555,6 +581,20 @@ def link_incidents_to_nps_topics(
         errors="coerce",
     ).dt.normalize()
 
+    # Restrict the semantic search space before vectorisation.  Previously every incident in the
+    # historical export competed for a period even when it could never pass the temporal policy.
+    if max_days_apart is not None:
+        dated_nps = nps["nps_date"].dropna()
+        if not dated_nps.empty:
+            delta = pd.Timedelta(days=max(0, int(max_days_apart)))
+            relevant = helix["incident_date"].between(dated_nps.min() - delta, dated_nps.max() + delta)
+            helix = helix.loc[relevant].copy()
+            if helix.empty:
+                return (
+                    pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
+                    pd.DataFrame(columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]),
+                )
+
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
 
@@ -586,15 +626,27 @@ def link_incidents_to_nps_topics(
 
     # Vectorize once for NPS comments + incidents. Dynamic min_df keeps small extracts valid.
     min_df = 1 if len(corpus) < 250 else 2
-    vec = TfidfVectorizer(
+    word_vec = TfidfVectorizer(
         lowercase=True,
+        strip_accents="unicode",
+        sublinear_tf=True,
         max_features=max_features,
         ngram_range=(1, 2),
         min_df=min_df,
         stop_words=None,
     )
+    char_vec = TfidfVectorizer(
+        lowercase=True,
+        strip_accents="unicode",
+        sublinear_tf=True,
+        analyzer="char_wb",
+        ngram_range=(3, 5),
+        min_df=min_df,
+        max_features=min(max_features, 60_000),
+    )
     try:
-        X = vec.fit_transform(corpus)
+        word_matrix = word_vec.fit_transform(corpus)
+        char_matrix = char_vec.fit_transform(corpus)
     except ValueError:
         # Empty vocabulary after cleaning
         return (
@@ -604,12 +656,14 @@ def link_incidents_to_nps_topics(
             ),
         )
 
-    X_nps = X[: len(nps)]
-    X_inc = X[len(nps) :]
-    X_topics = vec.transform(topic_docs.values.tolist())
+    split = len(nps)
+    word_nps, word_inc = word_matrix[:split], word_matrix[split:]
+    char_nps, char_inc = char_matrix[:split], char_matrix[split:]
+    word_topics = word_vec.transform(topic_docs.values.tolist())
+    char_topics = char_vec.transform(topic_docs.values.tolist())
 
     # Assignment incident -> topic with sparse similarity (no dense NxM matrix).
-    sim_topic = X_inc @ X_topics.T
+    sim_topic = (word_inc @ word_topics.T) * 0.35 + (char_inc @ char_topics.T) * 0.65
     assign_rows: list[dict[str, object]] = []
     for i in range(sim_topic.shape[0]):
         idx, vals = _sparse_row_topk(sim_topic.getrow(i), 1)
@@ -635,36 +689,54 @@ def link_incidents_to_nps_topics(
     # Evidence links: incident -> top detractor comments with sparse/chunked similarity.
     # Optional deterministic down-sampling keeps worst-case memory/CPU bounded.
     nps_pos = _sample_positions(int(len(nps)), int(max_nps_rows_for_evidence))
-    X_nps_ev = X_nps[nps_pos]
+    word_nps_ev = word_nps[nps_pos]
+    char_nps_ev = char_nps[nps_pos]
     nps_ev = nps.iloc[nps_pos].copy()
 
     links: List[EvidenceLink] = []
     chunk = max(1, int(evidence_chunk_size))
     per_incident_k = max(1, int(top_k_per_incident))
     max_days = int(max_days_apart) if max_days_apart is not None else None
-    for start in range(0, X_inc.shape[0], chunk):
-        end = min(start + chunk, X_inc.shape[0])
-        sim_block = X_inc[start:end] @ X_nps_ev.T
+    for start in range(0, word_inc.shape[0], chunk):
+        end = min(start + chunk, word_inc.shape[0])
+        sim_block = (word_inc[start:end] @ word_nps_ev.T) * 0.35 + (
+            char_inc[start:end] @ char_nps_ev.T
+        ) * 0.65
         for bi in range(sim_block.shape[0]):
-            row = sim_block.getrow(bi)
-            idx, vals = _sparse_row_topk(row, per_incident_k)
-            if len(idx) == 0:
-                continue
             inc_row = start + bi
             inc_id = str(helix.iloc[inc_row]["incident_id"])
             inc_topic = str(helix.iloc[inc_row]["incident_topic"])
             inc_date = pd.to_datetime(helix.iloc[inc_row].get("incident_date"), errors="coerce")
+            row = sim_block.getrow(bi)
+            candidate_idx = row.indices
+            candidate_vals = row.data
+            if max_days is not None:
+                if pd.isna(inc_date):
+                    continue
+                candidate_dates = pd.to_datetime(
+                    nps_ev.iloc[candidate_idx]["nps_date"], errors="coerce"
+                ).to_numpy(dtype="datetime64[ns]")
+                day_delta = np.abs(
+                    (candidate_dates - np.datetime64(inc_date.to_datetime64()))
+                    / np.timedelta64(1, "D")
+                )
+                valid = np.isfinite(day_delta) & (day_delta <= max_days)
+                candidate_idx = candidate_idx[valid]
+                candidate_vals = candidate_vals[valid]
+            if not len(candidate_idx):
+                continue
+            if len(candidate_vals) > per_incident_k:
+                pick = np.argpartition(candidate_vals, -per_incident_k)[-per_incident_k:]
+                pick = pick[np.argsort(-candidate_vals[pick])]
+                idx, vals = candidate_idx[pick], candidate_vals[pick]
+            else:
+                order = np.argsort(-candidate_vals)
+                idx, vals = candidate_idx[order], candidate_vals[order]
             for j, sim in zip(idx.tolist(), vals.tolist()):
                 s = float(sim)
                 if s < float(min_similarity):
                     continue
                 nps_row = nps_ev.iloc[int(j)]
-                if max_days is not None:
-                    nps_date = pd.to_datetime(nps_row.get("nps_date"), errors="coerce")
-                    if pd.isna(inc_date) or pd.isna(nps_date):
-                        continue
-                    if int(abs((inc_date - nps_date).days)) > max_days:
-                        continue
                 links.append(
                     EvidenceLink(
                         nps_id=str(nps_row["nps_id"]),

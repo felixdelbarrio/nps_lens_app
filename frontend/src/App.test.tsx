@@ -53,9 +53,9 @@ const contextPayload = {
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
     report_dimension_analysis: "palanca",
-    touchpoint_source: "palanca_touchpoint",
-    min_similarity: 0.25,
-    max_days_apart: 10,
+    touchpoint_source: "executive_journeys",
+    min_similarity: 0.15,
+    max_days_apart: 90,
     min_n_opportunities: 200,
     min_n_cross_comparisons: 30
   },
@@ -737,7 +737,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );
-    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("palanca_touchpoint");
+    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
     const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
     const incidentsMetric = screen.getByText("Incidencias del periodo");

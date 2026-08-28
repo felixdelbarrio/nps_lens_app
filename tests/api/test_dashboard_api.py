@@ -197,7 +197,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
     )
     assert context_payload["preferences"]["report_dimension_analysis"] == "palanca"
-    assert context_payload["preferences"]["touchpoint_source"] == "palanca_touchpoint"
+    assert context_payload["preferences"]["touchpoint_source"] == "executive_journeys"
     assert any(
         option["value"] == "executive_journeys"
         for option in context_payload["causal_method_options"]
@@ -460,8 +460,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["causal_method"]["value"] == "palanca_touchpoint"
-    assert linking_payload["navigation"][1]["label"] == "Touchpoints afectados por Palanca"
+    assert linking_payload["causal_method"]["value"] == "executive_journeys"
+    assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"
     assert "situation" in linking_payload
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload

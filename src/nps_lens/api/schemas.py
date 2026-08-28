@@ -87,9 +87,9 @@ class PreferencesResponse(BaseModel):
     downloads_path: str = ""
     helix_base_url: str = ""
     report_dimension_analysis: str = "palanca"
-    touchpoint_source: str = "palanca_touchpoint"
-    min_similarity: float = 0.25
-    max_days_apart: int = 10
+    touchpoint_source: str = "executive_journeys"
+    min_similarity: float = 0.15
+    max_days_apart: int = 90
     min_n_opportunities: int = 200
     min_n_cross_comparisons: int = 30
 

@@ -68,7 +68,15 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
     assert "function testNewsletter()" in newsletter
     assert "saveNewsletterRecipient" in newsletter
     assert "filter(item => item.active)" in newsletter
-    assert manifest["dependencies"]["enabledAdvancedServices"][0]["serviceId"] == "drive"
+    assert "newsletterFrom: 'nps-lens.group@bbva.com'" in config
+    assert "newsletterSenderName: 'NPS Lens'" in config
+    assert "Gmail.Users.Settings.SendAs.list('me')" in newsletter
+    assert "Gmail.Users.Messages.send({raw}, 'me')" in newsletter
+    assert "MailApp.sendEmail" not in newsletter
+    assert [
+        service["serviceId"] for service in manifest["dependencies"]["enabledAdvancedServices"]
+    ] == ["drive", "gmail"]
+    assert "https://www.googleapis.com/auth/gmail.send" in manifest["oauthScopes"]
 
 
 def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() -> None:
@@ -80,7 +88,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.3.1'" in config
+    assert "version: '2.4.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in administration

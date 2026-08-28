@@ -77,6 +77,7 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
+from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.domain.helix_links import (
     build_helix_incident_url_lookup,
     enrich_helix_incident_links,
@@ -973,8 +974,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1017,8 +1018,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1080,14 +1081,27 @@ class DashboardService:
             helix_history,
             context="linking_dashboard",
         )
-        core = self._compute_linking_core(
-            nps_df=nps_slice,
-            helix_df=helix_slice,
-            focus_df=focus_df,
-            focus_group=focus_group,
-            min_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-            operational_benchmark=operational_benchmark,
+        core = self._cached_result(
+            (
+                "linking-core",
+                *self._context_key(context),
+                self._data_revision(context),
+                pop_year,
+                pop_month,
+                resolved_channel,
+                focus_group,
+                min_similarity,
+                max_days_apart,
+            ),
+            lambda: self._compute_linking_core(
+                nps_df=nps_slice,
+                helix_df=helix_slice,
+                focus_df=focus_df,
+                focus_group=focus_group,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                operational_benchmark=operational_benchmark,
+            ),
         )
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
@@ -1443,8 +1457,8 @@ class DashboardService:
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
         report_format: str = "standard",
@@ -1708,31 +1722,42 @@ class DashboardService:
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
     ) -> PublicationArtifact:
+        active_touchpoint_source = touchpoint_source or "executive_journeys"
+        scope = build_publication_scope(
+            buug=context.service_origin,
+            n1=context.service_origin_n1,
+            n2=context.service_origin_n2,
+            year=pop_year,
+            month=pop_month,
+            causal_method=active_touchpoint_source,
+        )
+        publish_channel = self._resolve_score_channel(self._load_nps_df(context), "Web")
+        publish_group = self._resolve_nps_group(self._load_nps_df(context), "Detractores")
         dashboard = self.nps_dashboard(
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             min_n=min_n,
         )
         linking = self.linking_dashboard(
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
-            touchpoint_source=touchpoint_source,
+            touchpoint_source=active_touchpoint_source,
         )
         history_df = self._load_nps_df(context)
-        resolved_channel = self._resolve_score_channel(history_df, score_channel)
-        resolved_group = self._resolve_nps_group(history_df, nps_group)
+        resolved_channel = publish_channel
+        resolved_group = publish_group
         filtered_history_df = self._apply_score_channel_filter(history_df, resolved_channel)
         filtered_history_df = filter_by_nps_group(filtered_history_df, resolved_group)
         filtered_selected_df = self._apply_population_filters(
@@ -1775,8 +1800,8 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=POP_ALL,
+            score_channel=POP_ALL,
             limit=row_limit,
         )
         helix_data = self.dataset_rows(
@@ -1784,11 +1809,33 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            score_channel=score_channel,
+            score_channel=POP_ALL,
             limit=row_limit,
         )
         generated_at = datetime.now(timezone.utc).isoformat()
         registry = EquivalenceRegistry.load(self.settings.equivalences_path)
+        channels = self._available_score_channels(history_df)
+        groups = _DEFAULT_NPS_GROUPS.copy()
+        dashboard_views: dict[str, dict[str, object]] = {}
+        period_frame = self._apply_population_filters(history_df, pop_year, pop_month)
+        for channel in channels:
+            channel_frame = self._apply_score_channel_filter(period_frame, channel)
+            if channel_frame.empty:
+                continue
+            group_views: dict[str, object] = {}
+            for group in groups:
+                if filter_by_nps_group(channel_frame, group).empty:
+                    continue
+                group_views[group] = self.nps_dashboard(
+                    context=context,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    nps_group=group,
+                    score_channel=channel,
+                    min_n=min_n,
+                )
+            if group_views:
+                dashboard_views[channel] = group_views
         publication: dict[str, object] = {
             "schema_version": "1.0",
             "generated_at": generated_at,
@@ -1796,18 +1843,25 @@ class DashboardService:
                 "name": "BBVA Banca de Empresas e Instituciones",
                 "design_system": "BBVA Experience",
             },
+            "scope": scope,
             "filters": {
                 "service_origin": context.service_origin,
                 "service_origin_n1": context.service_origin_n1,
                 "service_origin_n2": context.service_origin_n2,
                 "year": pop_year,
                 "month": pop_month,
-                "nps_group": nps_group or POP_ALL,
-                "score_channel": score_channel or POP_ALL,
+                "nps_group": publish_group,
+                "score_channel": publish_channel,
                 "min_n": min_n,
                 "min_similarity": min_similarity,
                 "max_days_apart": max_days_apart,
-                "touchpoint_source": touchpoint_source,
+                "touchpoint_source": active_touchpoint_source,
+            },
+            "static_views": {
+                "default": {"score_channel": publish_channel, "nps_group": publish_group},
+                "score_channels": list(dashboard_views),
+                "nps_groups": groups,
+                "dashboard_by_filter": dashboard_views,
             },
             "screens": {
                 "dashboard": dashboard,
@@ -1816,6 +1870,7 @@ class DashboardService:
             },
             "manifest": {
                 "generated_at": generated_at,
+                "scope": scope,
                 "equivalence_registry": registry.to_dict(),
                 "privacy": "No incluye configuración administrativa ni telemetría.",
                 "report": report.file_name,
@@ -3032,7 +3087,9 @@ class DashboardService:
             return POP_ALL
         if "NPS Group" not in frame.columns:
             return POP_ALL
-        groups = set(frame["NPS Group"].fillna("").astype(str).str.strip().str.casefold())
+        groups = set(
+            frame["NPS Group"].astype("string").fillna("").str.strip().str.casefold()
+        )
         if _PREFERRED_NPS_GROUP.casefold() in groups or any(
             value.startswith("detr") for value in groups
         ):
