@@ -1,6 +1,7 @@
 function doGet() {
   const viewer = _viewer_();
   _assertViewer_(viewer);
+  viewer.reportUrl = _reportUrl_();
   const template = HtmlService.createTemplateFromFile('Index');
   template.publicationJson = JSON.stringify(_publishedEdition_()).replace(/<\//g, '<\\/');
   template.viewerJson = JSON.stringify(viewer);

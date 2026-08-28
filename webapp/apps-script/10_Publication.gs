@@ -85,7 +85,9 @@ function importPublicationArchive(form) {
     nativeDeck.saveAndClose();
     PropertiesService.getScriptProperties().setProperties({
       [NPS_LENS.editionFileProperty]: editionFile.getId(),
-      [NPS_LENS.reportFileProperty]: slidesFileId
+      [NPS_LENS.reportFileProperty]: slidesFileId,
+      [NPS_LENS.generatedAtProperty]: String(edition.generated_at || ''),
+      [NPS_LENS.newsletterInsightProperty]: JSON.stringify(_newsletterInsight_(edition))
     });
   } catch (error) {
     editionFile.setTrashed(true);
@@ -96,9 +98,7 @@ function importPublicationArchive(form) {
   return getAdministration();
 }
 
-function getReportUrl() {
-  const viewer = _viewer_();
-  _assertViewer_(viewer);
+function _reportUrl_() {
   const fileId = _property_(NPS_LENS.reportFileProperty);
-  return fileId ? DriveApp.getFileById(fileId).getUrl() : '';
+  return fileId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(fileId) + '/edit' : '';
 }

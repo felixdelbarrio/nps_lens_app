@@ -1,9 +1,11 @@
 const NPS_LENS = Object.freeze({
-  version: '2.2.2',
+  version: '2.3.0',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   editionFileProperty: 'NPS_LENS_EDITION_FILE_ID',
   reportFileProperty: 'NPS_LENS_REPORT_FILE_ID',
+  generatedAtProperty: 'NPS_LENS_GENERATED_AT',
+  newsletterInsightProperty: 'NPS_LENS_NEWSLETTER_INSIGHT',
   publicationFolderProperty: 'NPS_LENS_PUBLICATION_FOLDER_ID',
   adminEmailsProperty: 'NPS_LENS_ADMIN_EMAILS',
   activitySheet: 'ACTIVIDAD_NPS_LENS',

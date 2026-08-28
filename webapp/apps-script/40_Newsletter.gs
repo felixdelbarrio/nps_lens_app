@@ -17,7 +17,7 @@ function getNewsletterSettings() {
     subject: _property_('NPS_LENS_NEWSLETTER_SUBJECT') || 'NPS Lens · Voz del cliente y causalidad operativa',
     recipients: recipients.map(item => ({email: item.email, active: item.active})),
     activeCount: recipients.filter(item => item.active).length,
-    presentationUrl: getReportUrl()
+    presentationUrl: _reportUrl_()
   };
 }
 
@@ -27,7 +27,7 @@ function saveNewsletterSubject(subject) {
   const clean = _cleanText_(subject, 180);
   if (!clean) throw new Error('Indica un asunto para la newsletter.');
   PropertiesService.getScriptProperties().setProperty('NPS_LENS_NEWSLETTER_SUBJECT', clean);
-  return getNewsletterSettings();
+  return {subject: clean};
 }
 
 function saveNewsletterRecipient(payload) {
@@ -47,7 +47,7 @@ function saveNewsletterRecipient(payload) {
   } else {
     sheet.appendRow([email, active, now, viewer.email, now, viewer.email]);
   }
-  return getNewsletterSettings();
+  return {email, active};
 }
 
 function _newsletterInsight_(edition) {
@@ -66,8 +66,14 @@ function _newsletterEscape_(value) {
   })[character]);
 }
 
-function _newsletterHtml_(edition, reportUrl) {
-  const insight = _newsletterInsight_(edition);
+function _publishedNewsletterInsight_() {
+  const stored = _property_(NPS_LENS.newsletterInsightProperty);
+  if (!stored) throw new Error('La edición actual no contiene el insight de newsletter. Vuelve a importarla.');
+  try { return JSON.parse(stored); }
+  catch (error) { throw new Error('El insight de newsletter publicado no es válido. Vuelve a importar la edición.'); }
+}
+
+function _newsletterHtml_(insight, reportUrl) {
   const webUrl = ScriptApp.getService().getUrl();
   const opportunity = insight.opportunity ? '<div style="margin:20px 0;padding:18px;background:#EAF3FA;border-left:4px solid #2DCCCD"><b>Foco ejecutivo</b><br>' + _newsletterEscape_(insight.opportunity) + '</div>' : '';
   return '<div style="font-family:Arial,sans-serif;color:#121F3F;max-width:680px;margin:auto;background:#F4F6F8">' +
@@ -79,18 +85,17 @@ function _newsletterHtml_(edition, reportUrl) {
 }
 
 function _sendNewsletterTo_(recipients, subject) {
-  const edition = _publishedEdition_();
-  const reportUrl = getReportUrl();
+  const reportUrl = _reportUrl_();
   if (!reportUrl) throw new Error('Publica primero una edición con su presentación nativa.');
-  MailApp.sendEmail({to: recipients.join(','), subject, htmlBody: _newsletterHtml_(edition, reportUrl), name: 'NPS Lens'});
+  MailApp.sendEmail({to: recipients.join(','), subject, htmlBody: _newsletterHtml_(_publishedNewsletterInsight_(), reportUrl), name: 'NPS Lens'});
   return {sent: recipients.length, at: new Date().toISOString(), presentationUrl: reportUrl};
 }
 
 function testNewsletter() {
   const viewer = _viewer_();
   _assertAdmin_(viewer);
-  const settings = getNewsletterSettings();
-  return _sendNewsletterTo_([viewer.email], '[PRUEBA] ' + settings.subject);
+  const subject = _property_('NPS_LENS_NEWSLETTER_SUBJECT') || 'NPS Lens · Voz del cliente y causalidad operativa';
+  return _sendNewsletterTo_([viewer.email], '[PRUEBA] ' + subject);
 }
 
 function sendNewsletter() {

@@ -1,11 +1,10 @@
 function getAdministration() {
   const viewer = _viewer_();
   _assertAdmin_(viewer);
-  const edition = _publishedEdition_();
   return {
     version: NPS_LENS.version,
-    generatedAt: edition.generated_at || '',
-    reportUrl: getReportUrl(),
+    generatedAt: _property_(NPS_LENS.generatedAtProperty),
+    reportUrl: _reportUrl_(),
     access: {
       email: viewer.email,
       role: viewer.role,

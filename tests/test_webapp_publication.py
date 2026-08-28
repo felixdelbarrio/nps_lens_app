@@ -69,3 +69,25 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
     assert "saveNewsletterRecipient" in newsletter
     assert "filter(item => item.active)" in newsletter
     assert manifest["dependencies"]["enabledAdvancedServices"][0]["serviceId"] == "drive"
+
+
+def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() -> None:
+    root = Path("webapp/apps-script")
+    config = (root / "00_Config.gs").read_text(encoding="utf-8")
+    publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
+    activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
+    administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
+    newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
+    app = (root / "App.html").read_text(encoding="utf-8")
+
+    assert "version: '2.3.0'" in config
+    assert "function getReportUrl()" not in publication
+    assert "https://docs.google.com/presentation/d/" in publication
+    assert "_publishedEdition_" not in administration
+    assert "'v' + NPS_LENS.version" in activity
+    assert "event.occurredAt" in activity
+    assert "serverP95Ms" in activity and "renderP95Ms" in activity
+    assert "slowCalls" in activity
+    assert "_publishedEdition_" not in newsletter
+    assert "let activityCache" in app
+    assert "if(viewer.reportUrl)" in app

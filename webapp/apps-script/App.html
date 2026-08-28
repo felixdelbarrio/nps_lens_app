@@ -22,6 +22,7 @@
   const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
   const activityQueue = [];
   let activityTimer = 0;
+  let activityCache = {key:'',report:null};
 
   function detailViews(section) {
     if (section === 'summary') return summaryViews;
@@ -91,15 +92,14 @@
     const source = datasets[view] || {};
     return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(source.total_rows || rows(source.rows).length))} filas</span><span class="pill">${esc(rows(source.columns).length)} columnas</span></div>${table(source.rows,500)}</article></div>`;
   }
-  const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,users:4,sessions:6,errors:0,p95Ms:184},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],events:[]};
+  const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
   function rpc(name, args = []) {
     const callStarted = performance.now();
     return new Promise((resolve,reject) => {
       if (viewer.local) {
-        if (name === 'getReportUrl') return resolve(viewer.reportUrl || '');
         if (name === 'getAdministration') return resolve({version:'local',generatedAt:publication.generated_at,reportUrl:viewer.reportUrl || '',access:{email:viewer.email,role:'admin',source:'initial-admin',configurationReady:true}});
         if (name === 'getActivityReport') return resolve(localActivity);
-        if (name === 'exportActivityReport') return resolve({fileName:'nps-lens-webapp-diagnostico.json',content:JSON.stringify({schema_version:'2.0',report:localActivity})});
+        if (name === 'exportActivityReport') return resolve({fileName:'nps-lens-webapp-diagnostico.json',content:JSON.stringify({schema_version:'2.1',report:localActivity})});
         if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
         if (name === 'getNewsletterSettings') return resolve({subject:'NPS Lens · Voz del cliente y causalidad operativa',activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}]});
         if (name === 'saveNewsletterRecipient' || name === 'saveNewsletterSubject') return resolve({});
@@ -129,7 +129,8 @@
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
   function queueActivity(name, detail = '', status = 'ok', durationMs = 0) {
-    activityQueue.push({sessionId,name,area:state.adminRoute || state.area,section:state.adminRoute ? (state.adminRoute === 'settings' ? state.settingsView : state.adminRoute) : state.section,view:state.view,durationMs:Math.max(0,Math.round(durationMs)),status,detail});
+    const administrativeView = state.adminRoute === 'settings' ? state.settingsView : state.adminRoute;
+    activityQueue.push({occurredAt:new Date().toISOString(),sessionId,name,area:state.adminRoute || state.area,section:state.adminRoute ? administrativeView : state.section,view:state.adminRoute ? administrativeView : state.view,durationMs:Math.max(0,Math.round(durationMs)),status,detail});
     clearTimeout(activityTimer);
     if (activityQueue.length >= 8) flushActivity(); else activityTimer = setTimeout(flushActivity,1800);
   }
@@ -141,10 +142,18 @@
   }
   function renderActivity(report, adoption) {
     if (adoption) return `<div class="grid">${metric('Usuarios únicos',report.summary.users)}${metric('Sesiones',report.summary.sessions)}${metric('Acciones registradas',report.summary.events)}<article class="card half"><h3>Actividad por usuario</h3>${table(report.users,100)}</article><article class="card half"><h3>Acciones más utilizadas</h3>${table(report.actions,100)}</article><article class="card wide"><h3>Última actividad</h3>${table(report.events,250)}</article></div>`;
-    return `<div class="grid">${metric('Eventos',report.summary.events)}${metric('Errores',report.summary.errors)}${metric('P95 de respuesta',`${format(report.summary.p95Ms)} ms`)}<article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
+    return `<div class="grid">${metric('Eventos',report.summary.events)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}<article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
+  }
+  async function loadActivityReport(force = false) {
+    const request = {days:Number($('activity-days')?.value || 30),email:$('activity-email')?.value || ''};
+    const key = `${request.days}|${request.email.trim().toLowerCase()}`;
+    if(!force && activityCache.key === key && activityCache.report) return activityCache.report;
+    const report = await rpc('getActivityReport',[request]);
+    activityCache = {key,report};
+    return report;
   }
   function settings(view) {
-    setTimeout(async () => { try { const report = await rpc('getActivityReport',[{days:Number($('activity-days')?.value || 30),email:$('activity-email')?.value || ''}]); $('activity-body').innerHTML = renderActivity(report,view === 'adoption'); } catch (error) { $('activity-body').innerHTML = `<p class="error">${esc(error.message)}</p>`; } },0);
+    setTimeout(async () => { try { const report = await loadActivityReport(); if($('activity-body')) $('activity-body').innerHTML = renderActivity(report,view === 'adoption'); } catch (error) { if($('activity-body')) $('activity-body').innerHTML = `<p class="error">${esc(error.message)}</p>`; } },0);
     const title = view === 'adoption' ? 'Adopción y uso' : 'Telemetría de experiencia';
     const copy = view === 'adoption' ? 'Conoce quién utiliza NPS Lens y qué recorridos realiza para orientar la evolución del producto.' : 'Tiempos, errores y recorridos preparados para que CODEX identifique cuellos de botella sin exponer datos de cliente.';
     return hero(title,copy) + '<nav class="settings-tabs"><button class="button '+(view==='telemetry'?'':'ghost')+'" data-settings="telemetry">Telemetría</button><button class="button '+(view==='adoption'?'':'ghost')+'" data-settings="adoption">Adopción</button></nav><article class="card wide"><div class="admin-form"><label class="field">Periodo<select id="activity-days"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option><option value="365">12 meses</option></select></label><label class="field">Usuario (opcional)<input id="activity-email" type="email" placeholder="usuario@bbva.com"></label><button id="activity-refresh" class="button secondary">Actualizar</button></div><div id="activity-body" class="status">Preparando lectura…</div><div class="toolbar"><button id="activity-download" class="button">Descargar diagnóstico JSON</button><span id="activity-status" class="status"></span></div></article>';
@@ -173,7 +182,7 @@
       catch (error) { status.textContent = error.message; }
     };
     document.querySelectorAll('[data-settings]').forEach(button=>button.onclick=()=>{state.settingsView=button.dataset.settings;render();});
-    const refresh=async()=>{try{const report=await rpc('getActivityReport',[{days:Number($('activity-days').value),email:$('activity-email').value}]);$('activity-body').innerHTML=renderActivity(report,state.settingsView==='adoption');}catch(error){$('activity-body').innerHTML=`<p class="error">${esc(error.message)}</p>`;}};
+    const refresh=async()=>{try{const report=await loadActivityReport(true);$('activity-body').innerHTML=renderActivity(report,state.settingsView==='adoption');}catch(error){$('activity-body').innerHTML=`<p class="error">${esc(error.message)}</p>`;}};
     if($('activity-refresh')) $('activity-refresh').onclick=refresh;
     if($('activity-download')) $('activity-download').onclick=async()=>{try{const value=await rpc('exportActivityReport',[{days:Number($('activity-days').value),email:$('activity-email').value}]);downloadJson(value.fileName,value.content);$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
@@ -220,7 +229,7 @@
   $('edition-date').textContent = publication.generated_at ? new Date(publication.generated_at).toLocaleString('es-ES') : 'Pendiente de publicación';
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   $('edition-context').innerHTML = [filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month] || filters.month].filter(Boolean).map(value => `<span>${esc(value)}</span>`).join('');
-  rpc('getReportUrl').then(url => { if (url) { $('report-link').href = url; $('report-link').hidden = false; } }).catch(() => {});
+  if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
   window.addEventListener('error',event => queueActivity('client_error',event.message,'error'));
   window.addEventListener('pagehide',flushActivity);
   queueActivity('app_enter');
