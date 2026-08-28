@@ -92,14 +92,13 @@
     const source = datasets[view] || {};
     return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(source.total_rows || rows(source.rows).length))} filas</span><span class="pill">${esc(rows(source.columns).length)} columnas</span></div>${table(source.rows,500)}</article></div>`;
   }
-  const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
+  const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,performanceVersion:'2.3',performanceEvents:18,historicalEvents:0,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
   function rpc(name, args = []) {
     const callStarted = performance.now();
     return new Promise((resolve,reject) => {
       if (viewer.local) {
         if (name === 'getAdministration') return resolve({version:'local',generatedAt:publication.generated_at,reportUrl:viewer.reportUrl || '',access:{email:viewer.email,role:'admin',source:'initial-admin',configurationReady:true}});
         if (name === 'getActivityReport') return resolve(localActivity);
-        if (name === 'exportActivityReport') return resolve({fileName:'nps-lens-webapp-diagnostico.json',content:JSON.stringify({schema_version:'2.1',report:localActivity})});
         if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
         if (name === 'getNewsletterSettings') return resolve({subject:'NPS Lens · Voz del cliente y causalidad operativa',activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}]});
         if (name === 'saveNewsletterRecipient' || name === 'saveNewsletterSubject') return resolve({});
@@ -128,6 +127,12 @@
     anchor.href = url; anchor.download = fileName; document.body.append(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }
+  async function downloadActivityReport() {
+    const report = await loadActivityReport();
+    const payload = {schema_version:'2.1',app:{name:'NPS Lens WebApp',version:document.body.dataset.appVersion,runtime:'Google Apps Script'},privacy:{authenticated_users_recorded:true,customer_data_recorded:false,filter_values_recorded:false},report};
+    const stamp = new Date().toISOString().replace(/\D/g,'').slice(0,14);
+    downloadJson(`nps-lens-webapp-diagnostico-${stamp}.json`,JSON.stringify(payload));
+  }
   function queueActivity(name, detail = '', status = 'ok', durationMs = 0) {
     const administrativeView = state.adminRoute === 'settings' ? state.settingsView : state.adminRoute;
     activityQueue.push({occurredAt:new Date().toISOString(),sessionId,name,area:state.adminRoute || state.area,section:state.adminRoute ? administrativeView : state.section,view:state.adminRoute ? administrativeView : state.view,durationMs:Math.max(0,Math.round(durationMs)),status,detail});
@@ -142,7 +147,7 @@
   }
   function renderActivity(report, adoption) {
     if (adoption) return `<div class="grid">${metric('Usuarios únicos',report.summary.users)}${metric('Sesiones',report.summary.sessions)}${metric('Acciones registradas',report.summary.events)}<article class="card half"><h3>Actividad por usuario</h3>${table(report.users,100)}</article><article class="card half"><h3>Acciones más utilizadas</h3>${table(report.actions,100)}</article><article class="card wide"><h3>Última actividad</h3>${table(report.events,250)}</article></div>`;
-    return `<div class="grid">${metric('Eventos',report.summary.events)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}<article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
+    return `<div class="grid">${metric(`Eventos ${report.summary.performanceVersion}.x`,report.summary.performanceEvents)}${metric('Histórico conservado',report.summary.historicalEvents)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}<article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
   }
   async function loadActivityReport(force = false) {
     const request = {days:Number($('activity-days')?.value || 30),email:$('activity-email')?.value || ''};
@@ -184,7 +189,7 @@
     document.querySelectorAll('[data-settings]').forEach(button=>button.onclick=()=>{state.settingsView=button.dataset.settings;render();});
     const refresh=async()=>{try{const report=await loadActivityReport(true);$('activity-body').innerHTML=renderActivity(report,state.settingsView==='adoption');}catch(error){$('activity-body').innerHTML=`<p class="error">${esc(error.message)}</p>`;}};
     if($('activity-refresh')) $('activity-refresh').onclick=refresh;
-    if($('activity-download')) $('activity-download').onclick=async()=>{try{const value=await rpc('exportActivityReport',[{days:Number($('activity-days').value),email:$('activity-email').value}]);downloadJson(value.fileName,value.content);$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
+    if($('activity-download')) $('activity-download').onclick=async()=>{try{await downloadActivityReport();$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-subject-save')) $('newsletter-subject-save').onclick=async()=>{try{await rpc('saveNewsletterSubject',[$('newsletter-subject').value]);$('newsletter-status').textContent='Asunto guardado.';queueActivity('newsletter_subject_saved');}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};

@@ -179,6 +179,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         reloaded = Settings.from_env()
         request.app.state.settings = reloaded
         request.app.state.service.settings = reloaded
+        request.app.state.dashboard_service.clear_caches()
         request.app.state.dashboard_service.settings = reloaded
         request.app.state.dashboard_service.helix_store = (
             request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
@@ -282,6 +283,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         service_origin_n2: str = Form(""),
         sheet_name: str = Form(""),
         service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         require_admin(request)
         filename = file.filename or "upload.xlsx"
@@ -293,7 +295,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
-        return service_layer.ingest_excel(
+        result = service_layer.ingest_excel(
             filename=filename,
             payload=payload,
             context=UploadContext(
@@ -303,6 +305,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        dashboard_layer.clear_caches()
+        return result
 
     @app.post("/api/uploads/helix", response_model=HelixUploadResponse)
     async def upload_helix(
@@ -324,7 +328,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
-        return dashboard_layer.ingest_helix_excel(
+        result = dashboard_layer.ingest_helix_excel(
             filename=filename,
             payload=payload,
             context=UploadContext(
@@ -334,6 +338,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        dashboard_layer.clear_caches()
+        return result
 
     @app.get("/api/dashboard/context", response_model=ContextOptionsResponse)
     def dashboard_context(
@@ -453,6 +459,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         payload: EquivalenceRegistryRequest,
         request: Request,
         service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         require_admin(request)
         current_settings = cast(Settings, request.app.state.settings)
@@ -462,6 +469,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         updated_records = service_layer.repository.canonicalize_records(registry)
+        dashboard_layer.clear_caches()
         return {**registry.to_dict(), "updated_records": updated_records}
 
     @app.get("/api/dashboard/nps", response_model=DashboardResponse)

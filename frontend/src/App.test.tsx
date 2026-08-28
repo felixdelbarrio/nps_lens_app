@@ -626,6 +626,11 @@ describe("App", () => {
       expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("03");
     });
     expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/api/dashboard/context")
+      )
+    ).toHaveLength(1);
+    expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
     expect(screen.getAllByText("Score Medio").length).toBeGreaterThan(0);

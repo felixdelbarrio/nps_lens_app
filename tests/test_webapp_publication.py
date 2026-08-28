@@ -80,7 +80,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.3.0'" in config
+    assert "version: '2.3.1'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in administration
@@ -88,6 +88,10 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "event.occurredAt" in activity
     assert "serverP95Ms" in activity and "renderP95Ms" in activity
     assert "slowCalls" in activity
+    assert "performanceEvents" in activity
+    assert "function exportActivityReport" not in activity
     assert "_publishedEdition_" not in newsletter
     assert "let activityCache" in app
+    assert "downloadActivityReport" in app
+    assert "exportActivityReport" not in app
     assert "if(viewer.reportUrl)" in app

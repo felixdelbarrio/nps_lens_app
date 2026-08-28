@@ -287,10 +287,13 @@ export function App() {
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
   const didHydrate = useRef(false);
   const didApplyCausalDefault = useRef(false);
+  const initialContextKey = useRef("");
 
-  const configKey = serviceOrigin || serviceOriginN1 || serviceOriginN2
-    ? ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2]
-    : ["dashboard-context-initial"];
+  const selectedContextKey = `${serviceOrigin}\u0000${serviceOriginN1}\u0000${serviceOriginN2}`;
+  const configKey =
+    !serviceOrigin || !serviceOriginN1 || selectedContextKey === initialContextKey.current
+      ? ["dashboard-context-initial"]
+      : ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2];
 
   const {
     data: config,
@@ -314,6 +317,7 @@ export function App() {
       return;
     }
     didHydrate.current = true;
+    initialContextKey.current = `${config.default_service_origin}\u0000${config.default_service_origin_n1}\u0000${config.default_service_origin_n2 || ""}`;
     const latestYear = getLatestAvailableYear(config.available_years || []);
     const latestMonth = getLatestAvailableMonth(
       config.available_months_by_year[latestYear] || config.available_months_by_year.Todos || []

@@ -51,14 +51,17 @@ function getActivityReport(request) {
     source.forEach(row => { const key = String(row[column] || 'sin-dato'); result[key] = (result[key] || 0) + 1; });
     return Object.keys(result).map(name => ({name, events: result[name]})).sort((a, b) => b.events - a.events);
   };
-  const viewEvents = selected.filter(row => row[3] === 'view');
-  const serverCalls = selected.filter(row => row[3] === 'server_call');
+  const performanceVersion = NPS_LENS.version.split('.').slice(0, 2).join('.');
+  const performanceEvents = selected.filter(row => String(row[10] || '').indexOf('v' + performanceVersion + '.') === 0);
+  const viewEvents = performanceEvents.filter(row => row[3] === 'view');
+  const serverCalls = performanceEvents.filter(row => row[3] === 'server_call');
   const users = counts(selected, 1).map(item => ({email: item.name, events: item.events}));
   return {
     generatedAt: new Date().toISOString(), periodDays: days,
-    summary: {events: selected.length, users: users.length,
+    summary: {events: selected.length, performanceVersion, performanceEvents: performanceEvents.length,
+      historicalEvents: selected.length - performanceEvents.length, users: users.length,
       sessions: new Set(selected.map(row => String(row[2] || '')).filter(Boolean)).size,
-      errors: selected.filter(row => row[8] === 'error').length,
+      errors: performanceEvents.filter(row => row[8] === 'error').length,
       serverP95Ms: percentile95(serverCalls), renderP95Ms: percentile95(viewEvents)},
     users, actions: counts(selected, 3), screens: counts(viewEvents, 4).slice(0, 30),
     slowCalls: serverCalls.slice().sort((a, b) => Number(b[7] || 0) - Number(a[7] || 0)).slice(0, 20).map(row => ({
@@ -70,12 +73,4 @@ function getActivityReport(request) {
       duration_ms: Number(row[7]) || 0, status: String(row[8] || ''), detail: String(row[9] || ''),
       version: row[10] instanceof Date ? 'unknown' : String(row[10] || '')}))
   };
-}
-
-function exportActivityReport(request) {
-  const report = getActivityReport(request);
-  const payload = {schema_version: '2.1',
-    app: {name: 'NPS Lens WebApp', version: NPS_LENS.version, runtime: 'Google Apps Script'},
-    privacy: {authenticated_users_recorded: true, customer_data_recorded: false, filter_values_recorded: false}, report};
-  return {fileName: 'nps-lens-webapp-diagnostico-' + Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd-HHmmss') + '.json', content: JSON.stringify(payload)};
 }
