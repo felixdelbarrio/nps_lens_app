@@ -61,6 +61,10 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
     assert "initialAdmin" in config
     assert "_assertAdmin_(viewer)" in administration
     assert "function diagnoseNpsLensAccess()" in administration
+    assert "ScriptApp.requireAllScopes" in administration
+    assert "configuredAdmins || viewer.email" in administration
+    assert "SpreadsheetApp.create('NPS Lens · Administración')" in administration
+    assert "console.log(JSON.stringify(result))" in administration
     assert "function testNewsletter()" in newsletter
     assert "saveNewsletterRecipient" in newsletter
     assert "filter(item => item.active)" in newsletter

@@ -1,5 +1,5 @@
 const NPS_LENS = Object.freeze({
-  version: '2.2.1',
+  version: '2.2.2',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   editionFileProperty: 'NPS_LENS_EDITION_FILE_ID',

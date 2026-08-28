@@ -7,6 +7,6 @@ function onOpen() {
 }
 
 function setupFromActiveSpreadsheet() {
-  const email = Session.getActiveUser().getEmail();
-  return setupNpsLensWebApp(SpreadsheetApp.getActive().getId(), email);
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  return setupNpsLensWebApp(active ? active.getId() : '', '');
 }
