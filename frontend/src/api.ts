@@ -575,16 +575,28 @@ async function downloadArtifact(
   pathname: string,
   params: Record<string, string | number | undefined>,
   fallbackName: string
-): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
+): Promise<{ blob: Blob | null; fileName: string; savedPath: string }> {
   const response = await fetch(buildUrl(pathname, params));
   if (!response.ok) {
     await parseResponse(response);
+  }
+  const savedPath = response.headers.get("x-nps-lens-saved-path") || "";
+  if (savedPath && canUseDesktopFileBridge()) {
+    await response.body?.cancel();
+    return {
+      blob: null,
+      fileName: parseContentDispositionFilename(
+        response.headers.get("content-disposition"),
+        fallbackName
+      ),
+      savedPath
+    };
   }
   return {
     blob: await response.blob(),
     fileName:
       parseContentDispositionFilename(response.headers.get("content-disposition"), fallbackName),
-    savedPath: response.headers.get("x-nps-lens-saved-path") || ""
+    savedPath
   };
 }
 
@@ -600,7 +612,7 @@ export function downloadTelemetry() {
   return downloadArtifact("/api/telemetry/export", {}, "nps-lens-telemetria.json");
 }
 
-export async function downloadExecutiveReport(params: {
+export function downloadExecutiveReport(params: {
   service_origin: string;
   service_origin_n1: string;
   service_origin_n2: string;
@@ -613,14 +625,6 @@ export async function downloadExecutiveReport(params: {
   max_days_apart: number;
   touchpoint_source: string;
   report_dimension_analysis: string;
-}): Promise<{ blob: Blob; fileName: string; savedPath: string }> {
-  const response = await fetch(buildUrl("/api/dashboard/report/pptx", params));
-  if (!response.ok) {
-    await parseResponse(response);
-  }
-  return {
-    blob: await response.blob(),
-    fileName: parseContentDispositionFilename(response.headers.get("content-disposition")),
-    savedPath: response.headers.get("x-nps-lens-saved-path") || ""
-  };
+}) {
+  return downloadArtifact("/api/dashboard/report/pptx", params, "reporte-ejecutivo.pptx");
 }

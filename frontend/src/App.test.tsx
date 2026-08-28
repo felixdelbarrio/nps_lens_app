@@ -571,6 +571,13 @@ describe("App", () => {
             }
           });
         }
+        if (url.includes("/api/dashboard/publication.zip")) {
+          return new Response("publication-content", {
+            headers: {
+              "Content-Disposition": 'attachment; filename="nps-lens-publicacion.zip"'
+            }
+          });
+        }
         throw new Error(`Unhandled fetch ${url}`);
       })
     );
@@ -591,6 +598,7 @@ describe("App", () => {
 
   it("renders restored navigation, filters, traceability and uploads", async () => {
     const user = userEvent.setup();
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     renderApp();
 
     await waitFor(() =>
@@ -617,6 +625,11 @@ describe("App", () => {
       expect(screen.getByRole("combobox", { name: "Año" })).toHaveValue("2026");
       expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("03");
     });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/api/dashboard/context")
+      )
+    ).toHaveLength(1);
     expect(
       screen.getByRole("combobox", { name: "Mes" }).querySelector('option[value="03"]')
     ).toHaveTextContent("Marzo");
@@ -660,6 +673,12 @@ describe("App", () => {
     expect(screen.getByTestId("selected-issues-list")).toHaveTextContent(
       "extra_columns_detected"
     );
+    await user.click(screen.getByRole("tab", { name: "Publicación Web" }));
+    expect(screen.getByRole("heading", { name: "Preparar la edición para la WebApp" })).toBeInTheDocument();
+    expect(screen.getByText("30 MB")).toBeInTheDocument();
+    expect(screen.getByText("Incluida")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Generar y descargar edición" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/dashboard/publication.zip"))).toBe(true));
 
     await user.click(screen.getByRole("button", { name: /Datos/i }));
     expect(screen.getByTestId("data-table")).toHaveTextContent("Acceso");

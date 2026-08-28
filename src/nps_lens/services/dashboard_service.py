@@ -4,11 +4,13 @@ import contextlib
 import hashlib
 import json
 import logging
-import os
 import re
+from collections import OrderedDict
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Sequence, cast
+from threading import RLock
+from typing import Any, Callable, Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -84,6 +86,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
+from nps_lens.platform.downloads import persist_download
 from nps_lens.platform.publication import PublicationArtifact, build_publication_archive
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
@@ -396,6 +399,100 @@ class DashboardService:
         self.settings = settings
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self.logger = logging.getLogger(__name__)
+        # The analytical routes allocate large pandas/sklearn intermediates.  A single
+        # bounded lock/cache prevents identical requests (and exports) from calculating
+        # the same dataset concurrently while keeping memory use predictable.
+        self._analytics_lock = RLock()
+        self._frame_cache: OrderedDict[tuple[object, ...], pd.DataFrame] = OrderedDict()
+        self._result_cache: OrderedDict[tuple[object, ...], dict[str, object]] = OrderedDict()
+        self._frame_cache_limit = 4
+        self._result_cache_limit = 4
+
+    @staticmethod
+    def _path_revision(path: Path) -> tuple[int, int]:
+        try:
+            stat = path.stat()
+        except OSError:
+            return (0, 0)
+        return (int(stat.st_mtime_ns), int(stat.st_size))
+
+    @staticmethod
+    def _context_key(context: UploadContext) -> tuple[str, str, str]:
+        return (
+            context.service_origin,
+            context.service_origin_n1,
+            context.service_origin_n2,
+        )
+
+    def _data_revision(self, context: UploadContext) -> tuple[object, ...]:
+        dataset_context = DatasetContext(*self._context_key(context))
+        stored = self.helix_store.get(dataset_context)
+        helix_revision = self._path_revision(stored.path) if stored else (0, 0)
+        database_revision = (
+            self._path_revision(self.repository.db_path),
+            self._path_revision(Path(f"{self.repository.db_path}-wal")),
+        )
+        knowledge_revision = self._path_revision(
+            self.settings.knowledge_dir / "knowledge_cache.jsonl"
+        )
+        return (*database_revision, helix_revision, knowledge_revision)
+
+    @staticmethod
+    def _remember_bounded(
+        cache: OrderedDict[tuple[object, ...], Any],
+        key: tuple[object, ...],
+        value: Any,
+        limit: int,
+    ) -> Any:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > limit:
+            cache.popitem(last=False)
+        return value
+
+    def clear_caches(self) -> None:
+        with self._analytics_lock:
+            self._frame_cache.clear()
+            self._result_cache.clear()
+
+    def _cached_result(
+        self,
+        key: tuple[object, ...],
+        builder: Callable[[], dict[str, object]],
+    ) -> dict[str, object]:
+        with self._analytics_lock:
+            cached = self._result_cache.get(key)
+            if cached is not None:
+                self._result_cache.move_to_end(key)
+                return cached
+            result = builder()
+            return cast(
+                dict[str, object],
+                self._remember_bounded(
+                    self._result_cache,
+                    key,
+                    result,
+                    self._result_cache_limit,
+                ),
+            )
+
+    def _load_nps_df(self, context: UploadContext) -> pd.DataFrame:
+        key = ("nps-frame", *self._context_key(context), self._data_revision(context))
+        with self._analytics_lock:
+            cached = self._frame_cache.get(key)
+            if cached is not None:
+                self._frame_cache.move_to_end(key)
+                return cached
+            frame = self.repository.load_records_df(context)
+            return cast(
+                pd.DataFrame,
+                self._remember_bounded(
+                    self._frame_cache,
+                    key,
+                    frame,
+                    self._frame_cache_limit,
+                ),
+            )
 
     def _safe_helix_operational_benchmark(
         self,
@@ -440,7 +537,7 @@ class DashboardService:
         context: UploadContext,
     ) -> dict[str, object]:
         preferences = self.settings.ui_defaults()
-        records = self.repository.load_records_df(context)
+        records = self._load_nps_df(context)
         years, months_by_year = self._available_periods(records)
         helix_records = self._load_helix_df(context)
         causal_default_year, causal_default_month = self._latest_common_period(
@@ -557,8 +654,61 @@ class DashboardService:
         min_n_cross: int = 30,
         theme_mode: str = "light",
     ) -> dict[str, object]:
+        key = (
+            "nps-dashboard",
+            *self._context_key(context),
+            self._data_revision(context),
+            pop_year,
+            pop_month,
+            nps_group,
+            score_channel,
+            comparison_dimension,
+            gap_dimension,
+            opportunity_dimension,
+            cohort_row,
+            cohort_col,
+            min_n,
+            min_n_cross,
+            theme_mode,
+        )
+        return self._cached_result(
+            key,
+            lambda: self._build_nps_dashboard(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=nps_group,
+                score_channel=score_channel,
+                comparison_dimension=comparison_dimension,
+                gap_dimension=gap_dimension,
+                opportunity_dimension=opportunity_dimension,
+                cohort_row=cohort_row,
+                cohort_col=cohort_col,
+                min_n=min_n,
+                min_n_cross=min_n_cross,
+                theme_mode=theme_mode,
+            ),
+        )
+
+    def _build_nps_dashboard(
+        self,
+        *,
+        context: UploadContext,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
+        comparison_dimension: str = "Palanca",
+        gap_dimension: str = "Palanca",
+        opportunity_dimension: str = "Palanca",
+        cohort_row: str = "Palanca",
+        cohort_col: str = "Canal",
+        min_n: int = 200,
+        min_n_cross: int = 30,
+        theme_mode: str = "light",
+    ) -> dict[str, object]:
         theme = get_theme(theme_mode)
-        all_records = self.repository.load_records_df(context)
+        all_records = self._load_nps_df(context)
         resolved_channel = self._resolve_score_channel(all_records, score_channel)
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
@@ -791,7 +941,7 @@ class DashboardService:
                 self._resolve_score_channel(frame, score_channel),
             )
         else:
-            frame = self.repository.load_records_df(context)
+            frame = self._load_nps_df(context)
             resolved_channel = self._resolve_score_channel(frame, score_channel)
             resolved_group = self._resolve_nps_group(frame, nps_group)
             frame = self._apply_score_channel_filter(frame, resolved_channel)
@@ -828,8 +978,52 @@ class DashboardService:
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
+        key = (
+            "linking-dashboard",
+            *self._context_key(context),
+            self._data_revision(context),
+            pop_year,
+            pop_month,
+            # The causal view deliberately analyses the full NPS population on Web.
+            # Do not fragment the cache with caller values that the calculation ignores.
+            POP_ALL,
+            _PREFERRED_SCORE_CHANNEL,
+            min_similarity,
+            max_days_apart,
+            touchpoint_source,
+            theme_mode,
+            self._helix_base_url(),
+        )
+        return self._cached_result(
+            key,
+            lambda: self._build_linking_dashboard(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=nps_group,
+                score_channel=score_channel,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                touchpoint_source=touchpoint_source,
+                theme_mode=theme_mode,
+            ),
+        )
+
+    def _build_linking_dashboard(
+        self,
+        *,
+        context: UploadContext,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        nps_group: Optional[str] = None,
+        score_channel: Optional[str] = None,
+        min_similarity: float = 0.25,
+        max_days_apart: int = 10,
+        touchpoint_source: str = "",
+        theme_mode: str = "light",
+    ) -> dict[str, object]:
         theme = get_theme(theme_mode)
-        nps_frame = self.repository.load_records_df(context)
+        nps_frame = self._load_nps_df(context)
         del nps_group
         del score_channel
         resolved_channel = self._resolve_score_channel(nps_frame, _PREFERRED_SCORE_CHANNEL)
@@ -1255,7 +1449,7 @@ class DashboardService:
         report_dimension_analysis: str = "",
         report_format: str = "standard",
     ) -> BusinessPptResult:
-        scope_history_df = self.repository.load_records_df(context)
+        scope_history_df = self._load_nps_df(context)
         if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
         resolved_channel = self._resolve_score_channel(
@@ -1496,28 +1690,14 @@ class DashboardService:
         )
 
     def _persist_report_copy(self, report: BusinessPptResult) -> Path:
-        # Desktop/webview downloads cannot target an arbitrary folder directly, so the API
-        # writes the canonical copy server-side into the configured downloads directory.
         preferred_dir = Path(
             normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
         )
-        fallback_dir = self.settings.data_dir / "reports"
-        for target_dir in [preferred_dir, fallback_dir]:
-            try:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                saved_path = target_dir / report.file_name
-                with saved_path.open("wb") as handle:
-                    handle.write(report.content)
-                    handle.flush()
-                    with contextlib.suppress(OSError):
-                        os.fsync(handle.fileno())
-                if not saved_path.exists() or saved_path.stat().st_size <= 0:
-                    raise OSError("El fichero PPTX no existe tras persistirlo.")
-                print(f"[REPORT] Output path: {saved_path}")
-                return saved_path
-            except OSError:
-                continue
-        raise OSError("No se pudo persistir la copia local del reporte generado.")
+        return persist_download(
+            report.content,
+            report.file_name,
+            [preferred_dir, self.settings.data_dir / "reports"],
+        )
 
     def generate_publication(
         self,
@@ -1550,7 +1730,7 @@ class DashboardService:
             max_days_apart=max_days_apart,
             touchpoint_source=touchpoint_source,
         )
-        history_df = self.repository.load_records_df(context)
+        history_df = self._load_nps_df(context)
         resolved_channel = self._resolve_score_channel(history_df, score_channel)
         resolved_group = self._resolve_nps_group(history_df, nps_group)
         filtered_history_df = self._apply_score_channel_filter(history_df, resolved_channel)
@@ -1642,12 +1822,21 @@ class DashboardService:
             },
         }
         date_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return build_publication_archive(
+        artifact = build_publication_archive(
             publication,
             report_name=report.file_name,
             report_content=report.content,
             file_name=f"nps-lens-publicacion-{date_stamp}.zip",
         )
+        preferred_dir = Path(
+            normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
+        )
+        saved_path = persist_download(
+            artifact.content,
+            artifact.file_name,
+            [preferred_dir, self.settings.data_dir / "publications"],
+        )
+        return replace(artifact, saved_path=str(saved_path))
 
     def _build_business_report_md(
         self,
@@ -2954,7 +3143,26 @@ class DashboardService:
         )
         if stored is None:
             return pd.DataFrame()
-        return self.helix_store.load_df(stored)
+        key = (
+            "helix-frame",
+            *self._context_key(context),
+            self._path_revision(stored.path),
+        )
+        with self._analytics_lock:
+            cached = self._frame_cache.get(key)
+            if cached is not None:
+                self._frame_cache.move_to_end(key)
+                return cached
+            frame = self.helix_store.load_df(stored)
+            return cast(
+                pd.DataFrame,
+                self._remember_bounded(
+                    self._frame_cache,
+                    key,
+                    frame,
+                    self._frame_cache_limit,
+                ),
+            )
 
     def _context_pills(
         self,

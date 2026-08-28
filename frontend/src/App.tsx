@@ -2,6 +2,7 @@ import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent
 import useSWR from "swr";
 
 import {
+  canUseDesktopFileBridge,
   downloadExecutiveReport,
   downloadExclusiveReport,
   downloadWebPublication,
@@ -84,7 +85,8 @@ const INSIGHT_TABS = [
 const INGEST_TABS = [
   { id: "new", label: "Nueva carga" },
   { id: "history", label: "Histórico" },
-  { id: "traceability", label: "Detalle de ejecución" }
+  { id: "traceability", label: "Detalle de ejecución" },
+  { id: "publication", label: "Publicación Web" }
 ];
 
 const SUMMARY_TABS = [
@@ -205,6 +207,19 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
+function finishArtifactDownload(
+  artifact: { blob: Blob | null; fileName: string; savedPath: string },
+  onSaved: (path: string) => void
+) {
+  if (artifact.savedPath && canUseDesktopFileBridge()) {
+    onSaved(artifact.savedPath);
+    return;
+  }
+  if (artifact.blob) {
+    triggerBlobDownload(artifact.blob, artifact.fileName);
+  }
+}
+
 type KpiPayload = DashboardPayload["kpis"];
 type KpiKind = "metric" | "percentage" | "volume";
 
@@ -272,10 +287,13 @@ export function App() {
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
   const didHydrate = useRef(false);
   const didApplyCausalDefault = useRef(false);
+  const initialContextKey = useRef("");
 
-  const configKey = serviceOrigin || serviceOriginN1 || serviceOriginN2
-    ? ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2]
-    : ["dashboard-context-initial"];
+  const selectedContextKey = `${serviceOrigin}\u0000${serviceOriginN1}\u0000${serviceOriginN2}`;
+  const configKey =
+    !serviceOrigin || !serviceOriginN1 || selectedContextKey === initialContextKey.current
+      ? ["dashboard-context-initial"]
+      : ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2];
 
   const {
     data: config,
@@ -299,6 +317,7 @@ export function App() {
       return;
     }
     didHydrate.current = true;
+    initialContextKey.current = `${config.default_service_origin}\u0000${config.default_service_origin_n1}\u0000${config.default_service_origin_n2 || ""}`;
     const latestYear = getLatestAvailableYear(config.available_years || []);
     const latestMonth = getLatestAvailableMonth(
       config.available_months_by_year[latestYear] || config.available_months_by_year.Todos || []
@@ -783,7 +802,7 @@ export function App() {
         touchpoint_source: touchpointSource,
         report_dimension_analysis: reportDimensionAnalysis
       });
-      triggerBlobDownload(report.blob, report.fileName);
+      finishArtifactDownload(report, (path) => setStatusCopy(`Informe guardado en ${path}`));
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -807,14 +826,25 @@ export function App() {
     };
   }
 
-  async function handleDownloadExclusive(kind: "report" | "publication") {
+  async function handleDownloadExclusiveReport() {
     setIsGeneratingReport(true);
     setError(null);
     try {
-      const artifact = kind === "publication"
-        ? await downloadWebPublication(exportQuery())
-        : await downloadExclusiveReport(exportQuery());
-      triggerBlobDownload(artifact.blob, artifact.fileName);
+      const artifact = await downloadExclusiveReport(exportQuery());
+      finishArtifactDownload(artifact, (path) => setStatusCopy(`Informe exclusivo guardado en ${path}`));
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }
+
+  async function handleDownloadPublication() {
+    setIsGeneratingReport(true);
+    setError(null);
+    try {
+      const artifact = await downloadWebPublication(exportQuery());
+      finishArtifactDownload(artifact, (path) => setStatusCopy(`Publicación Web guardada en ${path}`));
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -1649,6 +1679,50 @@ export function App() {
             </aside>
           </div>
         ) : null}
+
+        {ingestTab === "publication" ? (
+          <section className="surface-card stack-panel publication-panel">
+            <div className="section-heading section-heading-inline">
+              <div>
+                <p className="eyebrow">Canal Web</p>
+                <h2>Preparar la edición para la WebApp</h2>
+                <p className="secondary-copy">
+                  Genera una edición estática con los filtros actuales, todas las pantallas de análisis
+                  y la presentación exclusiva que utilizará la newsletter.
+                </p>
+              </div>
+              <button
+                className="primary-button"
+                data-testid="publication-download-button"
+                disabled={actionsDisabled}
+                onClick={() => void handleDownloadPublication()}
+                type="button"
+              >
+                {isGeneratingReport ? "Preparando edición…" : "Generar y descargar edición"}
+              </button>
+            </div>
+            <div className="metric-grid metric-grid-3">
+              <article className="metric-card">
+                <span>Ámbito publicado</span>
+                <strong>{dashboard?.context_label || "Filtros actuales"}</strong>
+              </article>
+              <article className="metric-card">
+                <span>Tamaño máximo</span>
+                <strong>30 MB</strong>
+              </article>
+              <article className="metric-card">
+                <span>Presentación newsletter</span>
+                <strong>Incluida</strong>
+              </article>
+            </div>
+            <article className="note-card">
+              <p className="secondary-copy">
+                La edición se comprime y ajusta automáticamente al límite de publicación. No incluye
+                configuración administrativa ni telemetría.
+              </p>
+            </article>
+          </section>
+        ) : null}
       </section>
     );
   }
@@ -1774,19 +1848,10 @@ export function App() {
                     aria-label="Generar informe exclusivo para newsletter"
                     className="icon-button topbar-icon-button"
                     disabled={actionsDisabled}
-                    onClick={() => void handleDownloadExclusive("report")}
+                    onClick={() => void handleDownloadExclusiveReport()}
                     type="button"
                   >
                     <Icon name="presentation" />
-                  </button>
-                  <button
-                    aria-label="Descargar edición web actualizada"
-                    className="icon-button topbar-icon-button"
-                    disabled={actionsDisabled}
-                    onClick={() => void handleDownloadExclusive("publication")}
-                    type="button"
-                  >
-                    <Icon name="document" />
                   </button>
                   <button
                     aria-label="Abrir configuración global"

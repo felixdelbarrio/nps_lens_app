@@ -6,32 +6,238 @@
   const dashboard = publication.screens?.dashboard || {};
   const linking = publication.screens?.linking || {};
   const datasets = publication.screens?.data || {};
-  const state = {area:'summary', view:'period-aggregates', started:performance.now()};
+  const $ = id => document.getElementById(id);
+  const rows = value => Array.isArray(value) ? value : [];
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const label = value => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+  const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
+  const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['gaps','Dónde se separa el NPS'],['opportunities','Oportunidades priorizadas'],['cohorts','Comparativas cruzadas']];
+  const thermalViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']];
+  const linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : [['situation','Situación'],['entity-summary','Resumen causal'],['scenarios','Escenarios'],['nps-deep-dive','Detalle NPS']];
   const areas = [
-    {id:'summary',label:'Sumario del periodo',views:[['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['gaps','Dónde se separa el NPS'],['opportunities','Oportunidades priorizadas'],['cohorts','Comparativas cruzadas']]},
-    {id:'thermal',label:'Analítica NPS Térmico',views:[['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']]},
-    {id:'linking',label:'Incidencias ↔ NPS',views:(linking.navigation||[['situation','Situación'],['entity-summary','Resumen causal'],['scenarios','Escenarios'],['nps-deep-dive','Detalle NPS']]).map(item=>[item.id||item[0],item.label||item[1]])},
-    {id:'data',label:'Datos de soporte',views:[['nps','NPS'],['helix','Helix']]},
-    {id:'presentation',label:'Presentación',views:[]}
+    {id:'insights',label:'Insights',sections:[['summary','Sumario del Periodo'],['thermal','Analítica NPS Térmico'],['linking','Incidencias ↔ NPS']]},
+    {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}
   ];
-  if(viewer.isAdmin) areas.push({id:'administration',label:'Administración',views:[['publication','Publicación'],['newsletter','Newsletter'],['telemetry','Telemetría']]});
-  const $=id=>document.getElementById(id);
-  const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  const label=value=>String(value??'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
-  const format=value=>typeof value==='number'?new Intl.NumberFormat('es-ES',{maximumFractionDigits:1}).format(value):String(value??'—');
-  function rows(value){return Array.isArray(value)?value:[]}
-  function table(items,limit=250){const data=rows(items).slice(0,limit);if(!data.length)return '<div class="empty">No hay información suficiente en esta edición.</div>';const columns=[...new Set(data.flatMap(row=>Object.keys(row||{})))].slice(0,14);return `<div class="table-wrap"><table><thead><tr>${columns.map(key=>`<th>${esc(label(key))}</th>`).join('')}</tr></thead><tbody>${data.map(row=>`<tr>${columns.map(key=>{const raw=row?.[key];const text=typeof raw==='object'?JSON.stringify(raw):format(raw);const href=String(row?.url||row?.incident_id__href||'');return `<td>${href&&/incident|record id/i.test(key)?`<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>`:esc(text)}</td>`}).join('')}</tr>`).join('')}</tbody></table></div>`}
-  function metric(name,value){return `<article class="card"><div class="metric-label">${esc(name)}</div><div class="metric-value">${esc(format(value))}</div></article>`}
-  function figure(spec,id){if(!spec?.data?.length)return '<div class="empty">No hay señal suficiente para construir esta visualización.</div>';setTimeout(()=>{const target=$(id);if(target&&window.Plotly)Plotly.newPlot(target,spec.data,spec.layout||{}, {displayModeBar:false,responsive:true})},0);return `<div id="${id}" class="chart"></div>`}
-  function hero(title,copy){return `<div class="hero"><h3>${esc(title)}</h3><p>${esc(copy||'Información consolidada con las mismas reglas de negocio de NPS Lens local.')}</p><div class="pills">${rows(dashboard.context_pills).map(value=>`<span class="pill">${esc(value)}</span>`).join('')}</div></div>`}
-  function summary(view){const k=dashboard.kpis||{},overview=dashboard.overview||{};if(view==='period-aggregates')return hero(dashboard.scope?.cumulative?.label||'Visión ejecutiva',dashboard.scope?.cumulative?.note)+`<div class="grid">${metric('Muestras',k.samples)}${metric('Score medio',k.nps_average)}${metric('NPS clásico',k.classic_nps)}${metric('Detractores',k.detractor_rate)}${metric('Promotores',k.promoter_rate)}${metric('Comentarios',k.comments)}<article class="card wide"><h3>Evolución por periodo</h3>${figure(overview.period_aggregates_figure,'period-chart')}</article></div>`;if(view==='daily')return hero('NPS clásico y detractores','La lectura diaria separa nivel, tendencia y composición.')+`<div class="grid"><article class="card wide">${figure(overview.daily_nps_figure||overview.daily_figure,'daily-chart')}</article><article class="card wide">${table(overview.daily_table)}</article></div>`;if(view==='volume-mix')return hero('Cómo y cuándo lo dicen','Volumen, canal y mezcla de respuesta a lo largo del periodo.')+`<div class="grid"><article class="card wide">${figure(overview.daily_volume_mix_figure,'volume-chart')}</article></div>`;if(view==='gaps')return hero('Dónde se separa el NPS','Brechas con base suficiente y distancia frente al conjunto.')+`<div class="grid"><article class="card wide">${figure(dashboard.gaps?.figure,'gaps-chart')}</article><article class="card wide">${table(dashboard.gaps?.table)}</article></div>`;if(view==='opportunities')return hero('Oportunidades priorizadas','Conceptos equivalentes se muestran con una única denominación de negocio.')+`<div class="grid"><article class="card wide">${table(dashboard.opportunities?.table||dashboard.opportunities?.rows)}</article></div>`;return hero('Comparativas cruzadas','Lecturas por cohortes protegidas por el tamaño mínimo de muestra.')+`<div class="grid"><article class="card wide">${table(dashboard.cohorts?.table||dashboard.cohorts?.rows)}</article></div>`}
-  function thermal(view){if(view==='topics')return hero('Qué dicen los clientes','Temas, evidencias y lenguaje real de cliente.')+`<div class="grid"><article class="card half"><h3>Temas principales</h3>${table(dashboard.topics?.table||dashboard.topics?.rows)}</article><article class="card half"><h3>Evidencias</h3>${table(dashboard.topics?.evidence||dashboard.evidence?.rows)}</article></div>`;return hero('Cambios respecto al histórico','Diferencias comparables con su base y dirección.')+`<div class="grid"><article class="card wide">${figure(dashboard.comparison?.figure,'comparison-chart')}</article><article class="card wide">${table(dashboard.comparison?.table)}</article></div>`}
-  function scenarioCards(cards){return rows(cards).map((card,index)=>`<article class="card wide scenario"><h4>${esc(card.title||card.anchor_topic||`Escenario ${index+1}`)}</h4><p>${esc(card.statement||card.chain_story||card.rationale||card.summary||'')}</p><div class="scenario-grid">${rows(card.spotlight_metrics).map(item=>`<div class="fact"><span>${esc(item.label||'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')||Object.entries(card).filter(([key,value])=>!['title','statement','chain_story'].includes(key)&&['string','number'].includes(typeof value)).slice(0,12).map(([key,value])=>`<div class="fact"><span>${esc(label(key))}</span><strong>${esc(format(value))}</strong></div>`).join('')}</div><details open><summary>Evidencia Helix</summary>${table(card.incident_records||[],20)}</details><details><summary>Voz del cliente</summary>${table(card.comment_records||[],20)}</details><details><summary>Matriz visual</summary>${figure(card.matrix_figure,`matrix-${index}`)}</details><details><summary>Ficha cuantitativa</summary>${table(card.detail_table||[],30)}</details><details><summary>Heat map</summary>${figure(card.heatmap_figure,`heat-${index}`)}</details><details><summary>Changepoints + lag</summary>${figure(card.changepoints_figure,`cp-${index}`)}</details><details><summary>Lag en días</summary>${figure(card.lag_figure,`lag-${index}`)}</details></article>`).join('')||'<div class="empty">No hay escenarios defendibles en esta edición.</div>'}
-  function linkingView(view){if(!linking.available)return hero('Cruce todavía no disponible',linking.empty_state||'Se necesita una base Helix y NPS suficiente.');if(view==='situation')return hero(linking.situation?.narrative?.title||'Situación causal',linking.situation?.narrative?.summary)+`<div class="grid">${Object.entries(linking.kpis||{}).slice(0,9).map(([key,value])=>metric(label(key),value)).join('')}<article class="card wide">${figure(linking.situation?.figure,'situation-chart')}</article></div>`;if(view==='entity-summary')return hero(linking.entity_summary?.title||'Resumen causal',linking.entity_summary?.subtitle)+`<div class="grid"><article class="card wide">${figure(linking.entity_summary?.figure,'entity-chart')}</article><article class="card wide">${table(linking.entity_summary?.table)}</article></div>`;if(view==='scenarios')return hero(linking.scenarios?.title||'Escenarios causales',linking.scenarios?.subtitle)+`<div class="grid">${scenarioCards(linking.scenarios?.cards)}</div>`;return hero(linking.deep_dive?.title||'Análisis de tópicos NPS',linking.deep_dive?.subtitle)+`<div class="grid"><article class="card wide"><h3>Tópicos en tendencia</h3>${figure(linking.deep_dive?.trending?.figure,'trending-chart')}</article><article class="card wide"><h3>Ranking de hipótesis</h3>${table(linking.deep_dive?.ranking?.rows)}</article><article class="card wide"><h3>Muro de evidencias</h3>${table(linking.deep_dive?.evidence?.rows)}</article></div>`}
-  function data(view){const source=datasets[view]||{};return hero(view==='nps'?'Base NPS':'Base Helix','Muestra estática de soporte incluida en la edición publicada.')+`<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(source.total_rows||rows(source.rows).length))} filas</span><span class="pill">${esc(rows(source.columns).length)} columnas</span></div>${table(source.rows,500)}</article></div>`}
-  function rpc(name,args=[]){return new Promise((resolve,reject)=>{if(viewer.local){if(name==='getReportUrl')return resolve('');if(name==='getAdministration')return resolve({version:'local',generatedAt:publication.generated_at,telemetry:{events:0,errors:0,p95Ms:0,screens:[]}});if(name==='recordTelemetry')return resolve({accepted:args[0]?.length||0});return resolve({})}google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args)})}
-  function administration(view){if(view==='telemetry'){setTimeout(async()=>{try{const value=(await rpc('getAdministration')).telemetry||{};$('telemetry-body').innerHTML=`<div class="grid">${metric('Eventos',value.events)}${metric('Errores',value.errors)}${metric('P95 de respuesta',`${format(value.p95Ms)} ms`)}<article class="card wide"><h3>Pantallas más consultadas</h3>${table(value.screens)}</article></div>`}catch(error){$('telemetry-body').innerHTML=`<p class="error">${esc(error.message)}</p>`}},0);return hero('Telemetría de experiencia','Uso, errores y tiempos de respuesta para orientar optimizaciones.')+'<div id="telemetry-body" class="status">Preparando diagnóstico…</div>'}if(view==='newsletter'){setTimeout(async()=>{try{const value=await rpc('getNewsletterSettings');$('newsletter-recipients').value=value.recipients||'';$('newsletter-subject').value=value.subject||''}catch(error){$('newsletter-status').textContent=error.message}},0);return hero('Newsletter ejecutiva','Configura una comunicación exclusiva, vinculada a esta edición y su presentación.')+`<article class="card wide"><div class="admin-form"><input id="newsletter-recipients" placeholder="Destinatarios @bbva.com separados por coma"><input id="newsletter-subject" placeholder="Asunto"><button id="newsletter-save" class="button">Guardar</button></div><p id="newsletter-status" class="status">Solo el administrador puede guardar o enviar.</p><button id="newsletter-send" class="button secondary">Enviar newsletter</button></article>`}setTimeout(async()=>{try{const value=await rpc('getAdministration');$('admin-status').textContent=`Versión ${value.version} · Información generada ${value.generatedAt||'sin fecha'}`}catch(error){$('admin-status').textContent=error.message}},0);return hero('Administración de la publicación','La configuración y la newsletter permanecen reservadas al administrador.')+`<article class="card wide"><h3>Edición disponible</h3><p id="admin-status" class="status">Validando…</p><p>Publica los ficheros validados en Drive. El público navega contenido estático y no puede alterar filtros ni reglas.</p><div class="admin-form"><input id="edition-file" placeholder="ID de publication.json en Drive"><input id="report-file" placeholder="ID de la presentación en Drive"><button id="publication-save" class="button">Publicar edición</button></div></article>`}
-  function render(){const area=areas.find(item=>item.id===state.area)||areas[0];$('screen-title').textContent=area.label;document.querySelectorAll('.nav-button').forEach(button=>button.classList.toggle('active',button.dataset.area===area.id));$('secondary-nav').innerHTML=area.views.map(([id,name])=>`<button class="tab ${id===state.view?'active':''}" data-view="${esc(id)}">${esc(name)}</button>`).join('');document.querySelectorAll('.tab').forEach(button=>button.onclick=()=>{state.view=button.dataset.view;render()});let html='';if(area.id==='summary')html=summary(state.view);else if(area.id==='thermal')html=thermal(state.view);else if(area.id==='linking')html=linkingView(state.view);else if(area.id==='data')html=data(state.view);else if(area.id==='presentation')html=hero('Presentación exclusiva','Accede al informe diseñado para la newsletter y al racional extendido en estas pantallas.')+'<article class="card wide"><h3>Informe ejecutivo</h3><p>La presentación corresponde exactamente a la información publicada.</p></article>';else html=administration(state.view);$('content').innerHTML=html;if($('publication-save'))$('publication-save').onclick=async()=>{try{await rpc('setPublishedEditionFiles',[{editionFileId:$('edition-file').value,reportFileId:$('report-file').value}]);$('admin-status').textContent='Edición publicada correctamente.'}catch(error){$('admin-status').textContent=error.message}};if($('newsletter-save'))$('newsletter-save').onclick=async()=>{try{await rpc('saveNewsletterSettings',[{recipients:$('newsletter-recipients').value,subject:$('newsletter-subject').value}]);$('newsletter-status').textContent='Configuración guardada.'}catch(error){$('newsletter-status').textContent=error.message}};if($('newsletter-send'))$('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios.`}catch(error){$('newsletter-status').textContent=error.message}};history.replaceState(null,'',`#${area.id}/${state.view}`);rpc('recordTelemetry',[[{type:'view',screen:`${area.id}/${state.view}`,durationMs:Math.round(performance.now()-state.started)}]]).catch(()=>{});state.started=performance.now()}
-  $('primary-nav').className='primary-nav';$('primary-nav').innerHTML=areas.map(area=>`<button class="nav-button" data-area="${area.id}">${esc(area.label)}</button>`).join('');document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{const area=areas.find(item=>item.id===button.dataset.area);state.area=area.id;state.view=area.views[0]?.[0]||'';render()});const hash=location.hash.slice(1).split('/');if(areas.some(area=>area.id===hash[0])){state.area=hash[0];state.view=hash[1]||areas.find(area=>area.id===hash[0]).views[0]?.[0]||''}$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';rpc('getReportUrl').then(url=>{if(url){$('report-link').href=url;$('report-link').hidden=false}}).catch(()=>{});window.addEventListener('error',event=>rpc('recordTelemetry',[[{type:'error',screen:`${state.area}/${state.view}`,detail:event.message}]]).catch(()=>{}));render();
+  const state = {area:'insights',section:'summary',view:'period-aggregates',adminRoute:'',settingsView:'telemetry',started:performance.now()};
+  const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
+  const activityQueue = [];
+  let activityTimer = 0;
+  let activityCache = {key:'',report:null};
+
+  function detailViews(section) {
+    if (section === 'summary') return summaryViews;
+    if (section === 'thermal') return thermalViews;
+    if (section === 'linking') return linkingViews;
+    return [];
+  }
+  function table(items, limit = 250) {
+    const data = rows(items).slice(0, limit);
+    if (!data.length) return '<div class="empty">No hay información suficiente en esta edición.</div>';
+    const columns = [...new Set(data.flatMap(row => Object.keys(row || {})))].slice(0, 14);
+    return `<div class="table-wrap"><table><thead><tr>${columns.map(key => `<th>${esc(label(key))}</th>`).join('')}</tr></thead><tbody>${data.map(row => `<tr>${columns.map(key => {
+      const raw = row?.[key];
+      const text = typeof raw === 'object' ? JSON.stringify(raw) : format(raw);
+      const href = String(row?.url || row?.incident_id__href || '');
+      return `<td>${href && /incident|record id/i.test(key) ? `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>` : esc(text)}</td>`;
+    }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function metric(name, value) { return `<article class="card"><div class="metric-label">${esc(name)}</div><div class="metric-value">${esc(format(value))}</div></article>`; }
+  function figure(spec, id) {
+    if (!spec?.data?.length) return '<div class="empty">No hay señal suficiente para construir esta visualización.</div>';
+    setTimeout(() => { const target = $(id); if (target && window.Plotly) Plotly.newPlot(target, spec.data, spec.layout || {}, {displayModeBar:false,responsive:true}); }, 0);
+    return `<div id="${id}" class="chart"></div>`;
+  }
+  function hero(title, copy) {
+    return `<div class="hero"><h3>${esc(title)}</h3><p>${esc(copy || 'Información consolidada con las mismas reglas de negocio de NPS Lens local.')}</p><div class="pills">${rows(dashboard.context_pills).map(value => `<span class="pill">${esc(value)}</span>`).join('')}</div></div>`;
+  }
+  function contentTabs(items) {
+    return items.length ? `<nav class="content-tabs" aria-label="Detalle de pantalla">${items.map(([id,name]) => `<button class="tab ${id === state.view ? 'active' : ''}" data-detail="${esc(id)}">${esc(name)}</button>`).join('')}</nav>` : '';
+  }
+  function kpiCards(block, fallback) {
+    const kpis = block?.kpis || fallback || {};
+    const display = block?.display || {};
+    return [['Comentarios','comments'],['Score medio','nps_average'],['NPS clásico','classic_nps'],['Detractores','detractor_rate'],['Promotores','promoter_rate']].map(([name,key]) => metric(name,display[key] ?? kpis[key])).join('');
+  }
+  function summary(view) {
+    const overview = dashboard.overview || {};
+    const tabs = contentTabs(summaryViews);
+    if (view === 'period-aggregates') {
+      const cumulative = dashboard.scope?.cumulative;
+      const period = dashboard.scope?.period;
+      return tabs + hero(cumulative?.label || 'Datos acumulados', cumulative?.note) + `<div class="grid">${kpiCards(cumulative,dashboard.kpis)}<article class="card wide"><h3>${esc(period?.label || dashboard.context_label || 'Periodo seleccionado')}</h3><div class="grid nested-grid">${kpiCards(period,dashboard.kpis)}</div>${figure(overview.period_aggregates_figure,'period-chart')}</article></div>`;
+    }
+    if (view === 'daily') return tabs + hero('NPS clásico vs detractores','Nivel, tendencia y composición diaria con la misma lectura de la aplicación local.') + `<div class="grid"><article class="card wide">${figure(overview.daily_kpis_figure,'daily-kpis')}</article><article class="card wide">${figure(overview.daily_mix_figure,'daily-mix')}</article></div>`;
+    if (view === 'volume-mix') return tabs + hero('Cómo y cuándo lo dicen','Volumen, canal y mezcla de respuesta a lo largo del periodo.') + `<div class="grid"><article class="card wide">${figure(overview.daily_volume_mix_figure,'volume-chart')}</article></div>`;
+    if (view === 'gaps') return tabs + hero(dashboard.gaps?.title || 'Dónde se separa el NPS',dashboard.gaps?.subtitle) + `<div class="grid"><article class="card wide">${figure(dashboard.gaps?.figure,'gaps-chart')}</article><article class="card wide">${table(dashboard.gaps?.table)}</article></div>`;
+    if (view === 'opportunities') return tabs + hero('Oportunidades priorizadas','Conceptos equivalentes se muestran con una única denominación de negocio.') + `<div class="grid"><article class="card wide">${figure(dashboard.opportunities?.figure,'opportunity-chart')}</article><article class="card wide">${table(dashboard.opportunities?.table)}</article></div>`;
+    return tabs + hero('Comparativas cruzadas','Lecturas por cohortes protegidas por el tamaño mínimo de muestra.') + `<div class="grid"><article class="card wide">${figure(dashboard.cohorts?.figure,'cohort-chart')}</article><article class="card wide">${table(dashboard.cohorts?.table)}</article></div>`;
+  }
+  function thermal(view) {
+    const tabs = contentTabs(thermalViews);
+    if (view === 'topics') return tabs + hero('Qué dicen los clientes','Temas, evidencias y lenguaje real de cliente.') + `<div class="grid"><article class="card wide"><h3>Temas principales</h3>${figure(dashboard.overview?.topics_figure,'topics-chart')}${table(dashboard.overview?.topics_table)}</article></div>`;
+    return tabs + hero('Cambios respecto al histórico','Diferencias comparables con su base y dirección.') + `<div class="grid"><article class="card wide">${figure(dashboard.comparison?.figure,'comparison-chart')}</article><article class="card wide">${table(dashboard.comparison?.table)}</article></div>`;
+  }
+  function scenarioCards(cards) {
+    return rows(cards).map((card,index) => `<article class="card wide scenario"><h4>${esc(card.title || card.anchor_topic || `Escenario ${index + 1}`)}</h4><p>${esc(card.statement || card.chain_story || card.rationale || card.summary || '')}</p><div class="scenario-grid">${rows(card.spotlight_metrics).map(item => `<div class="fact"><span>${esc(item.label || 'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><details open><summary>Evidencia Helix</summary>${table(card.incident_records,20)}</details><details><summary>Voz del cliente</summary>${table(card.comment_records,20)}</details><details><summary>Matriz visual</summary>${figure(card.matrix_figure,`matrix-${index}`)}</details><details><summary>Ficha cuantitativa</summary>${table(card.detail_table,30)}</details><details><summary>Heat map</summary>${figure(card.heatmap_figure,`heat-${index}`)}</details><details><summary>Changepoints + lag</summary>${figure(card.changepoints_figure,`cp-${index}`)}</details><details><summary>Lag en días</summary>${figure(card.lag_figure,`lag-${index}`)}</details></article>`).join('') || '<div class="empty">No hay escenarios defendibles en esta edición.</div>';
+  }
+  function linkingView(view) {
+    const tabs = contentTabs(linkingViews);
+    if (!linking.available) return tabs + hero('Cruce todavía no disponible',linking.empty_state || 'Se necesita una base Helix y NPS suficiente.');
+    if (view === 'situation') return tabs + hero(linking.situation?.narrative?.title || 'Situación causal',linking.situation?.narrative?.summary) + `<div class="grid">${Object.entries(linking.kpis || {}).slice(0,9).map(([key,value]) => metric(label(key),value)).join('')}<article class="card wide">${figure(linking.situation?.figure,'situation-chart')}</article></div>`;
+    if (view === 'entity-summary') return tabs + hero(linking.entity_summary?.title || 'Resumen causal',linking.entity_summary?.subtitle) + `<div class="grid"><article class="card wide">${figure(linking.entity_summary?.figure,'entity-chart')}</article><article class="card wide">${table(linking.entity_summary?.table)}</article></div>`;
+    if (view === 'scenarios') return tabs + hero(linking.scenarios?.title || 'Escenarios causales',linking.scenarios?.subtitle) + `<div class="grid">${scenarioCards(linking.scenarios?.cards)}</div>`;
+    return tabs + hero(linking.deep_dive?.title || 'Análisis de tópicos NPS',linking.deep_dive?.subtitle) + `<div class="grid"><article class="card wide"><h3>Tópicos en tendencia</h3>${figure(linking.deep_dive?.trending?.figure,'trending-chart')}</article><article class="card wide"><h3>Ranking de hipótesis</h3>${table(linking.deep_dive?.ranking?.rows)}</article><article class="card wide"><h3>Muro de evidencias</h3>${table(linking.deep_dive?.evidence?.rows)}</article></div>`;
+  }
+  function data(view) {
+    const source = datasets[view] || {};
+    return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(source.total_rows || rows(source.rows).length))} filas</span><span class="pill">${esc(rows(source.columns).length)} columnas</span></div>${table(source.rows,500)}</article></div>`;
+  }
+  const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,performanceVersion:'2.3',performanceEvents:18,historicalEvents:0,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
+  function rpc(name, args = []) {
+    const callStarted = performance.now();
+    return new Promise((resolve,reject) => {
+      if (viewer.local) {
+        if (name === 'getAdministration') return resolve({version:'local',generatedAt:publication.generated_at,reportUrl:viewer.reportUrl || '',access:{email:viewer.email,role:'admin',source:'initial-admin',configurationReady:true}});
+        if (name === 'getActivityReport') return resolve(localActivity);
+        if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
+        if (name === 'getNewsletterSettings') return resolve({subject:'NPS Lens · Voz del cliente y causalidad operativa',activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}]});
+        if (name === 'saveNewsletterRecipient' || name === 'saveNewsletterSubject') return resolve({});
+        if (name === 'testNewsletter') return resolve({sent:1});
+        if (name === 'sendNewsletter') return resolve({sent:1});
+        return resolve({});
+      }
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args);
+    }).then(value => {
+      if(name !== 'recordActivityEvents') queueActivity('server_call',name,'ok',performance.now()-callStarted);
+      return value;
+    }, error => {
+      if(name !== 'recordActivityEvents') queueActivity('server_call',name,'error',performance.now()-callStarted);
+      throw error;
+    });
+  }
+  function importPublication(form) {
+    return new Promise((resolve,reject) => {
+      if (viewer.local) return reject(new Error('La importación se habilita al desplegar el proyecto en Google Apps Script.'));
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).importPublicationArchive(form);
+    });
+  }
+  function downloadJson(fileName, content) {
+    const url = URL.createObjectURL(new Blob([content], {type:'application/json'}));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = fileName; document.body.append(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+  async function downloadActivityReport() {
+    const report = await loadActivityReport();
+    const payload = {schema_version:'2.1',app:{name:'NPS Lens WebApp',version:document.body.dataset.appVersion,runtime:'Google Apps Script'},privacy:{authenticated_users_recorded:true,customer_data_recorded:false,filter_values_recorded:false},report};
+    const stamp = new Date().toISOString().replace(/\D/g,'').slice(0,14);
+    downloadJson(`nps-lens-webapp-diagnostico-${stamp}.json`,JSON.stringify(payload));
+  }
+  function queueActivity(name, detail = '', status = 'ok', durationMs = 0) {
+    const administrativeView = state.adminRoute === 'settings' ? state.settingsView : state.adminRoute;
+    activityQueue.push({occurredAt:new Date().toISOString(),sessionId,name,area:state.adminRoute || state.area,section:state.adminRoute ? administrativeView : state.section,view:state.adminRoute ? administrativeView : state.view,durationMs:Math.max(0,Math.round(durationMs)),status,detail});
+    clearTimeout(activityTimer);
+    if (activityQueue.length >= 8) flushActivity(); else activityTimer = setTimeout(flushActivity,1800);
+  }
+  function flushActivity() {
+    clearTimeout(activityTimer);
+    if (!activityQueue.length) return;
+    const batch = activityQueue.splice(0,50);
+    rpc('recordActivityEvents',[batch]).catch(() => {});
+  }
+  function renderActivity(report, adoption) {
+    if (adoption) return `<div class="grid">${metric('Usuarios únicos',report.summary.users)}${metric('Sesiones',report.summary.sessions)}${metric('Acciones registradas',report.summary.events)}<article class="card half"><h3>Actividad por usuario</h3>${table(report.users,100)}</article><article class="card half"><h3>Acciones más utilizadas</h3>${table(report.actions,100)}</article><article class="card wide"><h3>Última actividad</h3>${table(report.events,250)}</article></div>`;
+    return `<div class="grid">${metric(`Eventos ${report.summary.performanceVersion}.x`,report.summary.performanceEvents)}${metric('Histórico conservado',report.summary.historicalEvents)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}<article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
+  }
+  async function loadActivityReport(force = false) {
+    const request = {days:Number($('activity-days')?.value || 30),email:$('activity-email')?.value || ''};
+    const key = `${request.days}|${request.email.trim().toLowerCase()}`;
+    if(!force && activityCache.key === key && activityCache.report) return activityCache.report;
+    const report = await rpc('getActivityReport',[request]);
+    activityCache = {key,report};
+    return report;
+  }
+  function settings(view) {
+    setTimeout(async () => { try { const report = await loadActivityReport(); if($('activity-body')) $('activity-body').innerHTML = renderActivity(report,view === 'adoption'); } catch (error) { if($('activity-body')) $('activity-body').innerHTML = `<p class="error">${esc(error.message)}</p>`; } },0);
+    const title = view === 'adoption' ? 'Adopción y uso' : 'Telemetría de experiencia';
+    const copy = view === 'adoption' ? 'Conoce quién utiliza NPS Lens y qué recorridos realiza para orientar la evolución del producto.' : 'Tiempos, errores y recorridos preparados para que CODEX identifique cuellos de botella sin exponer datos de cliente.';
+    return hero(title,copy) + '<nav class="settings-tabs"><button class="button '+(view==='telemetry'?'':'ghost')+'" data-settings="telemetry">Telemetría</button><button class="button '+(view==='adoption'?'':'ghost')+'" data-settings="adoption">Adopción</button></nav><article class="card wide"><div class="admin-form"><label class="field">Periodo<select id="activity-days"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option><option value="365">12 meses</option></select></label><label class="field">Usuario (opcional)<input id="activity-email" type="email" placeholder="usuario@bbva.com"></label><button id="activity-refresh" class="button secondary">Actualizar</button></div><div id="activity-body" class="status">Preparando lectura…</div><div class="toolbar"><button id="activity-download" class="button">Descargar diagnóstico JSON</button><span id="activity-status" class="status"></span></div></article>';
+  }
+  function recipientRows(items) {
+    return rows(items).map(item => `<div class="recipient-row"><span class="recipient-email">${esc(item.email)}</span><span class="badge ${item.active?'active':'inactive'}">${item.active?'Activo':'Inactivo'}</span><button class="button ghost" data-recipient="${esc(item.email)}" data-active="${item.active?'false':'true'}">${item.active?'Desactivar':'Activar'}</button></div>`).join('') || '<div class="empty">Todavía no hay destinatarios.</div>';
+  }
+  function newsletter() {
+    setTimeout(loadNewsletter,0);
+    return hero('Newsletter ejecutiva','Gestiona destinatarios y prueba la comunicación con la presentación nativa de Google antes del envío general.') + '<div class="grid"><article class="card wide"><h3>Edición y envío</h3><label class="field">Asunto<input id="newsletter-subject" maxlength="180"></label><div class="toolbar"><button id="newsletter-subject-save" class="button secondary">Guardar asunto</button><button id="newsletter-test" class="button ghost">Probar newsletter</button><button id="newsletter-send" class="button">Enviar a destinatarios activos</button></div><p id="newsletter-status" class="status">La prueba se enviará únicamente al administrador conectado.</p></article><article class="card wide"><h3>Destinatarios</h3><p class="callout">Solo los correos marcados como activos recibirán la newsletter.</p><div class="admin-form"><label class="field">Correo BBVA<input id="recipient-email" type="email" placeholder="usuario@bbva.com"></label><button id="recipient-add" class="button">Añadir activo</button></div><div id="recipient-list" class="recipient-list"><div class="status">Cargando destinatarios…</div></div></article></div>';
+  }
+  async function loadNewsletter() {
+    try { const value = await rpc('getNewsletterSettings'); $('newsletter-subject').value=value.subject||''; $('recipient-list').innerHTML=recipientRows(value.recipients); wireRecipientActions(); }
+    catch(error){ $('newsletter-status').textContent=error.message; }
+  }
+  function publicationImport() {
+    setTimeout(async()=>{try{const value=await rpc('getAdministration');const access=value.access||{};$('admin-status').textContent=`Versión ${value.version} · ${access.email||'sesión administradora'} · Información generada ${value.generatedAt||'sin fecha'}`;}catch(error){$('admin-status').textContent=error.message;}},0);
+    return hero('Validar y cargar una edición','Publica el fichero preparado en la aplicación local y genera automáticamente la presentación nativa de Google Slides.') + '<article class="card wide"><h3>Edición disponible</h3><p id="admin-status" class="status">Validando configuración…</p><div class="upload-zone"><form id="publication-form" class="publication-form"><label><span>Fichero de edición (ZIP, máximo 30 MB)</span><input name="publication" id="publication-file" type="file" accept=".zip,application/zip" required></label><button class="button" type="submit">Validar y publicar</button></form></div><p id="publication-status" class="status">La edición vigente no cambia hasta que el contenido y la presentación se han validado completamente.</p></article>';
+  }
+  function wireRecipientActions(){document.querySelectorAll('[data-recipient]').forEach(button=>button.onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:button.dataset.recipient,active:button.dataset.active==='true'}]);queueActivity('recipient_status_changed');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}});}
+  function wireContentActions() {
+    document.querySelectorAll('[data-detail]').forEach(button => { button.onclick = () => { state.view = button.dataset.detail; render(); }; });
+    if ($('publication-form')) $('publication-form').onsubmit = async event => {
+      event.preventDefault(); const status = $('publication-status'); status.textContent = 'Validando y publicando…';
+      try { const value = await importPublication(event.currentTarget); status.textContent = `Edición publicada correctamente · ${value.generatedAt || ''}`; setTimeout(() => location.reload(), 700); }
+      catch (error) { status.textContent = error.message; }
+    };
+    document.querySelectorAll('[data-settings]').forEach(button=>button.onclick=()=>{state.settingsView=button.dataset.settings;render();});
+    const refresh=async()=>{try{const report=await loadActivityReport(true);$('activity-body').innerHTML=renderActivity(report,state.settingsView==='adoption');}catch(error){$('activity-body').innerHTML=`<p class="error">${esc(error.message)}</p>`;}};
+    if($('activity-refresh')) $('activity-refresh').onclick=refresh;
+    if($('activity-download')) $('activity-download').onclick=async()=>{try{await downloadActivityReport();$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
+    if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
+    if($('newsletter-subject-save')) $('newsletter-subject-save').onclick=async()=>{try{await rpc('saveNewsletterSubject',[$('newsletter-subject').value]);$('newsletter-status').textContent='Asunto guardado.';queueActivity('newsletter_subject_saved');}catch(error){$('newsletter-status').textContent=error.message;}};
+    if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
+    if($('newsletter-send')) $('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios activos.`;queueActivity('newsletter_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
+    wireRecipientActions();
+  }
+  function render() {
+    const renderStarted = performance.now();
+    if(state.adminRoute){
+      if(!viewer.isAdmin){state.adminRoute='';return render();}
+      $('screen-title').textContent=state.adminRoute==='newsletter'?'Newsletter':state.adminRoute==='import'?'Validar y cargar':'Configuración';
+      document.querySelectorAll('.nav-button').forEach(button=>button.classList.remove('active'));
+      document.querySelectorAll('[data-admin-route]').forEach(button=>button.classList.toggle('active',button.dataset.adminRoute===state.adminRoute));
+      $('secondary-nav').innerHTML='';
+      $('content').innerHTML=state.adminRoute==='newsletter'?newsletter():state.adminRoute==='import'?publicationImport():settings(state.settingsView);
+      wireContentActions();history.replaceState(null,'',`#admin/${state.adminRoute}/${state.settingsView}`);queueActivity('view','render','ok',performance.now()-renderStarted);state.started=performance.now();return;
+    }
+    const area = areas.find(item => item.id === state.area) || areas[0];
+    const section = area.sections.find(item => item[0] === state.section) || area.sections[0];
+    state.section = section[0]; $('screen-title').textContent = section[1];
+    document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active',button.dataset.area === area.id));
+    $('secondary-nav').innerHTML = area.sections.map(([id,name]) => `<button class="tab ${id === state.section ? 'active' : ''}" data-section="${esc(id)}">${esc(name)}</button>`).join('');
+    document.querySelectorAll('[data-section]').forEach(button => { button.onclick = () => { state.section = button.dataset.section; state.view = detailViews(state.section)[0]?.[0] || state.section; render(); }; });
+    let html = '';
+    if (state.area === 'insights' && state.section === 'summary') html = summary(state.view);
+    else if (state.area === 'insights' && state.section === 'thermal') html = thermal(state.view);
+    else if (state.area === 'insights') html = linkingView(state.view);
+    else html = data(state.section);
+    $('content').innerHTML = html; wireContentActions();
+    history.replaceState(null,'',`#${state.area}/${state.section}/${state.view}`);
+    queueActivity('view','render','ok',performance.now()-renderStarted);
+    state.started = performance.now();
+  }
+  $('primary-nav').innerHTML = areas.map(area => `<button class="nav-button" data-area="${area.id}">${esc(area.label)}</button>`).join('');
+  document.querySelectorAll('[data-area]').forEach(button => { button.onclick = () => { const area = areas.find(item => item.id === button.dataset.area); state.adminRoute=''; state.area = area.id; state.section = area.sections[0][0]; state.view = detailViews(state.section)[0]?.[0] || state.section; render(); }; });
+  if(viewer.isAdmin){document.body.classList.add('is-admin');document.querySelectorAll('[data-admin-route]').forEach(button=>button.onclick=()=>{state.adminRoute=button.dataset.adminRoute;render();});}else{document.querySelectorAll('.admin-only').forEach(node=>node.remove());}
+  const hash = location.hash.slice(1).split('/');
+  if(hash[0]==='admin' && viewer.isAdmin && ['newsletter','import','settings'].includes(hash[1])){state.adminRoute=hash[1];state.settingsView=['telemetry','adoption'].includes(hash[2])?hash[2]:'telemetry';}
+  const hashArea = areas.find(area => area.id === hash[0]);
+  if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; }
+  const filters = publication.filters || {};
+  $('edition-date').textContent = publication.generated_at ? new Date(publication.generated_at).toLocaleString('es-ES') : 'Pendiente de publicación';
+  const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
+  $('edition-context').innerHTML = [filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month] || filters.month].filter(Boolean).map(value => `<span>${esc(value)}</span>`).join('');
+  if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
+  window.addEventListener('error',event => queueActivity('client_error',event.message,'error'));
+  window.addEventListener('pagehide',flushActivity);
+  queueActivity('app_enter');
+  render();
 })();
 </script>

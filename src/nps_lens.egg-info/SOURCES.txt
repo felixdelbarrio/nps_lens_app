@@ -70,7 +70,9 @@ src/nps_lens/models/review.py
 src/nps_lens/platform/__init__.py
 src/nps_lens/platform/artifacts.py
 src/nps_lens/platform/batch.py
+src/nps_lens/platform/downloads.py
 src/nps_lens/platform/publication.py
+src/nps_lens/platform/webapp_preview.py
 src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
 src/nps_lens/reports/__init__.py
@@ -102,6 +104,7 @@ src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_config_env.py
+tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
 tests/test_desktop_runtime.py
@@ -134,3 +137,4 @@ tests/test_ui_business_periods.py
 tests/test_ui_population.py
 tests/test_upload_service.py
 tests/test_webapp_parity.py
+tests/test_webapp_publication.py

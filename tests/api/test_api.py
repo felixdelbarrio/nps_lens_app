@@ -23,6 +23,7 @@ def _settings(tmp_path: Path) -> Settings:
         default_service_origin_n1="Senda",
         allowed_service_origins=["BBVA México"],
         allowed_service_origin_n1={"BBVA México": ["Senda"]},
+        default_downloads_path=str(tmp_path / "downloads"),
         log_level="INFO",
     )
 
@@ -112,4 +113,8 @@ def test_gcp_iap_domain_and_admin_boundaries(tmp_path: Path) -> None:
 
     admin = {"X-Goog-Authenticated-User-Email": "accounts.google.com:admin@bbva.com"}
     assert client.get("/api/settings/equivalences", headers=admin).status_code == 200
-    assert client.get("/api/telemetry/export", headers=admin).status_code == 200
+    telemetry = client.get("/api/telemetry/export", headers=admin)
+    assert telemetry.status_code == 200
+    saved_path = Path(telemetry.headers["x-nps-lens-saved-path"])
+    assert saved_path == tmp_path / "downloads" / "nps-lens-telemetria.json"
+    assert saved_path.read_bytes() == telemetry.content
