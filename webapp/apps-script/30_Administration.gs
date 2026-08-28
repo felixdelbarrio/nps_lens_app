@@ -5,18 +5,36 @@ function getAdministration() {
   return {
     version: NPS_LENS.version,
     generatedAt: edition.generated_at || '',
-    reportUrl: getReportUrl()
+    reportUrl: getReportUrl(),
+    access: {
+      email: viewer.email,
+      role: viewer.role,
+      source: viewer.adminSource,
+      configurationReady: viewer.configurationReady
+    }
+  };
+}
+
+function diagnoseNpsLensAccess() {
+  const viewer = _viewer_();
+  _assertViewer_(viewer);
+  return {
+    version: NPS_LENS.version,
+    email: viewer.email,
+    role: viewer.role,
+    adminSource: viewer.adminSource,
+    configurationReady: viewer.configurationReady,
+    webAppUrl: ScriptApp.getService().getUrl()
   };
 }
 
 function setupNpsLensWebApp(spreadsheetId, adminEmails) {
   const viewer = _viewer_();
   const configuredAdmins = _property_(NPS_LENS.adminEmailsProperty);
-  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
   if (configuredAdmins) {
     _assertAdmin_(viewer);
-  } else if (!viewer.domainAllowed || viewer.email !== effectiveEmail) {
-    throw new Error('La configuración inicial debe realizarla el propietario del despliegue.');
+  } else if (!viewer.domainAllowed || viewer.adminSource !== 'initial-admin') {
+    throw new Error('La configuración inicial debe realizarla el administrador inicial.');
   }
   const admins = String(adminEmails || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
   if (!admins.length || admins.some(email => !email.endsWith('@' + NPS_LENS.domain))) {

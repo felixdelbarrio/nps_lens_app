@@ -70,6 +70,9 @@ def build_preview(
     index = index.replace(
         "<?!= viewerJson ?>", json.dumps(viewer, ensure_ascii=False, separators=(",", ":"))
     )
+    index = index.replace("<?= adminBodyClass ?>", "is-admin")
+    index = index.replace("<?= accessRole ?>", "admin")
+    index = index.replace("<?= appVersion ?>", "local")
     output.mkdir(parents=True, exist_ok=True)
     target = output / "index.html"
     target.write_text(index, encoding="utf-8")

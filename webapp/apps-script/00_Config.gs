@@ -1,6 +1,7 @@
 const NPS_LENS = Object.freeze({
-  version: '2.2.0',
+  version: '2.2.1',
   domain: 'bbva.com',
+  initialAdmin: 'felix.delbarrio@bbva.com',
   editionFileProperty: 'NPS_LENS_EDITION_FILE_ID',
   reportFileProperty: 'NPS_LENS_REPORT_FILE_ID',
   publicationFolderProperty: 'NPS_LENS_PUBLICATION_FOLDER_ID',
@@ -23,10 +24,16 @@ function _property_(key) {
 function _viewer_() {
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   const admins = _property_(NPS_LENS.adminEmailsProperty)
-    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+    .split(',').map(value => value.trim().toLowerCase())
+    .filter(value => value.endsWith('@' + NPS_LENS.domain));
+  const configuredAdmin = Boolean(email && admins.indexOf(email) >= 0);
+  const initialAdmin = Boolean(email && email === NPS_LENS.initialAdmin);
   return {
     email,
-    isAdmin: Boolean(email && admins.indexOf(email) >= 0),
+    isAdmin: configuredAdmin || initialAdmin,
+    role: configuredAdmin || initialAdmin ? 'admin' : 'viewer',
+    adminSource: configuredAdmin ? 'configured' : initialAdmin ? 'initial-admin' : '',
+    configurationReady: Boolean(_property_('NPS_LENS_SPREADSHEET_ID') && admins.length),
     domainAllowed: Boolean(email && email.endsWith('@' + NPS_LENS.domain))
   };
 }

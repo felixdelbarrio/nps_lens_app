@@ -97,7 +97,7 @@
     return new Promise((resolve,reject) => {
       if (viewer.local) {
         if (name === 'getReportUrl') return resolve(viewer.reportUrl || '');
-        if (name === 'getAdministration') return resolve({version:'local',generatedAt:publication.generated_at,reportUrl:viewer.reportUrl || ''});
+        if (name === 'getAdministration') return resolve({version:'local',generatedAt:publication.generated_at,reportUrl:viewer.reportUrl || '',access:{email:viewer.email,role:'admin',source:'initial-admin',configurationReady:true}});
         if (name === 'getActivityReport') return resolve(localActivity);
         if (name === 'exportActivityReport') return resolve({fileName:'nps-lens-webapp-diagnostico.json',content:JSON.stringify({schema_version:'2.0',report:localActivity})});
         if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
@@ -161,7 +161,7 @@
     catch(error){ $('newsletter-status').textContent=error.message; }
   }
   function publicationImport() {
-    setTimeout(async()=>{try{const value=await rpc('getAdministration');$('admin-status').textContent=`Versión ${value.version} · Información generada ${value.generatedAt||'sin fecha'}`;}catch(error){$('admin-status').textContent=error.message;}},0);
+    setTimeout(async()=>{try{const value=await rpc('getAdministration');const access=value.access||{};$('admin-status').textContent=`Versión ${value.version} · ${access.email||'sesión administradora'} · Información generada ${value.generatedAt||'sin fecha'}`;}catch(error){$('admin-status').textContent=error.message;}},0);
     return hero('Validar y cargar una edición','Publica el fichero preparado en la aplicación local y genera automáticamente la presentación nativa de Google Slides.') + '<article class="card wide"><h3>Edición disponible</h3><p id="admin-status" class="status">Validando configuración…</p><div class="upload-zone"><form id="publication-form" class="publication-form"><label><span>Fichero de edición (ZIP, máximo 30 MB)</span><input name="publication" id="publication-file" type="file" accept=".zip,application/zip" required></label><button class="button" type="submit">Validar y publicar</button></form></div><p id="publication-status" class="status">La edición vigente no cambia hasta que el contenido y la presentación se han validado completamente.</p></article>';
   }
   function wireRecipientActions(){document.querySelectorAll('[data-recipient]').forEach(button=>button.onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:button.dataset.recipient,active:button.dataset.active==='true'}]);queueActivity('recipient_status_changed');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}});}

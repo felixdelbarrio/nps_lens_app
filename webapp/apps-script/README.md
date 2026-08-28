@@ -3,7 +3,7 @@
 WebApp estática en Google Apps Script. Publica el último JSON generado por la aplicación local y conserva la navegación analítica sin filtros públicos.
 
 1. Crea una hoja de cálculo dentro del dominio BBVA y copia esta carpeta en un proyecto Apps Script.
-2. Ejecuta `setupNpsLensWebApp(spreadsheetId, "administrador@bbva.com")`.
+2. Con la cuenta administradora inicial, ejecuta `setupNpsLensWebApp(spreadsheetId, "tu-correo@bbva.com")`. El administrador inicial definido en la configuración se reconoce aunque todavía no exista almacenamiento, evitando bloqueos durante la primera publicación.
 3. Despliega como WebApp para usuarios del dominio.
 4. Entra como administrador y utiliza **Importar** para validar el ZIP generado en **Ingesta → Publicación Web** de la aplicación local. La WebApp valida el contrato y el límite de 30 MB, conserva el PPTX y genera la presentación nativa de Google Slides antes de activar la edición.
 
