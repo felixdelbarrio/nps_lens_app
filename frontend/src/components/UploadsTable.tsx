@@ -1,6 +1,7 @@
 import { useDeferredValue } from "react";
 
 import type { UploadResult } from "../api";
+import { toBusinessCopy } from "../utils/businessCopy";
 import { formatNumber } from "../utils/numberFormat";
 
 type UploadsTableProps = {
@@ -69,7 +70,7 @@ export function UploadsTable({
                   key={upload.upload_id}
                 >
                   <td>
-                    <strong>{upload.filename}</strong>
+                    <strong>{toBusinessCopy(upload.filename)}</strong>
                     <span>{upload.service_origin_n1}</span>
                   </td>
                   <td>{upload.status}</td>

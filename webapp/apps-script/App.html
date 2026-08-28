@@ -14,22 +14,23 @@
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['gaps','Dónde se separa el NPS'],['opportunities','Oportunidades priorizadas'],['cohorts','Comparativas cruzadas']];
-  const thermalViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']];
+  const npsViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']];
   const linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : [['situation','Situación'],['entity-summary','Resumen causal'],['scenarios','Escenarios'],['nps-deep-dive','Detalle NPS']];
   const areas = [
-    {id:'insights',label:'Insights',sections:[['summary','Sumario del Periodo'],['thermal','Analítica NPS Térmico'],['linking','Incidencias ↔ NPS']]},
+    {id:'insights',label:'Insights',sections:[['summary','Sumario del Periodo'],['nps-analysis','Analítica NPS'],['linking','Incidencias ↔ NPS']]},
     {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}
   ];
   const state = {area:'insights',section:'summary',view:'period-aggregates',adminRoute:'',settingsView:'telemetry',scoreChannel:defaultView.score_channel||'Web',npsGroup:defaultView.nps_group||'Detractores',started:performance.now()};
   let scopeCatalog = [];
   const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
   const activityQueue = [];
+  const datasetCache = {};
   let activityTimer = 0;
   let activityCache = {key:'',report:null};
 
   function detailViews(section) {
     if (section === 'summary') return summaryViews;
-    if (section === 'thermal') return thermalViews;
+    if (section === 'nps-analysis') return npsViews;
     if (section === 'linking') return linkingViews;
     return [];
   }
@@ -78,8 +79,8 @@
     if (view === 'opportunities') return tabs + hero('Oportunidades priorizadas','Conceptos equivalentes se muestran con una única denominación de negocio.') + `<div class="grid"><article class="card wide">${figure(dashboard.opportunities?.figure,'opportunity-chart')}</article><article class="card wide">${table(dashboard.opportunities?.table)}</article></div>`;
     return tabs + hero('Comparativas cruzadas','Lecturas por cohortes protegidas por el tamaño mínimo de muestra.') + `<div class="grid"><article class="card wide">${figure(dashboard.cohorts?.figure,'cohort-chart')}</article><article class="card wide">${table(dashboard.cohorts?.table)}</article></div>`;
   }
-  function thermal(view) {
-    const tabs = contentTabs(thermalViews);
+  function npsAnalysis(view) {
+    const tabs = contentTabs(npsViews);
     if (view === 'topics') return tabs + hero('Qué dicen los clientes','Temas, evidencias y lenguaje real de cliente.') + `<div class="grid"><article class="card wide"><h3>Temas principales</h3>${figure(dashboard.overview?.topics_figure,'topics-chart')}${table(dashboard.overview?.topics_table)}</article></div>`;
     return tabs + hero('Cambios respecto al histórico','Diferencias comparables con su base y dirección.') + `<div class="grid"><article class="card wide">${figure(dashboard.comparison?.figure,'comparison-chart')}</article><article class="card wide">${table(dashboard.comparison?.table)}</article></div>`;
   }
@@ -96,8 +97,12 @@
   }
   function data(view) {
     const source = datasets[view] || {};
-    return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(source.total_rows || rows(source.rows).length))} filas</span><span class="pill">${esc(rows(source.columns).length)} columnas</span></div>${table(source.rows,500)}</article></div>`;
+    const cacheKey=`${view}|${state.scoreChannel}|${state.npsGroup}`;
+    if(source.deferred&&!datasetCache[cacheKey])setTimeout(()=>loadStaticDataset(view,cacheKey),0);
+    const visible=datasetCache[cacheKey]||source;
+    return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(visible.total_rows || rows(visible.rows).length))} filas</span><span class="pill">${esc(rows(visible.columns).length)} columnas</span></div>${source.deferred&&!datasetCache[cacheKey]?'<div class="status">Cargando datos del ámbito…</div>':table(visible.rows,500)}</article></div>`;
   }
+  async function loadStaticDataset(view,cacheKey){try{datasetCache[cacheKey]=await rpc('getPublishedDataset',[view,publication.scope?.key||viewer.scopeKey,0,500,state.scoreChannel,state.npsGroup]);if(state.area==='data'&&state.section===view)render();}catch(error){datasetCache[cacheKey]={rows:[],columns:[],total_rows:0,error:error.message};if(state.area==='data'&&state.section===view)render();}}
   const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,performanceVersion:'2.3',performanceEvents:18,historicalEvents:0,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
   function rpc(name, args = []) {
     const callStarted = performance.now();
@@ -223,7 +228,7 @@
     document.querySelectorAll('[data-section]').forEach(button => { button.onclick = () => { state.section = button.dataset.section; state.view = detailViews(state.section)[0]?.[0] || state.section; render(); }; });
     let html = '';
     if (state.area === 'insights' && state.section === 'summary') html = summary(state.view);
-    else if (state.area === 'insights' && state.section === 'thermal') html = thermal(state.view);
+    else if (state.area === 'insights' && state.section === 'nps-analysis') html = npsAnalysis(state.view);
     else if (state.area === 'insights') html = linkingView(state.view);
     else html = data(state.section);
     $('content').innerHTML = html; wireContentActions();

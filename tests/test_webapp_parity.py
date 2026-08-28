@@ -8,7 +8,7 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     web = (ROOT / "webapp" / "apps-script" / "App.html").read_text(encoding="utf-8")
     shared_views = [
         "Sumario del periodo",
-        "Analítica NPS Térmico",
+        "Analítica NPS",
         "Incidencias ↔ NPS",
         "Agregados por periodo",
         "NPS clásico vs detractores",

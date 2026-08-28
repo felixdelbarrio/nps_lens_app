@@ -3,11 +3,19 @@ from nps_lens.domain.publication_scope import build_publication_scope
 
 def test_publication_scope_is_stable_and_separates_audience_from_edition() -> None:
     march = build_publication_scope(
-        buug="BBVA México", n1="ENTERPRISE WEB", n2="", year="2026", month="03",
+        buug="BBVA México",
+        n1="ENTERPRISE WEB",
+        n2="",
+        year="2026",
+        month="03",
         causal_method="executive_journeys",
     )
     april = build_publication_scope(
-        buug="BBVA México", n1="ENTERPRISE WEB", n2="", year="2026", month="04",
+        buug="BBVA México",
+        n1="ENTERPRISE WEB",
+        n2="",
+        year="2026",
+        month="04",
         causal_method="executive_journeys",
     )
     assert march["key"] != april["key"]
@@ -18,7 +26,11 @@ def test_publication_scope_is_stable_and_separates_audience_from_edition() -> No
 def test_publication_scope_requires_an_exact_period() -> None:
     try:
         build_publication_scope(
-            buug="BBVA México", n1="ENTERPRISE WEB", n2="", year="2026", month="Todos",
+            buug="BBVA México",
+            n1="ENTERPRISE WEB",
+            n2="",
+            year="2026",
+            month="Todos",
             causal_method="executive_journeys",
         )
     except ValueError as error:

@@ -6337,7 +6337,7 @@ def _add_cover_slide(
     accent.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
     accent.line.fill.background()
 
-    title = "Análisis NPS térmico y causalidad"
+    title = "Análisis NPS y causalidad"
     subtitle = f"{service_origin} · {service_origin_n1}".strip(" ·")
     if service_origin_n2:
         subtitle = f"{subtitle} · {service_origin_n2}".strip(" ·")
@@ -6394,7 +6394,7 @@ def _add_nps_section_cover_slide(prs: Presentation, *, context: PresentationCont
     _configure_text_frame(ttf)
     ttf.clear()
     tr = ttf.paragraphs[0].add_run()
-    tr.text = "NPS térmico"
+    tr.text = "NPS"
     tr.font.name = BBVA_FONT_DISPLAY
     tr.font.size = Pt(48)
     tr.font.bold = True

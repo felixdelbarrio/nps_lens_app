@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nps-lens"
 version = "0.1.0"
-description = "NPS Lens — análisis avanzado de NPS térmico + VoC multi-fuente (MVP Senda MX)."
+description = "NPS Lens — análisis avanzado de NPS + VoC multi-fuente (MVP Senda MX)."
 readme = "README.md"
 requires-python = ">=3.9,<3.10"
 

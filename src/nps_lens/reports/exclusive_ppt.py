@@ -237,8 +237,18 @@ def _fill_table(shape: object, rows: list[list[str]], *, body_size: float = 10.0
             run.font.size = Pt(body_size + (1 if row_index == 0 else 0))
             run.font.bold = row_index == 0
             run.font.color.rgb = RGBColor(255, 255, 255) if row_index == 0 else RGBColor(7, 14, 70)
-            cell.text_frame.word_wrap = True
-            cell.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+            frame.word_wrap = True
+            frame.auto_size = None
+            cell.margin_left = Inches(0.08)
+            cell.margin_right = Inches(0.08)
+            cell.margin_top = Inches(0.03)
+            cell.margin_bottom = Inches(0.03)
+
+
+def _resize_table_rows(shape: object, total_height: float) -> None:
+    height = Inches(total_height) // max(1, len(shape.table.rows))
+    for row in shape.table.rows:
+        row.height = height
 
 
 def _canonical_opportunities(frame: pd.DataFrame, min_n: int) -> list[Opportunity]:
@@ -306,6 +316,32 @@ def _apply_bei_brand_lockup(prs: Presentation) -> None:
             width=width - Inches(0.20),
             height=height - Inches(0.16),
         )
+
+
+def _fit_titles_around_brand(prs: Presentation) -> None:
+    """Reserve a stable title lane so dynamic copy never collides with the BEI lockup."""
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            if (
+                Inches(0.25) <= shape.left <= Inches(0.50)
+                and Inches(0.20) <= shape.top <= Inches(0.40)
+                and shape.width >= Inches(8.0)
+            ):
+                shape.width = Inches(7.35)
+                shape.height = Inches(0.78)
+                shape.text_frame.word_wrap = True
+                shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+
+def _set_white_banner_text(shape: object, text: str) -> None:
+    _set_shape_text(shape, text)
+    for paragraph in shape.text_frame.paragraphs:
+        for run in paragraph.runs:
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(255, 255, 255)
 
 
 def generate_exclusive_report(
@@ -411,6 +447,7 @@ def generate_exclusive_report(
             ]
         )
     _fill_table(slides[5].shapes[7], stat_rows, body_size=10)
+    _resize_table_rows(slides[5].shapes[7], 2.82)
     top_label = str(stats.iloc[0]["Palanca"]) if not stats.empty else "La principal palanca"
     _set_shape_text(slides[5].shapes[5], f"{top_label} concentra el mayor volumen observado")
     if not stats.empty:
@@ -461,7 +498,9 @@ def generate_exclusive_report(
                 str(row.get("nps_topic", "")),
             ]
         )
-    _fill_table(slides[8].shapes[7], journey_rows)
+    _fill_table(slides[8].shapes[7], journey_rows, body_size=9)
+    _resize_table_rows(slides[8].shapes[7], 2.62)
+    slides[8].shapes[4].top = Inches(5.13)
     _set_shape_text(
         slides[8].shapes[5], f"{len(scenarios)} journeys reúnen {total_links} vínculos validados"
     )
@@ -513,18 +552,39 @@ def generate_exclusive_report(
                 slides[slide_index].shapes[8], f"Confianza {_fmt(row.get('confidence', 0))}"
             )
         else:
+            probability = pd.to_numeric(
+                pd.Series([row.get("detractor_probability")]), errors="coerce"
+            ).iloc[0]
+            probability_label = (
+                f"{_fmt(float(probability) * 100)}%" if pd.notna(probability) else "n/d"
+            )
             _set_shape_text(
                 slides[slide_index].shapes[11], f"{title} completa el mapa causal prioritario"
             )
-            _set_shape_text(
+            _set_white_banner_text(
                 slides[slide_index].shapes[2],
                 f"{int(row.get('linked_pairs', 0) or 0)} vínculos validados",
+            )
+            _set_white_banner_text(
+                slides[slide_index].shapes[6],
+                f"Detracción estimada · {probability_label}",
+            )
+            _set_shape_text(
+                slides[slide_index].shapes[5],
+                (
+                    f"El escenario presenta una probabilidad de detracción del {probability_label} "
+                    f"y una confianza de {_fmt(row.get('confidence', 0), 2)}."
+                    if pd.notna(probability)
+                    else "La evidencia converge, pero no permite estimar la detracción con robustez; "
+                    "el escenario se mantiene como hipótesis a validar."
+                ),
             )
             _set_shape_text(
                 slides[slide_index].shapes[1],
                 f"{int(row.get('linked_incidents', 0) or 0)} incidencias y {int(row.get('linked_comments', 0) or 0)} comentarios convergen en este journey.",
             )
 
+    _fit_titles_around_brand(prs)
     _apply_bbva_fonts(prs)
     _apply_bei_brand_lockup(prs)
     output = BytesIO()

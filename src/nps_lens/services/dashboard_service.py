@@ -77,7 +77,6 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
-from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.domain.helix_links import (
     build_helix_incident_url_lookup,
     enrich_helix_incident_links,
@@ -85,6 +84,7 @@ from nps_lens.domain.helix_links import (
 )
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.platform.downloads import persist_download
@@ -3087,9 +3087,7 @@ class DashboardService:
             return POP_ALL
         if "NPS Group" not in frame.columns:
             return POP_ALL
-        groups = set(
-            frame["NPS Group"].astype("string").fillna("").str.strip().str.casefold()
-        )
+        groups = set(frame["NPS Group"].astype("string").fillna("").str.strip().str.casefold())
         if _PREFERRED_NPS_GROUP.casefold() in groups or any(
             value.startswith("detr") for value in groups
         ):

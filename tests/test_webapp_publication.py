@@ -85,6 +85,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
     activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
     administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
+    webapp = (root / "60_WebApp.gs").read_text(encoding="utf-8")
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
@@ -103,3 +104,6 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
     assert "if(viewer.reportUrl)" in app
+    assert "data[kind].rows = []" in webapp
+    assert "function getPublishedDataset(" in webapp
+    assert "source.deferred" in app

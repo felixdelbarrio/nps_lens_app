@@ -78,7 +78,7 @@
 
 ### KPIs de Ámbito de Análisis cambian al tocar Canal/Grupo
 - Es una regresión: el Sumario del Periodo solo debe depender de `SERVICE CONTAINER` + `PERIOD CONTAINER`.
-- Canal y Grupo Score solo afectan Analítica NPS Térmico y datos tabulares filtrados. Incidencias ↔ NPS fuerza `Canal=Web`, elimina `Grupo Score` y usa histórico completo de incidencias para no borrar causalidad pasada.
+- Canal y Grupo Score solo afectan Analítica NPS y datos tabulares filtrados. Incidencias ↔ NPS fuerza `Canal=Web`, elimina `Grupo Score` y usa histórico completo de incidencias para no borrar causalidad pasada.
 
 ### Warnings de pandas (groupby observed)
 - El código fija `observed=True` donde aplica.

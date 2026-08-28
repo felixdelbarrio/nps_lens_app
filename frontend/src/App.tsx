@@ -54,6 +54,7 @@ import {
   formatPercentage,
   formatVolume
 } from "./utils/numberFormat";
+import { toBusinessCopy } from "./utils/businessCopy";
 
 const MAIN_AREAS = [
   {
@@ -78,7 +79,7 @@ const MAIN_AREAS = [
 
 const INSIGHT_TABS = [
   { id: "summary", label: "Sumario del Periodo" },
-  { id: "thermal", label: "Analítica NPS Térmico" },
+  { id: "nps-analysis", label: "Analítica NPS" },
   { id: "linking", label: "Incidencias ↔ NPS" }
 ];
 
@@ -98,7 +99,7 @@ const SUMMARY_TABS = [
   { id: "cohorts", label: "Comparativas cruzadas" }
 ];
 
-const THERMAL_TABS = [
+const NPS_TABS = [
   { id: "topics", label: "Qué dicen los clientes" },
   { id: "comparison", label: "Cambios respecto al histórico" }
 ];
@@ -268,7 +269,7 @@ export function App() {
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("summary");
   const [summaryTab, setSummaryTab] = useState("period-aggregates");
-  const [thermalTab, setThermalTab] = useState("topics");
+  const [npsTab, setNpsTab] = useState("topics");
   const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
@@ -984,7 +985,7 @@ export function App() {
             <p className="eyebrow">Filters</p>
             <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Sincronizados para Analítica NPS Térmico, Incidencias y reportes causales
+              Sincronizados para Analítica NPS, Incidencias y reportes causales
             </p>
           </div>
         </div>
@@ -1439,17 +1440,17 @@ export function App() {
     );
   }
 
-  function renderThermalSection() {
+  function renderNpsSection() {
     return (
       <>
         <NavigationTabs
           compact
           disabled={actionsDisabled}
-          items={THERMAL_TABS}
-          onChange={setThermalTab}
-          value={thermalTab}
+          items={NPS_TABS}
+          onChange={setNpsTab}
+          value={npsTab}
         />
-        {thermalTab === "topics" ? renderTopicsPanel() : renderComparisonPanel()}
+        {npsTab === "topics" ? renderTopicsPanel() : renderComparisonPanel()}
       </>
     );
   }
@@ -1501,10 +1502,10 @@ export function App() {
     return (
       <section className="workspace-stack">
         {insightTab === "summary" ? renderSummarySection() : null}
-        {insightTab === "thermal" ? (
+        {insightTab === "nps-analysis" ? (
           <>
             {renderAnalysisFiltersContainer(false)}
-            {renderThermalSection()}
+            {renderNpsSection()}
           </>
         ) : null}
         {insightTab === "linking" ? (
@@ -1565,7 +1566,7 @@ export function App() {
             <DatasetUploadCard
               ctaLabel="Importar / actualizar NPS"
               datasetStatus={npsDatasetStatus}
-              description="Importa el Excel NPS térmico dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
+              description="Importa el Excel NPS dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
               disabled={actionsDisabled && !isMutating}
               eyebrow="Carga NPS"
               feedback={latestNpsUpload}
@@ -1634,7 +1635,7 @@ export function App() {
                   <dl className="detail-list">
                     <div>
                       <dt>Fichero</dt>
-                      <dd data-testid="selected-upload-name">{selectedUpload.filename}</dd>
+                      <dd data-testid="selected-upload-name">{toBusinessCopy(selectedUpload.filename)}</dd>
                     </div>
                     <div>
                       <dt>Estado</dt>
@@ -1802,7 +1803,7 @@ export function App() {
             <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Banca de Empresas e Instituciones · NPS Térmico y causalidad operativa.
+              Banca de Empresas e Instituciones · NPS y causalidad operativa.
             </p>
           </div>
 

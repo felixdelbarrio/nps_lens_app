@@ -417,8 +417,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
             for paragraph in shape.text_frame.paragraphs:
                 cover_texts.append(paragraph.text or "")
 
-    assert any("Análisis NPS térmico y causalidad" in t for t in texts)
-    assert any("NPS térmico" in t for t in texts)
+    assert any("Análisis NPS y causalidad" in t for t in texts)
+    assert any("NPS" in t for t in texts)
     assert any("PROMOTORES" in t for t in texts)
     assert any("Se analizaron" in t for t in texts)
     assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)

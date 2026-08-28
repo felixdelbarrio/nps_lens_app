@@ -47,6 +47,7 @@ src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
 src/nps_lens/domain/normalization.py
+src/nps_lens/domain/publication_scope.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
@@ -120,6 +121,7 @@ tests/test_ingest_contracts.py
 tests/test_ingest_features.py
 tests/test_knowledge_cache.py
 tests/test_llm_insight_response.py
+tests/test_local_processes.py
 tests/test_normalization_registry.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
@@ -130,6 +132,7 @@ tests/test_platform_batch.py
 tests/test_plotly_theme.py
 tests/test_ppt_script.py
 tests/test_ppt_wrapped_table_layout.py
+tests/test_publication_scope.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
 tests/test_text_mining.py

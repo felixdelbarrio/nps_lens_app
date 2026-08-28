@@ -22,7 +22,9 @@ def build_publication_scope(
     }
     missing = [key for key in ("buug", "n1", "year", "month", "causal_method") if not values[key]]
     if missing or values["year"] == "Todos" or values["month"] == "Todos":
-        raise ValueError("Selecciona BUUG, N1, año, mes y método causal antes de preparar la edición web.")
+        raise ValueError(
+            "Selecciona BUUG, N1, año, mes y método causal antes de preparar la edición web."
+        )
     canonical = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     scope_key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
     audience_canonical = json.dumps(
@@ -42,4 +44,3 @@ def build_publication_scope(
             [values["buug"], values["n1"], values["year"], values["month"], method.label]
         ),
     }
-

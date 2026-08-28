@@ -125,7 +125,7 @@ EDITORIAL_COPY = EditorialCopy()
 
 SLIDE_TITLES: tuple[str, ...] = (
     "NPS Lens",
-    "NPS térmico",
+    "NPS",
     "Evolución del NPS clásico del periodo",
     "Qué han dicho los clientes",
     "Qué ha cambiado en Palanca",

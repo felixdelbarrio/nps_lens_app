@@ -587,12 +587,24 @@ def link_incidents_to_nps_topics(
         dated_nps = nps["nps_date"].dropna()
         if not dated_nps.empty:
             delta = pd.Timedelta(days=max(0, int(max_days_apart)))
-            relevant = helix["incident_date"].between(dated_nps.min() - delta, dated_nps.max() + delta)
+            relevant = helix["incident_date"].between(
+                dated_nps.min() - delta, dated_nps.max() + delta
+            )
             helix = helix.loc[relevant].copy()
             if helix.empty:
                 return (
-                    pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
-                    pd.DataFrame(columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]),
+                    pd.DataFrame(
+                        columns=["incident_id", "nps_topic", "similarity", "incident_topic"]
+                    ),
+                    pd.DataFrame(
+                        columns=[
+                            "nps_id",
+                            "incident_id",
+                            "similarity",
+                            "nps_topic",
+                            "incident_topic",
+                        ]
+                    ),
                 )
 
     nps["nps_topic"] = build_nps_topic(nps)

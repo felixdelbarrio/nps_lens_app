@@ -29,6 +29,6 @@
 ## Reglas de dominio vigentes
 - `SERVICE CONTAINER` gobierna `service_origin`, `service_origin_n1` y `service_origin_n2`.
 - `PERIOD CONTAINER` gobierna `pop_year` y `pop_month` para toda la app.
-- `Canal` y `Grupo Score` se aplican a Analítica NPS Térmico, Incidencias ↔ NPS, tablas y reportes causales; no deben alterar el Ámbito de Análisis del Sumario del Periodo.
+- `Canal` y `Grupo Score` se aplican a Analítica NPS, Incidencias ↔ NPS, tablas y reportes causales; no deben alterar el Ámbito de Análisis del Sumario del Periodo.
 - Usar `Score` para medias/valores 0-10 y reservar `NPS clásico` para `% promotores - % detractores`.
 - No construir enlaces Helix fuera de `nps_lens.domain.helix_links`.
