@@ -56,15 +56,41 @@ function importPublicationArchive(form) {
   const timestamp = Utilities.formatDate(new Date(), 'Europe/Madrid', 'yyyyMMdd-HHmmss');
   const editionFile = folder.createFile(editionBlob.copyBlob().setName('publication-' + timestamp + '.json'));
   let reportFile;
+  let slidesFileId = '';
   try {
-    reportFile = folder.createFile(reportBlob.copyBlob());
+    reportFile = Drive.Files.create({
+      name: reportBlob.getName(),
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      parents: [folder.getId()],
+      appProperties: {npsLensArtifact: 'source-pptx'}
+    }, reportBlob.copyBlob().setContentType('application/vnd.openxmlformats-officedocument.presentationml.presentation'), {
+      supportsAllDrives: true,
+      fields: 'id,name,mimeType,size'
+    });
+    const slides = Drive.Files.create({
+      name: reportBlob.getName().replace(/\.pptx$/i, ''),
+      mimeType: 'application/vnd.google-apps.presentation',
+      parents: [folder.getId()],
+      appProperties: {npsLensArtifact: 'newsletter-google-slides'}
+    }, reportBlob.copyBlob().setContentType('application/vnd.openxmlformats-officedocument.presentationml.presentation'), {
+      supportsAllDrives: true,
+      fields: 'id,name,mimeType,webViewLink'
+    });
+    slidesFileId = String(slides.id || '');
+    if (!slidesFileId || slides.mimeType !== 'application/vnd.google-apps.presentation') {
+      throw new Error('Google Drive no pudo convertir la presentación a formato nativo.');
+    }
+    const nativeDeck = SlidesApp.openById(slidesFileId);
+    if (!nativeDeck.getSlides().length) throw new Error('La presentación nativa no contiene diapositivas.');
+    nativeDeck.saveAndClose();
     PropertiesService.getScriptProperties().setProperties({
       [NPS_LENS.editionFileProperty]: editionFile.getId(),
-      [NPS_LENS.reportFileProperty]: reportFile.getId()
+      [NPS_LENS.reportFileProperty]: slidesFileId
     });
   } catch (error) {
     editionFile.setTrashed(true);
-    if (reportFile) reportFile.setTrashed(true);
+    if (reportFile && reportFile.id) DriveApp.getFileById(reportFile.id).setTrashed(true);
+    if (slidesFileId) DriveApp.getFileById(slidesFileId).setTrashed(true);
     throw error;
   }
   return getAdministration();

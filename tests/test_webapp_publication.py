@@ -29,7 +29,7 @@ def test_webapp_preview_loads_publication_and_embedded_report(tmp_path: Path) ->
     assert report_url == "informe-exclusivo.pptx"
     assert (output / report_url).read_bytes() == b"PPTX"
     assert '"reportUrl":"informe-exclusivo.pptx"' in html
-    assert "Publicación Web" in html
+    assert "Validar y cargar" in html
     assert "Descargar diagnóstico JSON" in html
 
 
@@ -41,3 +41,23 @@ def test_apps_script_uses_archive_import_without_manual_drive_ids() -> None:
     assert "setPublishedEditionFiles" not in publication_source
     assert "edition-file" not in app_source
     assert "report-file" not in app_source
+
+
+def test_apps_script_converts_report_and_supports_admin_operations() -> None:
+    root = Path("webapp/apps-script")
+    publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
+    activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
+    administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
+    newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
+    manifest = json.loads((root / "appsscript.json").read_text(encoding="utf-8"))
+
+    assert "application/vnd.google-apps.presentation" in publication
+    assert "SlidesApp.openById" in publication
+    assert "function getActivityReport(request)" in activity
+    assert "user_email" in activity
+    assert "Session.getEffectiveUser" in administration
+    assert "_assertAdmin_(viewer)" in administration
+    assert "function testNewsletter()" in newsletter
+    assert "saveNewsletterRecipient" in newsletter
+    assert "filter(item => item.active)" in newsletter
+    assert manifest["dependencies"]["enabledAdvancedServices"][0]["serviceId"] == "drive"

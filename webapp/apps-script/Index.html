@@ -17,7 +17,15 @@
       <div class="edition"><span>INFORMACIÓN ACTUALIZADA</span><strong id="edition-date">—</strong></div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><div><p class="eyebrow">BANCA DE EMPRESAS E INSTITUCIONES</p><h2 id="screen-title">Sumario del periodo</h2></div><a id="report-link" class="button" hidden target="_blank">Abrir presentación</a></header>
+      <header class="topbar">
+        <div><p class="eyebrow">BANCA DE EMPRESAS E INSTITUCIONES</p><h2 id="screen-title">Sumario del periodo</h2></div>
+        <div class="workspace-actions">
+          <a id="report-link" class="button secondary" hidden target="_blank">Abrir presentación</a>
+          <button class="workspace-action admin-only" data-admin-route="newsletter" title="Newsletter" aria-label="Newsletter"><span aria-hidden="true">✉</span><span>Newsletter</span></button>
+          <button class="workspace-action admin-only" data-admin-route="import" title="Importar edición" aria-label="Importar edición"><span aria-hidden="true">⇧</span><span>Importar</span></button>
+          <button class="workspace-action admin-only" data-admin-route="settings" title="Configuración" aria-label="Configuración"><span aria-hidden="true">⚙</span><span>Configuración</span></button>
+        </div>
+      </header>
       <div id="secondary-nav" class="tabs"></div>
       <section id="content" class="content" aria-live="polite"></section>
     </main>

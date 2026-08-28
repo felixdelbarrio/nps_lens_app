@@ -5,19 +5,36 @@ function getAdministration() {
   return {
     version: NPS_LENS.version,
     generatedAt: edition.generated_at || '',
-    reportUrl: getReportUrl(),
-    telemetry: getTelemetry()
+    reportUrl: getReportUrl()
   };
 }
 
 function setupNpsLensWebApp(spreadsheetId, adminEmails) {
-  const properties = PropertiesService.getScriptProperties();
-  properties.setProperty('NPS_LENS_SPREADSHEET_ID', String(spreadsheetId || '').trim());
-  properties.setProperty(NPS_LENS.adminEmailsProperty, String(adminEmails || '').trim());
-  const book = SpreadsheetApp.openById(String(spreadsheetId).trim());
-  let sheet = book.getSheetByName(NPS_LENS.telemetrySheet);
-  if (!sheet) sheet = book.insertSheet(NPS_LENS.telemetrySheet);
-  if (!sheet.getLastRow()) sheet.appendRow(['timestamp', 'type', 'screen', 'duration_ms', 'detail', 'version']);
-  sheet.setFrozenRows(1);
-  return {ok: true, sheet: NPS_LENS.telemetrySheet};
+  const viewer = _viewer_();
+  const configuredAdmins = _property_(NPS_LENS.adminEmailsProperty);
+  const effectiveEmail = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  if (configuredAdmins) {
+    _assertAdmin_(viewer);
+  } else if (!viewer.domainAllowed || viewer.email !== effectiveEmail) {
+    throw new Error('La configuración inicial debe realizarla el propietario del despliegue.');
+  }
+  const admins = String(adminEmails || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  if (!admins.length || admins.some(email => !email.endsWith('@' + NPS_LENS.domain))) {
+    throw new Error('Configura al menos un administrador del dominio BBVA.');
+  }
+  const cleanSpreadsheetId = String(spreadsheetId || '').trim();
+  if (!cleanSpreadsheetId) throw new Error('Indica la hoja de cálculo de administración.');
+  const book = SpreadsheetApp.openById(cleanSpreadsheetId);
+  const specifications = [[NPS_LENS.activitySheet, ACTIVITY_HEADERS], [NPS_LENS.recipientsSheet, NEWSLETTER_RECIPIENT_HEADERS]];
+  specifications.forEach(specification => {
+    let sheet = book.getSheetByName(specification[0]);
+    if (!sheet) sheet = book.insertSheet(specification[0]);
+    if (!sheet.getLastRow()) sheet.appendRow(specification[1]);
+    sheet.setFrozenRows(1);
+  });
+  PropertiesService.getScriptProperties().setProperties({
+    NPS_LENS_SPREADSHEET_ID: cleanSpreadsheetId,
+    [NPS_LENS.adminEmailsProperty]: admins.join(',')
+  });
+  return {ok: true, sheets: specifications.map(specification => specification[0])};
 }

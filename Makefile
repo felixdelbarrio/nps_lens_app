@@ -223,7 +223,8 @@ kill:
 	@$(PYTHON) scripts/local_processes.py --root "$(ROOT)" --ports "$(APP_PORT)" 5173 "$(WEBAPP_PORT)"
 
 webapp: kill
-	@$(PYTHON) scripts/serve_webapp.py --port "$(WEBAPP_PORT)"
+	@test -x "$(PY)" || $(MAKE) venv
+	@$(PY) scripts/serve_webapp.py --port "$(WEBAPP_PORT)"
 
 WebApp: webapp
 

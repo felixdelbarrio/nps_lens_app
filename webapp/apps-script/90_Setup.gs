@@ -1,7 +1,7 @@
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('NPS Lens')
     .addItem('Validar configuración', 'getAdministration')
-    .addItem('Preparar telemetría', 'setupFromActiveSpreadsheet')
+    .addItem('Preparar administración', 'setupFromActiveSpreadsheet')
     .addToUi();
 }
 
