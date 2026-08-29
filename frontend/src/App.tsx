@@ -2,7 +2,7 @@ import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent
 import useSWR from "swr";
 
 import {
-  canUseDesktopFileBridge,
+  completeArtifactDownload,
   downloadExecutiveReport,
   downloadExclusiveReport,
   downloadWebPublication,
@@ -195,30 +195,6 @@ function chooseDefaultOption(options: string[], preferred: string, persisted?: s
 
 function formatMonthOptionLabel(month: string) {
   return MONTH_LABELS_ES[month] || month;
-}
-
-function triggerBlobDownload(blob: Blob, fileName: string) {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = fileName;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-}
-
-function finishArtifactDownload(
-  artifact: { blob: Blob | null; fileName: string; savedPath: string },
-  onSaved: (path: string) => void
-) {
-  if (artifact.savedPath && canUseDesktopFileBridge()) {
-    onSaved(artifact.savedPath);
-    return;
-  }
-  if (artifact.blob) {
-    triggerBlobDownload(artifact.blob, artifact.fileName);
-  }
 }
 
 type KpiPayload = DashboardPayload["kpis"];
@@ -791,7 +767,8 @@ export function App() {
         touchpoint_source: touchpointSource,
         report_dimension_analysis: reportDimensionAnalysis
       });
-      finishArtifactDownload(report, (path) => setStatusCopy(`Informe guardado en ${path}`));
+      const savedPath = await completeArtifactDownload(report);
+      setStatusCopy(savedPath ? `Informe guardado en ${savedPath}` : "Informe descargado correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -820,7 +797,8 @@ export function App() {
     setError(null);
     try {
       const artifact = await downloadExclusiveReport(exportQuery());
-      finishArtifactDownload(artifact, (path) => setStatusCopy(`Informe exclusivo guardado en ${path}`));
+      const savedPath = await completeArtifactDownload(artifact);
+      setStatusCopy(savedPath ? `Informe exclusivo guardado en ${savedPath}` : "Informe exclusivo descargado correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -833,7 +811,8 @@ export function App() {
     setError(null);
     try {
       const artifact = await downloadWebPublication(exportQuery());
-      finishArtifactDownload(artifact, (path) => setStatusCopy(`Publicación Web guardada en ${path}`));
+      const savedPath = await completeArtifactDownload(artifact);
+      setStatusCopy(savedPath ? `Publicación Web guardada en ${savedPath}` : "Publicación Web descargada correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {

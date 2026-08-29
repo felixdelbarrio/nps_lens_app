@@ -435,16 +435,6 @@ class Settings:
     default_min_n_opportunities: int = DEFAULT_UI_MIN_N_OPPORTUNITIES
     default_min_n_cross_comparisons: int = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
 
-    @property
-    def service_origin_values(self) -> list[str]:
-        """Backward-compatible alias used by older callers and tests."""
-        return self.allowed_service_origins
-
-    @property
-    def service_origin_n1_map(self) -> dict[str, list[str]]:
-        """Backward-compatible alias used by older callers and tests."""
-        return self.allowed_service_origin_n1
-
     @staticmethod
     def from_env() -> "Settings":
         data_dir = _resolve_runtime_dir("NPS_LENS_DATA_DIR", "./data")

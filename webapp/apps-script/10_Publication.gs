@@ -4,16 +4,36 @@ const PUBLICATION_HEADERS = Object.freeze([
   'newsletter_insight', 'generated_at', 'imported_at', 'imported_by'
 ]);
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
+const PUBLICATION_CACHE_KEY = 'nps-lens-publications-' + NPS_LENS.version;
+let publicationRowsCache = null;
+
+function _publicationShellProperty_(scopeKey) {
+  return 'NPS_LENS_SHELL_' + String(scopeKey || '').trim();
+}
+
+function _clearPublicationCache_() {
+  publicationRowsCache = null;
+  CacheService.getScriptCache().remove(PUBLICATION_CACHE_KEY);
+}
 
 function _publicationRows_() {
+  if (publicationRowsCache) return publicationRowsCache;
+  const cached = CacheService.getScriptCache().get(PUBLICATION_CACHE_KEY);
+  if (cached) {
+    publicationRowsCache = JSON.parse(cached);
+    return publicationRowsCache;
+  }
   const sheet = _sheet_(NPS_LENS.publicationsSheet);
   if (sheet.getLastRow() <= 1) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, PUBLICATION_HEADERS.length).getValues()
+  publicationRowsCache = sheet.getRange(2, 1, sheet.getLastRow() - 1, PUBLICATION_HEADERS.length).getValues()
     .map((row, index) => ({row: index + 2, scopeKey: String(row[0]), audienceKey: String(row[1]),
       buug: String(row[2]), n1: String(row[3]), n2: String(row[4]), year: String(row[5]),
       month: String(row[6]), causalMethod: String(row[7]), causalMethodLabel: String(row[8]),
       editionFileId: String(row[9]), pptxFileId: String(row[10]), slidesFileId: String(row[11]),
       newsletterInsight:String(row[12]||''),generatedAt:String(row[13]),importedAt:row[14],importedBy:String(row[15])}));
+  const serialized = JSON.stringify(publicationRowsCache);
+  if (serialized.length < 90000) CacheService.getScriptCache().put(PUBLICATION_CACHE_KEY, serialized, 300);
+  return publicationRowsCache;
 }
 
 function _publicationByKey_(scopeKey) {
@@ -43,6 +63,14 @@ function _publishedEdition_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
   if (!publication) return {schema_version:'1.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
   return _validateEdition_(JSON.parse(DriveApp.getFileById(publication.editionFileId).getBlob().getDataAsString('UTF-8')));
+}
+
+function _publishedShell_(scopeKey) {
+  const publication = _publicationByKey_(scopeKey);
+  if (!publication) return {schema_version:'1.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
+  const fileId = _property_(_publicationShellProperty_(publication.scopeKey));
+  if (!fileId) throw new Error('Esta edición debe volver a publicarse para aplicar la carga optimizada.');
+  return _validateEdition_(JSON.parse(DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8')));
 }
 
 function _folderId_(reference) {
@@ -85,7 +113,7 @@ function getPublicationCatalog() {
   return {selectedScopeKey:selected ? selected.scopeKey : '',publications:_publicationRows_().map(item => ({
     scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.buug,item.n1,item.year,item.month,item.causalMethodLabel].join(' · '),
     buug:item.buug,n1:item.n1,n2:item.n2,year:item.year,month:item.month,causalMethod:item.causalMethod,
-    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_reportUrl_(item.scopeKey)
+    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:'https://docs.google.com/presentation/d/'+encodeURIComponent(item.slidesFileId)+'/edit'
   }))};
 }
 
@@ -111,19 +139,35 @@ function importPublicationArchive(form) {
   const edition = _validateEdition_(JSON.parse(editionBlob.getDataAsString('UTF-8'))), reportBlob = reports[0];
   if (String(edition.manifest.report || '') !== reportBlob.getName()) throw new Error('La presentación no coincide con el manifiesto.');
   const destination = _publicationFolder_(), previous = _publicationRows_().find(item => item.scopeKey === edition.scope.key);
-  let editionFileId='', pptxFileId='', slidesFileId='';
+  const shellProperty = _publicationShellProperty_(edition.scope.key), previousShellFileId = _property_(shellProperty);
+  const previousSelectedScope = _property_(NPS_LENS.selectedScopeProperty);
+  const newsletterInsight = JSON.stringify(_newsletterInsight_(edition));
+  let editionFileId='', shellFileId='', pptxFileId='', slidesFileId='', committed=false;
   try {
     editionFileId = String(Drive.Files.create({name:'nps-lens-'+edition.scope.key+'.json',mimeType:'application/json',parents:[destination.id]},editionBlob,{supportsAllDrives:true,fields:'id'}).id);
+    const data = edition.screens && edition.screens.data || {};
+    Object.keys(data).forEach(kind => { if (data[kind] && Array.isArray(data[kind].rows)) {
+      data[kind].rows = []; data[kind].deferred = true;
+    }});
+    const shellBlob = Utilities.newBlob(JSON.stringify(edition),'application/json','nps-lens-'+edition.scope.key+'-web.json');
+    shellFileId = String(Drive.Files.create({name:shellBlob.getName(),mimeType:'application/json',parents:[destination.id]},shellBlob,{supportsAllDrives:true,fields:'id'}).id);
     pptxFileId = String(Drive.Files.create({name:reportBlob.getName(),mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
     slidesFileId = String(Drive.Files.create({name:reportBlob.getName().replace(/\.pptx$/i,''),mimeType:'application/vnd.google-apps.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
     if (!slidesFileId || !SlidesApp.openById(slidesFileId).getSlides().length) throw new Error('La presentación nativa no contiene diapositivas.');
-    const s=edition.scope,row=[s.key,s.audience_key,s.buug,s.n1,s.n2||'',s.year,s.month,s.causal_method,s.causal_method_label,editionFileId,pptxFileId,slidesFileId,JSON.stringify(_newsletterInsight_(edition)),edition.generated_at,new Date(),viewer.email];
+    const s=edition.scope,row=[s.key,s.audience_key,s.buug,s.n1,s.n2||'',s.year,s.month,s.causal_method,s.causal_method_label,editionFileId,pptxFileId,slidesFileId,newsletterInsight,edition.generated_at,new Date(),viewer.email];
     const sheet=_sheet_(NPS_LENS.publicationsSheet);
+    PropertiesService.getScriptProperties().setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});
     if(previous) sheet.getRange(previous.row,1,1,PUBLICATION_HEADERS.length).setValues([row]); else sheet.appendRow(row);
-    PropertiesService.getScriptProperties().setProperty(NPS_LENS.selectedScopeProperty,s.key);
-    if(previous) [previous.editionFileId,previous.pptxFileId,previous.slidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
+    committed = true; _clearPublicationCache_();
+    if(previous) [previous.editionFileId,previous.pptxFileId,previous.slidesFileId,previousShellFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
   } catch(error) {
-    [editionFileId,pptxFileId,slidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(ignore){}}); throw error;
+    if (!committed) {
+      const properties = PropertiesService.getScriptProperties();
+      if(previousShellFileId) properties.setProperty(shellProperty,previousShellFileId); else properties.deleteProperty(shellProperty);
+      if(previousSelectedScope) properties.setProperty(NPS_LENS.selectedScopeProperty,previousSelectedScope); else properties.deleteProperty(NPS_LENS.selectedScopeProperty);
+      [editionFileId,shellFileId,pptxFileId,slidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(ignore){}});
+    }
+    throw error;
   }
   return getAdministration();
 }

@@ -28,6 +28,11 @@
   let activityTimer = 0;
   let activityCache = {key:'',report:null};
 
+  function purgeCharts() {
+    if (!window.Plotly) return;
+    document.querySelectorAll('.chart').forEach(node => window.Plotly.purge(node));
+  }
+
   function detailViews(section) {
     if (section === 'summary') return summaryViews;
     if (section === 'nps-analysis') return npsViews;
@@ -207,10 +212,14 @@
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-send')) $('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios activos.`;queueActivity('newsletter_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
+    if($('static-channel')) $('static-channel').onchange=event=>{state.scoreChannel=event.target.value;const available=staticViews.dashboard_by_filter?.[state.scoreChannel]||{};if(!available[state.npsGroup])state.npsGroup=Object.keys(available)[0]||state.npsGroup;dashboard=available[state.npsGroup]||dashboard;render();};
+    if($('static-group')) $('static-group').onchange=event=>{state.npsGroup=event.target.value;dashboard=staticViews.dashboard_by_filter?.[state.scoreChannel]?.[state.npsGroup]||dashboard;render();};
+    if($('static-scope')) $('static-scope').onchange=event=>{location.href=location.pathname+'?scope='+encodeURIComponent(event.target.value)+location.hash;};
     wireRecipientActions();
   }
   function render() {
     const renderStarted = performance.now();
+    purgeCharts();
     if(state.adminRoute){
       if(!viewer.isAdmin){state.adminRoute='';return render();}
       $('screen-title').textContent=state.adminRoute==='newsletter'?'Newsletter':state.adminRoute==='import'?'Validar y cargar':'Configuración';
@@ -255,6 +264,3 @@
   render();
 })();
 </script>
-    if($('static-channel'))$('static-channel').onchange=event=>{state.scoreChannel=event.target.value;const available=staticViews.dashboard_by_filter?.[state.scoreChannel]||{};if(!available[state.npsGroup])state.npsGroup=Object.keys(available)[0]||state.npsGroup;dashboard=available[state.npsGroup]||dashboard;render();};
-    if($('static-group'))$('static-group').onchange=event=>{state.npsGroup=event.target.value;dashboard=staticViews.dashboard_by_filter?.[state.scoreChannel]?.[state.npsGroup]||dashboard;render();};
-    if($('static-scope'))$('static-scope').onchange=event=>{location.href=location.pathname+'?scope='+encodeURIComponent(event.target.value)+location.hash;};

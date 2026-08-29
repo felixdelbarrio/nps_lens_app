@@ -246,6 +246,7 @@ type DesktopBridgeApi = {
     serviceOriginN1: string,
     serviceOriginN2: string
   ) => Promise<HelixUploadResult>;
+  reveal_file?: (filePath: string) => Promise<boolean>;
 };
 
 declare global {
@@ -581,7 +582,7 @@ async function downloadArtifact(
     await parseResponse(response);
   }
   const savedPath = response.headers.get("x-nps-lens-saved-path") || "";
-  if (savedPath && canUseDesktopFileBridge()) {
+  if (savedPath) {
     await response.body?.cancel();
     return {
       blob: null,
@@ -598,6 +599,29 @@ async function downloadArtifact(
       parseContentDispositionFilename(response.headers.get("content-disposition"), fallbackName),
     savedPath
   };
+}
+
+export async function completeArtifactDownload(artifact: {
+  blob: Blob | null;
+  fileName: string;
+  savedPath: string;
+}): Promise<string> {
+  if (artifact.savedPath) {
+    await getDesktopBridge()?.reveal_file?.(artifact.savedPath);
+    return artifact.savedPath;
+  }
+  if (!artifact.blob) {
+    throw new Error("La descarga no devolvió ningún fichero.");
+  }
+  const objectUrl = URL.createObjectURL(artifact.blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = artifact.fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  return "";
 }
 
 export function downloadExclusiveReport(params: ExportQuery) {

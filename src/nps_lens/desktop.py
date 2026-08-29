@@ -308,6 +308,22 @@ class DesktopBridge:
         selected_path = Path(str(selection[0])).expanduser().resolve()
         return {"path": str(selected_path), "name": selected_path.name}
 
+    def reveal_file(self, file_path: str) -> bool:
+        target = Path(str(file_path)).expanduser().resolve()
+        if not target.is_file():
+            return False
+        if sys.platform == "darwin":
+            command = ["open", "-R", str(target)]
+        elif os.name == "nt":
+            command = ["explorer", "/select,", str(target)]
+        else:
+            command = ["xdg-open", str(target.parent)]
+        try:
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return False
+        return True
+
     def upload_nps_file(
         self,
         file_path: str,

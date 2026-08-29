@@ -656,6 +656,16 @@ class DatasetStore:
             "cols": int(len(df_out.columns)),
             "source": source,
             "updated_at_utc": _utc_now_iso(),
+            "periods": (
+                sorted(
+                    {
+                        (str(value.year), str(value.month).zfill(2))
+                        for value in pd.to_datetime(df_out.get("Fecha"), errors="coerce").dropna()
+                    }
+                )
+                if "Fecha" in df_out.columns
+                else []
+            ),
             "jsonl_mtime_ns": int(stat.st_mtime_ns),
             "jsonl_size": int(stat.st_size),
             "parquet_dataset": {
@@ -780,6 +790,27 @@ class HelixIncidentStore:
             return None
         return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
 
+    def available_periods(self, stored: StoredDataset) -> list[tuple[str, str]]:
+        """Read temporal coverage without materializing the wide Helix dataset."""
+        try:
+            metadata = json.loads(stored.meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            metadata = {}
+        configured = metadata.get("periods", [])
+        periods = {
+            (str(item[0]), str(item[1]).zfill(2))
+            for item in configured
+            if isinstance(item, list) and len(item) == 2
+        }
+        if periods:
+            return sorted(periods)
+        _data_path, _meta_path, parquet_dir = self._paths_for(stored.context)
+        for path in parquet_dir.glob("Fecha_day=*"):
+            value = path.name.partition("=")[2]
+            if len(value) >= 7:
+                periods.add((value[:4], value[5:7]))
+        return sorted(periods)
+
     def save_df(self, ctx: DatasetContext, df: pd.DataFrame, source: str) -> StoredDataset:
         data_path, meta_path, parquet_dir = self._paths_for(ctx)
 
@@ -816,6 +847,16 @@ class HelixIncidentStore:
             "cols": int(len(df_out.columns)),
             "source": source,
             "updated_at_utc": _utc_now_iso(),
+            "periods": (
+                sorted(
+                    {
+                        (str(value.year), str(value.month).zfill(2))
+                        for value in pd.to_datetime(df_out.get("Fecha"), errors="coerce").dropna()
+                    }
+                )
+                if "Fecha" in df_out.columns
+                else []
+            ),
             "jsonl_mtime_ns": int(stat.st_mtime_ns),
             "jsonl_size": int(stat.st_size),
             "parquet_dataset": {

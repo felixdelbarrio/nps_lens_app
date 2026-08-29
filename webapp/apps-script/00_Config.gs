@@ -1,5 +1,5 @@
 const NPS_LENS = Object.freeze({
-  version: '2.4.0',
+  version: '2.5.0',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   newsletterFrom: 'nps-lens.group@bbva.com',
@@ -15,6 +15,8 @@ const NPS_LENS = Object.freeze({
   maxActivityBatch: 50
 });
 
+const NPS_LENS_REQUEST = {viewer:null,spreadsheet:null,sheets:{}};
+
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
@@ -24,13 +26,14 @@ function _property_(key) {
 }
 
 function _viewer_() {
+  if (NPS_LENS_REQUEST.viewer) return NPS_LENS_REQUEST.viewer;
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   const admins = _property_(NPS_LENS.adminEmailsProperty)
     .split(',').map(value => value.trim().toLowerCase())
     .filter(value => value.endsWith('@' + NPS_LENS.domain));
   const configuredAdmin = Boolean(email && admins.indexOf(email) >= 0);
   const initialAdmin = Boolean(email && email === NPS_LENS.initialAdmin);
-  return {
+  NPS_LENS_REQUEST.viewer = {
     email,
     isAdmin: configuredAdmin || initialAdmin,
     role: configuredAdmin || initialAdmin ? 'admin' : 'viewer',
@@ -38,6 +41,7 @@ function _viewer_() {
     configurationReady: Boolean(_property_('NPS_LENS_SPREADSHEET_ID') && admins.length),
     domainAllowed: Boolean(email && email.endsWith('@' + NPS_LENS.domain))
   };
+  return NPS_LENS_REQUEST.viewer;
 }
 
 function _assertViewer_(viewer) {
@@ -50,14 +54,18 @@ function _assertAdmin_(viewer) {
 }
 
 function _spreadsheet_() {
+  if (NPS_LENS_REQUEST.spreadsheet) return NPS_LENS_REQUEST.spreadsheet;
   const spreadsheetId = _property_('NPS_LENS_SPREADSHEET_ID');
   if (!spreadsheetId) throw new Error('Ejecuta setupNpsLensWebApp antes de utilizar la administración.');
-  return SpreadsheetApp.openById(spreadsheetId);
+  NPS_LENS_REQUEST.spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  return NPS_LENS_REQUEST.spreadsheet;
 }
 
 function _sheet_(name) {
+  if (NPS_LENS_REQUEST.sheets[name]) return NPS_LENS_REQUEST.sheets[name];
   const sheet = _spreadsheet_().getSheetByName(name);
   if (!sheet) throw new Error('Ejecuta setupNpsLensWebApp para preparar la sección ' + name + '.');
+  NPS_LENS_REQUEST.sheets[name] = sheet;
   return sheet;
 }
 

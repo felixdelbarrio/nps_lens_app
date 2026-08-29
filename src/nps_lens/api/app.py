@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, cast
 from urllib.parse import quote
@@ -205,7 +206,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_admin(request)
         payload = request.app.state.telemetry.to_json_bytes()
         current_settings = cast(Settings, request.app.state.settings)
-        file_name = "nps-lens-telemetria.json"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        file_name = f"nps-lens-telemetria-{stamp}.json"
         saved_path = persist_download(
             payload,
             file_name,
@@ -224,6 +226,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             headers={
                 "Content-Disposition": f'attachment; filename="{file_name}"',
                 "X-NPS-LENS-SAVED-PATH": str(saved_path),
+                "Cache-Control": "no-store",
             },
         )
 

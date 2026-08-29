@@ -35,6 +35,10 @@ function getActivityReport(request) {
   const options = request || {};
   const days = Math.min(365, Math.max(1, Number(options.days) || 30));
   const email = _cleanText_(options.email, 180).toLowerCase();
+  const digest = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, days + '|' + email)).slice(0,24);
+  const cache = CacheService.getScriptCache(), cacheKey = 'activity-' + NPS_LENS.version + '-' + digest;
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
   const cutoff = Date.now() - days * 86400000;
   const sheet = _sheet_(NPS_LENS.activitySheet);
   const values = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, ACTIVITY_HEADERS.length).getValues() : [];
@@ -56,7 +60,7 @@ function getActivityReport(request) {
   const viewEvents = performanceEvents.filter(row => row[3] === 'view');
   const serverCalls = performanceEvents.filter(row => row[3] === 'server_call');
   const users = counts(selected, 1).map(item => ({email: item.name, events: item.events}));
-  return {
+  const report = {
     generatedAt: new Date().toISOString(), periodDays: days,
     summary: {events: selected.length, performanceVersion, performanceEvents: performanceEvents.length,
       historicalEvents: selected.length - performanceEvents.length, users: users.length,
@@ -73,4 +77,7 @@ function getActivityReport(request) {
       duration_ms: Number(row[7]) || 0, status: String(row[8] || ''), detail: String(row[9] || ''),
       version: row[10] instanceof Date ? 'unknown' : String(row[10] || '')}))
   };
+  const serialized = JSON.stringify(report);
+  if (serialized.length < 90000) cache.put(cacheKey, serialized, 60);
+  return report;
 }

@@ -538,18 +538,28 @@ class DashboardService:
         context: UploadContext,
     ) -> dict[str, object]:
         preferences = self.settings.ui_defaults()
-        records = self._load_nps_df(context)
-        years, months_by_year = self._available_periods(records)
-        helix_records = self._load_helix_df(context)
-        causal_default_year, causal_default_month = self._latest_common_period(
-            records, helix_records
+        profile = self.repository.records_profile(context)
+        periods = cast(list[tuple[str, str]], profile["periods"])
+        concrete_years = sorted({year for year, _month in periods})
+        all_months = sorted({month for _year, month in periods})
+        years = [POP_ALL, *concrete_years]
+        months_by_year = {POP_ALL: [POP_ALL, *all_months]}
+        for year in concrete_years:
+            months_by_year[year] = [
+                POP_ALL,
+                *sorted(month for period_year, month in periods if period_year == year),
+            ]
+        helix_dataset = self.helix_store.get(DatasetContext(*self._context_key(context)))
+        helix_periods = self.helix_store.available_periods(helix_dataset) if helix_dataset else []
+        causal_default_year, causal_default_month = self._latest_common_period_values(
+            periods, helix_periods
         )
-        score_channels = self._available_score_channels(records)
+        score_channels = [POP_ALL, *cast(list[str], profile["score_channels"])]
         latest_upload = self.repository.list_uploads(limit=1, context=context)
         nps_dataset = {
-            "available": not records.empty,
-            "rows": int(len(records)),
-            "columns": int(len(records.columns)),
+            "available": bool(profile["rows"]),
+            "rows": int(profile["rows"]),
+            "columns": int(profile["columns"]) if profile["rows"] else 0,
             "updated_at": latest_upload[0]["uploaded_at"] if latest_upload else None,
             "status": latest_upload[0]["status"] if latest_upload else "missing",
         }
@@ -3142,6 +3152,21 @@ class DashboardService:
         if not common:
             return POP_ALL, POP_ALL
 
+        year, month = max(common)
+        return str(year), str(month).zfill(2)
+
+    @staticmethod
+    def _latest_common_period_values(
+        nps_periods: Sequence[tuple[str, str]],
+        helix_periods: Sequence[tuple[str, str]],
+    ) -> tuple[str, str]:
+        if not nps_periods or not helix_periods:
+            return POP_ALL, POP_ALL
+        nps_values = {(int(year), int(month)) for year, month in nps_periods}
+        helix_values = {(int(year), int(month)) for year, month in helix_periods}
+        common = nps_values & helix_values
+        if not common:
+            return POP_ALL, POP_ALL
         year, month = max(common)
         return str(year), str(month).zfill(2)
 

@@ -6,11 +6,7 @@ function doGet(event) {
   viewer.scopeKey = publication ? publication.scopeKey : '';
   viewer.reportUrl = _reportUrl_(viewer.scopeKey);
   const template = HtmlService.createTemplateFromFile('Index');
-  const edition = _publishedEdition_(viewer.scopeKey);
-  const data = edition.screens && edition.screens.data || {};
-  Object.keys(data).forEach(kind => { if (data[kind] && Array.isArray(data[kind].rows)) {
-    data[kind].rows = []; data[kind].deferred = true;
-  }});
+  const edition = _publishedShell_(viewer.scopeKey);
   template.publicationJson = JSON.stringify(edition).replace(/<\//g, '<\\/');
   template.viewerJson = JSON.stringify(viewer);
   template.adminBodyClass = viewer.isAdmin ? 'is-admin' : '';

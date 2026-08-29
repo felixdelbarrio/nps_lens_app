@@ -116,5 +116,7 @@ def test_gcp_iap_domain_and_admin_boundaries(tmp_path: Path) -> None:
     telemetry = client.get("/api/telemetry/export", headers=admin)
     assert telemetry.status_code == 200
     saved_path = Path(telemetry.headers["x-nps-lens-saved-path"])
-    assert saved_path == tmp_path / "downloads" / "nps-lens-telemetria.json"
+    assert saved_path.parent == tmp_path / "downloads"
+    assert saved_path.name.startswith("nps-lens-telemetria-")
+    assert saved_path.suffix == ".json"
     assert saved_path.read_bytes() == telemetry.content

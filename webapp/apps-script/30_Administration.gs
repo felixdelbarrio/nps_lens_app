@@ -61,11 +61,7 @@ function setupNpsLensWebApp(spreadsheetId, adminEmails) {
       const current = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
       const expected = specification[1];
       if (current.join('\u0000') !== expected.join('\u0000')) {
-        if (specification[0] === NPS_LENS.recipientsSheet && current.join(',') === 'email,active,created_at,created_by,updated_at,updated_by') {
-          const legacy = sheet.getLastRow() > 1 ? sheet.getRange(2,1,sheet.getLastRow()-1,6).getValues() : [];
-          sheet.clearContents(); sheet.getRange(1,1,1,expected.length).setValues([expected]);
-          if (legacy.length) sheet.getRange(2,1,legacy.length,expected.length).setValues(legacy.map(row => ['', '', '', row[0], row[1], row[2], row[3], row[4], row[5]]));
-        } else if (sheet.getLastRow() === 1) {
+        if (sheet.getLastRow() === 1) {
           sheet.clearContents(); sheet.getRange(1,1,1,expected.length).setValues([expected]);
         } else throw new Error('La hoja ' + specification[0] + ' tiene un contrato obsoleto con datos. Revísala antes de continuar.');
       }
@@ -80,6 +76,9 @@ function setupNpsLensWebApp(spreadsheetId, adminEmails) {
     NPS_LENS_SPREADSHEET_ID: cleanSpreadsheetId,
     [NPS_LENS.adminEmailsProperty]: admins.join(',')
   });
+  NPS_LENS_REQUEST.spreadsheet = book;
+  NPS_LENS_REQUEST.sheets = {};
+  NPS_LENS_REQUEST.viewer = null;
   const result = {
     ok: true,
     version: NPS_LENS.version,

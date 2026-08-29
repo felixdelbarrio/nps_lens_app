@@ -89,7 +89,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.4.0'" in config
+    assert "version: '2.5.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in administration
@@ -104,6 +104,10 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
     assert "if(viewer.reportUrl)" in app
-    assert "data[kind].rows = []" in webapp
+    assert "_publishedShell_" in webapp
+    assert "data[kind].rows = []" in publication
+    assert "NPS_LENS_SHELL_" in publication
     assert "function getPublishedDataset(" in webapp
     assert "source.deferred" in app
+    assert app.strip().endswith("</script>")
+    assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")
