@@ -10,7 +10,7 @@ from nps_lens.platform.webapp_preview import build_preview, extract_report, load
 def test_webapp_preview_loads_publication_and_embedded_report(tmp_path: Path) -> None:
     archive_path = tmp_path / "nps-lens-publicacion-20260827-100000.zip"
     publication = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "generated_at": "2026-08-27T08:00:00Z",
         "filters": {"service_origin": "BBVA México", "month": "03"},
         "screens": {"dashboard": {}, "linking": {}, "data": {}},
@@ -89,13 +89,15 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.7.0'" in config
+    assert "version: '2.8.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
     assert "_loadSnapshot_" in publication
     assert "Utilities.gzip" in publication
-    assert "function _datasetSnapshot_" in publication
+    assert "function _datasetSnapshot_" not in publication
+    assert "edition.snapshots.data" in publication
+    assert "_validateArchive_" in publication
     assert "'v' + NPS_LENS.version" in activity
     assert "event.occurredAt" in activity
     assert "serverP95Ms" in activity and "renderP95Ms" in activity
@@ -111,7 +113,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "if(viewer.reportUrl)" in app
     assert "_publishedShell_" in webapp
     assert "viewer.publicationCatalog = _publicationCatalog_()" in webapp
-    assert "data[kind].rows = []" in publication
+    assert "delete edition.snapshots" in publication
     assert "NPS_LENS_SHELL_" in publication
     assert "function getPublishedDataset(" in webapp
     assert "offset, limit" not in webapp

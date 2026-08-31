@@ -88,7 +88,12 @@ from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.platform.downloads import persist_download
-from nps_lens.platform.publication import PublicationArtifact, build_publication_archive
+from nps_lens.platform.publication import (
+    PUBLICATION_SCHEMA_VERSION,
+    PublicationArtifact,
+    build_publication_archive,
+    build_static_data_snapshot,
+)
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
@@ -1754,6 +1759,19 @@ class DashboardService:
             score_channel=POP_ALL,
             limit=row_limit,
         )
+        data_snapshot = build_static_data_snapshot(nps_data, helix_data)
+        static_datasets = data_snapshot["datasets"]
+        if not isinstance(static_datasets, dict):
+            raise ValueError("No se pudo materializar el snapshot estático de publicación.")
+        static_data = {
+            kind: {
+                "columns": dataset["columns"],
+                "total_rows": dataset["total_rows"],
+                "deferred": True,
+            }
+            for kind, dataset in static_datasets.items()
+            if isinstance(dataset, dict)
+        }
         generated_at = datetime.now(timezone.utc).isoformat()
         registry = EquivalenceRegistry.load(self.settings.equivalences_path)
         channels = self._available_score_channels(history_df)
@@ -1779,7 +1797,7 @@ class DashboardService:
             if group_views:
                 dashboard_views[channel] = group_views
         publication: dict[str, object] = {
-            "schema_version": "1.0",
+            "schema_version": PUBLICATION_SCHEMA_VERSION,
             "generated_at": generated_at,
             "brand": {
                 "name": "BBVA Banca de Empresas e Instituciones",
@@ -1808,8 +1826,9 @@ class DashboardService:
             "screens": {
                 "dashboard": dashboard,
                 "linking": linking,
-                "data": {"nps": nps_data, "helix": helix_data},
+                "data": static_data,
             },
+            "snapshots": {"data": data_snapshot},
             "manifest": {
                 "generated_at": generated_at,
                 "scope": scope,

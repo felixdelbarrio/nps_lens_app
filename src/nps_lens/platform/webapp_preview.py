@@ -22,7 +22,7 @@ def latest_publication(search_dirs: list[Path]) -> Path | None:
 def load_publication(path: Path | None) -> dict[str, object]:
     if path is None:
         return {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "generated_at": "",
             "screens": {"dashboard": {}, "linking": {}, "data": {}},
             "manifest": {"status": "La edición local todavía no se ha generado."},

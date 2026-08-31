@@ -49,8 +49,8 @@ function _publicationByKey_(scopeKey) {
 function _selectedPublication_() { return _publicationByKey_(_property_(NPS_LENS.selectedScopeProperty)); }
 
 function _validateEdition_(payload) {
-  if (!payload || payload.schema_version !== '1.0' || !payload.manifest || !payload.screens || !payload.scope) {
-    throw new Error('La edición no cumple el contrato NPS Lens 1.0 con ámbito inmutable.');
+  if (!payload || payload.schema_version !== '2.0' || !payload.manifest || !payload.screens || !payload.scope) {
+    throw new Error('La edición no cumple el contrato NPS Lens 2.0 con ámbito inmutable.');
   }
   ['dashboard', 'linking', 'data'].forEach(name => {
     if (!payload.screens[name] || typeof payload.screens[name] !== 'object') throw new Error('Falta la pantalla requerida: ' + name + '.');
@@ -58,6 +58,19 @@ function _validateEdition_(payload) {
   ['key','audience_key','buug','n1','year','month','causal_method','causal_method_label'].forEach(name => {
     if (!String(payload.scope[name] || '').trim()) throw new Error('Falta el dato de ámbito: ' + name + '.');
   });
+  return payload;
+}
+
+function _validateArchive_(payload) {
+  _validateEdition_(payload);
+  const snapshot = payload.snapshots && payload.snapshots.data;
+  const datasets = snapshot && snapshot.datasets;
+  if (!snapshot || snapshot.schema_version !== '2.0' || !datasets || !datasets.nps || !datasets.helix) {
+    throw new Error('La edición no incluye los snapshots estáticos calculados por la aplicación local.');
+  }
+  if (!datasets.nps.pages || !datasets.nps.pages['todos|todos'] || !datasets.helix.page) {
+    throw new Error('Los snapshots estáticos están incompletos.');
+  }
   return payload;
 }
 
@@ -105,35 +118,9 @@ function _normalizedDatasetFilter_(value) {
     .replace(/^detractores$/, 'detractor').replace(/^promotores$/, 'promotor').replace(/^neutros$/, 'pasivo');
 }
 
-function _datasetSnapshot_(edition) {
-  const sources = edition.screens && edition.screens.data || {}, datasets = {};
-  ['nps','helix'].forEach(kind => {
-    const source = sources[kind] || {}, rows = Array.isArray(source.rows) ? source.rows : [];
-    const columns = Array.isArray(source.columns) ? source.columns.map(String) : [];
-    const visibleColumns = columns.slice(0, 14);
-    const page = selected => ({total_rows:selected.length,rows:selected.slice(0, 500).map(row => {
-      const projected = {}; visibleColumns.forEach(column => { projected[column] = row[column]; }); return projected;
-    })});
-    if (kind === 'helix') {
-      datasets.helix = {columns,total_rows:rows.length,page:page(rows)};
-      return;
-    }
-    const channels = Array.from(new Set(['todos'].concat(rows.map(row => _normalizedDatasetFilter_(row.Canal)))));
-    const groups = Array.from(new Set(['todos'].concat(rows.map(row => _normalizedDatasetFilter_(row['NPS Group'])))));
-    const pages = {};
-    channels.forEach(channel => groups.forEach(group => {
-      const selected = rows.filter(row => (channel === 'todos' || _normalizedDatasetFilter_(row.Canal) === channel) &&
-        (group === 'todos' || _normalizedDatasetFilter_(row['NPS Group']) === group));
-      pages[channel + '|' + group] = page(selected);
-    }));
-    datasets.nps = {columns,total_rows:rows.length,pages};
-  });
-  return {schema_version:'1.0',datasets};
-}
-
 function _publishedShell_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
-  if (!publication) return {schema_version:'1.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
+  if (!publication) return {schema_version:'2.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
   const fileId = _property_(_publicationShellProperty_(publication.scopeKey));
   if (!fileId) throw new Error('Esta edición debe volver a publicarse para aplicar la carga optimizada.');
   return _validateEdition_(_loadSnapshot_(fileId));
@@ -209,7 +196,7 @@ function importPublicationArchive(form) {
   const editionBlob = members.find(blob => blob.getName() === 'publication.json');
   const reports = members.filter(blob => blob.getName().toLowerCase().endsWith('.pptx'));
   if (!editionBlob || reports.length !== 1) throw new Error('La edición debe contener publication.json y una única presentación PPTX.');
-  const edition = _validateEdition_(JSON.parse(editionBlob.getDataAsString('UTF-8'))), reportBlob = reports[0];
+  const edition = _validateArchive_(JSON.parse(editionBlob.getDataAsString('UTF-8'))), reportBlob = reports[0];
   if (String(edition.manifest.report || '') !== reportBlob.getName()) throw new Error('La presentación no coincide con el manifiesto.');
   const destination = _publicationFolder_(), previous = _publicationRows_().find(item => item.scopeKey === edition.scope.key);
   const shellProperty = _publicationShellProperty_(edition.scope.key), previousShellFileId = _property_(shellProperty);
@@ -217,13 +204,10 @@ function importPublicationArchive(form) {
   const newsletterInsight = JSON.stringify(_newsletterInsight_(edition));
   let snapshotFileId='', shellFileId='', pptxFileId='', slidesFileId='', committed=false;
   try {
-    const snapshotText = JSON.stringify(_datasetSnapshot_(edition));
+    const snapshotText = JSON.stringify(edition.snapshots.data);
     const snapshotBlob = Utilities.newBlob(snapshotText,'application/json','nps-lens-'+edition.scope.key+'-data.json');
     snapshotFileId = String(Drive.Files.create({name:snapshotBlob.getName(),mimeType:'application/json',parents:[destination.id]},snapshotBlob,{supportsAllDrives:true,fields:'id'}).id);
-    const data = edition.screens && edition.screens.data || {};
-    Object.keys(data).forEach(kind => { if (data[kind] && Array.isArray(data[kind].rows)) {
-      data[kind].rows = []; data[kind].deferred = true;
-    }});
+    delete edition.snapshots;
     const shellText = JSON.stringify(edition);
     const shellBlob = Utilities.newBlob(shellText,'application/json','nps-lens-'+edition.scope.key+'-web.json');
     shellFileId = String(Drive.Files.create({name:shellBlob.getName(),mimeType:'application/json',parents:[destination.id]},shellBlob,{supportsAllDrives:true,fields:'id'}).id);

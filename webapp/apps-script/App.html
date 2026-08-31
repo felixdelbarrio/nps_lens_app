@@ -20,7 +20,7 @@
     {id:'insights',label:'Insights',sections:[['summary','Sumario del Periodo'],['nps-analysis','Analítica NPS'],['linking','Incidencias ↔ NPS']]},
     {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}
   ];
-  const state = {area:'insights',section:'summary',view:'period-aggregates',adminRoute:'',settingsView:'telemetry',scoreChannel:defaultView.score_channel||'Web',npsGroup:defaultView.nps_group||'Detractores',started:performance.now()};
+  const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,adminRoute:'',settingsView:'telemetry',scoreChannel:defaultView.score_channel||'Web',npsGroup:defaultView.nps_group||'Detractores',started:performance.now()};
   const scopeCatalog = rows(viewer.publicationCatalog);
   const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
   const activityQueue = [];
@@ -89,15 +89,25 @@
     if (view === 'topics') return tabs + hero('Qué dicen los clientes','Temas, evidencias y lenguaje real de cliente.') + `<div class="grid"><article class="card wide"><h3>Temas principales</h3>${figure(dashboard.overview?.topics_figure,'topics-chart')}${table(dashboard.overview?.topics_table)}</article></div>`;
     return tabs + hero('Cambios respecto al histórico','Diferencias comparables con su base y dirección.') + `<div class="grid"><article class="card wide">${figure(dashboard.comparison?.figure,'comparison-chart')}</article><article class="card wide">${table(dashboard.comparison?.table)}</article></div>`;
   }
-  function scenarioCards(cards) {
-    return rows(cards).map((card,index) => `<article class="card wide scenario"><h4>${esc(card.title || card.anchor_topic || `Escenario ${index + 1}`)}</h4><p>${esc(card.statement || card.chain_story || card.rationale || card.summary || '')}</p><div class="scenario-grid">${rows(card.spotlight_metrics).map(item => `<div class="fact"><span>${esc(item.label || 'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><details open><summary>Evidencia Helix</summary>${table(card.incident_records,20)}</details><details><summary>Voz del cliente</summary>${table(card.comment_records,20)}</details><details><summary>Matriz visual</summary>${figure(card.matrix_figure,`matrix-${index}`)}</details><details><summary>Ficha cuantitativa</summary>${table(card.detail_table,30)}</details><details><summary>Heat map</summary>${figure(card.heatmap_figure,`heat-${index}`)}</details><details><summary>Changepoints + lag</summary>${figure(card.changepoints_figure,`cp-${index}`)}</details><details><summary>Lag en días</summary>${figure(card.lag_figure,`lag-${index}`)}</details></article>`).join('') || '<div class="empty">No hay escenarios defendibles en esta edición.</div>';
+  function scenarioCard(card,index,total) {
+    if (!card) return '<div class="empty">No hay escenarios defendibles en esta edición.</div>';
+    const title=card.title||card.anchor_topic||`Escenario ${index+1}`;
+    const story=card.statement||card.chain_story||card.rationale||card.summary||'';
+    return `<article class="card wide scenario" id="active-scenario" tabindex="-1" aria-label="Escenario causal ${index+1} de ${total}"><header class="scenario-head"><div><p class="eyebrow">Escenario causal priorizado</p><h3>${esc(title)}</h3><p class="scenario-story">${esc(story)}</p></div><span class="scenario-rank" aria-label="Prioridad ${esc(card.rank||index+1)}">#${esc(card.rank||index+1)}</span></header><div class="scenario-flow">${rows(card.flow_steps).map(step=>`<span>${esc(step)}</span>`).join('')}</div><div class="scenario-grid">${rows(card.spotlight_metrics).map(item => `<div class="fact"><span>${esc(item.label || 'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><details open><summary>Evidencia Helix</summary>${table(card.incident_records,20)}</details><details><summary>Voz del cliente</summary>${table(card.comment_records,20)}</details><details><summary>Matriz visual</summary>${figure(card.matrix_figure,`matrix-${index}`)}</details><details><summary>Ficha cuantitativa</summary>${table(card.detail_table,30)}</details><details><summary>Heat map</summary>${figure(card.heatmap_figure,`heat-${index}`)}</details><details><summary>Changepoints + lag</summary>${figure(card.changepoints_figure,`cp-${index}`)}</details><details><summary>Lag en días</summary>${figure(card.lag_figure,`lag-${index}`)}</details></article>`;
+  }
+  function scenarioWorkspace(cards) {
+    const items=rows(cards), total=items.length;
+    if(!total)return scenarioCard(null,0,0);
+    state.scenarioIndex=((state.scenarioIndex%total)+total)%total;
+    const card=items[state.scenarioIndex], disabled=total<=1?'disabled':'';
+    return `<nav class="scenario-nav" aria-label="Navegación entre escenarios causales"><button class="button ghost" data-scenario-step="-1" ${disabled}>Anterior</button><div class="scenario-nav-meta" aria-live="polite"><strong>Escenario ${state.scenarioIndex+1} de ${total}</strong><span>${esc(card.selection_label||card.title||'Escenario causal')}</span></div><button class="button ghost" data-scenario-step="1" ${disabled}>Ver siguiente</button></nav>${scenarioCard(card,state.scenarioIndex,total)}`;
   }
   function linkingView(view) {
     const tabs = contentTabs(linkingViews);
     if (!linking.available) return tabs + hero('Cruce todavía no disponible',linking.empty_state || 'Se necesita una base Helix y NPS suficiente.');
     if (view === 'situation') return tabs + hero(linking.situation?.narrative?.title || 'Situación causal',linking.situation?.narrative?.summary) + `<div class="grid">${Object.entries(linking.kpis || {}).slice(0,9).map(([key,value]) => metric(label(key),value)).join('')}<article class="card wide">${figure(linking.situation?.figure,'situation-chart')}</article></div>`;
     if (view === 'entity-summary') return tabs + hero(linking.entity_summary?.title || 'Resumen causal',linking.entity_summary?.subtitle) + `<div class="grid"><article class="card wide">${figure(linking.entity_summary?.figure,'entity-chart')}</article><article class="card wide">${table(linking.entity_summary?.table)}</article></div>`;
-    if (view === 'scenarios') return tabs + hero(linking.scenarios?.title || 'Escenarios causales',linking.scenarios?.subtitle) + `<div class="grid">${scenarioCards(linking.scenarios?.cards)}</div>`;
+    if (view === 'scenarios') return tabs + hero(linking.scenarios?.title || 'Escenarios causales',linking.scenarios?.subtitle) + `<div class="grid scenario-workspace">${scenarioWorkspace(linking.scenarios?.cards)}</div>`;
     return tabs + hero(linking.deep_dive?.title || 'Análisis de tópicos NPS',linking.deep_dive?.subtitle) + `<div class="grid"><article class="card wide"><h3>Tópicos en tendencia</h3>${figure(linking.deep_dive?.trending?.figure,'trending-chart')}</article><article class="card wide"><h3>Ranking de hipótesis</h3>${table(linking.deep_dive?.ranking?.rows)}</article><article class="card wide"><h3>Muro de evidencias</h3>${table(linking.deep_dive?.evidence?.rows)}</article></div>`;
   }
   function data(view) {
@@ -205,6 +215,7 @@
   function wireNewsletterScopeActions(){if($('newsletter-scope-open'))$('newsletter-scope-open').onclick=async()=>{try{await rpc('selectPublicationScope',[$('newsletter-scope').value]);location.href=location.pathname+'?scope='+encodeURIComponent($('newsletter-scope').value)+'#admin/newsletter';}catch(error){$('newsletter-status').textContent=error.message;}};}
   function wireContentActions() {
     document.querySelectorAll('[data-detail]').forEach(button => { button.onclick = () => { state.view = button.dataset.detail; render(); }; });
+    document.querySelectorAll('[data-scenario-step]').forEach(button=>button.onclick=()=>{const total=rows(linking.scenarios?.cards).length;if(total>1){state.scenarioIndex=(state.scenarioIndex+Number(button.dataset.scenarioStep)+total)%total;render();$('active-scenario')?.focus({preventScroll:true});queueActivity('scenario_changed',String(state.scenarioIndex+1));}});
     if ($('publication-form')) $('publication-form').onsubmit = async event => {
       event.preventDefault(); const status = $('publication-status'); status.textContent = 'Validando y publicando…';
       try { const value = await importPublication(event.currentTarget); const href=location.pathname+'?scope='+encodeURIComponent(value.selectedScopeKey||'');status.innerHTML=`Edición publicada correctamente · ${esc(value.generatedAt||'')} <a class="button secondary" href="${href}">Abrir edición</a>`; }
@@ -247,7 +258,8 @@
     else if (state.area === 'insights') html = linkingView(state.view);
     else html = data(state.section);
     $('content').innerHTML = html; wireContentActions();
-    history.replaceState(null,'',`#${state.area}/${state.section}/${state.view}`);
+    const scenarioHash=state.area==='insights'&&state.section==='linking'&&state.view==='scenarios'?`/${state.scenarioIndex+1}`:'';
+    history.replaceState(null,'',`#${state.area}/${state.section}/${state.view}${scenarioHash}`);
     queueActivity('view','render','ok',performance.now()-renderStarted);
     state.started = performance.now();
   }
@@ -257,7 +269,7 @@
   const hash = location.hash.slice(1).split('/');
   if(hash[0]==='admin' && viewer.isAdmin && ['newsletter','import','settings'].includes(hash[1])){state.adminRoute=hash[1];state.settingsView=['telemetry','adoption','publication'].includes(hash[2])?hash[2]:'telemetry';}
   const hashArea = areas.find(area => area.id === hash[0]);
-  if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; }
+  if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
   const filters = publication.filters || {};
   $('edition-date').textContent = publication.generated_at ? new Date(publication.generated_at).toLocaleString('es-ES') : 'Pendiente de publicación';
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};

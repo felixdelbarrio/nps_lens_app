@@ -30,6 +30,9 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
         "Lag en días",
     ):
         assert causal_detail in web
+    for navigation in ("Anterior", "Ver siguiente", "scenarioIndex", "data-scenario-step"):
+        assert navigation in web
+    assert "rows(cards).map" not in web
 
 
 def test_public_webapp_has_no_filter_controls_and_admin_is_explicit() -> None:

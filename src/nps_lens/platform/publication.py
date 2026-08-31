@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import html
 import json
+import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 MAX_PUBLICATION_BYTES = 30 * 1024 * 1024
+PUBLICATION_SCHEMA_VERSION = "2.0"
+DATA_PAGE_SIZE = 500
+DATA_VISIBLE_COLUMNS = 14
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,70 @@ class PublicationArtifact:
     included_nps_rows: int
     included_helix_rows: int
     saved_path: str = ""
+
+
+def _filter_key(value: object) -> str:
+    key = unicodedata.normalize("NFKD", str(value or "todos").strip().casefold())
+    key = "".join(character for character in key if not unicodedata.combining(character))
+    return {"detractores": "detractor", "promotores": "promotor", "neutros": "pasivo"}.get(
+        key, key or "todos"
+    )
+
+
+def _dataset_page(
+    rows: list[dict[str, object]], columns: list[str], *, page_size: int
+) -> dict[str, object]:
+    visible = columns[:DATA_VISIBLE_COLUMNS]
+    return {
+        "total_rows": len(rows),
+        "rows": [{column: row.get(column) for column in visible} for row in rows[:page_size]],
+    }
+
+
+def build_static_data_snapshot(
+    nps: dict[str, object],
+    helix: dict[str, object],
+    *,
+    page_size: int = DATA_PAGE_SIZE,
+) -> dict[str, object]:
+    """Materializa localmente las páginas inmutables que consumirá la WebApp."""
+
+    def source(value: dict[str, object]) -> tuple[list[str], list[dict[str, object]]]:
+        columns = [str(column) for column in value.get("columns", [])]
+        rows = [row for row in value.get("rows", []) if isinstance(row, dict)]
+        return columns, rows
+
+    nps_columns, nps_rows = source(nps)
+    helix_columns, helix_rows = source(helix)
+    channels = list(dict.fromkeys(["todos", *(_filter_key(row.get("Canal")) for row in nps_rows)]))
+    groups = list(
+        dict.fromkeys(["todos", *(_filter_key(row.get("NPS Group")) for row in nps_rows)])
+    )
+    pages = {
+        f"{channel}|{group}": _dataset_page(
+            [
+                row
+                for row in nps_rows
+                if (channel == "todos" or _filter_key(row.get("Canal")) == channel)
+                and (group == "todos" or _filter_key(row.get("NPS Group")) == group)
+            ],
+            nps_columns,
+            page_size=page_size,
+        )
+        for channel in channels
+        for group in groups
+    }
+    return {
+        "schema_version": PUBLICATION_SCHEMA_VERSION,
+        "datasets": {
+            "nps": {"columns": nps_columns, "total_rows": len(nps_rows), "pages": pages},
+            "helix": {
+                "columns": helix_columns,
+                "total_rows": len(helix_rows),
+                "page": _dataset_page(helix_rows, helix_columns, page_size=page_size),
+            },
+        },
+    }
 
 
 def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
@@ -67,35 +135,32 @@ def build_publication_archive(
     file_name: str,
     max_bytes: int = MAX_PUBLICATION_BYTES,
 ) -> PublicationArtifact:
-    screens = publication.setdefault("screens", {})
-    data = screens.setdefault("data", {}) if isinstance(screens, dict) else {}
-    nps = data.setdefault("nps", {}) if isinstance(data, dict) else {}
-    helix = data.setdefault("helix", {}) if isinstance(data, dict) else {}
-    nps_rows = nps.get("rows", []) if isinstance(nps, dict) else []
-    helix_rows = helix.get("rows", []) if isinstance(helix, dict) else []
-    if not isinstance(nps_rows, list) or not isinstance(helix_rows, list):
-        raise ValueError("Las filas de la publicación deben ser listas.")
-    original_nps, original_helix = len(nps_rows), len(helix_rows)
-    content = _archive(publication, report_name=report_name, report_content=report_content)
-    while len(content) > max_bytes and (nps_rows or helix_rows):
-        target = nps_rows if len(nps_rows) >= len(helix_rows) else helix_rows
-        del target[max(len(target) // 2, 1) :]
-        content = _archive(publication, report_name=report_name, report_content=report_content)
+    snapshots = publication.get("snapshots", {})
+    data = snapshots.get("data", {}) if isinstance(snapshots, dict) else {}
+    datasets = data.get("datasets", {}) if isinstance(data, dict) else {}
+    if data.get("schema_version") != PUBLICATION_SCHEMA_VERSION or not all(
+        isinstance(datasets.get(kind), dict) for kind in ("nps", "helix")
+    ):
+        raise ValueError("La publicación debe incluir el snapshot estático local de NPS y Helix.")
+    nps, helix = datasets["nps"], datasets["helix"]
+    nps_total, helix_total = int(nps.get("total_rows", 0)), int(helix.get("total_rows", 0))
+    nps_included = len((nps.get("pages", {}).get("todos|todos", {}) or {}).get("rows", []))
+    helix_included = len((helix.get("page", {}) or {}).get("rows", []))
     manifest = publication.setdefault("manifest", {})
     if isinstance(manifest, dict):
         manifest.update(
             {
                 "size_budget_bytes": int(max_bytes),
                 "data_rows": {
-                    "nps": {"total": original_nps, "included": len(nps_rows)},
-                    "helix": {"total": original_helix, "included": len(helix_rows)},
+                    "nps": {"total": nps_total, "included": nps_included},
+                    "helix": {"total": helix_total, "included": helix_included},
                 },
-                "truncated": len(nps_rows) < original_nps or len(helix_rows) < original_helix,
+                "truncated": nps_included < nps_total or helix_included < helix_total,
             }
         )
     content = _archive(publication, report_name=report_name, report_content=report_content)
     if len(content) > max_bytes:
-        raise ValueError("La publicación supera el límite absoluto de 30 MB.")
+        raise ValueError("La publicación estática supera el límite absoluto permitido.")
     if isinstance(manifest, dict):
         manifest["size_bytes"] = len(content)
         content = _archive(publication, report_name=report_name, report_content=report_content)
@@ -103,6 +168,6 @@ def build_publication_archive(
         file_name=file_name,
         content=content,
         size_bytes=len(content),
-        included_nps_rows=len(nps_rows),
-        included_helix_rows=len(helix_rows),
+        included_nps_rows=nps_included,
+        included_helix_rows=helix_included,
     )
