@@ -89,25 +89,34 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.5.0'" in config
+    assert "version: '2.6.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
-    assert "_publishedEdition_" not in administration
+    assert "_publishedEdition_" not in publication
+    assert "_loadSnapshot_" in publication
+    assert "Utilities.gzip" in publication
+    assert "function _datasetSnapshot_" in publication
     assert "'v' + NPS_LENS.version" in activity
     assert "event.occurredAt" in activity
     assert "serverP95Ms" in activity and "renderP95Ms" in activity
     assert "slowCalls" in activity
     assert "performanceEvents" in activity
     assert "function exportActivityReport" not in activity
-    assert "_publishedEdition_" not in newsletter
+    assert "function getNewsletterSettings" not in newsletter
+    assert "function getNewsletterWorkspace" in newsletter
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
     assert "if(viewer.reportUrl)" in app
     assert "_publishedShell_" in webapp
+    assert "viewer.publicationCatalog = _publicationCatalog_()" in webapp
     assert "data[kind].rows = []" in publication
     assert "NPS_LENS_SHELL_" in publication
     assert "function getPublishedDataset(" in webapp
+    assert "offset, limit" not in webapp
     assert "source.deferred" in app
+    assert "rpc('getPublicationCatalog')" not in app
+    assert "rpc('getAdministration')" not in app
+    assert "Promise.all([rpc('getNewsletter" not in app
     assert app.strip().endswith("</script>")
     assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")

@@ -50,12 +50,12 @@ function revalidateNewsletterSender() {
   return _newsletterSenderIdentity_(true);
 }
 
-function getNewsletterSettings() {
+function getNewsletterWorkspace() {
   const viewer = _viewer_();
   _assertAdmin_(viewer);
   const publication = _selectedPublication_();
   if (!publication) return {subject:'Importa un ámbito para construir el asunto',scope:null,
-    recipients:[],activeCount:0,presentationUrl:'',sender:_newsletterSenderIdentity_(false)};
+    recipients:[],activeCount:0,presentationUrl:'',sender:_newsletterSenderIdentity_(false),folder:_configuredPublicationFolder_()};
   const recipients = _newsletterRecipients_(publication.audienceKey);
   return {
     subject: _newsletterSubject_(publication),
@@ -63,7 +63,8 @@ function getNewsletterSettings() {
     recipients: recipients.map(item => ({email: item.email, active: item.active})),
     activeCount: recipients.filter(item => item.active).length,
     presentationUrl: _reportUrl_(publication.scopeKey),
-    sender: _newsletterSenderIdentity_(false)
+    sender: _newsletterSenderIdentity_(false),
+    folder: _configuredPublicationFolder_()
   };
 }
 
@@ -200,7 +201,7 @@ function testNewsletter() {
 function sendNewsletter() {
   const viewer = _viewer_();
   _assertAdmin_(viewer);
-  const settings = getNewsletterSettings();
+  const settings = getNewsletterWorkspace();
   const active = settings.recipients.filter(item => item.active).map(item => item.email);
   if (!active.length) throw new Error('Activa al menos un destinatario.');
   return _sendNewsletterTo_(active, settings.subject, _selectedPublication_());

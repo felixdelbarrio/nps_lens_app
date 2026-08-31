@@ -66,6 +66,20 @@ def build_preview(
         "isAdmin": True,
         "local": True,
         "reportUrl": report_url,
+        "selectedScopeKey": str(payload.get("scope", {}).get("key", "local"))
+        if isinstance(payload.get("scope"), dict)
+        else "",
+        "publicationCatalog": [
+            {
+                "scopeKey": str(payload.get("scope", {}).get("key", "local")),
+                "label": str(payload.get("scope", {}).get("label", "Edición local")),
+            }
+        ] if isinstance(payload.get("scope"), dict) else [],
+        "administration": {
+            "version": "local",
+            "generatedAt": str(payload.get("generated_at", "")),
+            "access": {"email": "local@bbva.com", "role": "admin"},
+        },
     }
     index = index.replace(
         "<?!= viewerJson ?>", json.dumps(viewer, ensure_ascii=False, separators=(",", ":"))
