@@ -332,6 +332,7 @@ export type ExportQuery = {
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
+  report_dimension_analysis: string;
 };
 
 function buildUrl(pathname: string, params?: Record<string, string | number | undefined>) {

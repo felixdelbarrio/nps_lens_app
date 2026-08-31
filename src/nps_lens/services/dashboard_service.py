@@ -1530,10 +1530,6 @@ class DashboardService:
         executive_journey_catalog: list[dict[str, object]] = []
         broken_journeys_df = pd.DataFrame()
         include_causal_section = False
-        nps_points_at_risk = 0.0
-        nps_points_recoverable = 0.0
-        top3_incident_share = 0.0
-        median_lag_weeks = 0.0
 
         helix_history = self._load_helix_df(context)
         helix_current = pd.DataFrame()
@@ -1590,15 +1586,6 @@ class DashboardService:
                         by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
                         by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
 
-                        canonical_bundle = self._build_rationale_bundle(
-                            by_topic_weekly=by_topic_weekly,
-                            by_topic_daily=by_topic_daily,
-                            overall_daily=overall_daily,
-                            focus_group=focus_group,
-                            context=context,
-                            links_df=links_df,
-                            operational_benchmark=operational_benchmark,
-                        )
                         mode_bundle = self._build_rationale_bundle(
                             by_topic_weekly=by_topic_weekly_mode,
                             by_topic_daily=by_topic_daily_mode,
@@ -1609,11 +1596,6 @@ class DashboardService:
                             operational_benchmark=operational_benchmark,
                         )
                         rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
-                        rationale_summary = cast(Any, canonical_bundle["rationale_summary"])
-                        nps_points_at_risk = float(rationale_summary.nps_points_at_risk)
-                        nps_points_recoverable = float(rationale_summary.nps_points_recoverable)
-                        top3_incident_share = float(rationale_summary.top3_incident_share)
-                        median_lag_weeks = float(rationale_summary.median_lag_weeks)
 
                         if not rationale_df.empty:
                             attribution_all_df = build_incident_attribution_chains(
@@ -1666,10 +1648,6 @@ class DashboardService:
             focus_name=focus_name,
             overall_weekly=overall_series,
             rationale_df=rationale_df,
-            nps_points_at_risk=nps_points_at_risk,
-            nps_points_recoverable=nps_points_recoverable,
-            top3_incident_share=top3_incident_share,
-            median_lag_weeks=median_lag_weeks,
             story_md=business_story_md,
             script_8slides_md="",
             attribution_df=attribution_df,
@@ -1714,6 +1692,7 @@ class DashboardService:
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
         touchpoint_source: str = "",
+        report_dimension_analysis: str = "",
     ) -> PublicationArtifact:
         active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
         scope = build_publication_scope(
@@ -1745,81 +1724,17 @@ class DashboardService:
             max_days_apart=max_days_apart,
             touchpoint_source=active_touchpoint_source,
         )
-        filtered_history_df = self._apply_score_channel_filter(history_df, publish_channel)
-        filtered_history_df = filter_by_nps_group(filtered_history_df, publish_group)
-        filtered_selected_df = self._apply_population_filters(
-            filtered_history_df,
-            pop_year,
-            pop_month,
-        )
-        if filtered_selected_df.empty:
-            raise ValueError("El periodo filtrado no contiene respuestas para la edición web.")
-        report_selected_df = self._apply_population_filters(history_df, pop_year, pop_month)
-        period_start, period_end = self._period_bounds(report_selected_df)
-        scenario_payload = cast(dict[str, object], linking.get("scenarios", {}))
-        scenario_rows = scenario_payload.get("cards", [])
-        attribution_df = pd.DataFrame(scenario_rows if isinstance(scenario_rows, list) else [])
-        entity_payload = cast(dict[str, object], linking.get("entity_summary", {}))
-        entity_kpis = entity_payload.get("kpis", [])
-        linking_kpis = cast(dict[str, object], linking.get("kpis", {}))
-        focus_group, _ = self._linking_focus_group(publish_group)
-        report = generate_business_review_ppt(
-            service_origin=context.service_origin,
-            service_origin_n1=context.service_origin_n1,
-            service_origin_n2=context.service_origin_n2,
-            period_start=period_start,
-            period_end=period_end,
-            focus_name=self._focus_name(focus_group),
-            overall_weekly=pd.DataFrame(),
-            rationale_df=pd.DataFrame(),
-            nps_points_at_risk=float(
-                cast(Any, linking_kpis.get("nps_points_at_risk", 0.0) or 0.0)
-            ),
-            nps_points_recoverable=float(
-                cast(Any, linking_kpis.get("nps_points_recoverable", 0.0) or 0.0)
-            ),
-            top3_incident_share=float(
-                cast(Any, linking_kpis.get("top3_incident_share", 0.0) or 0.0)
-            ),
-            median_lag_weeks=float(
-                cast(Any, linking_kpis.get("median_lag_weeks", 0.0) or 0.0)
-            ),
-            story_md=self._build_business_report_md(
-                current_df=report_selected_df,
-                history_df=history_df,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                min_n=min_n,
-            ),
-            script_8slides_md="",
-            attribution_df=attribution_df,
-            selected_nps_df=report_selected_df,
-            comparison_nps_df=history_df,
+        report = self.generate_ppt_report(
+            context=context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            nps_group=publish_group,
+            score_channel=publish_channel,
+            min_n=min_n,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
             touchpoint_source=active_touchpoint_source,
-            entity_summary_df=attribution_df,
-            entity_summary_kpis=entity_kpis if isinstance(entity_kpis, list) else [],
-            report_dimension_analysis=str(
-                self.settings.ui_defaults().get("report_dimension_analysis", "palanca")
-            ),
-            period_kpis=build_period_kpis(
-                history_df=history_df,
-                current_df=report_selected_df,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                context_label=selected_month_label(
-                    pop_year=pop_year,
-                    pop_month=pop_month,
-                    df=history_df,
-                ),
-            ),
-            include_causal_section=bool(linking.get("available")),
-        )
-        saved_report_path = self._persist_report_copy(report)
-        report = BusinessPptResult(
-            file_name=report.file_name,
-            content=report.content,
-            slide_count=report.slide_count,
-            saved_path=str(saved_report_path),
+            report_dimension_analysis=report_dimension_analysis,
         )
         row_limit = 50_000
         nps_data = self.dataset_rows(

@@ -787,7 +787,8 @@ export function App() {
       min_n: minN,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
-      touchpoint_source: touchpointSource
+      touchpoint_source: touchpointSource,
+      report_dimension_analysis: reportDimensionAnalysis
     };
   }
 

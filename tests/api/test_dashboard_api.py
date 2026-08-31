@@ -9,7 +9,6 @@ import pandas as pd
 from fastapi.testclient import TestClient
 from pptx import Presentation
 
-import nps_lens.services.dashboard_service as dashboard_service_module
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
@@ -720,7 +719,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         captured.update(kwargs)
         return BusinessPptResult("informe-ejecutivo.pptx", b"EXECUTIVE", 10)
 
-    monkeypatch.setattr(dashboard_service_module, "generate_business_review_ppt", _executive_report)
+    monkeypatch.setattr(service, "generate_ppt_report", _executive_report)
 
     artifact = service.generate_publication(
         context=UploadContext("BBVA México", "Senda", ""),
@@ -728,10 +727,8 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         pop_month="03",
     )
 
-    assert captured["include_causal_section"] is True
     assert captured["touchpoint_source"] == "executive_journeys"
-    assert captured["attribution_df"].iloc[0]["nps_topic"] == "Acceso bloqueado"
-    assert captured["entity_summary_df"].iloc[0]["linked_pairs"] == 4
+    assert captured["report_dimension_analysis"] == ""
     with ZipFile(BytesIO(artifact.content)) as archive:
         assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
         assert b"presentaci\xc3\xb3n ejecutiva" in archive.read("newsletter.html")
@@ -804,5 +801,5 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("3. Qué ha cambiado en Palanca" in text for text in all_texts)
+    assert any("deterioro frente al histórico se concentra en Palanca" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

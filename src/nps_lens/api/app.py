@@ -614,6 +614,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
         touchpoint_source: str = "",
+        report_dimension_analysis: str = "",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> Response:
         require_admin(request)
@@ -633,6 +634,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 min_similarity=min_similarity,
                 max_days_apart=max_days_apart,
                 touchpoint_source=touchpoint_source,
+                report_dimension_analysis=report_dimension_analysis,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
