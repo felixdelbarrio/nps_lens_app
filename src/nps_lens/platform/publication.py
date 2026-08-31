@@ -40,7 +40,7 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
     return f"""<!doctype html><html><body style="margin:0;background:#f7f8f8;font-family:Arial,sans-serif;color:#070e46">
 <table role="presentation" width="100%"><tr><td align="center"><table role="presentation" width="680" style="max-width:100%;background:#fff">
 <tr><td style="background:#070e46;color:#fff;padding:32px"><h1 style="margin:0">NPS Lens</h1><div style="color:#85c8ff">BBVA Banca de Empresas e Instituciones · {context}</div></td></tr>
-<tr><td style="padding:28px"><h2>La señal del cliente, conectada con la operación</h2><p>Consulta la edición actualizada para navegar el análisis completo y accede a la presentación exclusiva.</p>
+<tr><td style="padding:28px"><h2>La señal del cliente, conectada con la operación</h2><p>Consulta la edición actualizada para navegar el análisis completo y accede a la presentación ejecutiva.</p>
 <table role="presentation" width="100%"><tr>{metrics}</tr></table><p><a href="WEBAPP_URL" style="display:inline-block;background:#001391;color:#fff;text-decoration:none;padding:13px 18px">Abrir NPS Lens</a>
 <a href="{report_href}" style="display:inline-block;color:#001391;padding:13px 18px">Abrir presentación</a></p></td></tr></table></td></tr></table></body></html>""".encode(
         "utf-8"

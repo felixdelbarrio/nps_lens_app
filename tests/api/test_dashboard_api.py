@@ -3,11 +3,13 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from typing import Callable
+from zipfile import ZipFile
 
 import pandas as pd
 from fastapi.testclient import TestClient
 from pptx import Presentation
 
+import nps_lens.services.dashboard_service as dashboard_service_module
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
@@ -668,6 +670,72 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
 
     presentation = Presentation(BytesIO(report_response.content))
     assert len(presentation.slides) >= 8
+
+
+def test_publication_embeds_the_executive_report_with_causal_slides(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_march(client)
+    service = app.state.dashboard_service
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(service, "nps_dashboard", lambda **_: {"kpis": {}})
+    monkeypatch.setattr(
+        service,
+        "linking_dashboard",
+        lambda **_: {
+            "available": True,
+            "kpis": {
+                "nps_points_at_risk": 2.1,
+                "nps_points_recoverable": 1.3,
+                "top3_incident_share": 0.7,
+                "median_lag_weeks": 1.0,
+            },
+            "entity_summary": {
+                "kpis": [{"label": "Journeys de detracción", "value": "1"}],
+                "table": [{"nps_topic": "Acceso", "linked_pairs": 4}],
+            },
+            "scenarios": {
+                "cards": [
+                    {
+                        "rank": 1,
+                        "nps_topic": "Acceso bloqueado",
+                        "linked_pairs": 4,
+                        "detractor_probability": 0.6,
+                    }
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "dataset_rows",
+        lambda *, dataset_kind, **_: {"dataset_kind": dataset_kind, "rows": []},
+    )
+
+    def _executive_report(**kwargs):
+        captured.update(kwargs)
+        return BusinessPptResult("informe-ejecutivo.pptx", b"EXECUTIVE", 10)
+
+    monkeypatch.setattr(dashboard_service_module, "generate_business_review_ppt", _executive_report)
+
+    artifact = service.generate_publication(
+        context=UploadContext("BBVA México", "Senda", ""),
+        pop_year="2026",
+        pop_month="03",
+    )
+
+    assert captured["include_causal_section"] is True
+    assert captured["touchpoint_source"] == "executive_journeys"
+    assert captured["attribution_df"].iloc[0]["nps_topic"] == "Acceso bloqueado"
+    assert captured["entity_summary_df"].iloc[0]["linked_pairs"] == 4
+    with ZipFile(BytesIO(artifact.content)) as archive:
+        assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
+        assert b"presentaci\xc3\xb3n ejecutiva" in archive.read("newsletter.html")
+    assert client.get("/api/dashboard/report/exclusive.pptx").status_code == 404
 
 
 def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history(

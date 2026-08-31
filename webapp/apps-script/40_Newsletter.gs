@@ -14,7 +14,7 @@ function _newsletterSenderIdentity_(forceRefresh) {
   const requested = NPS_LENS.newsletterFrom.toLowerCase();
   const executor = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'nps-lens-newsletter-sender-' + NPS_LENS.version;
+  const cacheKey = _cacheKey_('newsletter-sender');
   if (forceRefresh === true) cache.remove(cacheKey);
   else {
     const stored = cache.get(cacheKey);
@@ -55,7 +55,7 @@ function getNewsletterWorkspace() {
   _assertAdmin_(viewer);
   const publication = _selectedPublication_();
   if (!publication) return {subject:'Importa un ámbito para construir el asunto',scope:null,
-    recipients:[],activeCount:0,presentationUrl:'',sender:_newsletterSenderIdentity_(false),folder:_configuredPublicationFolder_()};
+    recipients:[],activeCount:0,presentationUrl:'',sender:_newsletterSenderIdentity_(false)};
   const recipients = _newsletterRecipients_(publication.audienceKey);
   return {
     subject: _newsletterSubject_(publication),
@@ -63,8 +63,7 @@ function getNewsletterWorkspace() {
     recipients: recipients.map(item => ({email: item.email, active: item.active})),
     activeCount: recipients.filter(item => item.active).length,
     presentationUrl: _reportUrl_(publication.scopeKey),
-    sender: _newsletterSenderIdentity_(false),
-    folder: _configuredPublicationFolder_()
+    sender: _newsletterSenderIdentity_(false)
   };
 }
 

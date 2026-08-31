@@ -1,12 +1,9 @@
-function getAdministration() {
-  const viewer = _viewer_();
-  _assertAdmin_(viewer);
-  const publication = _selectedPublication_();
+function _administration_(publication, viewer) {
   return {
     version: NPS_LENS.version,
     generatedAt: publication ? publication.generatedAt : '',
     selectedScopeKey: publication ? publication.scopeKey : '',
-    reportUrl: _reportUrl_(publication && publication.scopeKey),
+    reportUrl: publication && publication.slidesFileId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(publication.slidesFileId) + '/edit' : '',
     access: {
       email: viewer.email,
       role: viewer.role,
@@ -14,6 +11,11 @@ function getAdministration() {
       configurationReady: viewer.configurationReady
     }
   };
+}
+
+function getAdministration() {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  return _administration_(_selectedPublication_(), viewer);
 }
 
 function diagnoseNpsLensAccess() {

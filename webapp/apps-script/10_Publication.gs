@@ -4,7 +4,6 @@ const PUBLICATION_HEADERS = Object.freeze([
   'newsletter_insight', 'generated_at', 'imported_at', 'imported_by'
 ]);
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
-const PUBLICATION_CACHE_KEY = 'nps-lens-publications-' + NPS_LENS.version;
 const SNAPSHOT_CACHE_SECONDS = 21600;
 const SNAPSHOT_CACHE_CHUNK_CHARS = 80000;
 let publicationRowsCache = null;
@@ -15,12 +14,13 @@ function _publicationShellProperty_(scopeKey) {
 
 function _clearPublicationCache_() {
   publicationRowsCache = null;
-  CacheService.getScriptCache().remove(PUBLICATION_CACHE_KEY);
+  CacheService.getScriptCache().remove(_cacheKey_('publications'));
 }
 
 function _publicationRows_() {
   if (publicationRowsCache) return publicationRowsCache;
-  const cached = CacheService.getScriptCache().get(PUBLICATION_CACHE_KEY);
+  const cacheKey = _cacheKey_('publications');
+  const cached = CacheService.getScriptCache().get(cacheKey);
   if (cached) {
     publicationRowsCache = JSON.parse(cached);
     return publicationRowsCache;
@@ -34,7 +34,7 @@ function _publicationRows_() {
       snapshotFileId: String(row[9]), pptxFileId: String(row[10]), slidesFileId: String(row[11]),
       newsletterInsight:String(row[12]||''),generatedAt:String(row[13]),importedAt:row[14],importedBy:String(row[15])}));
   const serialized = JSON.stringify(publicationRowsCache);
-  if (serialized.length < 90000) CacheService.getScriptCache().put(PUBLICATION_CACHE_KEY, serialized, 300);
+  if (serialized.length < 90000) CacheService.getScriptCache().put(cacheKey, serialized, 300);
   return publicationRowsCache;
 }
 
@@ -62,7 +62,7 @@ function _validateEdition_(payload) {
 }
 
 function _snapshotCacheKey_(fileId) {
-  return 'nps-lens-snapshot-' + NPS_LENS.version + '-' + fileId;
+  return _cacheKey_('snapshot-' + fileId);
 }
 
 function _cacheSnapshot_(fileId, jsonText) {
@@ -149,7 +149,7 @@ function _folderId_(reference) {
 
 function _folderDescriptor_(reference) {
   const id = _folderId_(reference), cache = CacheService.getScriptCache();
-  const cacheKey = 'nps-lens-folder-' + NPS_LENS.version + '-' + id, cached = cache.get(cacheKey);
+  const cacheKey = _cacheKey_('folder-' + id), cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
   const resource = Drive.Files.get(id, {supportsAllDrives:true,fields:'id,name,mimeType,webViewLink,capabilities(canAddChildren)'});
   if (resource.mimeType !== DRIVE_FOLDER_MIME) throw new Error('La referencia no corresponde a una carpeta.');
@@ -164,6 +164,11 @@ function _configuredPublicationFolder_() {
   return id ? _folderDescriptor_(id) : {id:'',name:'',url:''};
 }
 
+function getPublicationSettings() {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  return _configuredPublicationFolder_();
+}
+
 function savePublicationFolder(reference) {
   const viewer = _viewer_(); _assertAdmin_(viewer);
   const folder = _folderDescriptor_(reference);
@@ -173,7 +178,7 @@ function savePublicationFolder(reference) {
 
 function _publicationFolder_() {
   const id = _property_(NPS_LENS.publicationFolderProperty);
-  if (!id) throw new Error('Configura primero la carpeta de presentaciones en Newsletter.');
+  if (!id) throw new Error('Configura primero la carpeta en Configuración > Publicación.');
   return _folderDescriptor_(id);
 }
 
@@ -224,13 +229,13 @@ function importPublicationArchive(form) {
     shellFileId = String(Drive.Files.create({name:shellBlob.getName(),mimeType:'application/json',parents:[destination.id]},shellBlob,{supportsAllDrives:true,fields:'id'}).id);
     pptxFileId = String(Drive.Files.create({name:reportBlob.getName(),mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
     slidesFileId = String(Drive.Files.create({name:reportBlob.getName().replace(/\.pptx$/i,''),mimeType:'application/vnd.google-apps.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
-    if (!slidesFileId || !SlidesApp.openById(slidesFileId).getSlides().length) throw new Error('La presentación nativa no contiene diapositivas.');
+    if (!slidesFileId) throw new Error('Google Drive no ha confirmado la presentación nativa.');
     const s=edition.scope,row=[s.key,s.audience_key,s.buug,s.n1,s.n2||'',s.year,s.month,s.causal_method,s.causal_method_label,snapshotFileId,pptxFileId,slidesFileId,newsletterInsight,edition.generated_at,new Date(),viewer.email];
     const sheet=_sheet_(NPS_LENS.publicationsSheet);
     PropertiesService.getScriptProperties().setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});
     if(previous) sheet.getRange(previous.row,1,1,PUBLICATION_HEADERS.length).setValues([row]); else sheet.appendRow(row);
     committed = true; _clearPublicationCache_();
-    _cacheSnapshot_(snapshotFileId, snapshotText); _cacheSnapshot_(shellFileId, shellText);
+    _cacheSnapshot_(shellFileId, shellText);
     if(previous) [previous.snapshotFileId,previous.pptxFileId,previous.slidesFileId,previousShellFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
   } catch(error) {
     if (!committed) {
@@ -241,7 +246,7 @@ function importPublicationArchive(form) {
     }
     throw error;
   }
-  return getAdministration();
+  return _administration_({scopeKey:edition.scope.key,generatedAt:edition.generated_at,slidesFileId}, viewer);
 }
 
 function _reportUrl_(scopeKey) {

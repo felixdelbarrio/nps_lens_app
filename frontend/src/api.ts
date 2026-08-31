@@ -624,10 +624,6 @@ export async function completeArtifactDownload(artifact: {
   return "";
 }
 
-export function downloadExclusiveReport(params: ExportQuery) {
-  return downloadArtifact("/api/dashboard/report/exclusive.pptx", params, "informe-exclusivo.pptx");
-}
-
 export function downloadWebPublication(params: ExportQuery) {
   return downloadArtifact("/api/dashboard/publication.zip", params, "nps-lens-publicacion.zip");
 }

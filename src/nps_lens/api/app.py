@@ -600,55 +600,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             headers=headers,
         )
 
-    @app.get("/api/dashboard/report/exclusive.pptx")
-    def dashboard_exclusive_report(
-        request: Request,
-        service_origin: Optional[str] = None,
-        service_origin_n1: Optional[str] = None,
-        service_origin_n2: Optional[str] = None,
-        pop_year: str = "Todos",
-        pop_month: str = "Todos",
-        nps_group: Optional[str] = None,
-        score_channel: Optional[str] = None,
-        min_n: int = 200,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
-        touchpoint_source: str = "",
-        dashboard_layer: DashboardService = Depends(get_dashboard_service),
-    ) -> Response:
-        require_admin(request)
-        try:
-            report = dashboard_layer.generate_ppt_report(
-                context=_resolve_context(
-                    cast(Settings, request.app.state.settings),
-                    service_origin,
-                    service_origin_n1,
-                    service_origin_n2,
-                ),
-                pop_year=pop_year,
-                pop_month=pop_month,
-                nps_group=nps_group,
-                score_channel=score_channel,
-                min_n=min_n,
-                min_similarity=min_similarity,
-                max_days_apart=max_days_apart,
-                touchpoint_source=touchpoint_source,
-                report_format="exclusive",
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return Response(
-            content=report.content,
-            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{report.file_name}"; '
-                    f"filename*=UTF-8''{quote(report.file_name)}"
-                ),
-                "X-NPS-LENS-SAVED-PATH": report.saved_path,
-            },
-        )
-
     @app.get("/api/dashboard/publication.zip")
     def dashboard_publication(
         request: Request,

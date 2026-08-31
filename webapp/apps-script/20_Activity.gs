@@ -36,7 +36,7 @@ function getActivityReport(request) {
   const days = Math.min(365, Math.max(1, Number(options.days) || 30));
   const email = _cleanText_(options.email, 180).toLowerCase();
   const digest = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, days + '|' + email)).slice(0,24);
-  const cache = CacheService.getScriptCache(), cacheKey = 'activity-' + NPS_LENS.version + '-' + digest;
+  const cache = CacheService.getScriptCache(), cacheKey = _cacheKey_('activity-' + digest);
   const cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
   const cutoff = Date.now() - days * 86400000;

@@ -1,10 +1,11 @@
 const NPS_LENS = Object.freeze({
-  version: '2.6.0',
+  version: '2.7.0',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   newsletterFrom: 'nps-lens.group@bbva.com',
   newsletterSenderName: 'NPS Lens',
   publicationFolderProperty: 'NPS_LENS_PUBLICATION_FOLDER_ID',
+  cacheEpochProperty: 'NPS_LENS_CACHE_EPOCH',
   selectedScopeProperty: 'NPS_LENS_SELECTED_SCOPE_KEY',
   adminEmailsProperty: 'NPS_LENS_ADMIN_EMAILS',
   activitySheet: 'ACTIVIDAD_NPS_LENS',
@@ -15,7 +16,7 @@ const NPS_LENS = Object.freeze({
   maxActivityBatch: 50
 });
 
-const NPS_LENS_REQUEST = {viewer:null,spreadsheet:null,sheets:{}};
+const NPS_LENS_REQUEST = {viewer:null,spreadsheet:null,sheets:{},cacheEpoch:null};
 
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
@@ -23,6 +24,11 @@ function include(name) {
 
 function _property_(key) {
   return String(PropertiesService.getScriptProperties().getProperty(key) || '').trim();
+}
+
+function _cacheKey_(name) {
+  if (NPS_LENS_REQUEST.cacheEpoch === null) NPS_LENS_REQUEST.cacheEpoch = _property_(NPS_LENS.cacheEpochProperty);
+  return ['nps-lens',NPS_LENS.version,NPS_LENS_REQUEST.cacheEpoch,name].join('-');
 }
 
 function _viewer_() {

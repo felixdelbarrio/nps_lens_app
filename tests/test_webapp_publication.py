@@ -14,11 +14,11 @@ def test_webapp_preview_loads_publication_and_embedded_report(tmp_path: Path) ->
         "generated_at": "2026-08-27T08:00:00Z",
         "filters": {"service_origin": "BBVA México", "month": "03"},
         "screens": {"dashboard": {}, "linking": {}, "data": {}},
-        "manifest": {"report": "informe-exclusivo.pptx"},
+        "manifest": {"report": "informe-ejecutivo.pptx"},
     }
     with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
         archive.writestr("publication.json", json.dumps(publication))
-        archive.writestr("informe-exclusivo.pptx", b"PPTX")
+        archive.writestr("informe-ejecutivo.pptx", b"PPTX")
 
     payload = load_publication(archive_path)
     output = tmp_path / "preview"
@@ -26,9 +26,9 @@ def test_webapp_preview_loads_publication_and_embedded_report(tmp_path: Path) ->
     target = build_preview(Path("webapp/apps-script"), output, payload, report_url=report_url)
 
     html = target.read_text(encoding="utf-8")
-    assert report_url == "informe-exclusivo.pptx"
+    assert report_url == "informe-ejecutivo.pptx"
     assert (output / report_url).read_bytes() == b"PPTX"
-    assert '"reportUrl":"informe-exclusivo.pptx"' in html
+    assert '"reportUrl":"informe-ejecutivo.pptx"' in html
     assert 'data-access-role="admin"' in html
     assert 'data-app-version="local"' in html
     assert "Validar y cargar" in html
@@ -55,7 +55,7 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
     manifest = json.loads((root / "appsscript.json").read_text(encoding="utf-8"))
 
     assert "application/vnd.google-apps.presentation" in publication
-    assert "SlidesApp.openById" in publication
+    assert "SlidesApp" not in publication
     assert "function getActivityReport(request)" in activity
     assert "user_email" in activity
     assert "initialAdmin" in config
@@ -77,6 +77,7 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
         service["serviceId"] for service in manifest["dependencies"]["enabledAdvancedServices"]
     ] == ["drive", "gmail"]
     assert "https://www.googleapis.com/auth/gmail.send" in manifest["oauthScopes"]
+    assert "https://www.googleapis.com/auth/presentations" not in manifest["oauthScopes"]
 
 
 def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() -> None:
@@ -84,12 +85,11 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     config = (root / "00_Config.gs").read_text(encoding="utf-8")
     publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
     activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
-    administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
     webapp = (root / "60_WebApp.gs").read_text(encoding="utf-8")
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.6.0'" in config
+    assert "version: '2.7.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
@@ -104,6 +104,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "function exportActivityReport" not in activity
     assert "function getNewsletterSettings" not in newsletter
     assert "function getNewsletterWorkspace" in newsletter
+    assert "_configuredPublicationFolder_" not in newsletter
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
@@ -118,5 +119,22 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "rpc('getPublicationCatalog')" not in app
     assert "rpc('getAdministration')" not in app
     assert "Promise.all([rpc('getNewsletter" not in app
+    assert "location.reload()" not in app
+    assert "importPublicationArchive','ok'" in app
+    assert "data-settings=\"publication\"" in app
+    assert "function getPublicationSettings" in publication
+    assert "_cacheKey_" in publication and "_cacheKey_" in activity and "_cacheKey_" in newsletter
     assert app.strip().endswith("</script>")
     assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")
+
+
+def test_admin_cleanup_trashes_every_publication_artifact_and_invalidates_caches() -> None:
+    setup = Path("webapp/apps-script/90_Setup.gs").read_text(encoding="utf-8")
+
+    assert "function clearNpsLensCachesAndReports()" in setup
+    assert "_assertAdmin_(viewer)" in setup
+    assert "item.snapshotFileId" in setup
+    assert "item.pptxFileId" in setup
+    assert "item.slidesFileId" in setup
+    assert "setTrashed(true)" in setup
+    assert "cacheEpochProperty" in setup

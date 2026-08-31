@@ -91,11 +91,6 @@ from nps_lens.platform.downloads import persist_download
 from nps_lens.platform.publication import PublicationArtifact, build_publication_archive
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
-from nps_lens.reports.exclusive_ppt import (
-    ExclusiveReportContext,
-    find_exclusive_template_path,
-    generate_exclusive_report,
-)
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analytics import (
     build_period_kpis,
@@ -549,17 +544,19 @@ class DashboardService:
                 POP_ALL,
                 *sorted(month for period_year, month in periods if period_year == year),
             ]
-        helix_dataset = self.helix_store.get(DatasetContext(*self._context_key(context)))
-        helix_periods = self.helix_store.available_periods(helix_dataset) if helix_dataset else []
+        stored_helix = self.helix_store.get(DatasetContext(*self._context_key(context)))
+        helix_periods = self.helix_store.available_periods(stored_helix) if stored_helix else []
         causal_default_year, causal_default_month = self._latest_common_period_values(
             periods, helix_periods
         )
         score_channels = [POP_ALL, *cast(list[str], profile["score_channels"])]
         latest_upload = self.repository.list_uploads(limit=1, context=context)
+        nps_rows = cast(int, profile["rows"])
+        nps_columns = cast(int, profile["columns"])
         nps_dataset = {
-            "available": bool(profile["rows"]),
-            "rows": int(profile["rows"]),
-            "columns": int(profile["columns"]) if profile["rows"] else 0,
+            "available": bool(nps_rows),
+            "rows": nps_rows,
+            "columns": nps_columns if nps_rows else 0,
             "updated_at": latest_upload[0]["uploaded_at"] if latest_upload else None,
             "status": latest_upload[0]["status"] if latest_upload else "missing",
         }
@@ -1471,7 +1468,6 @@ class DashboardService:
         max_days_apart: int = 90,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
-        report_format: str = "standard",
     ) -> BusinessPptResult:
         scope_history_df = self._load_nps_df(context)
         if scope_history_df.empty:
@@ -1661,50 +1657,33 @@ class DashboardService:
                         exc,
                     )
 
-        if report_format == "exclusive":
-            report = generate_exclusive_report(
-                template_path=find_exclusive_template_path(),
-                context=ExclusiveReportContext(
-                    service_origin=context.service_origin,
-                    service_origin_n1=context.service_origin_n1,
-                    service_origin_n2=context.service_origin_n2,
-                    period_start=period_start,
-                    period_end=period_end,
-                    helix_base_url=str(self.settings.ui_defaults()["helix_base_url"]),
-                ),
-                selected_nps_df=descriptive_current_df,
-                comparison_nps_df=scope_history_df,
-                attribution_df=attribution_df,
-                min_n=min_n,
-            )
-        else:
-            report = generate_business_review_ppt(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-                period_start=period_start,
-                period_end=period_end,
-                focus_name=focus_name,
-                overall_weekly=overall_series,
-                rationale_df=rationale_df,
-                nps_points_at_risk=nps_points_at_risk,
-                nps_points_recoverable=nps_points_recoverable,
-                top3_incident_share=top3_incident_share,
-                median_lag_weeks=median_lag_weeks,
-                story_md=business_story_md,
-                script_8slides_md="",
-                attribution_df=attribution_df,
-                selected_nps_df=descriptive_current_df,
-                comparison_nps_df=scope_history_df,
-                touchpoint_source=active_touchpoint_source,
-                entity_summary_df=attribution_all_df,
-                entity_summary_kpis=entity_summary_kpis,
-                executive_journey_catalog=executive_journey_catalog,
-                broken_journeys_df=broken_journeys_df,
-                report_dimension_analysis=resolved_report_dimension_analysis,
-                period_kpis=period_kpis,
-                include_causal_section=include_causal_section,
-            )
+        report = generate_business_review_ppt(
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+            service_origin_n2=context.service_origin_n2,
+            period_start=period_start,
+            period_end=period_end,
+            focus_name=focus_name,
+            overall_weekly=overall_series,
+            rationale_df=rationale_df,
+            nps_points_at_risk=nps_points_at_risk,
+            nps_points_recoverable=nps_points_recoverable,
+            top3_incident_share=top3_incident_share,
+            median_lag_weeks=median_lag_weeks,
+            story_md=business_story_md,
+            script_8slides_md="",
+            attribution_df=attribution_df,
+            selected_nps_df=descriptive_current_df,
+            comparison_nps_df=scope_history_df,
+            touchpoint_source=active_touchpoint_source,
+            entity_summary_df=attribution_all_df,
+            entity_summary_kpis=entity_summary_kpis,
+            executive_journey_catalog=executive_journey_catalog,
+            broken_journeys_df=broken_journeys_df,
+            report_dimension_analysis=resolved_report_dimension_analysis,
+            period_kpis=period_kpis,
+            include_causal_section=include_causal_section,
+        )
         saved_path = self._persist_report_copy(report)
         return BusinessPptResult(
             file_name=report.file_name,
@@ -1736,7 +1715,7 @@ class DashboardService:
         max_days_apart: int = 90,
         touchpoint_source: str = "",
     ) -> PublicationArtifact:
-        active_touchpoint_source = touchpoint_source or "executive_journeys"
+        active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
         scope = build_publication_scope(
             buug=context.service_origin,
             n1=context.service_origin_n1,
@@ -1745,8 +1724,9 @@ class DashboardService:
             month=pop_month,
             causal_method=active_touchpoint_source,
         )
-        publish_channel = self._resolve_score_channel(self._load_nps_df(context), "Web")
-        publish_group = self._resolve_nps_group(self._load_nps_df(context), "Detractores")
+        history_df = self._load_nps_df(context)
+        publish_channel = self._resolve_score_channel(history_df, "Web")
+        publish_group = self._resolve_nps_group(history_df, "Detractores")
         dashboard = self.nps_dashboard(
             context=context,
             pop_year=pop_year,
@@ -1765,11 +1745,8 @@ class DashboardService:
             max_days_apart=max_days_apart,
             touchpoint_source=active_touchpoint_source,
         )
-        history_df = self._load_nps_df(context)
-        resolved_channel = publish_channel
-        resolved_group = publish_group
-        filtered_history_df = self._apply_score_channel_filter(history_df, resolved_channel)
-        filtered_history_df = filter_by_nps_group(filtered_history_df, resolved_group)
+        filtered_history_df = self._apply_score_channel_filter(history_df, publish_channel)
+        filtered_history_df = filter_by_nps_group(filtered_history_df, publish_group)
         filtered_selected_df = self._apply_population_filters(
             filtered_history_df,
             pop_year,
@@ -1782,20 +1759,60 @@ class DashboardService:
         scenario_payload = cast(dict[str, object], linking.get("scenarios", {}))
         scenario_rows = scenario_payload.get("cards", [])
         attribution_df = pd.DataFrame(scenario_rows if isinstance(scenario_rows, list) else [])
-        report = generate_exclusive_report(
-            template_path=find_exclusive_template_path(),
-            context=ExclusiveReportContext(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-                period_start=period_start,
-                period_end=period_end,
-                helix_base_url=str(self.settings.ui_defaults()["helix_base_url"]),
+        entity_payload = cast(dict[str, object], linking.get("entity_summary", {}))
+        entity_kpis = entity_payload.get("kpis", [])
+        linking_kpis = cast(dict[str, object], linking.get("kpis", {}))
+        focus_group, _ = self._linking_focus_group(publish_group)
+        report = generate_business_review_ppt(
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+            service_origin_n2=context.service_origin_n2,
+            period_start=period_start,
+            period_end=period_end,
+            focus_name=self._focus_name(focus_group),
+            overall_weekly=pd.DataFrame(),
+            rationale_df=pd.DataFrame(),
+            nps_points_at_risk=float(
+                cast(Any, linking_kpis.get("nps_points_at_risk", 0.0) or 0.0)
             ),
+            nps_points_recoverable=float(
+                cast(Any, linking_kpis.get("nps_points_recoverable", 0.0) or 0.0)
+            ),
+            top3_incident_share=float(
+                cast(Any, linking_kpis.get("top3_incident_share", 0.0) or 0.0)
+            ),
+            median_lag_weeks=float(
+                cast(Any, linking_kpis.get("median_lag_weeks", 0.0) or 0.0)
+            ),
+            story_md=self._build_business_report_md(
+                current_df=report_selected_df,
+                history_df=history_df,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                min_n=min_n,
+            ),
+            script_8slides_md="",
+            attribution_df=attribution_df,
             selected_nps_df=report_selected_df,
             comparison_nps_df=history_df,
-            attribution_df=attribution_df,
-            min_n=min_n,
+            touchpoint_source=active_touchpoint_source,
+            entity_summary_df=attribution_df,
+            entity_summary_kpis=entity_kpis if isinstance(entity_kpis, list) else [],
+            report_dimension_analysis=str(
+                self.settings.ui_defaults().get("report_dimension_analysis", "palanca")
+            ),
+            period_kpis=build_period_kpis(
+                history_df=history_df,
+                current_df=report_selected_df,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                context_label=selected_month_label(
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    df=history_df,
+                ),
+            ),
+            include_causal_section=bool(linking.get("available")),
         )
         saved_report_path = self._persist_report_copy(report)
         report = BusinessPptResult(
@@ -3049,8 +3066,8 @@ class DashboardService:
         if start is not None:
             result = result.loc[result["Fecha"] >= pd.Timestamp(start)]
         if end is not None:
-            end_exclusive = pd.Timestamp(end) + pd.Timedelta(days=1)
-            result = result.loc[result["Fecha"] < end_exclusive]
+            end_boundary = pd.Timestamp(end) + pd.Timedelta(days=1)
+            result = result.loc[result["Fecha"] < end_boundary]
         if month_filter:
             result = result.loc[result["Fecha"].dt.month == int(str(month_filter).strip().zfill(2))]
         return result

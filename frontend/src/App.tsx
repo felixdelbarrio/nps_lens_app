@@ -4,7 +4,6 @@ import useSWR from "swr";
 import {
   completeArtifactDownload,
   downloadExecutiveReport,
-  downloadExclusiveReport,
   downloadWebPublication,
   fetchConfig,
   fetchDashboard,
@@ -790,20 +789,6 @@ export function App() {
       max_days_apart: maxDaysApart,
       touchpoint_source: touchpointSource
     };
-  }
-
-  async function handleDownloadExclusiveReport() {
-    setIsGeneratingReport(true);
-    setError(null);
-    try {
-      const artifact = await downloadExclusiveReport(exportQuery());
-      const savedPath = await completeArtifactDownload(artifact);
-      setStatusCopy(savedPath ? `Informe exclusivo guardado en ${savedPath}` : "Informe exclusivo descargado correctamente.");
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
-    } finally {
-      setIsGeneratingReport(false);
-    }
   }
 
   async function handleDownloadPublication() {
@@ -1656,7 +1641,7 @@ export function App() {
                 <h2>Preparar la edición para la WebApp</h2>
                 <p className="secondary-copy">
                   Genera una edición estática con los filtros actuales, todas las pantallas de análisis
-                  y la presentación exclusiva que utilizará la newsletter.
+                  y la presentación ejecutiva que utilizará la newsletter.
                 </p>
               </div>
               <button
@@ -1811,26 +1796,15 @@ export function App() {
                 <Icon name="presentation" />
               </button>
               {isAdmin ? (
-                <>
-                  <button
-                    aria-label="Generar informe exclusivo para newsletter"
-                    className="icon-button topbar-icon-button"
-                    disabled={actionsDisabled}
-                    onClick={() => void handleDownloadExclusiveReport()}
-                    type="button"
-                  >
-                    <Icon name="presentation" />
-                  </button>
-                  <button
-                    aria-label="Abrir configuración global"
-                    className="icon-button topbar-icon-button"
-                    disabled={actionsDisabled}
-                    onClick={() => setSettingsOpen(true)}
-                    type="button"
-                  >
-                    <Icon name="settings" />
-                  </button>
-                </>
+                <button
+                  aria-label="Abrir configuración global"
+                  className="icon-button topbar-icon-button"
+                  disabled={actionsDisabled}
+                  onClick={() => setSettingsOpen(true)}
+                  type="button"
+                >
+                  <Icon name="settings" />
+                </button>
               ) : null}
             </div>
             <div className="topbar-copy">
