@@ -583,7 +583,7 @@ async function downloadArtifact(
     await parseResponse(response);
   }
   const savedPath = response.headers.get("x-nps-lens-saved-path") || "";
-  if (savedPath) {
+  if (savedPath && getDesktopBridge()?.reveal_file) {
     await response.body?.cancel();
     return {
       blob: null,
@@ -598,7 +598,7 @@ async function downloadArtifact(
     blob: await response.blob(),
     fileName:
       parseContentDispositionFilename(response.headers.get("content-disposition"), fallbackName),
-    savedPath
+    savedPath: ""
   };
 }
 
