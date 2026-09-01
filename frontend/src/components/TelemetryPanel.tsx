@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import {
-  completeArtifactDownload,
   downloadTelemetry,
   fetchTelemetry,
   type TelemetryPayload
@@ -42,8 +41,7 @@ export function TelemetryPanel({ disabled = false }: { disabled?: boolean }) {
             setError("");
             setDownloadStatus("");
             void downloadTelemetry()
-              .then(async (artifact) => {
-                const savedPath = await completeArtifactDownload(artifact);
+              .then((savedPath) => {
                 setDownloadStatus(savedPath ? `Fichero guardado en ${savedPath}` : "Descarga completada correctamente.");
               })
               .catch((caught: Error) => setError(caught.message));

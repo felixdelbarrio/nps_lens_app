@@ -39,6 +39,7 @@ from nps_lens.design.tokens import (
     executive_report_palette,
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
+from nps_lens.platform.resources import resource_root
 from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
     select_negative_delta_rows,
@@ -84,7 +85,7 @@ BBVA_FONT_HEAD = BBVA_TYPOGRAPHY.heading
 BBVA_FONT_BODY = BBVA_TYPOGRAPHY.body
 BBVA_FONT_MEDIUM = BBVA_TYPOGRAPHY.medium
 REPORT_DESIGN_VERSION = "thermal-causality-v3"
-REPORT_ASSETS = Path(__file__).resolve().parents[3] / "assets" / "ppt" / "bbva"
+REPORT_ASSETS = resource_root() / "assets" / "ppt" / "bbva"
 REPORT_TEMPLATE = REPORT_ASSETS / "nps-thermal-causality-v3-template.pptx"
 _FIGURE_PNG_CACHE: OrderedDict[str, bytes] = OrderedDict()
 _FIGURE_PNG_LOCK = RLock()
@@ -1519,7 +1520,7 @@ def _pillow_font(size: int, *, bold: bool = False):  # pragma: no cover
     except Exception:
         return None
 
-    fonts_dir = Path(__file__).resolve().parents[3] / "assets" / "ppt" / "bbva" / "fonts"
+    fonts_dir = REPORT_ASSETS / "fonts"
     candidates = [
         fonts_dir / ("BentonSansBBVA-Bold.ttf" if bold else "BentonSansBBVA-Book.ttf"),
         fonts_dir / "BentonSansBBVA-Medium.ttf",

@@ -9,6 +9,8 @@ from typing import Mapping, Optional
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
+from nps_lens.platform.resources import resource_root
+
 DEFAULT_UI_THEME_MODE = "light"
 DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
 DEFAULT_UI_REPORT_DIMENSION_ANALYSIS = "palanca"
@@ -176,14 +178,6 @@ def _runtime_app_home() -> Path:
     return Path(app_home_raw).expanduser() if app_home_raw else (Path.home() / ".nps-lens")
 
 
-def _resource_root() -> Path:
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return Path(str(meipass))
-    return Path(__file__).resolve().parents[2]
-
-
 def resolve_dotenv_path() -> Optional[Path]:
     explicit = str(os.getenv("NPS_LENS_DOTENV_PATH", "")).strip()
     if explicit:
@@ -193,7 +187,7 @@ def resolve_dotenv_path() -> Optional[Path]:
     if getattr(sys, "frozen", False):
         return _runtime_app_home() / ".env"
 
-    repo_root = _resource_root()
+    repo_root = resource_root()
     candidates = [
         Path.cwd() / ".env",
         repo_root / ".env",
@@ -207,7 +201,7 @@ def resolve_dotenv_path() -> Optional[Path]:
 
 def resolve_dotenv_example_path() -> Optional[Path]:
     candidates = [
-        _resource_root() / ".env.example",
+        resource_root() / ".env.example",
         Path.cwd() / ".env.example",
     ]
     for candidate in candidates:

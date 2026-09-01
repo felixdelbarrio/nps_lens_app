@@ -73,6 +73,7 @@ src/nps_lens/platform/artifacts.py
 src/nps_lens/platform/batch.py
 src/nps_lens/platform/downloads.py
 src/nps_lens/platform/publication.py
+src/nps_lens/platform/resources.py
 src/nps_lens/platform/webapp_preview.py
 src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
@@ -107,6 +108,7 @@ tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
 tests/test_desktop_runtime.py
+tests/test_downloads.py
 tests/test_drivers.py
 tests/test_helix_ingest_filtering.py
 tests/test_helix_operational_metrics.py
@@ -126,6 +128,7 @@ tests/test_nps_parser.py
 tests/test_period_kpis.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py
+tests/test_platform_resources.py
 tests/test_plotly_theme.py
 tests/test_ppt_script.py
 tests/test_ppt_wrapped_table_layout.py

@@ -577,47 +577,27 @@ async function downloadArtifact(
   pathname: string,
   params: Record<string, string | number | undefined>,
   fallbackName: string
-): Promise<{ blob: Blob | null; fileName: string; savedPath: string }> {
+): Promise<string> {
   const response = await fetch(buildUrl(pathname, params));
   if (!response.ok) {
     await parseResponse(response);
   }
   const savedPath = response.headers.get("x-nps-lens-saved-path") || "";
-  if (savedPath && getDesktopBridge()?.reveal_file) {
+  const revealFile = getDesktopBridge()?.reveal_file;
+  if (savedPath && revealFile) {
     await response.body?.cancel();
-    return {
-      blob: null,
-      fileName: parseContentDispositionFilename(
-        response.headers.get("content-disposition"),
-        fallbackName
-      ),
-      savedPath
-    };
+    await revealFile(savedPath);
+    return savedPath;
   }
-  return {
-    blob: await response.blob(),
-    fileName:
-      parseContentDispositionFilename(response.headers.get("content-disposition"), fallbackName),
-    savedPath: ""
-  };
-}
-
-export async function completeArtifactDownload(artifact: {
-  blob: Blob | null;
-  fileName: string;
-  savedPath: string;
-}): Promise<string> {
-  if (artifact.savedPath) {
-    await getDesktopBridge()?.reveal_file?.(artifact.savedPath);
-    return artifact.savedPath;
-  }
-  if (!artifact.blob) {
-    throw new Error("La descarga no devolvió ningún fichero.");
-  }
-  const objectUrl = URL.createObjectURL(artifact.blob);
+  const blob = await response.blob();
+  const fileName = parseContentDispositionFilename(
+    response.headers.get("content-disposition"),
+    fallbackName
+  );
+  const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
-  anchor.download = artifact.fileName;
+  anchor.download = fileName;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();

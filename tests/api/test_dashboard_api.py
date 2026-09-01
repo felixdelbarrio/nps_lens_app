@@ -152,10 +152,10 @@ def _build_helix_mixed_dates_fixture(path: Path) -> Path:
     return path
 
 
-def _persist_report_in_tmp(tmp_path: Path) -> Callable[[BusinessPptResult], Path]:
-    def _persist(report: BusinessPptResult) -> Path:
-        target = tmp_path / report.file_name
-        target.write_bytes(report.content)
+def _persist_artifact_in_tmp(tmp_path: Path) -> Callable[[bytes, str], Path]:
+    def _persist(content: bytes, file_name: str) -> Path:
+        target = tmp_path / file_name
+        target.write_bytes(content)
         return target
 
     return _persist
@@ -308,7 +308,7 @@ def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
     client = TestClient(app)
     _upload_nps_march(client)
     service = app.state.dashboard_service
-    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+    monkeypatch.setattr(service, "_persist_artifact", _persist_artifact_in_tmp(tmp_path))
 
     report = service.generate_ppt_report(
         context=UploadContext(
@@ -355,7 +355,7 @@ def test_generate_ppt_report_with_helix_outside_period_omits_causal_section(
         )
     assert upload_response.status_code == 200
     service = app.state.dashboard_service
-    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+    monkeypatch.setattr(service, "_persist_artifact", _persist_artifact_in_tmp(tmp_path))
 
     report = service.generate_ppt_report(
         context=UploadContext(
@@ -556,7 +556,7 @@ def test_generate_ppt_report_falls_back_to_nps_when_causal_helix_block_fails(
     assert upload_response.status_code == 200
 
     service = app.state.dashboard_service
-    monkeypatch.setattr(service, "_persist_report_copy", _persist_report_in_tmp(tmp_path))
+    monkeypatch.setattr(service, "_persist_artifact", _persist_artifact_in_tmp(tmp_path))
 
     def _boom(*args, **kwargs):
         raise RuntimeError("causal unavailable")

@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  completeArtifactDownload,
   downloadExecutiveReport,
+  downloadTelemetry,
   downloadWebPublication
 } from "./api";
 
-describe("completeArtifactDownload", () => {
+describe("artifact downloads", () => {
   afterEach(() => {
     delete window.pywebview;
     vi.unstubAllGlobals();
@@ -39,7 +39,7 @@ describe("completeArtifactDownload", () => {
         })
       );
 
-      const artifact = await requestArtifact({
+      const savedPath = await requestArtifact({
         service_origin: "BBVA México",
         service_origin_n1: "Senda",
         service_origin_n2: "",
@@ -53,28 +53,30 @@ describe("completeArtifactDownload", () => {
         touchpoint_source: "executive_journeys",
         report_dimension_analysis: "palanca"
       });
-      const savedPath = await completeArtifactDownload(artifact);
-
       expect(String(fetchMock.mock.calls[0]?.[0])).toContain(endpoint);
-      expect(artifact.blob).not.toBeNull();
-      expect(artifact.blob?.size).toBeGreaterThan(0);
-      expect(artifact.savedPath).toBe("");
       expect(savedPath).toBe("");
-      expect(createObjectUrl).toHaveBeenCalledWith(artifact.blob);
+      expect(createObjectUrl).toHaveBeenCalledOnce();
       expect(click).toHaveBeenCalledOnce();
     }
   );
 
-  it("uses the file persisted by the local API without navigating to the JSON response", async () => {
+  it("uses the file persisted by the desktop API without creating a browser download", async () => {
     const revealFile = vi.fn(async () => true);
     window.pywebview = { api: { reveal_file: revealFile } };
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("telemetry", {
+          headers: {
+            "Content-Disposition": 'attachment; filename="diagnostico.json"',
+            "X-NPS-LENS-SAVED-PATH": "/tmp/diagnostico.json"
+          }
+        })
+      )
+    );
 
-    const savedPath = await completeArtifactDownload({
-      blob: null,
-      fileName: "diagnostico.json",
-      savedPath: "/tmp/diagnostico.json"
-    });
+    const savedPath = await downloadTelemetry();
 
     expect(savedPath).toBe("/tmp/diagnostico.json");
     expect(revealFile).toHaveBeenCalledWith("/tmp/diagnostico.json");

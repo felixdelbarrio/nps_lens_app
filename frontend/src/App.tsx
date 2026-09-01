@@ -2,7 +2,6 @@ import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent
 import useSWR from "swr";
 
 import {
-  completeArtifactDownload,
   downloadExecutiveReport,
   downloadWebPublication,
   fetchConfig,
@@ -752,7 +751,7 @@ export function App() {
     setIsGeneratingReport(true);
     setError(null);
     try {
-      const report = await downloadExecutiveReport({
+      const savedPath = await downloadExecutiveReport({
         service_origin: serviceOrigin,
         service_origin_n1: serviceOriginN1,
         service_origin_n2: serviceOriginN2,
@@ -766,7 +765,6 @@ export function App() {
         touchpoint_source: touchpointSource,
         report_dimension_analysis: reportDimensionAnalysis
       });
-      const savedPath = await completeArtifactDownload(report);
       setStatusCopy(savedPath ? `Informe guardado en ${savedPath}` : "Informe descargado correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
@@ -796,8 +794,7 @@ export function App() {
     setIsGeneratingReport(true);
     setError(null);
     try {
-      const artifact = await downloadWebPublication(exportQuery());
-      const savedPath = await completeArtifactDownload(artifact);
+      const savedPath = await downloadWebPublication(exportQuery());
       setStatusCopy(savedPath ? `Publicación Web guardada en ${savedPath}` : "Publicación Web descargada correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");

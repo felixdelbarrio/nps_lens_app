@@ -208,18 +208,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         current_settings = cast(Settings, request.app.state.settings)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         file_name = f"nps-lens-telemetria-{stamp}.json"
-        saved_path = persist_download(
-            payload,
-            file_name,
-            [
+        try:
+            saved_path = persist_download(
+                payload,
+                file_name,
                 Path(
                     normalize_downloads_path(
                         current_settings.ui_defaults()["downloads_path"], create=True
                     )
                 ),
-                current_settings.data_dir / "telemetry",
-            ],
-        )
+            )
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         return Response(
             content=payload,
             media_type="application/json",
@@ -586,6 +586,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         headers = {
             "Content-Disposition": (
@@ -638,6 +640,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         return Response(
             content=artifact.content,
             media_type="application/zip",

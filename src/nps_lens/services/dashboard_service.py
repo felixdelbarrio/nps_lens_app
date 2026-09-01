@@ -1667,7 +1667,7 @@ class DashboardService:
             period_kpis=period_kpis,
             include_causal_section=include_causal_section,
         )
-        saved_path = self._persist_report_copy(report)
+        saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(
             file_name=report.file_name,
             content=report.content,
@@ -1675,15 +1675,11 @@ class DashboardService:
             saved_path=str(saved_path),
         )
 
-    def _persist_report_copy(self, report: BusinessPptResult) -> Path:
+    def _persist_artifact(self, content: bytes, file_name: str) -> Path:
         preferred_dir = Path(
             normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
         )
-        return persist_download(
-            report.content,
-            report.file_name,
-            [preferred_dir, self.settings.data_dir / "reports"],
-        )
+        return persist_download(content, file_name, preferred_dir)
 
     def generate_publication(
         self,
@@ -1844,14 +1840,7 @@ class DashboardService:
             report_content=report.content,
             file_name=f"nps-lens-publicacion-{date_stamp}.zip",
         )
-        preferred_dir = Path(
-            normalize_downloads_path(self.settings.ui_defaults()["downloads_path"], create=True)
-        )
-        saved_path = persist_download(
-            artifact.content,
-            artifact.file_name,
-            [preferred_dir, self.settings.data_dir / "publications"],
-        )
+        saved_path = self._persist_artifact(artifact.content, artifact.file_name)
         return replace(artifact, saved_path=str(saved_path))
 
     def _build_business_report_md(
