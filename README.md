@@ -18,7 +18,7 @@
 
 **NPS Lens** es una plataforma para convertir señales de Voz del Cliente en **insights accionables**, combinando:
 
-- **NPS térmico** (score 0-10 + texto + palanca/subpalanca/canal/segmento)
+- **NPS** (score 0-10 + texto + palanca/subpalanca/canal/segmento)
 - **Incidencias Helix** (tickets/bugs) para correlación y causalidad pragmática
 - (Opcional) **Reviews** (stores) / **Feedback in‑app** (roadmap)
 
@@ -40,7 +40,7 @@ La aplicación une métricas + verbatims + evidencias multi‑fuente y genera un
 
 ```mermaid
 flowchart LR
-  A[NPS térmico
+  A[NPS
 (score + texto)] -->|normaliza| C[(Modelo canónico)]
   B[Helix
 (incidencias)] -->|normaliza| C
@@ -114,7 +114,7 @@ La experiencia operativa se organiza así:
 - **SERVICE CONTAINER**: contexto de servicio (`BUUG`, `N1`, `N2`).
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
 - **Sumario del Periodo**: KPIs y gráficos afectados solo por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
-- **Analítica NPS Térmico**: filtros sincronizados de `Canal` y `Grupo Score`; contiene “Qué dicen los clientes” y “Cambios respecto al histórico”.
+- **Analítica NPS**: filtros sincronizados de `Canal` y `Grupo Score`; contiene “Qué dicen los clientes” y “Cambios respecto al histórico”.
 - **Incidencias ↔ NPS**: fija `Canal=Web`, oculta `Grupo Score` y usa `Método causal=Por Palanca` por defecto.
 - **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
 
@@ -122,7 +122,7 @@ Semántica:
 
 - **Score** es el valor individual 0-10 o su media.
 - **NPS clásico** es el índice `% promotores - % detractores`.
-- **NPS térmico** se mantiene como nombre de fuente/dominio.
+- **NPS** se mantiene como nombre de fuente/dominio.
 
 El canal selecciona `Web` por defecto si existe; si no, `Todos`. El grupo selecciona `Detractores` si existe; si no, `Todos`. En Incidencias ↔ NPS el canal queda fijado a `Web` y el histórico Helix no se recorta por la fecha NPS. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
 

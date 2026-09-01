@@ -352,7 +352,7 @@ def build_incident_ppt_story(
         else []
     )
     lines: list[str] = []
-    lines.append("# Racional de negocio — Incidencias vs NPS térmico")
+    lines.append("# Racional de negocio — Incidencias vs NPS")
     lines.append("")
     lines.append("## 1) Observación")
     lines.append(
@@ -502,7 +502,7 @@ def build_ppt_8slide_script(
     top_topics = ", ".join(topics[:3]) if topics else "Sin tópicos priorizados"
 
     lines: list[str] = []
-    lines.append("# Guion de negocio — 8 slides (NPS térmico vs incidencias)")
+    lines.append("# Guion de negocio — 8 slides (NPS vs incidencias)")
     lines.append("")
     lines.append("## Slide 1 — Mensaje principal")
     lines.append(
@@ -658,9 +658,7 @@ def build_ppt_8slide_script(
 
     lines.append("## Slide 8 — Gobierno y métricas")
     lines.append(f"- KPI leading: incidencias por tópico P1, SLA de resolución, % {focus_name}.")
-    lines.append(
-        "- KPI lagging: NPS térmico, NPS en riesgo (pts), NPS recuperable realizado (pts)."
-    )
+    lines.append("- KPI lagging: NPS, NPS en riesgo (pts), NPS recuperable realizado (pts).")
     lines.append("- Cadencia: comité semanal con owners de producto, tecnología y operaciones.")
     lines.append("")
     return "\n".join(lines) + "\n"

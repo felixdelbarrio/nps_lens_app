@@ -22,7 +22,7 @@ let plotlyModulePromise: Promise<PlotlyModule> | null = null;
 
 function loadPlotlyModule() {
   if (!plotlyModulePromise) {
-    plotlyModulePromise = import("plotly.js-dist-min").then(
+    plotlyModulePromise = import("plotly.js-cartesian-dist-min").then(
       (module) => (module.default ?? module) as PlotlyModule
     );
   }

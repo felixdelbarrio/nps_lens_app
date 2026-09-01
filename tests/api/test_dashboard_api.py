@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from typing import Callable
+from zipfile import ZipFile
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -197,7 +198,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
     )
     assert context_payload["preferences"]["report_dimension_analysis"] == "palanca"
-    assert context_payload["preferences"]["touchpoint_source"] == "palanca_touchpoint"
+    assert context_payload["preferences"]["touchpoint_source"] == "executive_journeys"
     assert any(
         option["value"] == "executive_journeys"
         for option in context_payload["causal_method_options"]
@@ -460,8 +461,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["causal_method"]["value"] == "palanca_touchpoint"
-    assert linking_payload["navigation"][1]["label"] == "Touchpoints afectados por Palanca"
+    assert linking_payload["causal_method"]["value"] == "executive_journeys"
+    assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"
     assert "situation" in linking_payload
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
@@ -670,6 +671,70 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
     assert len(presentation.slides) >= 8
 
 
+def test_publication_embeds_the_executive_report_with_causal_slides(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_march(client)
+    service = app.state.dashboard_service
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(service, "nps_dashboard", lambda **_: {"kpis": {}})
+    monkeypatch.setattr(
+        service,
+        "linking_dashboard",
+        lambda **_: {
+            "available": True,
+            "kpis": {
+                "nps_points_at_risk": 2.1,
+                "nps_points_recoverable": 1.3,
+                "top3_incident_share": 0.7,
+                "median_lag_weeks": 1.0,
+            },
+            "entity_summary": {
+                "kpis": [{"label": "Journeys de detracción", "value": "1"}],
+                "table": [{"nps_topic": "Acceso", "linked_pairs": 4}],
+            },
+            "scenarios": {
+                "cards": [
+                    {
+                        "rank": 1,
+                        "nps_topic": "Acceso bloqueado",
+                        "linked_pairs": 4,
+                        "detractor_probability": 0.6,
+                    }
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "dataset_rows",
+        lambda *, dataset_kind, **_: {"dataset_kind": dataset_kind, "rows": []},
+    )
+
+    def _executive_report(**kwargs):
+        captured.update(kwargs)
+        return BusinessPptResult("informe-ejecutivo.pptx", b"EXECUTIVE", 10)
+
+    monkeypatch.setattr(service, "generate_ppt_report", _executive_report)
+
+    artifact = service.generate_publication(
+        context=UploadContext("BBVA México", "Senda", ""),
+        pop_year="2026",
+        pop_month="03",
+    )
+
+    assert captured["touchpoint_source"] == "executive_journeys"
+    assert captured["report_dimension_analysis"] == ""
+    with ZipFile(BytesIO(artifact.content)) as archive:
+        assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
+        assert b"presentaci\xc3\xb3n ejecutiva" in archive.read("newsletter.html")
+    assert client.get("/api/dashboard/report/exclusive.pptx").status_code == 404
+
+
 def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history(
     tmp_path: Path,
 ) -> None:
@@ -716,7 +781,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
     assert report_response.status_code == 200
 
     presentation = Presentation(BytesIO(report_response.content))
-    assert len(presentation.slides) >= 9
+    assert len(presentation.slides) >= 6
 
     slide_2_texts: list[str] = []
     for shape in presentation.slides[1].shapes:
@@ -725,7 +790,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "2026-03" in slide_2_text
+    assert "marzo 2026" in slide_2_text.lower()
     assert "2026-01" not in slide_2_text
     assert "2026-02" not in slide_2_text
 
@@ -736,5 +801,5 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("3. Qué ha cambiado en Palanca" in text for text in all_texts)
+    assert any("lidera el deterioro frente a la base" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

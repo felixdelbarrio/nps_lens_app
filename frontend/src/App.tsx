@@ -2,9 +2,8 @@ import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent
 import useSWR from "swr";
 
 import {
-  canUseDesktopFileBridge,
+  completeArtifactDownload,
   downloadExecutiveReport,
-  downloadExclusiveReport,
   downloadWebPublication,
   fetchConfig,
   fetchDashboard,
@@ -54,6 +53,7 @@ import {
   formatPercentage,
   formatVolume
 } from "./utils/numberFormat";
+import { toBusinessCopy } from "./utils/businessCopy";
 
 const MAIN_AREAS = [
   {
@@ -78,7 +78,7 @@ const MAIN_AREAS = [
 
 const INSIGHT_TABS = [
   { id: "summary", label: "Sumario del Periodo" },
-  { id: "thermal", label: "Analítica NPS Térmico" },
+  { id: "nps-analysis", label: "Analítica NPS" },
   { id: "linking", label: "Incidencias ↔ NPS" }
 ];
 
@@ -98,7 +98,7 @@ const SUMMARY_TABS = [
   { id: "cohorts", label: "Comparativas cruzadas" }
 ];
 
-const THERMAL_TABS = [
+const NPS_TABS = [
   { id: "topics", label: "Qué dicen los clientes" },
   { id: "comparison", label: "Cambios respecto al histórico" }
 ];
@@ -196,30 +196,6 @@ function formatMonthOptionLabel(month: string) {
   return MONTH_LABELS_ES[month] || month;
 }
 
-function triggerBlobDownload(blob: Blob, fileName: string) {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = fileName;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-}
-
-function finishArtifactDownload(
-  artifact: { blob: Blob | null; fileName: string; savedPath: string },
-  onSaved: (path: string) => void
-) {
-  if (artifact.savedPath && canUseDesktopFileBridge()) {
-    onSaved(artifact.savedPath);
-    return;
-  }
-  if (artifact.blob) {
-    triggerBlobDownload(artifact.blob, artifact.fileName);
-  }
-}
-
 type KpiPayload = DashboardPayload["kpis"];
 type KpiKind = "metric" | "percentage" | "volume";
 
@@ -249,13 +225,13 @@ export function App() {
   const [serviceOriginN2, setServiceOriginN2] = useState("");
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
-  const [npsGroup, setNpsGroup] = useState("Todos");
-  const [scoreChannel, setScoreChannel] = useState("Todos");
+  const [npsGroup, setNpsGroup] = useState("Detractores");
+  const [scoreChannel, setScoreChannel] = useState("Web");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
   const [reportDimensionAnalysis, setReportDimensionAnalysis] = useState<"palanca" | "subpalanca">("palanca");
-  const [touchpointSource, setTouchpointSource] = useState("palanca_touchpoint");
+  const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
   const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [opportunityDimension, setOpportunityDimension] = useState("Palanca");
@@ -263,12 +239,12 @@ export function App() {
   const [cohortCol, setCohortCol] = useState("Canal");
   const [minN, setMinN] = useState(200);
   const [minNCross, setMinNCross] = useState(30);
-  const [minSimilarity, setMinSimilarity] = useState(0.25);
-  const [maxDaysApart, setMaxDaysApart] = useState(10);
+  const [minSimilarity, setMinSimilarity] = useState(0.15);
+  const [maxDaysApart, setMaxDaysApart] = useState(90);
   const [mainArea, setMainArea] = useState("insights");
   const [insightTab, setInsightTab] = useState("summary");
   const [summaryTab, setSummaryTab] = useState("period-aggregates");
-  const [thermalTab, setThermalTab] = useState("topics");
+  const [npsTab, setNpsTab] = useState("topics");
   const [linkingTab, setLinkingTab] = useState("situation");
   const [ingestTab, setIngestTab] = useState("new");
   const [dataTab, setDataTab] = useState<"nps" | "helix">("nps");
@@ -286,7 +262,6 @@ export function App() {
   const [latestNpsUpload, setLatestNpsUpload] = useState<UploadResult | null>(null);
   const [latestHelixUpload, setLatestHelixUpload] = useState<HelixUploadResult | null>(null);
   const didHydrate = useRef(false);
-  const didApplyCausalDefault = useRef(false);
   const initialContextKey = useRef("");
 
   const selectedContextKey = `${serviceOrigin}\u0000${serviceOriginN1}\u0000${serviceOriginN2}`;
@@ -337,9 +312,9 @@ export function App() {
     setDownloadsPath(config.preferences.downloads_path || "");
     setHelixBaseUrl(config.preferences.helix_base_url || "");
     setReportDimensionAnalysis(config.preferences.report_dimension_analysis || "palanca");
-    setTouchpointSource(config.preferences.touchpoint_source || "palanca_touchpoint");
-    setMinSimilarity(config.preferences.min_similarity ?? 0.25);
-    setMaxDaysApart(config.preferences.max_days_apart ?? 10);
+    setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
+    setMinSimilarity(config.preferences.min_similarity ?? 0.15);
+    setMaxDaysApart(config.preferences.max_days_apart ?? 90);
     setMinN(config.preferences.min_n_opportunities ?? 200);
     setMinNCross(config.preferences.min_n_cross_comparisons ?? 30);
   }, [config]);
@@ -356,17 +331,6 @@ export function App() {
       setPopMonth(monthOptions.includes("Todos") ? "Todos" : getLatestAvailableMonth(monthOptions));
     }
   }, [monthOptions, popMonth]);
-
-  useEffect(() => {
-    if (!config || insightTab !== "linking" || didApplyCausalDefault.current) {
-      return;
-    }
-    didApplyCausalDefault.current = true;
-    const causalYear = config.causal_default_year || "Todos";
-    const causalMonth = config.causal_default_month || "Todos";
-    setPopYear(causalYear);
-    setPopMonth(causalMonth);
-  }, [config, insightTab]);
 
   useEffect(() => {
     if (!config) {
@@ -642,9 +606,9 @@ export function App() {
     }
     if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
       setTouchpointSource(
-        causalMethodOptions.find((option) => option.value === "palanca_touchpoint")?.value ||
+        causalMethodOptions.find((option) => option.value === "executive_journeys")?.value ||
           causalMethodOptions[0]?.value ||
-          "palanca_touchpoint"
+          "executive_journeys"
       );
     }
   }, [causalMethodOptions, touchpointSource]);
@@ -802,7 +766,8 @@ export function App() {
         touchpoint_source: touchpointSource,
         report_dimension_analysis: reportDimensionAnalysis
       });
-      finishArtifactDownload(report, (path) => setStatusCopy(`Informe guardado en ${path}`));
+      const savedPath = await completeArtifactDownload(report);
+      setStatusCopy(savedPath ? `Informe guardado en ${savedPath}` : "Informe descargado correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -822,21 +787,9 @@ export function App() {
       min_n: minN,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
-      touchpoint_source: touchpointSource
+      touchpoint_source: touchpointSource,
+      report_dimension_analysis: reportDimensionAnalysis
     };
-  }
-
-  async function handleDownloadExclusiveReport() {
-    setIsGeneratingReport(true);
-    setError(null);
-    try {
-      const artifact = await downloadExclusiveReport(exportQuery());
-      finishArtifactDownload(artifact, (path) => setStatusCopy(`Informe exclusivo guardado en ${path}`));
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
-    } finally {
-      setIsGeneratingReport(false);
-    }
   }
 
   async function handleDownloadPublication() {
@@ -844,7 +797,8 @@ export function App() {
     setError(null);
     try {
       const artifact = await downloadWebPublication(exportQuery());
-      finishArtifactDownload(artifact, (path) => setStatusCopy(`Publicación Web guardada en ${path}`));
+      const savedPath = await completeArtifactDownload(artifact);
+      setStatusCopy(savedPath ? `Publicación Web guardada en ${savedPath}` : "Publicación Web descargada correctamente.");
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -996,7 +950,7 @@ export function App() {
             <p className="eyebrow">Filters</p>
             <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Sincronizados para Analítica NPS Térmico, Incidencias y reportes causales
+              Sincronizados para Analítica NPS, Incidencias y reportes causales
             </p>
           </div>
         </div>
@@ -1451,17 +1405,17 @@ export function App() {
     );
   }
 
-  function renderThermalSection() {
+  function renderNpsSection() {
     return (
       <>
         <NavigationTabs
           compact
           disabled={actionsDisabled}
-          items={THERMAL_TABS}
-          onChange={setThermalTab}
-          value={thermalTab}
+          items={NPS_TABS}
+          onChange={setNpsTab}
+          value={npsTab}
         />
-        {thermalTab === "topics" ? renderTopicsPanel() : renderComparisonPanel()}
+        {npsTab === "topics" ? renderTopicsPanel() : renderComparisonPanel()}
       </>
     );
   }
@@ -1513,10 +1467,10 @@ export function App() {
     return (
       <section className="workspace-stack">
         {insightTab === "summary" ? renderSummarySection() : null}
-        {insightTab === "thermal" ? (
+        {insightTab === "nps-analysis" ? (
           <>
             {renderAnalysisFiltersContainer(false)}
-            {renderThermalSection()}
+            {renderNpsSection()}
           </>
         ) : null}
         {insightTab === "linking" ? (
@@ -1577,7 +1531,7 @@ export function App() {
             <DatasetUploadCard
               ctaLabel="Importar / actualizar NPS"
               datasetStatus={npsDatasetStatus}
-              description="Importa el Excel NPS térmico dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
+              description="Importa el Excel NPS dentro del contexto seleccionado. La carga es acumulativa, tolera drift de esquema y protege el histórico persistente."
               disabled={actionsDisabled && !isMutating}
               eyebrow="Carga NPS"
               feedback={latestNpsUpload}
@@ -1646,7 +1600,7 @@ export function App() {
                   <dl className="detail-list">
                     <div>
                       <dt>Fichero</dt>
-                      <dd data-testid="selected-upload-name">{selectedUpload.filename}</dd>
+                      <dd data-testid="selected-upload-name">{toBusinessCopy(selectedUpload.filename)}</dd>
                     </div>
                     <div>
                       <dt>Estado</dt>
@@ -1688,7 +1642,7 @@ export function App() {
                 <h2>Preparar la edición para la WebApp</h2>
                 <p className="secondary-copy">
                   Genera una edición estática con los filtros actuales, todas las pantallas de análisis
-                  y la presentación exclusiva que utilizará la newsletter.
+                  y la presentación ejecutiva que utilizará la newsletter.
                 </p>
               </div>
               <button
@@ -1814,7 +1768,7 @@ export function App() {
             <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Banca de Empresas e Instituciones · NPS Térmico y causalidad operativa.
+              Banca de Empresas e Instituciones · NPS y causalidad operativa.
             </p>
           </div>
 
@@ -1843,26 +1797,15 @@ export function App() {
                 <Icon name="presentation" />
               </button>
               {isAdmin ? (
-                <>
-                  <button
-                    aria-label="Generar informe exclusivo para newsletter"
-                    className="icon-button topbar-icon-button"
-                    disabled={actionsDisabled}
-                    onClick={() => void handleDownloadExclusiveReport()}
-                    type="button"
-                  >
-                    <Icon name="presentation" />
-                  </button>
-                  <button
-                    aria-label="Abrir configuración global"
-                    className="icon-button topbar-icon-button"
-                    disabled={actionsDisabled}
-                    onClick={() => setSettingsOpen(true)}
-                    type="button"
-                  >
-                    <Icon name="settings" />
-                  </button>
-                </>
+                <button
+                  aria-label="Abrir configuración global"
+                  className="icon-button topbar-icon-button"
+                  disabled={actionsDisabled}
+                  onClick={() => setSettingsOpen(true)}
+                  type="button"
+                >
+                  <Icon name="settings" />
+                </button>
               ) : null}
             </div>
             <div className="topbar-copy">

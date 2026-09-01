@@ -49,7 +49,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - Profiling opcional (cProfile) y resumen
 
 ### `nps_lens.ingest.nps_thermal`
-- Lectura Excel NPS térmico (openpyxl)
+- Lectura Excel NPS (openpyxl)
 - Normalización de columnas mínimas
 - Validación (issues con nivel INFO/WARN/ERROR)
 
@@ -94,7 +94,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 ### `nps_lens.services.dashboard_service`
 - Fachada de dominio para la app React/FastAPI.
 - Centraliza Service Container, Period Container, filtro Canal, Grupo Score, KPIs, payloads de Sumario/Analítica/Linking, tablas y generación PPT.
-- El Sumario del Periodo usa solo Service + Period. Analítica NPS Térmico usa Canal + Grupo Score. Incidencias ↔ NPS fija Canal=`Web`, Método causal=`Por Palanca` y usa el histórico completo de incidencias.
+- El Sumario del Periodo usa solo Service + Period. Analítica NPS usa Canal + Grupo Score. Incidencias ↔ NPS fija Canal=`Web`, Método causal=`Por Palanca` y usa el histórico completo de incidencias.
 
 ### `nps_lens.domain.helix_links`
 - Resuelve enlaces Helix desde columnas de incidencia y `Record ID`.
@@ -121,7 +121,7 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 - Semántica visual:
   - `Score` para valores o medias 0-10
   - `NPS clásico` para `% promotores - % detractores`
-  - `NPS térmico` para fuente/dominio
+  - `NPS` para fuente/dominio
 - Features internas:
   - prefijo `_` (ej. `_service_origin_n2_key`)
 - Context keys:

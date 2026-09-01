@@ -84,17 +84,18 @@ from nps_lens.domain.helix_links import (
 )
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.platform.downloads import persist_download
-from nps_lens.platform.publication import PublicationArtifact, build_publication_archive
+from nps_lens.platform.publication import (
+    PUBLICATION_SCHEMA_VERSION,
+    PublicationArtifact,
+    build_publication_archive,
+    build_static_data_snapshot,
+)
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
-from nps_lens.reports.exclusive_ppt import (
-    ExclusiveReportContext,
-    find_exclusive_template_path,
-    generate_exclusive_report,
-)
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analytics import (
     build_period_kpis,
@@ -537,18 +538,30 @@ class DashboardService:
         context: UploadContext,
     ) -> dict[str, object]:
         preferences = self.settings.ui_defaults()
-        records = self._load_nps_df(context)
-        years, months_by_year = self._available_periods(records)
-        helix_records = self._load_helix_df(context)
-        causal_default_year, causal_default_month = self._latest_common_period(
-            records, helix_records
+        profile = self.repository.records_profile(context)
+        periods = cast(list[tuple[str, str]], profile["periods"])
+        concrete_years = sorted({year for year, _month in periods})
+        all_months = sorted({month for _year, month in periods})
+        years = [POP_ALL, *concrete_years]
+        months_by_year = {POP_ALL: [POP_ALL, *all_months]}
+        for year in concrete_years:
+            months_by_year[year] = [
+                POP_ALL,
+                *sorted(month for period_year, month in periods if period_year == year),
+            ]
+        stored_helix = self.helix_store.get(DatasetContext(*self._context_key(context)))
+        helix_periods = self.helix_store.available_periods(stored_helix) if stored_helix else []
+        causal_default_year, causal_default_month = self._latest_common_period_values(
+            periods, helix_periods
         )
-        score_channels = self._available_score_channels(records)
+        score_channels = [POP_ALL, *cast(list[str], profile["score_channels"])]
         latest_upload = self.repository.list_uploads(limit=1, context=context)
+        nps_rows = cast(int, profile["rows"])
+        nps_columns = cast(int, profile["columns"])
         nps_dataset = {
-            "available": not records.empty,
-            "rows": int(len(records)),
-            "columns": int(len(records.columns)),
+            "available": bool(nps_rows),
+            "rows": nps_rows,
+            "columns": nps_columns if nps_rows else 0,
             "updated_at": latest_upload[0]["uploaded_at"] if latest_upload else None,
             "status": latest_upload[0]["status"] if latest_upload else "missing",
         }
@@ -973,8 +986,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1017,8 +1030,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1080,14 +1093,27 @@ class DashboardService:
             helix_history,
             context="linking_dashboard",
         )
-        core = self._compute_linking_core(
-            nps_df=nps_slice,
-            helix_df=helix_slice,
-            focus_df=focus_df,
-            focus_group=focus_group,
-            min_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-            operational_benchmark=operational_benchmark,
+        core = self._cached_result(
+            (
+                "linking-core",
+                *self._context_key(context),
+                self._data_revision(context),
+                pop_year,
+                pop_month,
+                resolved_channel,
+                focus_group,
+                min_similarity,
+                max_days_apart,
+            ),
+            lambda: self._compute_linking_core(
+                nps_df=nps_slice,
+                helix_df=helix_slice,
+                focus_df=focus_df,
+                focus_group=focus_group,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                operational_benchmark=operational_benchmark,
+            ),
         )
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
@@ -1443,11 +1469,10 @@ class DashboardService:
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
-        report_format: str = "standard",
     ) -> BusinessPptResult:
         scope_history_df = self._load_nps_df(context)
         if scope_history_df.empty:
@@ -1510,10 +1535,6 @@ class DashboardService:
         executive_journey_catalog: list[dict[str, object]] = []
         broken_journeys_df = pd.DataFrame()
         include_causal_section = False
-        nps_points_at_risk = 0.0
-        nps_points_recoverable = 0.0
-        top3_incident_share = 0.0
-        median_lag_weeks = 0.0
 
         helix_history = self._load_helix_df(context)
         helix_current = pd.DataFrame()
@@ -1570,15 +1591,6 @@ class DashboardService:
                         by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
                         by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
 
-                        canonical_bundle = self._build_rationale_bundle(
-                            by_topic_weekly=by_topic_weekly,
-                            by_topic_daily=by_topic_daily,
-                            overall_daily=overall_daily,
-                            focus_group=focus_group,
-                            context=context,
-                            links_df=links_df,
-                            operational_benchmark=operational_benchmark,
-                        )
                         mode_bundle = self._build_rationale_bundle(
                             by_topic_weekly=by_topic_weekly_mode,
                             by_topic_daily=by_topic_daily_mode,
@@ -1589,11 +1601,6 @@ class DashboardService:
                             operational_benchmark=operational_benchmark,
                         )
                         rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
-                        rationale_summary = cast(Any, canonical_bundle["rationale_summary"])
-                        nps_points_at_risk = float(rationale_summary.nps_points_at_risk)
-                        nps_points_recoverable = float(rationale_summary.nps_points_recoverable)
-                        top3_incident_share = float(rationale_summary.top3_incident_share)
-                        median_lag_weeks = float(rationale_summary.median_lag_weeks)
 
                         if not rationale_df.empty:
                             attribution_all_df = build_incident_attribution_chains(
@@ -1637,50 +1644,29 @@ class DashboardService:
                         exc,
                     )
 
-        if report_format == "exclusive":
-            report = generate_exclusive_report(
-                template_path=find_exclusive_template_path(),
-                context=ExclusiveReportContext(
-                    service_origin=context.service_origin,
-                    service_origin_n1=context.service_origin_n1,
-                    service_origin_n2=context.service_origin_n2,
-                    period_start=period_start,
-                    period_end=period_end,
-                    helix_base_url=str(self.settings.ui_defaults()["helix_base_url"]),
-                ),
-                selected_nps_df=descriptive_current_df,
-                comparison_nps_df=scope_history_df,
-                attribution_df=attribution_df,
-                min_n=min_n,
-            )
-        else:
-            report = generate_business_review_ppt(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-                period_start=period_start,
-                period_end=period_end,
-                focus_name=focus_name,
-                overall_weekly=overall_series,
-                rationale_df=rationale_df,
-                nps_points_at_risk=nps_points_at_risk,
-                nps_points_recoverable=nps_points_recoverable,
-                top3_incident_share=top3_incident_share,
-                median_lag_weeks=median_lag_weeks,
-                story_md=business_story_md,
-                script_8slides_md="",
-                attribution_df=attribution_df,
-                selected_nps_df=descriptive_current_df,
-                comparison_nps_df=scope_history_df,
-                touchpoint_source=active_touchpoint_source,
-                entity_summary_df=attribution_all_df,
-                entity_summary_kpis=entity_summary_kpis,
-                executive_journey_catalog=executive_journey_catalog,
-                broken_journeys_df=broken_journeys_df,
-                report_dimension_analysis=resolved_report_dimension_analysis,
-                period_kpis=period_kpis,
-                include_causal_section=include_causal_section,
-            )
+        report = generate_business_review_ppt(
+            service_origin=context.service_origin,
+            service_origin_n1=context.service_origin_n1,
+            service_origin_n2=context.service_origin_n2,
+            period_start=period_start,
+            period_end=period_end,
+            focus_name=focus_name,
+            overall_weekly=overall_series,
+            rationale_df=rationale_df,
+            story_md=business_story_md,
+            script_8slides_md="",
+            attribution_df=attribution_df,
+            selected_nps_df=descriptive_current_df,
+            comparison_nps_df=scope_history_df,
+            touchpoint_source=active_touchpoint_source,
+            entity_summary_df=attribution_all_df,
+            entity_summary_kpis=entity_summary_kpis,
+            executive_journey_catalog=executive_journey_catalog,
+            broken_journeys_df=broken_journeys_df,
+            report_dimension_analysis=resolved_report_dimension_analysis,
+            period_kpis=period_kpis,
+            include_causal_section=include_causal_section,
+        )
         saved_path = self._persist_report_copy(report)
         return BusinessPptResult(
             file_name=report.file_name,
@@ -1708,66 +1694,52 @@ class DashboardService:
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.25,
-        max_days_apart: int = 10,
+        min_similarity: float = 0.15,
+        max_days_apart: int = 90,
         touchpoint_source: str = "",
+        report_dimension_analysis: str = "",
     ) -> PublicationArtifact:
+        active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+        scope = build_publication_scope(
+            buug=context.service_origin,
+            n1=context.service_origin_n1,
+            n2=context.service_origin_n2,
+            year=pop_year,
+            month=pop_month,
+            causal_method=active_touchpoint_source,
+        )
+        history_df = self._load_nps_df(context)
+        publish_channel = self._resolve_score_channel(history_df, "Web")
+        publish_group = self._resolve_nps_group(history_df, "Detractores")
         dashboard = self.nps_dashboard(
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             min_n=min_n,
         )
         linking = self.linking_dashboard(
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
-            touchpoint_source=touchpoint_source,
+            touchpoint_source=active_touchpoint_source,
         )
-        history_df = self._load_nps_df(context)
-        resolved_channel = self._resolve_score_channel(history_df, score_channel)
-        resolved_group = self._resolve_nps_group(history_df, nps_group)
-        filtered_history_df = self._apply_score_channel_filter(history_df, resolved_channel)
-        filtered_history_df = filter_by_nps_group(filtered_history_df, resolved_group)
-        filtered_selected_df = self._apply_population_filters(
-            filtered_history_df,
-            pop_year,
-            pop_month,
-        )
-        if filtered_selected_df.empty:
-            raise ValueError("El periodo filtrado no contiene respuestas para la edición web.")
-        report_selected_df = self._apply_population_filters(history_df, pop_year, pop_month)
-        period_start, period_end = self._period_bounds(report_selected_df)
-        scenario_payload = cast(dict[str, object], linking.get("scenarios", {}))
-        scenario_rows = scenario_payload.get("cards", [])
-        attribution_df = pd.DataFrame(scenario_rows if isinstance(scenario_rows, list) else [])
-        report = generate_exclusive_report(
-            template_path=find_exclusive_template_path(),
-            context=ExclusiveReportContext(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-                period_start=period_start,
-                period_end=period_end,
-                helix_base_url=str(self.settings.ui_defaults()["helix_base_url"]),
-            ),
-            selected_nps_df=report_selected_df,
-            comparison_nps_df=history_df,
-            attribution_df=attribution_df,
+        report = self.generate_ppt_report(
+            context=context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             min_n=min_n,
-        )
-        saved_report_path = self._persist_report_copy(report)
-        report = BusinessPptResult(
-            file_name=report.file_name,
-            content=report.content,
-            slide_count=report.slide_count,
-            saved_path=str(saved_report_path),
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            touchpoint_source=active_touchpoint_source,
+            report_dimension_analysis=report_dimension_analysis,
         )
         row_limit = 50_000
         nps_data = self.dataset_rows(
@@ -1775,8 +1747,8 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=nps_group,
-            score_channel=score_channel,
+            nps_group=POP_ALL,
+            score_channel=POP_ALL,
             limit=row_limit,
         )
         helix_data = self.dataset_rows(
@@ -1784,38 +1756,82 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            score_channel=score_channel,
+            score_channel=POP_ALL,
             limit=row_limit,
         )
+        data_snapshot = build_static_data_snapshot(nps_data, helix_data)
+        static_datasets = data_snapshot["datasets"]
+        if not isinstance(static_datasets, dict):
+            raise ValueError("No se pudo materializar el snapshot estático de publicación.")
+        static_data = {
+            kind: {
+                "columns": dataset["columns"],
+                "total_rows": dataset["total_rows"],
+                "deferred": True,
+            }
+            for kind, dataset in static_datasets.items()
+            if isinstance(dataset, dict)
+        }
         generated_at = datetime.now(timezone.utc).isoformat()
         registry = EquivalenceRegistry.load(self.settings.equivalences_path)
+        channels = self._available_score_channels(history_df)
+        groups = _DEFAULT_NPS_GROUPS.copy()
+        dashboard_views: dict[str, dict[str, object]] = {}
+        period_frame = self._apply_population_filters(history_df, pop_year, pop_month)
+        for channel in channels:
+            channel_frame = self._apply_score_channel_filter(period_frame, channel)
+            if channel_frame.empty:
+                continue
+            group_views: dict[str, object] = {}
+            for group in groups:
+                if filter_by_nps_group(channel_frame, group).empty:
+                    continue
+                group_views[group] = self.nps_dashboard(
+                    context=context,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    nps_group=group,
+                    score_channel=channel,
+                    min_n=min_n,
+                )
+            if group_views:
+                dashboard_views[channel] = group_views
         publication: dict[str, object] = {
-            "schema_version": "1.0",
+            "schema_version": PUBLICATION_SCHEMA_VERSION,
             "generated_at": generated_at,
             "brand": {
                 "name": "BBVA Banca de Empresas e Instituciones",
                 "design_system": "BBVA Experience",
             },
+            "scope": scope,
             "filters": {
                 "service_origin": context.service_origin,
                 "service_origin_n1": context.service_origin_n1,
                 "service_origin_n2": context.service_origin_n2,
                 "year": pop_year,
                 "month": pop_month,
-                "nps_group": nps_group or POP_ALL,
-                "score_channel": score_channel or POP_ALL,
+                "nps_group": publish_group,
+                "score_channel": publish_channel,
                 "min_n": min_n,
                 "min_similarity": min_similarity,
                 "max_days_apart": max_days_apart,
-                "touchpoint_source": touchpoint_source,
+                "touchpoint_source": active_touchpoint_source,
+            },
+            "static_views": {
+                "default": {"score_channel": publish_channel, "nps_group": publish_group},
+                "score_channels": list(dashboard_views),
+                "nps_groups": groups,
+                "dashboard_by_filter": dashboard_views,
             },
             "screens": {
                 "dashboard": dashboard,
                 "linking": linking,
-                "data": {"nps": nps_data, "helix": helix_data},
+                "data": static_data,
             },
+            "snapshots": {"data": data_snapshot},
             "manifest": {
                 "generated_at": generated_at,
+                "scope": scope,
                 "equivalence_registry": registry.to_dict(),
                 "privacy": "No incluye configuración administrativa ni telemetría.",
                 "report": report.file_name,
@@ -2984,8 +3000,8 @@ class DashboardService:
         if start is not None:
             result = result.loc[result["Fecha"] >= pd.Timestamp(start)]
         if end is not None:
-            end_exclusive = pd.Timestamp(end) + pd.Timedelta(days=1)
-            result = result.loc[result["Fecha"] < end_exclusive]
+            end_boundary = pd.Timestamp(end) + pd.Timedelta(days=1)
+            result = result.loc[result["Fecha"] < end_boundary]
         if month_filter:
             result = result.loc[result["Fecha"].dt.month == int(str(month_filter).strip().zfill(2))]
         return result
@@ -3032,7 +3048,7 @@ class DashboardService:
             return POP_ALL
         if "NPS Group" not in frame.columns:
             return POP_ALL
-        groups = set(frame["NPS Group"].fillna("").astype(str).str.strip().str.casefold())
+        groups = set(frame["NPS Group"].astype("string").fillna("").str.strip().str.casefold())
         if _PREFERRED_NPS_GROUP.casefold() in groups or any(
             value.startswith("detr") for value in groups
         ):
@@ -3087,6 +3103,21 @@ class DashboardService:
         if not common:
             return POP_ALL, POP_ALL
 
+        year, month = max(common)
+        return str(year), str(month).zfill(2)
+
+    @staticmethod
+    def _latest_common_period_values(
+        nps_periods: Sequence[tuple[str, str]],
+        helix_periods: Sequence[tuple[str, str]],
+    ) -> tuple[str, str]:
+        if not nps_periods or not helix_periods:
+            return POP_ALL, POP_ALL
+        nps_values = {(int(year), int(month)) for year, month in nps_periods}
+        helix_values = {(int(year), int(month)) for year, month in helix_periods}
+        common = nps_values & helix_values
+        if not common:
+            return POP_ALL, POP_ALL
         year, month = max(common)
         return str(year), str(month).zfill(2)
 

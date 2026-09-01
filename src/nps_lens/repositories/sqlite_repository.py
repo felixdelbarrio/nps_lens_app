@@ -123,6 +123,12 @@ class SqliteNpsRepository:
                     service_origin_n2
                 );
                 CREATE INDEX IF NOT EXISTS idx_records_response_at ON records (response_at);
+                CREATE INDEX IF NOT EXISTS idx_records_context_response_at ON records (
+                    service_origin,
+                    service_origin_n1,
+                    service_origin_n2,
+                    response_at
+                );
 
                 CREATE TABLE IF NOT EXISTS upload_records (
                     upload_id TEXT NOT NULL REFERENCES uploads(upload_id) ON DELETE CASCADE,
@@ -601,6 +607,50 @@ class SqliteNpsRepository:
             if unique_values <= max(64, len(frame) // 10):
                 frame[column] = frame[column].astype("category")
         return frame
+
+    def records_profile(self, context: UploadContext) -> dict[str, object]:
+        """Return navigation metadata without materializing the customer corpus."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    substr(response_at, 1, 4) AS year,
+                    substr(response_at, 6, 2) AS month,
+                    channel,
+                    COUNT(*) AS row_count
+                FROM records
+                WHERE service_origin = ?
+                  AND service_origin_n1 = ?
+                  AND service_origin_n2 = ?
+                GROUP BY year, month, channel
+                ORDER BY year, month, channel
+                """,
+                (
+                    context.service_origin,
+                    context.service_origin_n1,
+                    context.service_origin_n2,
+                ),
+            ).fetchall()
+
+        periods: set[tuple[str, str]] = set()
+        channels: list[str] = []
+        seen_channels: set[str] = set()
+        total_rows = 0
+        for row in rows:
+            year, month = str(row["year"] or ""), str(row["month"] or "")
+            if len(year) == 4 and len(month) == 2:
+                periods.add((year, month))
+            channel = str(row["channel"] or "").strip()
+            if channel and channel not in seen_channels:
+                seen_channels.add(channel)
+                channels.append(channel)
+            total_rows += int(row["row_count"] or 0)
+        return {
+            "rows": total_rows,
+            "columns": 17,
+            "periods": sorted(periods),
+            "score_channels": channels,
+        }
 
     def canonicalize_records(
         self,

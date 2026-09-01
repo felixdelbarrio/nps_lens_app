@@ -40,10 +40,15 @@ def _process_details(pid: int) -> tuple[str, str]:
 def _belongs_to_project(pid: int, root: Path) -> bool:
     command, cwd = _process_details(pid)
     root_text = str(root.resolve())
-    safe_markers = ("nps_lens", "nps-lens", "vite", "serve_webapp.py")
-    return cwd.startswith(root_text) or (
-        any(marker in command for marker in safe_markers) and root_text in command
-    )
+    if cwd.startswith(root_text):
+        return True
+    # Packaged desktop builds commonly run from the shared Builds directory and
+    # therefore have neither the repository in argv nor the repository as cwd.
+    # Their executable name is specific enough to stop safely on NPS Lens ports.
+    executable = Path(command.split(maxsplit=1)[0]).name.casefold() if command else ""
+    if executable in {"nps-lens", "nps_lens", "nps-lens.exe", "nps_lens.exe"}:
+        return True
+    return root_text in command and any(marker in command for marker in ("vite", "serve_webapp.py"))
 
 
 def stop_project_processes(root: Path, ports: tuple[int, ...]) -> list[int]:

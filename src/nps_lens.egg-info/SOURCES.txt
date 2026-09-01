@@ -47,6 +47,7 @@ src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
 src/nps_lens/domain/normalization.py
+src/nps_lens/domain/publication_scope.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
@@ -78,9 +79,7 @@ src/nps_lens/quality/profiling.py
 src/nps_lens/reports/__init__.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
-src/nps_lens/reports/exclusive_ppt.py
 src/nps_lens/reports/executive_ppt.py
-src/nps_lens/reports/ppt_template.py
 src/nps_lens/reports/presentation_context.py
 src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
@@ -109,7 +108,6 @@ tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
 tests/test_desktop_runtime.py
 tests/test_drivers.py
-tests/test_exclusive_ppt.py
 tests/test_helix_ingest_filtering.py
 tests/test_helix_operational_metrics.py
 tests/test_historic_changes_single_source.py
@@ -120,6 +118,7 @@ tests/test_ingest_contracts.py
 tests/test_ingest_features.py
 tests/test_knowledge_cache.py
 tests/test_llm_insight_response.py
+tests/test_local_processes.py
 tests/test_normalization_registry.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
@@ -130,6 +129,7 @@ tests/test_platform_batch.py
 tests/test_plotly_theme.py
 tests/test_ppt_script.py
 tests/test_ppt_wrapped_table_layout.py
+tests/test_publication_scope.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
 tests/test_text_mining.py

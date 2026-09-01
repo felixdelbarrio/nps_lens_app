@@ -6,7 +6,7 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from nps_lens.core.telemetry import TelemetryCollector
-from nps_lens.platform.publication import build_publication_archive
+from nps_lens.platform.publication import build_publication_archive, build_static_data_snapshot
 
 
 def test_telemetry_is_bounded_and_does_not_export_payloads() -> None:
@@ -35,15 +35,19 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         }
         for index in range(800)
     ]
+    snapshot = build_static_data_snapshot(
+        {"columns": ["id", "comment"], "rows": list(rows)},
+        {"columns": ["id", "comment"], "rows": list(rows)},
+        page_size=20,
+    )
     publication: dict[str, object] = {
+        "schema_version": "2.0",
         "screens": {
             "dashboard": {"kpis": {"samples": 800}},
             "linking": {},
-            "data": {
-                "nps": {"rows": list(rows)},
-                "helix": {"rows": list(rows)},
-            },
+            "data": {"nps": {"deferred": True}, "helix": {"deferred": True}},
         },
+        "snapshots": {"data": snapshot},
         "manifest": {},
     }
     artifact = build_publication_archive(

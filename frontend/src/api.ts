@@ -246,6 +246,7 @@ type DesktopBridgeApi = {
     serviceOriginN1: string,
     serviceOriginN2: string
   ) => Promise<HelixUploadResult>;
+  reveal_file?: (filePath: string) => Promise<boolean>;
 };
 
 declare global {
@@ -331,6 +332,7 @@ export type ExportQuery = {
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
+  report_dimension_analysis: string;
 };
 
 function buildUrl(pathname: string, params?: Record<string, string | number | undefined>) {
@@ -581,7 +583,7 @@ async function downloadArtifact(
     await parseResponse(response);
   }
   const savedPath = response.headers.get("x-nps-lens-saved-path") || "";
-  if (savedPath && canUseDesktopFileBridge()) {
+  if (savedPath) {
     await response.body?.cancel();
     return {
       blob: null,
@@ -600,8 +602,27 @@ async function downloadArtifact(
   };
 }
 
-export function downloadExclusiveReport(params: ExportQuery) {
-  return downloadArtifact("/api/dashboard/report/exclusive.pptx", params, "informe-exclusivo.pptx");
+export async function completeArtifactDownload(artifact: {
+  blob: Blob | null;
+  fileName: string;
+  savedPath: string;
+}): Promise<string> {
+  if (artifact.savedPath) {
+    await getDesktopBridge()?.reveal_file?.(artifact.savedPath);
+    return artifact.savedPath;
+  }
+  if (!artifact.blob) {
+    throw new Error("La descarga no devolvió ningún fichero.");
+  }
+  const objectUrl = URL.createObjectURL(artifact.blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = artifact.fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  return "";
 }
 
 export function downloadWebPublication(params: ExportQuery) {

@@ -53,9 +53,9 @@ const contextPayload = {
     downloads_path: "/Users/test/Downloads",
     helix_base_url: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/",
     report_dimension_analysis: "palanca",
-    touchpoint_source: "palanca_touchpoint",
-    min_similarity: 0.25,
-    max_days_apart: 10,
+    touchpoint_source: "executive_journeys",
+    min_similarity: 0.15,
+    max_days_apart: 90,
     min_n_opportunities: 200,
     min_n_cross_comparisons: 30
   },
@@ -78,7 +78,7 @@ const contextPayload = {
 
 const uploadPayload = {
   upload_id: "u-1",
-  filename: "NPS Térmico Senda - 03Marzo.xlsx",
+  filename: "NPS Senda - 03Marzo.xlsx",
   file_hash: "hash",
   uploaded_at: "2026-04-17T12:00:00Z",
   parser_version: "2026.04.17",
@@ -615,7 +615,7 @@ describe("App", () => {
       screen.queryByRole("tab", { name: "Evolución promotores vs detractores" })
     ).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Sumario del Periodo" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Analítica NPS Térmico" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Analítica NPS" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByText("PERIOD CONTAINER")).toBeInTheDocument();
@@ -647,7 +647,7 @@ describe("App", () => {
     expect(opportunityNote).not.toHaveTextContent("**");
     expect(within(opportunityNote as HTMLElement).getByText("Palanca=Acceso").tagName).toBe("STRONG");
 
-    await user.click(screen.getByRole("tab", { name: "Analítica NPS Térmico" }));
+    await user.click(screen.getByRole("tab", { name: "Analítica NPS" }));
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
@@ -668,7 +668,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Ver issues" }));
 
     expect(screen.getByTestId("selected-upload-name")).toHaveTextContent(
-      "NPS Térmico Senda - 03Marzo.xlsx"
+      "NPS Senda - 03Marzo.xlsx"
     );
     expect(screen.getByTestId("selected-issues-list")).toHaveTextContent(
       "extra_columns_detected"
@@ -737,7 +737,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );
-    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("palanca_touchpoint");
+    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
     const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
     const incidentsMetric = screen.getByText("Incidencias del periodo");

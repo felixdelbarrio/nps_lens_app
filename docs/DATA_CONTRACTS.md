@@ -25,7 +25,7 @@ Este documento define:
 
 ---
 
-## 1) Fuente: NPS Térmico (Excel)
+## 1) Fuente: NPS (Excel)
 
 ### Columnas mínimas esperadas
 - `Fecha` (o equivalente; se normaliza a `Fecha`)
@@ -48,7 +48,7 @@ Este documento define:
 ### Semántica de negocio
 - `Score` = valor 0-10 individual o media 0-10.
 - `NPS clásico` = `% promotores - % detractores`.
-- `NPS térmico` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
+- `NPS` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
 - El filtro `Canal` se calcula desde `Canal`; por defecto usa `Web` si existe y `Todos` si no.
 
 ### Taxonomía temporal oficial
