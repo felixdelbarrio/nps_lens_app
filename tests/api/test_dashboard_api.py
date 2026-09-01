@@ -781,7 +781,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
     assert report_response.status_code == 200
 
     presentation = Presentation(BytesIO(report_response.content))
-    assert len(presentation.slides) >= 9
+    assert len(presentation.slides) >= 6
 
     slide_2_texts: list[str] = []
     for shape in presentation.slides[1].shapes:
@@ -790,7 +790,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "2026-03" in slide_2_text
+    assert "marzo 2026" in slide_2_text.lower()
     assert "2026-01" not in slide_2_text
     assert "2026-02" not in slide_2_text
 
@@ -801,5 +801,5 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("deterioro frente al histórico se concentra en Palanca" in text for text in all_texts)
+    assert any("lidera el deterioro frente a la base" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import tempfile
 import zipfile
 from datetime import date
 from io import BytesIO
@@ -10,7 +8,6 @@ from pathlib import Path
 import pandas as pd
 from pptx import Presentation
 
-import nps_lens.reports.ppt_template as ppt_template_module
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -23,11 +20,6 @@ from nps_lens.reports.content_selectors import (
     select_nonzero_kpis,
 )
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
-from nps_lens.reports.ppt_template import (
-    build_presentation,
-    find_corporate_template_path,
-    resolve_layout,
-)
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.settings import Settings
@@ -378,7 +370,6 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         lag_days_by_topic=payload["lag_days"],
         by_topic_weekly=None,
         lag_weeks_by_topic=None,
-        logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source="domain_touchpoint",
@@ -392,9 +383,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 9
+    assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
+    assert out.file_name.startswith("nps-termico-causal-")
+    assert "thermal-causality-v3" in (prs.core_properties.keywords or "")
     assert len(prs.slides) == out.slide_count
     _assert_no_shape_overflow(prs)
 
@@ -413,23 +406,15 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert any("Análisis NPS" in t for t in texts)
     assert any("NPS" in t for t in texts)
-    assert any("PROMOTORES" in t for t in texts)
-    assert any("Se analizaron" in t for t in texts)
-    assert any("todo el histórico disponible" in t for t in texts)
-    assert any("voz detractora concentra" in t for t in texts)
-    assert any("deterioro frente al histórico se concentra en Palanca" in t for t in texts)
+    assert any("todo el histórico" in t for t in texts)
+    assert any("detractores hacen visible" in t for t in texts)
+    assert any("lidera el deterioro frente a la base" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("dolor Web se localiza en focos concretos de Palanca" in t for t in texts)
+    assert any("concentra el mayor dolor en la Web" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
-    assert any("oportunidades combinan impacto potencial" in t for t in texts)
+    assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Highlights del periodo" in t for t in texts)
-    assert any("Touchpoints afectados por Subpalanca" in t for t in texts)
-    assert any("Acceso > Login: causalidad defendible" in t for t in texts)
-    assert any("Análisis causal de Subpalanca: Escenario #1 ·" in t for t in texts)
-    assert any("Sumario del análisis del escenario" in t for t in texts)
-    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
-    assert any("Ejemplos de Comentarios enlazados" in t for t in texts)
+    assert any("Causalidad en tópico NPS ancla: Acceso > Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -449,10 +434,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert not any("Fix estructural" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
-    assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide9.xml.rels").decode("utf-8")
+        rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
 
 
@@ -473,7 +457,6 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        logo_path=None,
     )
 
     assert "/" not in out.file_name
@@ -513,7 +496,6 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
         lag_days_by_topic=payload["lag_days"],
-        logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -534,8 +516,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Journeys de detracción" in t for t in texts)
-    assert any("Análisis causal de Journey de detracción: Escenario #1 ·" in t for t in texts)
+    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
@@ -659,26 +640,24 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 11
-    assert any("Operativa crítica fallida: causalidad defendible" in t for t in texts)
-    assert any("Acceso bloqueado: causalidad defendible" in t for t in texts)
-    assert any("Rendimiento degradado: causalidad defendible" in t for t in texts)
-    assert any("Sumario del análisis del escenario" in t for t in texts)
-    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
+    assert out.slide_count == 9
+    assert any("Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in texts)
+    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
+    assert any("Causalidad en tópico NPS ancla: Rendimiento degradado" in t for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
-    slide_11_texts = [
+    slide_9_texts = [
         paragraph.text or ""
-        for shape in prs.slides[10].shapes
+        for shape in prs.slides[8].shapes
         if getattr(shape, "has_text_frame", False)
         for paragraph in shape.text_frame.paragraphs
     ]
-    assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_11_texts)
+    assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
     assert any("VÍNCULOS VALIDADOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
-            for index in range(9, 12)
+            for index in range(7, 10)
         )
     assert "https://helix.example/INC000104257175" in rels
 
@@ -716,7 +695,6 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
         lag_days_by_topic=payload["lag_days"],
-        logo_path=None,
         incident_evidence_df=payload["incident_evidence"],
         changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -737,8 +715,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Journeys rotos" in t for t in texts)
-    assert any("Análisis causal de Journey roto: Escenario #1 ·" in t for t in texts)
+    assert any("Causalidad en tópico NPS ancla: Acceso / Login" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -933,7 +910,6 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
         lag_days_by_topic=pd.DataFrame(),
         by_topic_weekly=None,
         lag_weeks_by_topic=None,
-        logo_path=None,
         incident_evidence_df=pd.DataFrame(),
         changepoints_by_topic=pd.DataFrame(),
     )
@@ -946,12 +922,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico disponible" in t for t in texts)
-    assert any("Touchpoints afectados por Subpalanca" in t for t in texts)
-    assert any("evidencia disponible no permite afirmar causalidad" in t for t in texts)
-    assert any(
-        "No se identificaron patrones causales estadísticamente defendibles" in t for t in texts
-    )
+    assert any("todo el histórico" in t for t in texts)
+    assert len(prs.slides) == 6
+    assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
 
 
@@ -987,63 +960,6 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
     assert not any("evidencia disponible no permite afirmar causalidad" in t for t in texts)
 
 
-def test_ppt_template_fallback_builds_default_presentation() -> None:
-    prs = build_presentation(template_path=None)
-    layout = resolve_layout(prs, ["layout inexistente"], fallback_index=0)
-
-    assert prs is not None
-    assert layout is not None
-
-
-def test_ppt_template_path_resolution_supports_explicit_and_env_paths() -> None:
-    original = os.environ.get("NPS_LENS_PPT_TEMPLATE")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir)
-        pptx_path = tmp_path / "corporate-template.pptx"
-        Presentation().save(pptx_path)
-
-        found_explicit = find_corporate_template_path(
-            explicit_path=pptx_path, workspace_root=tmp_path
-        )
-        assert found_explicit == pptx_path
-
-        os.environ["NPS_LENS_PPT_TEMPLATE"] = str(pptx_path)
-        found_env = find_corporate_template_path(explicit_path=pptx_path, workspace_root=tmp_path)
-        assert found_env == pptx_path
-
-        fallback_prs = build_presentation(template_path=None, workspace_root=tmp_path / "missing")
-        assert fallback_prs is not None
-
-    if original is None:
-        os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
-    else:
-        os.environ["NPS_LENS_PPT_TEMPLATE"] = original
-
-
-def test_ppt_template_resolution_handles_duplicates_and_no_match() -> None:
-    original_env = os.environ.get("NPS_LENS_PPT_TEMPLATE")
-    original_names = ppt_template_module._TEMPLATE_FILE_NAMES
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            missing = tmp_path / "missing-template.pptx"
-            os.environ["NPS_LENS_PPT_TEMPLATE"] = str(missing)
-            ppt_template_module._TEMPLATE_FILE_NAMES = ()
-
-            assert (
-                find_corporate_template_path(explicit_path=missing, workspace_root=tmp_path) is None
-            )
-
-            prs = build_presentation(template_path=None, workspace_root=tmp_path)
-            assert prs is not None
-    finally:
-        ppt_template_module._TEMPLATE_FILE_NAMES = original_names
-        if original_env is None:
-            os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
-        else:
-            os.environ["NPS_LENS_PPT_TEMPLATE"] = original_env
-
-
 def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_raw_nps() -> None:
     payload = _sample_payload()
     out = generate_business_review_ppt(
@@ -1065,7 +981,6 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
         lag_days_by_topic=None,
         by_topic_weekly=None,
         lag_weeks_by_topic=None,
-        logo_path=None,
         incident_evidence_df=None,
         changepoints_by_topic=None,
     )
@@ -1078,8 +993,8 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico disponible" in t for t in texts)
-    assert any("oportunidades combinan impacto potencial" in t for t in texts)
+    assert any("todo el histórico" in t for t in texts)
+    assert any("detractores hacen visible" in t for t in texts)
 
 
 def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() -> None:
@@ -1099,22 +1014,8 @@ def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() 
     assert fig is not None
     assert len(fig.data[0].x) == 5
 
-    prs = Presentation()
-    executive_ppt._add_deep_dive_slide(
-        prs,
-        period_label="2026-03-01 -> 2026-03-29",
-        text_topics_df=topics,
-        topic_figure=None,
-    )
-    texts = [
-        paragraph.text or ""
-        for shape in prs.slides[0].shapes
-        if getattr(shape, "has_text_frame", False)
-        for paragraph in shape.text_frame.paragraphs
-    ]
-    assert "uno, dos" in texts
-    assert "ejemplo" in texts
-    assert not any(text in {"1", "2", "3", "4", "5"} for text in texts)
+    selected = executive_ppt.select_text_clusters(topics, max_clusters=3)
+    assert selected["cluster_id"].tolist() == [1, 2, 3]
 
 
 def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Path) -> None:
@@ -1169,14 +1070,7 @@ def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
     assert fig.data[1]["cliponaxis"] is False
 
 
-def test_change_layout_uses_full_width_chart_and_table() -> None:
-    layout = executive_ppt.CHANGE_SLIDE_LAYOUT
-
-    assert layout.chart_panel.left < 0.70
-    assert layout.chart_panel.width > 12.0
-    assert layout.table_panel.top > layout.chart_panel.top + layout.chart_panel.height
-    assert layout.max_rows == 4
-
+def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
             "value": ["B", "A", "C"],
