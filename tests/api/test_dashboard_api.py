@@ -329,7 +329,7 @@ def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
     assert not any("Journeys de detracción" in text for text in texts)
 
 
-def test_generate_ppt_report_with_helix_outside_period_omits_causal_section(
+def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_boundary(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -373,7 +373,7 @@ def test_generate_ppt_report_with_helix_outside_period_omits_causal_section(
     assert report.slide_count > 0
     texts = _ppt_texts(report.content)
     assert not any("Análisis causal no concluyente" in text for text in texts)
-    assert not any("Journeys de detracción" in text for text in texts)
+    assert any("Journeys de detracción" in text for text in texts)
 
 
 def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) -> None:
@@ -445,6 +445,22 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         data_payload["rows"][0]["Incident Number__href"]
         == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/RID-1"
     )
+
+    filtered_data_response = client.get(
+        "/api/dashboard/data/helix",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+            "pop_year": "2025",
+            "pop_month": "12",
+            "score_channel": "Web",
+            "limit": 10,
+        },
+    )
+    filtered_data_payload = filtered_data_response.json()
+    assert filtered_data_payload["total_rows"] == 2
+    assert "Causal Match Eligible" in filtered_data_payload["columns"]
 
     linking_response = client.get(
         "/api/dashboard/linking",

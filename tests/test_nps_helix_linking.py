@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from nps_lens.analytics.nps_helix_link import (
+    annotate_incident_link_quality,
     build_incident_display_text,
     link_incidents_to_nps_topics,
 )
@@ -56,6 +57,42 @@ def test_link_incidents_to_nps_topics_handles_empty_text() -> None:
     assign_df, links_df = link_incidents_to_nps_topics(nps, helix, min_similarity=0.2)
     assert assign_df.empty
     assert links_df.empty
+
+
+def test_placeholder_incident_is_auditable_but_excluded_from_causal_links() -> None:
+    nps = pd.DataFrame(
+        {
+            "ID": ["n1"],
+            "Fecha": pd.to_datetime(["2026-07-10"]),
+            "NPS": [2],
+            "Palanca": ["Pagos"],
+            "Subpalanca": ["Nómina"],
+            "Comment": ["Por ejemplo la nómina falla al cargar el archivo"],
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["INC000104555438"],
+            "Fecha": pd.to_datetime(["2026-05-20"]),
+            "Description": ["H2H EJEMPLO"],
+            "Detailed Decription": ["KJHKLJHJJKJKHKJJKH"],
+            "Short Description": ["."],
+            "BBVA_SourceServiceN2": ["H2H"],
+        }
+    )
+
+    annotated = annotate_incident_link_quality(helix)
+    assignments, links = link_incidents_to_nps_topics(
+        nps,
+        helix,
+        min_similarity=0.01,
+        max_days_apart=90,
+    )
+
+    assert annotated.loc[0, "Causal Match Eligible"] == False  # noqa: E712
+    assert annotated.loc[0, "Causal Exclusion Reason"] == "Registro de ejemplo o placeholder"
+    assert assignments.empty
+    assert links.empty
 
 
 def test_build_incident_display_text_prefers_detailed_description_variants() -> None:

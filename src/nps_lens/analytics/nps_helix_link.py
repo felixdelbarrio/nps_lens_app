@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -504,6 +505,67 @@ def build_incident_text(df: pd.DataFrame) -> pd.Series:
     return compact.str.replace(r"\s+", " ", regex=True).str.strip()
 
 
+_PLACEHOLDER_INCIDENT_RE = re.compile(
+    r"\b(?:ejemplo|example|dummy|placeholder|lorem\s+ipsum)\b",
+    flags=re.IGNORECASE,
+)
+_WORD_RE = re.compile(r"[a-záéíóúüñ]{3,}", flags=re.IGNORECASE)
+_VOWEL_RE = re.compile(r"[aeiouáéíóúü]", flags=re.IGNORECASE)
+
+
+def _incident_link_quality_columns(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    semantic_text = build_incident_text(df).fillna("").astype(str).str.strip()
+    display_text = build_incident_display_text(df).fillna("").astype(str).str.strip()
+    title_columns = _ordered_cols_ci(df, ["Description", "summary", "Short Description"])
+    description = _txt_series(df, title_columns[0] if title_columns else "")
+
+    eligible: list[bool] = []
+    reasons: list[str] = []
+    for semantic, display, title in zip(semantic_text, display_text, description):
+        combined = " ".join((str(title), str(display))).strip()
+        words = _WORD_RE.findall(str(semantic))
+        informative = [word for word in words if _VOWEL_RE.search(word)]
+        placeholder = bool(_PLACEHOLDER_INCIDENT_RE.search(combined))
+        if not str(semantic).strip() or not informative:
+            eligible.append(False)
+            reasons.append("Texto operativo vacío o no interpretable")
+        elif placeholder and len(informative) <= 4:
+            eligible.append(False)
+            reasons.append("Registro de ejemplo o placeholder")
+        else:
+            eligible.append(True)
+            reasons.append("")
+
+    return (
+        pd.Series(eligible, index=df.index, dtype=bool),
+        pd.Series(reasons, index=df.index, dtype="string"),
+    )
+
+
+def annotate_incident_link_quality(df: pd.DataFrame) -> pd.DataFrame:
+    """Annotate whether each incident has enough real narrative for causal matching.
+
+    The source row remains available for audit in the Helix dataset. Only synthetic,
+    placeholder or effectively empty narratives are kept out of semantic linking.
+    """
+
+    out = df.copy()
+    eligible, reasons = _incident_link_quality_columns(df)
+    out["Causal Match Eligible"] = eligible
+    out["Causal Exclusion Reason"] = reasons
+    return out
+
+
+def filter_linkable_incidents(df: pd.DataFrame) -> pd.DataFrame:
+    """Return only incidents suitable for semantic causal analysis."""
+
+    if "Causal Match Eligible" in df.columns:
+        eligible = df["Causal Match Eligible"].fillna(False).astype(bool)
+        return df.loc[eligible].copy()
+    eligible, _ = _incident_link_quality_columns(df)
+    return df.loc[eligible].copy()
+
+
 @dataclass(frozen=True)
 class EvidenceLink:
     nps_id: str
@@ -563,7 +625,14 @@ def link_incidents_to_nps_topics(
         )
 
     nps = nps_detractors.copy()
-    helix = helix_incidents.copy()
+    helix = filter_linkable_incidents(helix_incidents)
+    if helix.empty:
+        return (
+            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity"]),
+            pd.DataFrame(
+                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+            ),
+        )
 
     nps["nps_id"] = _safe_id(nps.get("ID", pd.Series(nps.index, index=nps.index)))
     helix["incident_id"] = _safe_id(

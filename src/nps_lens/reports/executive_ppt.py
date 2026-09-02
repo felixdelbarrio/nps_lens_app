@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
@@ -2994,8 +2995,11 @@ def _fill_template_deck(
         row = scenario.row
         title = str(row.get("nps_topic") or f"Escenario causal {offset + 1}")
         title_shape = slide.shapes[1]
-        title_shape.height = Inches(0.72)
-        _set_template_text(title_shape, f"Causalidad en tópico NPS ancla: {title}", size=22 if len(title) < 62 else 18, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
+        full_title = f"Causalidad en tópico NPS ancla: {title}"
+        title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
+        title_shape.height = Inches(0.78)
+        title_size = 22 if len(full_title) < 49 else 18 if len(full_title) < 65 else 16
+        _set_template_text(title_shape, full_title, size=title_size, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
         _set_template_text(slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT)
         _set_template_text(slide.shapes[3], _fmt_pct_or_nd(row.get("detractor_probability")), size=30, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
         _set_template_text(slide.shapes[6], _fmt_num_or_nd(row.get("confidence")), size=30, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
@@ -3006,6 +3010,29 @@ def _fill_template_deck(
         comments = scenario.comment_lines[:2] or ["Sin comentario VoC defendible en el periodo."]
         evidence_shape = content_shapes[-1]
         quote_shapes = content_shapes[:-1]
+        if len(quote_shapes) == 1 and len(comments) >= 2:
+            first_quote = quote_shapes[0]
+            first_quote.left = Inches(3.55)
+            first_quote.top = Inches(1.10)
+            first_quote.width = Inches(5.83)
+            first_quote.height = Inches(0.47)
+            second_quote = slide.shapes.add_shape(
+                MSO_AUTO_SHAPE_TYPE.RECTANGLE,
+                Inches(3.55),
+                Inches(1.63),
+                Inches(5.83),
+                Inches(0.67),
+            )
+            second_quote.fill.solid()
+            second_quote.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
+            second_quote.line.fill.background()
+            second_quote.text_frame.margin_left = Inches(0.10)
+            second_quote.text_frame.margin_right = Inches(0.10)
+            second_quote.text_frame.margin_top = Inches(0.07)
+            second_quote.text_frame.margin_bottom = Inches(0.05)
+            quote_shapes.append(second_quote)
+            evidence_shape.top = Inches(2.39)
+            evidence_shape.height = Inches(2.26)
         for index, quote_shape in enumerate(quote_shapes):
             _set_template_text(quote_shape, comments[index] if index < len(comments) else "", size=11, bold=False, color=BBVA_COLORS["ink"])
         _scenario_evidence(evidence_shape, scenario)

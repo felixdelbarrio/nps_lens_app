@@ -39,7 +39,12 @@ from nps_lens.analytics.incident_rationale import (
     build_incident_nps_rationale,
     summarize_incident_nps_rationale,
 )
+from nps_lens.analytics.linking_policy import (
+    LINK_MAX_VISIBLE_COMMENTS,
+    LINK_MAX_VISIBLE_INCIDENTS,
+)
 from nps_lens.analytics.nps_helix_link import (
+    annotate_incident_link_quality,
     build_incident_display_text,
     can_use_daily_resample,
     causal_rank_by_topic,
@@ -947,11 +952,10 @@ class DashboardService:
         limit: int = 100,
     ) -> dict[str, object]:
         if dataset_kind == "helix":
-            frame = self._enrich_helix_links(self._load_helix_df(context))
-            frame = self._apply_population_filters(frame, pop_year, pop_month)
-            frame = self._apply_score_channel_filter(
-                frame,
-                self._resolve_score_channel(frame, score_channel),
+            # Helix is a contextual historical dataset. NPS period/channel controls must not
+            # hide its rows; the causal engine applies its own explicit temporal window.
+            frame = annotate_incident_link_quality(
+                self._enrich_helix_links(self._load_helix_df(context))
             )
         else:
             frame = self._load_nps_df(context)
@@ -977,6 +981,181 @@ class DashboardService:
             "rows": self._serialize_rows(slice_df),
             "has_more": offset + len(slice_df) < total_rows,
         }
+
+    @staticmethod
+    def _causal_helix_window(
+        helix_df: pd.DataFrame,
+        nps_df: pd.DataFrame,
+        *,
+        max_days_apart: int,
+    ) -> pd.DataFrame:
+        """Apply the one causal time policy without pretending Helix is an NPS dataset."""
+
+        if (
+            helix_df.empty
+            or nps_df.empty
+            or "Fecha" not in helix_df.columns
+            or "Fecha" not in nps_df.columns
+        ):
+            return helix_df.iloc[0:0].copy()
+        nps_dates = pd.to_datetime(nps_df["Fecha"], errors="coerce").dropna()
+        if nps_dates.empty:
+            return helix_df.iloc[0:0].copy()
+        incident_dates = pd.to_datetime(helix_df["Fecha"], errors="coerce")
+        delta = pd.Timedelta(days=max(0, int(max_days_apart)))
+        return helix_df.loc[
+            incident_dates.between(nps_dates.min() - delta, nps_dates.max() + delta)
+        ].copy()
+
+    def _causal_analysis_bundle(
+        self,
+        *,
+        context: UploadContext,
+        pop_year: str,
+        pop_month: str,
+        min_similarity: float,
+        max_days_apart: int,
+        touchpoint_source: str,
+    ) -> dict[str, object]:
+        """Build the canonical causal dataset consumed by both UI and PowerPoint."""
+
+        active_source = str(
+            touchpoint_source
+            or self.settings.ui_defaults()["touchpoint_source"]
+            or TOUCHPOINT_SOURCE_DOMAIN
+        ).strip()
+        key = (
+            "causal-analysis",
+            *self._context_key(context),
+            self._data_revision(context),
+            pop_year,
+            pop_month,
+            _PREFERRED_SCORE_CHANNEL,
+            min_similarity,
+            max_days_apart,
+            active_source,
+            self._helix_base_url(),
+        )
+
+        def _build() -> dict[str, object]:
+            nps_frame = self._load_nps_df(context)
+            resolved_channel = self._resolve_score_channel(nps_frame, _PREFERRED_SCORE_CHANNEL)
+            nps_slice = self._apply_population_filters(
+                self._apply_score_channel_filter(nps_frame, resolved_channel),
+                pop_year,
+                pop_month,
+            )
+            focus_group, focus_label = self._linking_focus_group(POP_ALL)
+            focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
+            helix_history = self._load_helix_df(context)
+            helix_window = self._causal_helix_window(
+                helix_history,
+                nps_slice,
+                max_days_apart=max_days_apart,
+            )
+            helix_annotated = annotate_incident_link_quality(helix_window)
+            helix_slice = helix_annotated.loc[
+                helix_annotated["Causal Match Eligible"]
+            ].copy()
+            base: dict[str, object] = {
+                "ready": False,
+                "resolved_channel": resolved_channel,
+                "focus_group": focus_group,
+                "focus_label": focus_label,
+                "nps_slice": nps_slice,
+                "focus_df": focus_df,
+                "helix_slice": helix_slice,
+                "helix_window_rows": int(len(helix_window)),
+                "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
+                "touchpoint_source": active_source,
+            }
+            if nps_slice.empty or focus_df.empty or helix_slice.empty:
+                return base
+
+            operational_benchmark = self._safe_helix_operational_benchmark(
+                helix_slice,
+                context="causal_analysis",
+            )
+            core = self._compute_linking_core(
+                nps_df=nps_slice,
+                helix_df=helix_slice,
+                focus_df=focus_df,
+                focus_group=focus_group,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                operational_benchmark=operational_benchmark,
+            )
+            links_df = cast(pd.DataFrame, core["links_df"])
+            overall_daily = cast(pd.DataFrame, core["overall_daily"])
+            by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
+            by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
+            executive_journey_catalog = load_executive_journey_catalog(
+                self.settings.knowledge_dir,
+                service_origin=context.service_origin,
+                service_origin_n1=context.service_origin_n1,
+            )
+            mode_payload = self._build_touchpoint_mode_payload(
+                touchpoint_source=active_source,
+                links_df=links_df,
+                focus_df=focus_df,
+                helix_df=helix_slice,
+                by_topic_weekly=by_topic_weekly,
+                by_topic_daily=by_topic_daily,
+                executive_journey_catalog=executive_journey_catalog,
+            )
+            canonical_bundle = self._build_rationale_bundle(
+                by_topic_weekly=by_topic_weekly,
+                by_topic_daily=by_topic_daily,
+                overall_daily=overall_daily,
+                focus_group=focus_group,
+                context=context,
+                links_df=links_df,
+                operational_benchmark=operational_benchmark,
+            )
+            links_mode_df = mode_payload["links_mode_df"]
+            mode_bundle = self._build_rationale_bundle(
+                by_topic_weekly=mode_payload["by_topic_weekly_mode"],
+                by_topic_daily=mode_payload["by_topic_daily_mode"],
+                overall_daily=overall_daily,
+                focus_group=focus_group,
+                context=context,
+                links_df=links_mode_df,
+                operational_benchmark=operational_benchmark,
+            )
+            chains = build_incident_attribution_chains(
+                links_mode_df,
+                focus_df,
+                helix_slice,
+                rationale_df=cast(pd.DataFrame, mode_bundle["rationale_df"]),
+                top_k=0,
+                max_incident_examples=0,
+                max_comment_examples=0,
+                min_links_per_topic=1,
+                touchpoint_source=active_source,
+                journey_catalog_df=mode_payload["broken_journeys_df"],
+                journey_links_df=mode_payload["broken_journey_links_df"],
+                executive_journey_catalog=executive_journey_catalog,
+            )
+            chains = enrich_chain_with_operational_metrics(
+                chains,
+                benchmark=operational_benchmark,
+            )
+            chains = _annotate_chain_candidates(chains)
+            chains = self._inject_incident_record_urls(chains, helix_df=helix_slice)
+            base.update(
+                {
+                    "ready": True,
+                    "core": core,
+                    "mode_payload": mode_payload,
+                    "canonical_bundle": canonical_bundle,
+                    "mode_bundle": mode_bundle,
+                    "chains": chains,
+                    "executive_journey_catalog": executive_journey_catalog,
+                }
+            )
+            return base
+
+        return self._cached_result(key, _build)
 
     def linking_dashboard(
         self,
@@ -1036,22 +1215,21 @@ class DashboardService:
         theme_mode: str = "light",
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
-        nps_frame = self._load_nps_df(context)
         del nps_group
         del score_channel
-        resolved_channel = self._resolve_score_channel(nps_frame, _PREFERRED_SCORE_CHANNEL)
         resolved_group = POP_ALL
-        nps_filtered = self._apply_score_channel_filter(nps_frame, resolved_channel)
-        nps_slice = self._apply_population_filters(
-            filter_by_nps_group(nps_filtered, resolved_group),
-            pop_year,
-            pop_month,
+        analysis = self._causal_analysis_bundle(
+            context=context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            touchpoint_source=touchpoint_source,
         )
-        helix_history = self._load_helix_df(context)
-        helix_slice = self._apply_score_channel_filter(helix_history, resolved_channel)
-
-        focus_group, focus_label = self._linking_focus_group(resolved_group)
-        if nps_slice.empty or helix_slice.empty:
+        resolved_channel = str(analysis["resolved_channel"])
+        focus_group = str(analysis["focus_group"])
+        focus_label = str(analysis["focus_label"])
+        if not bool(analysis["ready"]):
             return self._empty_linking_payload(
                 context=context,
                 pop_year=pop_year,
@@ -1065,103 +1243,27 @@ class DashboardService:
                     "contexto actual. Carga Helix y revisa el periodo activo."
                 ),
             )
-
-        focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
-        if focus_df.empty:
-            return self._empty_linking_payload(
-                context=context,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                nps_group=resolved_group,
-                score_channel=resolved_channel,
-                focus_group=focus_group,
-                focus_label=focus_label,
-                empty_state=(
-                    "El grupo focal seleccionado no tiene suficientes respuestas para construir "
-                    "análisis causal con incidencias."
-                ),
-            )
-
-        active_touchpoint_source = str(
-            touchpoint_source
-            or self.settings.ui_defaults()["touchpoint_source"]
-            or TOUCHPOINT_SOURCE_DOMAIN
-        ).strip()
+        nps_slice = cast(pd.DataFrame, analysis["nps_slice"])
+        focus_df = cast(pd.DataFrame, analysis["focus_df"])
+        helix_slice = cast(pd.DataFrame, analysis["helix_slice"])
+        active_touchpoint_source = str(analysis["touchpoint_source"])
         method_spec = get_causal_method_spec(active_touchpoint_source)
         focus_name = self._focus_name(focus_group)
-        operational_benchmark = self._safe_helix_operational_benchmark(
-            helix_history,
-            context="linking_dashboard",
-        )
-        core = self._cached_result(
-            (
-                "linking-core",
-                *self._context_key(context),
-                self._data_revision(context),
-                pop_year,
-                pop_month,
-                resolved_channel,
-                focus_group,
-                min_similarity,
-                max_days_apart,
-            ),
-            lambda: self._compute_linking_core(
-                nps_df=nps_slice,
-                helix_df=helix_slice,
-                focus_df=focus_df,
-                focus_group=focus_group,
-                min_similarity=min_similarity,
-                max_days_apart=max_days_apart,
-                operational_benchmark=operational_benchmark,
-            ),
-        )
+        core = cast(dict[str, object], analysis["core"])
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
-        by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
-        by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
         links_df = cast(pd.DataFrame, core["links_df"])
-        executive_journey_catalog = load_executive_journey_catalog(
-            self.settings.knowledge_dir,
-            service_origin=context.service_origin,
-            service_origin_n1=context.service_origin_n1,
-        )
-        mode_payload = self._build_touchpoint_mode_payload(
-            touchpoint_source=active_touchpoint_source,
-            links_df=links_df,
-            focus_df=focus_df,
-            helix_df=helix_slice,
-            by_topic_weekly=by_topic_weekly,
-            by_topic_daily=by_topic_daily,
-            executive_journey_catalog=executive_journey_catalog,
-        )
-        broken_journeys_df = mode_payload["broken_journeys_df"]
-        broken_journey_links_df = mode_payload["broken_journey_links_df"]
-        causal_topic_map_df = mode_payload["causal_topic_map_df"]
-        links_mode_df = mode_payload["links_mode_df"]
-        by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
-        by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
+        mode_payload = cast(dict[str, object], analysis["mode_payload"])
+        causal_topic_map_df = cast(pd.DataFrame, mode_payload["causal_topic_map_df"])
+        links_mode_df = cast(pd.DataFrame, mode_payload["links_mode_df"])
+        by_topic_weekly_mode = cast(pd.DataFrame, mode_payload["by_topic_weekly_mode"])
+        by_topic_daily_mode = cast(pd.DataFrame, mode_payload["by_topic_daily_mode"])
         trend_df = overall_daily if not overall_daily.empty else overall_weekly
         average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
         show_all_groups = str(resolved_group or "").strip().lower() == str(POP_ALL).lower()
 
-        canonical_bundle = self._build_rationale_bundle(
-            by_topic_weekly=by_topic_weekly,
-            by_topic_daily=by_topic_daily,
-            overall_daily=overall_daily,
-            focus_group=focus_group,
-            context=context,
-            links_df=links_df,
-            operational_benchmark=operational_benchmark,
-        )
-        mode_bundle = self._build_rationale_bundle(
-            by_topic_weekly=by_topic_weekly_mode,
-            by_topic_daily=by_topic_daily_mode,
-            overall_daily=overall_daily,
-            focus_group=focus_group,
-            context=context,
-            links_df=links_mode_df,
-            operational_benchmark=operational_benchmark,
-        )
+        canonical_bundle = cast(dict[str, object], analysis["canonical_bundle"])
+        mode_bundle = cast(dict[str, object], analysis["mode_bundle"])
         canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
         canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
         canonical_rationale_df = cast(pd.DataFrame, canonical_bundle["rationale_df"])
@@ -1171,7 +1273,6 @@ class DashboardService:
             if not mode_ranking_df.empty
             else cast(pd.DataFrame, mode_bundle["rank_df"])
         )
-        mode_rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
         mode_lag_days_df = cast(pd.DataFrame, mode_bundle["lag_days_df"])
         evidence_df = self._build_linking_evidence_table(
             focus_df,
@@ -1184,34 +1285,16 @@ class DashboardService:
             helix_df=helix_slice,
             incident_column="incident_id",
         )
-        chain_candidates_df = build_incident_attribution_chains(
-            links_mode_df,
-            focus_df,
-            helix_slice,
-            rationale_df=mode_rationale_df,
-            top_k=0,
-            max_incident_examples=5,
-            max_comment_examples=2,
-            min_links_per_topic=1,
-            touchpoint_source=active_touchpoint_source,
-            journey_catalog_df=broken_journeys_df,
-            journey_links_df=broken_journey_links_df,
-            executive_journey_catalog=executive_journey_catalog,
-        )
-        chain_candidates_df = enrich_chain_with_operational_metrics(
-            chain_candidates_df,
-            benchmark=operational_benchmark,
-        )
-        chain_candidates_df = _annotate_chain_candidates(chain_candidates_df)
-        chain_candidates_df = self._inject_incident_record_urls(
-            chain_candidates_df,
-            helix_df=helix_slice,
-        )
+        chain_candidates_df = cast(pd.DataFrame, analysis["chains"])
         chain_candidates_summary = summarize_attribution_chains(chain_candidates_df)
-        chain_cards_df = _cap_chain_evidence_rows(
+        ordered_chain_candidates = select_causal_scenarios(
             chain_candidates_df,
-            max_incident_examples=5,
-            max_comment_examples=2,
+            max_rows=len(chain_candidates_df),
+        )
+        chain_cards_df = _cap_chain_evidence_rows(
+            ordered_chain_candidates,
+            max_incident_examples=LINK_MAX_VISIBLE_INCIDENTS,
+            max_comment_examples=LINK_MAX_VISIBLE_COMMENTS,
         )
         scenario_cards = self._build_linking_scenario_cards(
             chain_cards_df,
@@ -1275,6 +1358,12 @@ class DashboardService:
             )
         )
         situation_notes = [method_spec.situation_note]
+        excluded_quality = int(cast(Any, analysis.get("helix_excluded_quality", 0) or 0))
+        if excluded_quality:
+            situation_notes.append(
+                f"Se excluyeron {excluded_quality} incidencias sin narrativa operativa válida; "
+                "siguen visibles y auditables en Datos > Helix."
+            )
         if not show_all_groups and not overall_daily.empty:
             situation_notes.append(
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
@@ -1328,6 +1417,10 @@ class DashboardService:
                 "responses": int(len(nps_slice)),
                 "focus_responses": int(len(focus_df)),
                 "incidents": int(len(helix_slice)),
+                "incidents_in_time_window": int(
+                    cast(Any, analysis.get("helix_window_rows", len(helix_slice)))
+                ),
+                "incidents_excluded_quality": excluded_quality,
                 "linked_pairs": int(len(links_mode_df)),
                 "topics_analyzed": int(active_rationale_summary.topics_analyzed),
                 "nps_points_at_risk": float(active_rationale_summary.nps_points_at_risk),
@@ -1536,113 +1629,52 @@ class DashboardService:
         broken_journeys_df = pd.DataFrame()
         include_causal_section = False
 
-        helix_history = self._load_helix_df(context)
-        helix_current = pd.DataFrame()
-        if not helix_history.empty and "Fecha" in helix_history.columns:
-            helix_scoped = self._apply_score_channel_filter(helix_history, resolved_channel)
-            helix_current = self._apply_population_filters(helix_scoped, pop_year, pop_month)
-
-        causal_nps_df = current_df if not current_df.empty else descriptive_current_df
-        if not helix_current.empty and not causal_nps_df.empty:
-            executive_journey_catalog = load_executive_journey_catalog(
-                self.settings.knowledge_dir,
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
+        try:
+            causal = self._causal_analysis_bundle(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                touchpoint_source=active_touchpoint_source,
             )
-            focus_current = causal_nps_df.loc[
-                focus_mask(causal_nps_df, focus_group=focus_group)
-            ].copy()
-            operational_benchmark = self._safe_helix_operational_benchmark(
-                helix_current,
-                context="generate_ppt_report",
+            if bool(causal["ready"]):
+                focus_name = self._focus_name(str(causal["focus_group"]))
+                causal_nps_df = cast(pd.DataFrame, causal["nps_slice"])
+                core = cast(dict[str, object], causal["core"])
+                overall_daily = self._attach_daily_nps_mean(
+                    cast(pd.DataFrame, core["overall_daily"]),
+                    causal_nps_df,
+                )
+                overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
+                overall_series = overall_daily if not overall_daily.empty else overall_weekly
+                mode_bundle = cast(dict[str, object], causal["mode_bundle"])
+                rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
+                attribution_all_df = cast(pd.DataFrame, causal["chains"])
+                attribution_df = self._select_top_chain_rows(attribution_all_df)
+                mode_payload = cast(dict[str, object], causal["mode_payload"])
+                broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
+                executive_journey_catalog = cast(
+                    list[dict[str, object]],
+                    causal["executive_journey_catalog"],
+                )
+                entity_summary_kpis = self._build_entity_summary_kpis(
+                    attribution_all_df,
+                    touchpoint_source=active_touchpoint_source,
+                )
+                include_causal_section = not attribution_df.empty
+        except Exception as exc:
+            include_causal_section = False
+            overall_series = pd.DataFrame()
+            rationale_df = pd.DataFrame()
+            attribution_df = pd.DataFrame()
+            attribution_all_df = pd.DataFrame()
+            entity_summary_kpis = []
+            broken_journeys_df = pd.DataFrame()
+            self.logger.warning(
+                "No se pudo construir el bloque causal Helix para la PPT; se generará fallback: %s",
+                exc,
             )
-            if not focus_current.empty:
-                try:
-                    core = self._compute_linking_core(
-                        nps_df=causal_nps_df,
-                        helix_df=helix_current,
-                        focus_df=focus_current,
-                        focus_group=focus_group,
-                        min_similarity=min_similarity,
-                        max_days_apart=max_days_apart,
-                        operational_benchmark=operational_benchmark,
-                    )
-                    links_df = cast(pd.DataFrame, core["links_df"])
-                    overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
-                    by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
-                    overall_daily = cast(pd.DataFrame, core["overall_daily"])
-                    by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
-                    overall_daily = self._attach_daily_nps_mean(overall_daily, causal_nps_df)
-                    overall_series = overall_daily if not overall_daily.empty else overall_weekly
-
-                    if not links_df.empty:
-                        mode_payload = self._build_touchpoint_mode_payload(
-                            touchpoint_source=active_touchpoint_source,
-                            links_df=links_df,
-                            focus_df=focus_current,
-                            helix_df=helix_current,
-                            by_topic_weekly=by_topic_weekly,
-                            by_topic_daily=by_topic_daily,
-                            executive_journey_catalog=executive_journey_catalog,
-                        )
-                        broken_journeys_df = mode_payload["broken_journeys_df"]
-                        broken_journey_links_df = mode_payload["broken_journey_links_df"]
-                        links_mode_df = mode_payload["links_mode_df"]
-                        by_topic_weekly_mode = mode_payload["by_topic_weekly_mode"]
-                        by_topic_daily_mode = mode_payload["by_topic_daily_mode"]
-
-                        mode_bundle = self._build_rationale_bundle(
-                            by_topic_weekly=by_topic_weekly_mode,
-                            by_topic_daily=by_topic_daily_mode,
-                            overall_daily=overall_daily,
-                            focus_group=focus_group,
-                            context=context,
-                            links_df=links_mode_df,
-                            operational_benchmark=operational_benchmark,
-                        )
-                        rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
-
-                        if not rationale_df.empty:
-                            attribution_all_df = build_incident_attribution_chains(
-                                links_mode_df,
-                                focus_current,
-                                helix_current,
-                                rationale_df=rationale_df,
-                                top_k=0,
-                                max_incident_examples=5,
-                                max_comment_examples=2,
-                                min_links_per_topic=1,
-                                touchpoint_source=active_touchpoint_source,
-                                journey_catalog_df=broken_journeys_df,
-                                journey_links_df=broken_journey_links_df,
-                                executive_journey_catalog=executive_journey_catalog,
-                            )
-                            attribution_all_df = enrich_chain_with_operational_metrics(
-                                attribution_all_df,
-                                benchmark=operational_benchmark,
-                            )
-                            attribution_all_df = self._inject_incident_record_urls(
-                                attribution_all_df,
-                                helix_df=helix_current,
-                            )
-                            entity_summary_kpis = self._build_entity_summary_kpis(
-                                attribution_all_df,
-                                touchpoint_source=active_touchpoint_source,
-                            )
-                            attribution_df = self._select_top_chain_rows(attribution_all_df)
-                            include_causal_section = True
-                except Exception as exc:
-                    include_causal_section = False
-                    overall_series = pd.DataFrame()
-                    rationale_df = pd.DataFrame()
-                    attribution_df = pd.DataFrame()
-                    attribution_all_df = pd.DataFrame()
-                    entity_summary_kpis = []
-                    broken_journeys_df = pd.DataFrame()
-                    self.logger.warning(
-                        "No se pudo construir el bloque causal Helix para la PPT; se generará fallback: %s",
-                        exc,
-                    )
 
         report = generate_business_review_ppt(
             service_origin=context.service_origin,
