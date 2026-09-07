@@ -68,7 +68,7 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
         {
             "Fecha": ["2026-03-01"],
             "NPS": [2],
-            "Canal": ["Web"],
+            "Comment": ["Falta el canal"],
         }
     ).to_excel(invalid, index=False)
 

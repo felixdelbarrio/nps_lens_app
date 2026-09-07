@@ -14,6 +14,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
 )
+from nps_lens.analytics.text_mining import preprocess_text
 from nps_lens.core.nps_math import focus_mask, normalize_focus_group
 
 
@@ -679,8 +680,8 @@ def link_incidents_to_nps_topics(
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
 
-    nps_text = build_nps_text(nps).fillna("")
-    helix_text = build_incident_text(helix).fillna("")
+    nps_text = build_nps_text(nps).fillna("").map(preprocess_text)
+    helix_text = build_incident_text(helix).fillna("").map(preprocess_text)
     corpus = nps_text.tolist() + helix_text.tolist()
     if not any(str(t).strip() for t in corpus):
         return (

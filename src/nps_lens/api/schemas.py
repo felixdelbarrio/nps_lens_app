@@ -110,7 +110,7 @@ class EquivalenceGroupRequest(BaseModel):
 
 
 class EquivalenceRegistryRequest(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: str = "2.0"
     dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 
@@ -163,3 +163,15 @@ class LinkingResponse(BaseModel):
     entity_summary: dict[str, Any] = Field(default_factory=dict)
     scenarios: dict[str, Any] = Field(default_factory=dict)
     deep_dive: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaxonomyGenerateRequest(BaseModel):
+    mode: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    regenerate: bool = False
+
+
+class TaxonomySettingsRequest(BaseModel):
+    active: Optional[str] = None
+    default: Optional[str] = None
+    policy: Optional[str] = None

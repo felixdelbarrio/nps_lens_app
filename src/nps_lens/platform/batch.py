@@ -9,7 +9,9 @@ import pandas as pd
 
 from nps_lens.application.service import AppService
 from nps_lens.core.store import DatasetContext, DatasetStore
-from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
+from nps_lens.ingest.incidents import read_incidents_csv
+from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+from nps_lens.ingest.reviews import read_reviews_csv
 from nps_lens.llm.pack import build_insight_pack, export_pack
 from nps_lens.platform.artifacts import ensure_artifact_dirs, update_manifest, write_json_atomic
 

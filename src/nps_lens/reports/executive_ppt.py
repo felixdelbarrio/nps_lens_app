@@ -32,7 +32,7 @@ from nps_lens.analytics.incident_attribution import (
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.analytics.text_mining import extract_topics
+from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
     DesignTokens,
@@ -648,7 +648,7 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
     if comments.empty:
         return pd.DataFrame(columns=cols)
 
-    topics = extract_topics(comments, n_clusters=max(int(top_k), 10))
+    topics = summarize_taxonomy(current_nps_df.rename(columns={"palanca": "Palanca", "subpalanca": "Subpalanca", "comment_txt": "Comment"}), limit=top_k)
     if not topics:
         return pd.DataFrame(columns=cols)
 

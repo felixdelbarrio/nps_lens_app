@@ -27,6 +27,7 @@ import type {
   UploadSelectionPayload,
   UploadResult
 } from "./api";
+import { TaxonomyIngestNotice, TaxonomyStudio } from "./components/TaxonomyStudio";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
 import { LinkingWorkspace } from "./components/LinkingWorkspace";
@@ -55,6 +56,7 @@ import {
 import { toBusinessCopy } from "./utils/businessCopy";
 
 const MAIN_AREAS = [
+  { id: "taxonomy", label: "Taxonomy Studio", description: "Lentes, cobertura y comparación", icon: "database" as const },
   {
     id: "insights",
     label: "Insights",
@@ -710,6 +712,11 @@ export function App() {
     } finally {
       setIsMutating(false);
     }
+  }
+
+  const taxonomyContext = { service_origin: serviceOrigin, service_origin_n1: serviceOriginN1, service_origin_n2: serviceOriginN2 };
+  async function refreshTaxonomy() {
+    await Promise.all([mutateConfig(), mutateDashboard(), mutateDataset(), mutateLinking()]);
   }
 
   async function handleReprocess() {
@@ -1788,6 +1795,8 @@ export function App() {
           ) : null}
 
           {mainArea === "insights" ? renderInsightsArea() : null}
+          {mainArea === "taxonomy" ? <TaxonomyStudio key={JSON.stringify(taxonomyContext)} context={taxonomyContext} onChange={refreshTaxonomy} disabled={actionsDisabled} /> : null}
+          {mainArea === "ingest" ? <TaxonomyIngestNotice context={taxonomyContext} revision={latestNpsUpload?.upload_id || ""} onOpen={() => setMainArea("taxonomy")} /> : null}
           {mainArea === "ingest" ? renderIngestArea() : null}
           {mainArea === "data" ? renderDataArea() : null}
 
@@ -1801,6 +1810,8 @@ export function App() {
 
       {isAdmin ? (
         <SettingsSheet
+          taxonomyContext={taxonomyContext}
+          onTaxonomyChange={refreshTaxonomy}
           actionsDisabled={actionsDisabled}
           activeTab={settingsTab}
           downloadsPath={downloadsPath}

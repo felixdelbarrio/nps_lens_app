@@ -9,9 +9,13 @@ import pandas as pd
 
 from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.domain.models import SummarySnapshot, UploadAttempt, UploadContext
-from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.record_identity import business_keys
 
 CORE_COLUMNS = {
+    "source_channel",
+    "source_lever",
+    "source_sublever",
+    "source_preserved",
     "ID",
     "Fecha",
     "NPS",
@@ -100,9 +104,9 @@ class SqliteNpsRepository:
                     nps_group TEXT NOT NULL,
                     comment_text TEXT NOT NULL,
                     decision_user TEXT NOT NULL,
-                    channel TEXT NOT NULL,
-                    lever TEXT NOT NULL,
-                    sublever TEXT NOT NULL,
+                    source_channel TEXT NOT NULL,
+                    source_lever TEXT NOT NULL,
+                    source_sublever TEXT NOT NULL,
                     browser TEXT NOT NULL,
                     operating_system TEXT NOT NULL,
                     service_origin TEXT NOT NULL,
@@ -141,6 +145,97 @@ class SqliteNpsRepository:
                 );
                 """
             )
+
+        with self._connect() as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(records)")}
+            if "source_preserved" not in columns:
+                connection.execute(
+                    "ALTER TABLE records ADD COLUMN source_preserved INTEGER NOT NULL DEFAULT "
+                    + ("0" if "channel" in columns else "1")
+                )
+            for old, new in [
+                ("channel", "source_channel"),
+                ("lever", "source_lever"),
+                ("sublever", "source_sublever"),
+            ]:
+                if old in columns:
+                    connection.execute(f"ALTER TABLE records RENAME COLUMN {old} TO {new}")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS taxonomy_artifacts (signature TEXT PRIMARY KEY, context TEXT NOT NULL, mode TEXT NOT NULL, payload TEXT NOT NULL)"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS taxonomy_state (context TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+            )
+
+    def migrate_source_identity(self, uploads_dir: Path) -> None:
+        """Recover originals from retained uploads, then migrate keys once in a transaction."""
+        with self._connect() as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version >= 2:
+                return
+            old = pd.read_sql_query(
+                "SELECT r.business_key, r.last_upload_id, u.row_number FROM records r JOIN upload_records u ON u.business_key = r.business_key AND u.upload_id = r.last_upload_id WHERE r.source_preserved = 0",
+                connection,
+            )
+            if not old.empty:
+                from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+
+                for upload_id, group in old.groupby("last_upload_id", sort=False):
+                    paths = list(uploads_dir.glob(str(upload_id) + "__*"))
+                    if not paths:
+                        continue
+                    contexts = connection.execute(
+                        "SELECT service_origin, service_origin_n1, service_origin_n2 FROM records WHERE business_key = ?",
+                        (group.iloc[0]["business_key"],),
+                    ).fetchone()
+                    parsed = read_nps_thermal_excel(str(paths[0]), *contexts).df
+                    if "_source_row_number" not in parsed:
+                        continue
+                    joined = group.merge(
+                        parsed, left_on="row_number", right_on="_source_row_number"
+                    )
+                    connection.executemany(
+                        "UPDATE records SET source_channel = ?, source_lever = ?, source_sublever = ?, comment_text = ?, source_preserved = 1 WHERE business_key = ?",
+                        list(
+                            joined[
+                                [
+                                    "source_channel",
+                                    "source_lever",
+                                    "source_sublever",
+                                    "Comment",
+                                    "business_key",
+                                ]
+                            ].itertuples(index=False, name=None)
+                        ),
+                    )
+            frame = pd.read_sql_query(
+                'SELECT business_key, external_id AS ID, response_at AS Fecha, nps_score AS NPS, comment_text AS Comment, decision_user AS "UsuarioDecisión", '
+                'service_origin, service_origin_n1, service_origin_n2 FROM records ORDER BY last_seen_at',
+                connection,
+            )
+            if not frame.empty:
+                frame["Fecha"] = pd.to_datetime(frame["Fecha"])
+                frame["new_key"] = business_keys(frame)
+                connection.execute(
+                    "CREATE TEMP TABLE key_migration (old_key TEXT PRIMARY KEY, new_key TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO key_migration VALUES (?, ?)",
+                    list(frame[["business_key", "new_key"]].itertuples(index=False, name=None)),
+                )
+                # Keep the latest observation when old taxonomy-dependent identities collapse.
+                redundant = frame.loc[frame.duplicated("new_key", keep="last"), "business_key"]
+                connection.executemany(
+                    "DELETE FROM records WHERE business_key = ?", [(key,) for key in redundant]
+                )
+                connection.execute("UPDATE records SET business_key = 'migrating:' || business_key")
+                connection.execute(
+                    "UPDATE records SET business_key = (SELECT new_key FROM key_migration WHERE old_key = substr(records.business_key, 11))"
+                )
+                connection.execute(
+                    "UPDATE OR REPLACE upload_records SET business_key = COALESCE((SELECT new_key FROM key_migration WHERE old_key = upload_records.business_key), business_key)"
+                )
+            connection.execute("PRAGMA user_version = 2")
 
     def has_completed_file_hash(self, file_hash: str, context: UploadContext) -> bool:
         with self._connect() as connection:
@@ -321,6 +416,9 @@ class SqliteNpsRepository:
                     }
                 )
 
+            inserts: list[tuple[Any, ...]] = []
+            duplicates: list[tuple[Any, ...]] = []
+            updates: list[tuple[Any, ...]] = []
             upload_events: list[tuple[str, str, int, str, str]] = []
             for row in rows:
                 business_key = str(row["_business_key"])
@@ -335,9 +433,9 @@ class SqliteNpsRepository:
                     str(row.get("NPS Group", "")),
                     str(row.get("Comment", "")),
                     str(row.get("UsuarioDecisión", "")),
-                    str(row.get("Canal", "")),
-                    str(row.get("Palanca", "")),
-                    str(row.get("Subpalanca", "")),
+                    str(row.get("source_channel", row.get("Canal", ""))),
+                    str(row.get("source_lever", row.get("Palanca", ""))),
+                    str(row.get("source_sublever", row.get("Subpalanca", ""))),
                     str(row.get("Browser", "")),
                     str(row.get("Operating System", "")),
                     str(row.get("service_origin", "")),
@@ -354,36 +452,7 @@ class SqliteNpsRepository:
                 )
 
                 if business_key not in existing:
-                    connection.execute(
-                        """
-                        INSERT INTO records (
-                            business_key,
-                            external_id,
-                            response_at,
-                            nps_score,
-                            nps_group,
-                            comment_text,
-                            decision_user,
-                            channel,
-                            lever,
-                            sublever,
-                            browser,
-                            operating_system,
-                            service_origin,
-                            service_origin_n1,
-                            service_origin_n2,
-                            normalized_text,
-                            record_fingerprint,
-                            extra_payload_json,
-                            first_upload_id,
-                            last_upload_id,
-                            first_seen_at,
-                            last_seen_at,
-                            times_seen
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        payload,
-                    )
+                    inserts.append(payload)
                     existing[business_key] = {
                         "record_fingerprint": record_fingerprint,
                         "times_seen": 1,
@@ -395,16 +464,7 @@ class SqliteNpsRepository:
                     continue
 
                 if existing[business_key]["record_fingerprint"] == record_fingerprint:
-                    connection.execute(
-                        """
-                        UPDATE records
-                        SET last_upload_id = ?,
-                            last_seen_at = ?,
-                            times_seen = times_seen + 1
-                        WHERE business_key = ?
-                        """,
-                        (upload_id, uploaded_at, business_key),
-                    )
+                    duplicates.append((upload_id, uploaded_at, business_key))
                     existing[business_key]["times_seen"] = (
                         int(existing[business_key]["times_seen"]) + 1
                     )
@@ -420,31 +480,7 @@ class SqliteNpsRepository:
                     )
                     continue
 
-                connection.execute(
-                    """
-                    UPDATE records
-                    SET external_id = ?,
-                        response_at = ?,
-                        nps_score = ?,
-                        nps_group = ?,
-                        comment_text = ?,
-                        decision_user = ?,
-                        channel = ?,
-                        lever = ?,
-                        sublever = ?,
-                        browser = ?,
-                        operating_system = ?,
-                        service_origin = ?,
-                        service_origin_n1 = ?,
-                        service_origin_n2 = ?,
-                        normalized_text = ?,
-                        record_fingerprint = ?,
-                        extra_payload_json = ?,
-                        last_upload_id = ?,
-                        last_seen_at = ?,
-                        times_seen = times_seen + 1
-                    WHERE business_key = ?
-                    """,
+                updates.append(
                     (
                         payload[1],
                         payload[2],
@@ -466,7 +502,7 @@ class SqliteNpsRepository:
                         upload_id,
                         uploaded_at,
                         business_key,
-                    ),
+                    )
                 )
                 existing[business_key]["record_fingerprint"] = record_fingerprint
                 existing[business_key]["times_seen"] = int(existing[business_key]["times_seen"]) + 1
@@ -474,6 +510,74 @@ class SqliteNpsRepository:
                 upload_events.append(
                     (upload_id, business_key, row_number, "updated", record_fingerprint)
                 )
+
+            connection.executemany(
+                """
+                        INSERT INTO records (
+                            business_key,
+                            external_id,
+                            response_at,
+                            nps_score,
+                            nps_group,
+                            comment_text,
+                            decision_user,
+                            source_channel,
+                            source_lever,
+                            source_sublever,
+                            browser,
+                            operating_system,
+                            service_origin,
+                            service_origin_n1,
+                            service_origin_n2,
+                            normalized_text,
+                            record_fingerprint,
+                            extra_payload_json,
+                            first_upload_id,
+                            last_upload_id,
+                            first_seen_at,
+                            last_seen_at,
+                            times_seen, source_preserved
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """,
+                inserts,
+            )
+            connection.executemany(
+                """
+                        UPDATE records
+                        SET last_upload_id = ?,
+                            last_seen_at = ?,
+                            times_seen = times_seen + 1
+                        WHERE business_key = ?
+                        """,
+                duplicates,
+            )
+            connection.executemany(
+                """
+                    UPDATE records
+                    SET source_preserved = 1, external_id = ?,
+                        response_at = ?,
+                        nps_score = ?,
+                        nps_group = ?,
+                        comment_text = ?,
+                        decision_user = ?,
+                        source_channel = ?,
+                        source_lever = ?,
+                        source_sublever = ?,
+                        browser = ?,
+                        operating_system = ?,
+                        service_origin = ?,
+                        service_origin_n1 = ?,
+                        service_origin_n2 = ?,
+                        normalized_text = ?,
+                        record_fingerprint = ?,
+                        extra_payload_json = ?,
+                        last_upload_id = ?,
+                        last_seen_at = ?,
+                        times_seen = times_seen + 1
+                    WHERE business_key = ?
+                    """,
+                updates,
+            )
 
             connection.executemany(
                 """
@@ -554,9 +658,10 @@ class SqliteNpsRepository:
                 nps_group AS "NPS Group",
                 comment_text AS Comment,
                 decision_user AS "UsuarioDecisión",
-                channel AS Canal,
-                lever AS Palanca,
-                sublever AS Subpalanca,
+                source_channel AS Canal,
+                source_lever AS Palanca,
+                source_sublever AS Subpalanca,
+                source_channel, source_lever, source_sublever, source_preserved,
                 browser AS Browser,
                 operating_system AS "Operating System",
                 service_origin,
@@ -618,7 +723,7 @@ class SqliteNpsRepository:
                 SELECT
                     substr(response_at, 1, 4) AS year,
                     substr(response_at, 6, 2) AS month,
-                    channel,
+                    source_channel AS channel,
                     COUNT(*) AS row_count
                 FROM records
                 WHERE service_origin = ?
@@ -653,45 +758,6 @@ class SqliteNpsRepository:
             "periods": sorted(periods),
             "score_channels": channels,
         }
-
-    def canonicalize_records(
-        self,
-        registry: EquivalenceRegistry,
-        context: Optional[UploadContext] = None,
-    ) -> int:
-        query = "SELECT business_key, channel, lever, sublever FROM records"
-        params: list[Any] = []
-        if context is not None:
-            query += (
-                " WHERE service_origin = ? AND service_origin_n1 = ? " "AND service_origin_n2 = ?"
-            )
-            params.extend(
-                [context.service_origin, context.service_origin_n1, context.service_origin_n2]
-            )
-
-        with self._connect() as connection:
-            rows = connection.execute(query, params).fetchall()
-            updates: list[tuple[str, str, str, str]] = []
-            for row in rows:
-                channel = registry.normalize("Canal", row["channel"])
-                lever = registry.normalize("Palanca", row["lever"])
-                sublever = registry.normalize("Subpalanca", row["sublever"])
-                if (
-                    channel != str(row["channel"])
-                    or lever != str(row["lever"])
-                    or sublever != str(row["sublever"])
-                ):
-                    updates.append((channel, lever, sublever, str(row["business_key"])))
-            if updates:
-                connection.executemany(
-                    """
-                    UPDATE records
-                    SET channel = ?, lever = ?, sublever = ?
-                    WHERE business_key = ?
-                    """,
-                    updates,
-                )
-        return len(updates)
 
     def build_summary(self, context: Optional[UploadContext] = None) -> SummarySnapshot:
         records = self.load_records_df(context)

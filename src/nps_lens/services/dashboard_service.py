@@ -57,7 +57,7 @@ from nps_lens.analytics.nps_helix_link import (
     weekly_aggregates,
 )
 from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.analytics.text_mining import extract_topics
+from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.knowledge_cache import (
     load_entries as kc_load_entries,
 )
@@ -108,6 +108,7 @@ from nps_lens.services.analytics import (
     format_metric,
     format_percentage,
 )
+from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     default_windows,
@@ -403,6 +404,7 @@ class DashboardService:
     def __init__(self, repository: SqliteNpsRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
+        self.taxonomy = TaxonomyService(repository, settings.equivalences_path)
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self.logger = logging.getLogger(__name__)
         # The analytical routes allocate large pandas/sklearn intermediates.  A single
@@ -441,7 +443,13 @@ class DashboardService:
         knowledge_revision = self._path_revision(
             self.settings.knowledge_dir / "knowledge_cache.jsonl"
         )
-        return (*database_revision, helix_revision, knowledge_revision)
+        return (
+            *database_revision,
+            helix_revision,
+            knowledge_revision,
+            self._path_revision(self.settings.equivalences_path),
+            self.taxonomy.lens_override,
+        )
 
     @staticmethod
     def _remember_bounded(
@@ -489,7 +497,7 @@ class DashboardService:
             if cached is not None:
                 self._frame_cache.move_to_end(key)
                 return cached
-            frame = self.repository.load_records_df(context)
+            frame = self.taxonomy.resolve(context)
             return cast(
                 pd.DataFrame,
                 self._remember_bounded(
@@ -543,7 +551,21 @@ class DashboardService:
         context: UploadContext,
     ) -> dict[str, object]:
         preferences = self.settings.ui_defaults()
+        restored = self.taxonomy.state(context).get("restored")
         profile = self.repository.records_profile(context)
+        if restored:
+            frame = self.taxonomy.source(context)
+            preferences.update(restored.get("analysis_config", {}))
+            dates = pd.to_datetime(frame["Fecha"], errors="coerce").dropna()
+            profile = {
+                "rows": len(frame),
+                "columns": len(frame.columns),
+                "periods": sorted(set(zip(dates.dt.strftime("%Y"), dates.dt.strftime("%m")))),
+                "score_channels": self.taxonomy.resolve(context, frame)["Canal"]
+                .drop_duplicates()
+                .tolist(),
+            }
+
         periods = cast(list[tuple[str, str]], profile["periods"])
         concrete_years = sorted({year for year, _month in periods})
         all_months = sorted({month for _year, month in periods})
@@ -1726,137 +1748,152 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> PublicationArtifact:
-        active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
-        scope = build_publication_scope(
-            buug=context.service_origin,
-            n1=context.service_origin_n1,
-            n2=context.service_origin_n2,
-            year=pop_year,
-            month=pop_month,
-            causal_method=active_touchpoint_source,
-        )
-        history_df = self._load_nps_df(context)
-        publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
-        publish_group = self._resolve_nps_group(history_df, nps_group)
-        causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
-        causal_group = self._resolve_nps_group(history_df, POP_ALL)
-        dashboard = self.nps_dashboard(
-            context=context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            nps_group=publish_group,
-            score_channel=publish_channel,
-            min_n=min_n,
-        )
-        linking = self.linking_dashboard(
-            context=context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            nps_group=causal_group,
-            score_channel=causal_channel,
-            min_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-            touchpoint_source=active_touchpoint_source,
-        )
-        report = self.generate_ppt_report(
-            context=context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            nps_group=causal_group,
-            score_channel=causal_channel,
-            min_n=min_n,
-            min_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-            touchpoint_source=active_touchpoint_source,
-            report_dimension_analysis=report_dimension_analysis,
-        )
-        row_limit = 50_000
-        nps_data = self.dataset_rows(
-            dataset_kind="nps",
-            context=context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            nps_group=publish_group,
-            score_channel=publish_channel,
-            limit=row_limit,
-        )
-        helix_data = self.dataset_rows(
-            dataset_kind="helix",
-            context=context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            score_channel=POP_ALL,
-            limit=row_limit,
-        )
-        data_snapshot = build_static_data_snapshot(nps_data, helix_data)
-        static_datasets = data_snapshot["datasets"]
-        if not isinstance(static_datasets, dict):
-            raise ValueError("No se pudo materializar el snapshot estático de publicación.")
-        static_data = {
-            kind: {
-                "columns": dataset["columns"],
-                "total_rows": dataset["total_rows"],
-                "deferred": True,
+        with self._analytics_lock, self.taxonomy.snapshot_lens(context):
+            active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+            scope = build_publication_scope(
+                buug=context.service_origin,
+                n1=context.service_origin_n1,
+                n2=context.service_origin_n2,
+                year=pop_year,
+                month=pop_month,
+                causal_method=active_touchpoint_source,
+            )
+            history_df = self._load_nps_df(context)
+            publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            publish_group = self._resolve_nps_group(history_df, nps_group)
+            causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            causal_group = self._resolve_nps_group(history_df, POP_ALL)
+            dashboard = self.nps_dashboard(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=publish_group,
+                score_channel=publish_channel,
+                min_n=min_n,
+            )
+            linking = self.linking_dashboard(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=causal_group,
+                score_channel=causal_channel,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                touchpoint_source=active_touchpoint_source,
+            )
+            report = self.generate_ppt_report(
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=causal_group,
+                score_channel=causal_channel,
+                min_n=min_n,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+                touchpoint_source=active_touchpoint_source,
+                report_dimension_analysis=report_dimension_analysis,
+            )
+            row_limit = 50_000
+            nps_data = self.dataset_rows(
+                dataset_kind="nps",
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                nps_group=publish_group,
+                score_channel=publish_channel,
+                limit=row_limit,
+            )
+            helix_data = self.dataset_rows(
+                dataset_kind="helix",
+                context=context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=POP_ALL,
+                limit=row_limit,
+            )
+            data_snapshot = build_static_data_snapshot(nps_data, helix_data)
+            static_datasets = data_snapshot["datasets"]
+            if not isinstance(static_datasets, dict):
+                raise ValueError("No se pudo materializar el snapshot estático de publicación.")
+            static_data = {
+                kind: {
+                    "columns": dataset["columns"],
+                    "total_rows": dataset["total_rows"],
+                    "deferred": True,
+                }
+                for kind, dataset in static_datasets.items()
+                if isinstance(dataset, dict)
             }
-            for kind, dataset in static_datasets.items()
-            if isinstance(dataset, dict)
-        }
-        generated_at = datetime.now(timezone.utc).isoformat()
-        registry = EquivalenceRegistry.load(self.settings.equivalences_path)
-        publication: dict[str, object] = {
-            "schema_version": PUBLICATION_SCHEMA_VERSION,
-            "generated_at": generated_at,
-            "brand": {
-                "name": "BBVA Banca de Empresas e Instituciones",
-                "design_system": "BBVA Experience",
-                "design_tokens": DesignTokens.default().colors_light,
-            },
-            "scope": scope,
-            "filters": {
-                "service_origin": context.service_origin,
-                "service_origin_n1": context.service_origin_n1,
-                "service_origin_n2": context.service_origin_n2,
-                "year": pop_year,
-                "month": pop_month,
-                "nps_group": publish_group,
-                "score_channel": publish_channel,
-                "min_n": min_n,
-                "min_similarity": min_similarity,
-                "max_days_apart": max_days_apart,
-                "touchpoint_source": active_touchpoint_source,
-                "causal_nps_group": causal_group,
-                "causal_score_channel": causal_channel,
-            },
-            "static_views": {
-                "default": {"score_channel": publish_channel, "nps_group": publish_group},
-                "immutable": True,
-            },
-            "screens": {
-                "dashboard": dashboard,
-                "linking": linking,
-                "data": static_data,
-            },
-            "snapshots": {"data": data_snapshot},
-            "manifest": {
+            generated_at = datetime.now(timezone.utc).isoformat()
+            registry = EquivalenceRegistry.load(self.settings.equivalences_path)
+            publication: dict[str, object] = {
+                "schema_version": PUBLICATION_SCHEMA_VERSION,
                 "generated_at": generated_at,
+                "brand": {
+                    "name": "BBVA Banca de Empresas e Instituciones",
+                    "design_system": "BBVA Experience",
+                    "design_tokens": DesignTokens.default().colors_light,
+                },
                 "scope": scope,
-                "equivalence_registry": registry.to_dict(),
-                "privacy": "No incluye configuración administrativa ni telemetría.",
-                "report": report.file_name,
-                "report_without_evolution": report.compact_file_name,
-            },
-        }
-        date_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        artifact = build_publication_archive(
-            publication,
-            report_name=report.file_name,
-            report_content=report.content,
-            compact_report_name=report.compact_file_name,
-            compact_report_content=report.compact_content,
-            file_name=f"nps-lens-publicacion-{date_stamp}.zip",
-        )
-        saved_path = self._persist_artifact(artifact.content, artifact.file_name)
-        return replace(artifact, saved_path=str(saved_path))
+                "filters": {
+                    "service_origin": context.service_origin,
+                    "service_origin_n1": context.service_origin_n1,
+                    "service_origin_n2": context.service_origin_n2,
+                    "year": pop_year,
+                    "month": pop_month,
+                    "nps_group": publish_group,
+                    "score_channel": publish_channel,
+                    "min_n": min_n,
+                    "min_similarity": min_similarity,
+                    "max_days_apart": max_days_apart,
+                    "touchpoint_source": active_touchpoint_source,
+                    "causal_nps_group": causal_group,
+                    "causal_score_channel": causal_channel,
+                },
+                "static_views": {
+                    "default": {"score_channel": publish_channel, "nps_group": publish_group},
+                    "immutable": True,
+                },
+                "screens": {
+                    "dashboard": dashboard,
+                    "linking": linking,
+                    "data": static_data,
+                },
+                "snapshots": {
+                    "data": data_snapshot,
+                    "taxonomy": self.taxonomy.snapshot(
+                        context,
+                        self._load_helix_df(context),
+                        {
+                            **self.settings.ui_defaults(),
+                            "pop_year": pop_year,
+                            "pop_month": pop_month,
+                            "min_similarity": min_similarity,
+                            "max_days_apart": max_days_apart,
+                            "touchpoint_source": active_touchpoint_source,
+                        },
+                    ),
+                },
+                "manifest": {
+                    "generated_at": generated_at,
+                    "scope": scope,
+                    "equivalence_registry": registry.to_dict(),
+                    "privacy": "No incluye configuración administrativa ni telemetría.",
+                    "report": report.file_name,
+                    "report_without_evolution": report.compact_file_name,
+                },
+            }
+            date_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            artifact = build_publication_archive(
+                publication,
+                report_name=report.file_name,
+                report_content=report.content,
+                compact_report_name=report.compact_file_name,
+                compact_report_content=report.compact_content,
+                file_name=f"nps-lens-publicacion-{date_stamp}.zip",
+            )
+            saved_path = self._persist_artifact(artifact.content, artifact.file_name)
+            return replace(artifact, saved_path=str(saved_path))
 
     def _build_business_report_md(
         self,
@@ -3169,6 +3206,11 @@ class DashboardService:
         }
 
     def _load_helix_df(self, context: UploadContext) -> pd.DataFrame:
+        restored = self.taxonomy.state(context).get("restored")
+        if restored and restored.get("helix") is not None:
+            from io import StringIO
+
+            return pd.read_json(StringIO(json.dumps(restored["helix"])), orient="table")
         stored = self.helix_store.get(
             DatasetContext(
                 service_origin=context.service_origin,
@@ -3182,13 +3224,14 @@ class DashboardService:
             "helix-frame",
             *self._context_key(context),
             self._path_revision(stored.path),
+            self._path_revision(self.settings.equivalences_path),
         )
         with self._analytics_lock:
             cached = self._frame_cache.get(key)
             if cached is not None:
                 self._frame_cache.move_to_end(key)
                 return cached
-            frame = self.helix_store.load_df(stored)
+            frame = self.taxonomy.registry(context).apply("helix", self.helix_store.load_df(stored))
             return cast(
                 pd.DataFrame,
                 self._remember_bounded(
@@ -3226,7 +3269,7 @@ class DashboardService:
         comment_column = "Comment" if "Comment" in frame.columns else ""
         if not comment_column:
             return pd.DataFrame()
-        topics = extract_topics(frame[comment_column].astype(str), n_clusters=10)
+        topics = summarize_taxonomy(frame)
         return pd.DataFrame([topic.__dict__ for topic in topics])
 
     def _build_linking_evidence_table(

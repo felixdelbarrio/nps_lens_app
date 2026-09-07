@@ -9,7 +9,23 @@ from typing import Any, Iterable, Mapping, cast
 
 import pandas as pd
 
-EQUIVALENCE_SCHEMA_VERSION = "1.0"
+EQUIVALENCE_SCHEMA_VERSION = "2.0"
+CATEGORICAL_DIMENSIONS = {
+    "nps.Canal",
+    "nps.Palanca",
+    "nps.Subpalanca",
+    "helix.Service",
+    "helix.service",
+    "helix.BBVA_SourceServiceN1",
+    "helix.BBVA_SourceServiceN2",
+    "helix.BBVA_RootCauseMain",
+    "helix.BBVA_RootCauseSub",
+    "helix.Priority",
+    "helix.Status",
+    "helix.Operational Categorization Tier 1",
+    "helix.Operational Categorization Tier 2",
+    "helix.Operational Categorization Tier 3",
+}
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _SEPARATOR_RE = re.compile(r"\s*(?:/|\\|&|\+|\||;|,)\s*")
@@ -19,7 +35,8 @@ _EMPTY_MARKERS = {"", "nan", "none", "null", "nat", "<na>"}
 
 
 DEFAULT_EQUIVALENCES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
-    "Palanca": (
+    "nps.Canal": (("Otros Canales", ("Otros", "Otros canales")),),
+    "nps.Palanca": (
         (
             "Pagos/transferencias",
             (
@@ -32,7 +49,7 @@ DEFAULT_EQUIVALENCES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("Funcionamiento continuo", ("funcionamiento continuo",)),
         ("Agregar funcionalidad", ("agregar funcionalidad",)),
     ),
-    "Subpalanca": (
+    "nps.Subpalanca": (
         (
             "Pagos/transferencias",
             (
@@ -86,20 +103,12 @@ def equivalence_key(value: object) -> str:
     return " ".join(tokens)
 
 
-def _default_display(value: object) -> str:
-    text = clean_label(value)
-    if not text:
-        return ""
-    folded = text.casefold()
-    return folded[:1].upper() + folded[1:]
-
-
 @dataclass(frozen=True)
 class EquivalenceGroup:
     canonical: str
     aliases: tuple[str, ...]
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {"canonical": self.canonical, "aliases": list(self.aliases)}
 
 
@@ -109,8 +118,8 @@ class EquivalenceRegistry:
         lookups: dict[str, dict[str, str]] = {}
         for dimension, raw_groups in groups.items():
             dimension_name = clean_label(dimension)
-            if dimension_name not in {"Canal", "Palanca", "Subpalanca"}:
-                continue
+            if dimension_name not in CATEGORICAL_DIMENSIONS:
+                raise ValueError(f"Dimensión categórica no soportada: {dimension_name}")
             dimension_groups: list[EquivalenceGroup] = []
             dimension_lookup: dict[str, str] = {}
             for raw_group in raw_groups:
@@ -118,13 +127,11 @@ class EquivalenceRegistry:
                 if not canonical:
                     continue
                 aliases = tuple(
-                    dict.fromkeys(
-                        clean_label(alias) for alias in raw_group.aliases if clean_label(alias)
-                    )
+                    dict.fromkeys(str(alias) for alias in raw_group.aliases if str(alias).strip())
                 )
                 group = EquivalenceGroup(canonical=canonical, aliases=aliases)
                 for candidate in (canonical, *aliases):
-                    key = equivalence_key(candidate)
+                    key = candidate
                     previous = dimension_lookup.get(key)
                     if previous and previous != canonical:
                         raise ValueError(
@@ -154,6 +161,8 @@ class EquivalenceRegistry:
             raise ValueError("El registro de equivalencias debe contener un objeto 'dimensions'.")
         groups: dict[str, list[EquivalenceGroup]] = {}
         for dimension, raw_groups in dimensions.items():
+            if dimension not in CATEGORICAL_DIMENSIONS:
+                raise ValueError(f"Dimensión categórica no soportada: {dimension}")
             if not isinstance(raw_groups, list):
                 raise ValueError(f"Las equivalencias de {dimension} deben ser una lista.")
             parsed: list[EquivalenceGroup] = []
@@ -166,7 +175,7 @@ class EquivalenceRegistry:
                 parsed.append(
                     EquivalenceGroup(
                         canonical=clean_label(raw_group.get("canonical", "")),
-                        aliases=tuple(clean_label(alias) for alias in aliases),
+                        aliases=tuple(str(alias) for alias in aliases),
                     )
                 )
             groups[str(dimension)] = parsed
@@ -181,6 +190,20 @@ class EquivalenceRegistry:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
             raise ValueError("El fichero de equivalencias no contiene un objeto JSON.")
+        # One-time on-disk schema migration; public APIs accept scoped dimensions only.
+        if payload.get("schema_version", "1.0") == "1.0":
+            dimensions = payload.get("dimensions", {})
+            payload = {
+                "schema_version": EQUIVALENCE_SCHEMA_VERSION,
+                "dimensions": {
+                    f"nps.{key}": value
+                    for key, value in dimensions.items()
+                    if f"nps.{key}" in CATEGORICAL_DIMENSIONS
+                },
+            }
+            registry = cls.from_dict(payload)
+            registry.save(path)
+            return registry
         return cls.from_dict(payload)
 
     def save(self, path: Path) -> None:
@@ -193,21 +216,23 @@ class EquivalenceRegistry:
         temporary.replace(path)
 
     def normalize(self, dimension: str, value: object) -> str:
-        clean = clean_label(value)
-        if not clean:
+        if dimension not in CATEGORICAL_DIMENSIONS:
+            raise ValueError(f"Dimensión categórica no soportada: {dimension}")
+        if value is None or bool(cast(Any, pd.isna)(value)):
             return ""
-        canonical = self._lookups.get(clean_label(dimension), {}).get(equivalence_key(clean))
-        return canonical or _default_display(clean)
+        raw = str(value)
+        # Only configured variants are merged. Unconfigured labels remain verbatim.
+        return self._lookups.get(dimension, {}).get(raw, raw)
 
     def key(self, dimension: str, value: object) -> str:
-        return equivalence_key(self.normalize(dimension, value))
+        return self.normalize(dimension, value)
 
     def normalize_series(self, dimension: str, values: pd.Series[Any]) -> pd.Series[Any]:
         unique_values = values.drop_duplicates().tolist()
         lookup = {value: self.normalize(dimension, value) for value in unique_values}
         return values.map(lookup).fillna("")
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": EQUIVALENCE_SCHEMA_VERSION,
             "dimensions": {
@@ -222,7 +247,7 @@ class EquivalenceRegistry:
             raw = clean_label(value)
             if not raw:
                 continue
-            observed.setdefault(self.key(dimension, raw), set()).add(raw)
+            observed.setdefault(equivalence_key(raw), set()).add(str(value))
         return [
             {
                 "canonical": self.normalize(dimension, next(iter(raw_values))),
@@ -231,3 +256,21 @@ class EquivalenceRegistry:
             for _, raw_values in sorted(observed.items())
             if len(raw_values) > 1
         ]
+
+    def apply(self, domain: str, frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy(deep=False)
+        for scope in self._groups:
+            prefix, column = scope.split(".", 1)
+            if prefix == domain and column in frame:
+                out[column] = self.normalize_series(scope, frame[column])
+        return out
+
+    def signature(self, domain: str) -> str:
+        from hashlib import sha256
+
+        values = {
+            key: value
+            for key, value in self.to_dict()["dimensions"].items()
+            if key.startswith(domain + ".")
+        }
+        return sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

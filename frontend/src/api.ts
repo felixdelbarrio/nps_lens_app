@@ -308,7 +308,8 @@ export type ReprocessSummary = {
 export type EquivalenceRegistryPayload = {
   schema_version: string;
   dimensions: Record<string, Array<{ canonical: string; aliases: string[] }>>;
-  updated_records?: number;
+  available_dimensions?: string[];
+  statistics?: Record<string, { groups: Array<{ canonical: string; affected: number }>; suggestions: Array<{ variants: string[] }> }>;
 };
 
 export type TelemetryPayload = {
@@ -552,15 +553,15 @@ export async function updateServiceOrigins(
   );
 }
 
-export async function fetchEquivalences(): Promise<EquivalenceRegistryPayload> {
-  return parseResponse<EquivalenceRegistryPayload>(await fetch("/api/settings/equivalences"));
+export async function fetchEquivalences(context: TaxonomyContext = {}): Promise<EquivalenceRegistryPayload> {
+  return parseResponse<EquivalenceRegistryPayload>(await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`));
 }
 
 export async function updateEquivalences(
-  payload: EquivalenceRegistryPayload
+  payload: EquivalenceRegistryPayload, context: TaxonomyContext = {}
 ): Promise<EquivalenceRegistryPayload> {
   return parseResponse<EquivalenceRegistryPayload>(
-    await fetch("/api/settings/equivalences", {
+    await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -635,4 +636,22 @@ export function downloadExecutiveReport(params: {
   report_dimension_analysis: string;
 }) {
   return downloadArtifact("/api/dashboard/report/pptx", params, "reporte-ejecutivo.pptx");
+}
+
+export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "DISCOVERED";
+export type TaxonomyContext = Record<string, string>;
+export type TaxonomyStatus = {
+  detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number };
+  active: TaxonomyMode;
+  requested_active: TaxonomyMode;
+  default: TaxonomyMode;
+  policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
+  restored: boolean;
+  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
+};
+export function taxonomyUrl(path: string, context: TaxonomyContext) {
+  return `/api/taxonomy${path}?${new URLSearchParams(context)}`;
+}
+export async function taxonomyRequest<T>(path: string, context: TaxonomyContext, init?: RequestInit): Promise<T> {
+  return parseResponse<T>(await fetch(taxonomyUrl(path, context), init));
 }

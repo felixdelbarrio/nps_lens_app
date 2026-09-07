@@ -7,8 +7,8 @@ import { SettingsSheet, type SettingsTab } from "./SettingsSheet";
 
 vi.mock("../api", () => ({
   fetchEquivalences: vi.fn().mockResolvedValue({
-    schema_version: "1.0",
-    dimensions: { Palanca: [], Subpalanca: [] }
+    schema_version: "2.0",
+    dimensions: { "nps.Palanca": [], "nps.Subpalanca": [] }
   }),
   updateEquivalences: vi.fn()
 }));
@@ -40,7 +40,7 @@ it("shows fixed score rules separately from editable equivalences", async () => 
   expect(screen.getByText("≥9: promotor")).toBeInTheDocument();
   expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
   await user.click(screen.getByRole("tab", { name: "Equivalencias" }));
-  expect(await screen.findByRole("heading", { name: "Palancas de experiencia" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Motivos detallados" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "nps.Palanca" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Subpalanca" })).toBeInTheDocument();
   expect(screen.queryByText("Clasificación NPS")).not.toBeInTheDocument();
 });

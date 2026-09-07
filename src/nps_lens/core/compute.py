@@ -9,7 +9,6 @@ from nps_lens.analytics.changepoints import ChangePoint, detect_nps_changepoints
 from nps_lens.analytics.drivers import DriverStat, driver_table
 from nps_lens.analytics.journey import RouteCandidate, build_routes
 from nps_lens.analytics.opportunities import Opportunity, rank_opportunities
-from nps_lens.analytics.text_mining import TopicCluster, extract_topics
 from nps_lens.core.metrics import NpsSummary, daily_kpis, daily_mix, summarize
 
 
@@ -23,14 +22,6 @@ def compute_driver_table(df: pd.DataFrame, dimension: str) -> list[DriverStat]:
 
 def compute_opportunities(df: pd.DataFrame, dimensions: list[str], min_n: int) -> list[Opportunity]:
     return rank_opportunities(df, dimensions=dimensions, min_n=min_n)
-
-
-def compute_topics(
-    texts: pd.Series[str],
-    n_clusters: int = 10,
-    max_features: int = 3000,
-) -> list[TopicCluster]:
-    return extract_topics(texts=texts, n_clusters=n_clusters, max_features=max_features)
 
 
 def compute_routes(

@@ -24,6 +24,7 @@ src/nps_lens/analytics/journey.py
 src/nps_lens/analytics/linking_policy.py
 src/nps_lens/analytics/nps_helix_link.py
 src/nps_lens/analytics/opportunities.py
+src/nps_lens/analytics/taxonomy.py
 src/nps_lens/analytics/text_mining.py
 src/nps_lens/api/__init__.py
 src/nps_lens/api/app.py
@@ -48,6 +49,7 @@ src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
 src/nps_lens/domain/normalization.py
 src/nps_lens/domain/publication_scope.py
+src/nps_lens/domain/record_identity.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
@@ -88,6 +90,7 @@ src/nps_lens/services/__init__.py
 src/nps_lens/services/dashboard_service.py
 src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
+src/nps_lens/services/taxonomy_service.py
 src/nps_lens/services/analytics/__init__.py
 src/nps_lens/services/analytics/insights_service.py
 src/nps_lens/services/analytics/kpis_service.py
@@ -125,6 +128,7 @@ tests/test_normalization_registry.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
 tests/test_nps_parser.py
+tests/test_nps_score_classification.py
 tests/test_period_kpis.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py
@@ -135,6 +139,7 @@ tests/test_ppt_wrapped_table_layout.py
 tests/test_publication_scope.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
+tests/test_taxonomy_engine.py
 tests/test_text_mining.py
 tests/test_ui_business_periods.py
 tests/test_ui_population.py

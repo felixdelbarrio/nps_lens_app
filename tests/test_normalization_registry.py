@@ -18,17 +18,17 @@ def test_equivalence_key_unifies_joiners_case_accents_and_spacing() -> None:
 
 def test_default_registry_unifies_business_labels() -> None:
     registry = EquivalenceRegistry.default()
-    assert registry.normalize("Palanca", "Pagos y transferencias") == "Pagos/transferencias"
-    assert registry.normalize("Palanca", "Pagos/ Transferencias") == "Pagos/transferencias"
+    assert registry.normalize("nps.Palanca", "pagos y transferencias") == "Pagos/transferencias"
+    assert registry.normalize("nps.Palanca", "pagos/ transferencias") == "Pagos/transferencias"
     assert "NPS Group" not in registry.to_dict()["dimensions"]
 
 
 def test_registry_rejects_ambiguous_aliases() -> None:
     payload = {
         "dimensions": {
-            "Palanca": [
+            "nps.Palanca": [
                 {"canonical": "Uno", "aliases": ["igual"]},
-                {"canonical": "Dos", "aliases": ["IGUAL"]},
+                {"canonical": "Dos", "aliases": ["igual"]},
             ]
         }
     }
@@ -64,8 +64,8 @@ def test_parser_accepts_current_senda_export_headers(tmp_path: Path) -> None:
     )
 
     assert not [issue for issue in result.issues if issue.level == "ERROR"]
-    assert result.df["Palanca"].unique().tolist() == ["Pagos/transferencias"]
-    assert result.df["Subpalanca"].unique().tolist() == ["Fallas en el login"]
+    assert result.df["source_lever"].tolist() == source["Palanca"].tolist()
+    assert result.df["source_sublever"].tolist() == source["Subpalanca"].tolist()
     assert result.df["NPS Group"].tolist() == ["PASIVO", "DETRACTOR"]
 
 
