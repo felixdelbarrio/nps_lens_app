@@ -181,10 +181,10 @@ class SqliteNpsRepository:
             if version >= 2:
                 return
             old = pd.read_sql_query(
-                'SELECT business_key, last_upload_id, external_id AS ID, response_at AS Fecha, '
+                "SELECT business_key, last_upload_id, external_id AS ID, response_at AS Fecha, "
                 'nps_score AS NPS, comment_text AS Comment, decision_user AS "UsuarioDecisión", '
-                'service_origin, service_origin_n1, service_origin_n2 '
-                'FROM records WHERE source_preserved = 0',
+                "service_origin, service_origin_n1, service_origin_n2 "
+                "FROM records WHERE source_preserved = 0",
                 connection,
             )
             if not old.empty:

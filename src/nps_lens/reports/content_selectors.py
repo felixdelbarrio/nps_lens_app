@@ -92,6 +92,13 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
         "avg_similarity",
     ):
         work[column] = _numeric_series(work, column).fillna(0.0)
+    label_column = next(
+        (column for column in ("nps_topic", "entity_label", "journey") if column in work),
+        None,
+    )
+    work["_scenario_label"] = (
+        work[label_column].astype(str) if label_column is not None else work.index.astype(str)
+    )
     return (
         work.sort_values(
             [
@@ -100,11 +107,12 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
                 "linked_comments",
                 "responses",
                 "avg_similarity",
-                "nps_topic",
+                "_scenario_label",
             ],
             ascending=[False, False, False, False, False, True],
         )
         .head(max_rows)
+        .drop(columns="_scenario_label")
         .copy()
     )
 

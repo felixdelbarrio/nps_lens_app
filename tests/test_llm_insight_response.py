@@ -21,7 +21,6 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
                     "qual": ["dato1"],
                 },
                 "assumptions": ["as1"],
-                "actions": [{"action": "Fix", "owner": "Tech", "eta": "2w"}],
                 "tests_or_checks": ["Validar muestra"],
             }
         ],

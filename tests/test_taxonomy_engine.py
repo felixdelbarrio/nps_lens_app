@@ -317,7 +317,9 @@ def test_migration_recovers_source_and_preserves_record_identity(service, settin
     repo = tax.repository
     expected = repo.load_records_df(ctx)
     with repo._connect() as connection:
-        connection.execute("UPDATE records SET source_lever = 'LOST', source_sublever = 'LOST', source_preserved = 0")
+        connection.execute(
+            "UPDATE records SET source_lever = 'LOST', source_sublever = 'LOST', source_preserved = 0"
+        )
         connection.execute("PRAGMA user_version = 0")
     repo.migrate_source_identity(settings.data_dir / "uploads")
     recovered = repo.load_records_df(ctx)

@@ -332,7 +332,7 @@ def plotly_risk_scale(tokens: DesignTokens, mode: str) -> list[list[object]]:
     """Risk/intensity continuous scale aligned to status tokens.
 
     Low values are neutral/background; high values move to warning and alert.
-    Use for heatmaps / confidence / severity where higher == more risk/priority.
+    Use for heatmaps or severity scales where a higher value needs stronger emphasis.
 
     Plotly accepts either a list of colors or a list of (stop, color) pairs.
     We use explicit stops to make the perceptual jump clear.

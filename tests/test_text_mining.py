@@ -23,6 +23,10 @@ def test_summarize_taxonomy_smoke() -> None:
         ]
         * 30
     )
-    topics = summarize_taxonomy(pd.DataFrame({"Comment": s, "Palanca": ["Acceso"] * len(s), "Subpalanca": ["Login"] * len(s)}))
+    topics = summarize_taxonomy(
+        pd.DataFrame(
+            {"Comment": s, "Palanca": ["Acceso"] * len(s), "Subpalanca": ["Login"] * len(s)}
+        )
+    )
     assert topics
     assert topics[0].n > 0

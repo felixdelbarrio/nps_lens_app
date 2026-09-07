@@ -958,7 +958,6 @@ def chart_causal_entity_bar(
     return apply_plotly_template(fig, theme)
 
 
-
 def chart_case_incident_heatmap(
     by_topic_daily: pd.DataFrame,
     theme: Theme,

@@ -17,4 +17,5 @@ class EditorialContentLimits:
     max_helix_evidence: int = 4
     max_voc_evidence: int = 3
 
+
 EDITORIAL_LIMITS = EditorialContentLimits()

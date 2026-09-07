@@ -32,7 +32,7 @@ class TaxonomyConfig:
     max_features: int = 5000
     clusters: int = 0
     subclusters: int = 0
-    confidence: float = 0.65
+    certainty_threshold: float = 0.65
     min_f1: float = 0.65
     min_class_size: int = 4
     seed: int = 42
@@ -47,7 +47,7 @@ class TaxonomyConfig:
                 "Configuración fuera de rango: features 100–20000, temas 0–20, subtemas 0–8."
             )
         if (
-            not 0.5 <= self.confidence <= 1
+            not 0.5 <= self.certainty_threshold <= 1
             or not 0 <= self.min_f1 <= 1
             or not 4 <= self.min_class_size <= 100
         ):
@@ -124,7 +124,7 @@ def complete(frame: pd.DataFrame, config: TaxonomyConfig) -> dict[str, Any]:
     texts = text_series(frame)
     pal, sub = labels(frame, "Palanca").copy(), labels(frame, "Subpalanca").copy()
     provenance = pd.Series("human", index=frame.index)
-    confidence = pd.Series(0.0, index=frame.index)
+    assignment_certainty = pd.Series(0.0, index=frame.index)
     quality: list[dict[str, Any]] = []
 
     def predict(
@@ -191,10 +191,10 @@ def complete(frame: pd.DataFrame, config: TaxonomyConfig) -> dict[str, Any]:
         probabilities = model.predict_proba(matrix)
         best = probabilities.argmax(axis=1)
         certainty = probabilities.max(axis=1)
-        accept = (certainty >= config.confidence) & (matrix.getnnz(axis=1) > 0)
+        accept = (certainty >= config.certainty_threshold) & (matrix.getnnz(axis=1) > 0)
         indices = candidates.index[accept]
         target.loc[indices] = model.classes_[best[accept]]
-        confidence.loc[indices] = certainty[accept]
+        assignment_certainty.loc[indices] = certainty[accept]
         provenance.loc[indices] = "completed"
         report["assigned"] = int(accept.sum())
 
@@ -216,7 +216,7 @@ def complete(frame: pd.DataFrame, config: TaxonomyConfig) -> dict[str, Any]:
         "lever": pal.tolist(),
         "sublever": sub.tolist(),
         "provenance": provenance.tolist(),
-        "confidence": confidence.tolist(),
+        "assignment_certainty": assignment_certainty.tolist(),
         "quality": quality,
         "nodes": [],
     }

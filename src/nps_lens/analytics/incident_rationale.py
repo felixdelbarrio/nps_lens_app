@@ -17,12 +17,26 @@ class IncidentRationaleSummary:
 
 
 RATIONALE_COLUMNS = [
-    "nps_topic", "touchpoint", "weeks", "responses", "incidents",
-    "incident_rate_per_100_responses", "low_incident_weeks", "high_incident_weeks",
-    "low_incident_threshold", "high_incident_threshold", "focus_rate_low_incidence",
-    "focus_rate_high_incidence", "focus_rate_difference_pp", "score_mean_low_incidence",
-    "score_mean_high_incidence", "score_mean_difference", "best_lag_weeks", "corr",
-    "max_cp_stability", "incidents_lead_changepoint_share",
+    "nps_topic",
+    "touchpoint",
+    "weeks",
+    "responses",
+    "incidents",
+    "incident_rate_per_100_responses",
+    "low_incident_weeks",
+    "high_incident_weeks",
+    "low_incident_threshold",
+    "high_incident_threshold",
+    "focus_rate_low_incidence",
+    "focus_rate_high_incidence",
+    "focus_rate_difference_pp",
+    "score_mean_low_incidence",
+    "score_mean_high_incidence",
+    "score_mean_difference",
+    "best_lag_weeks",
+    "corr",
+    "max_cp_stability",
+    "incidents_lead_changepoint_share",
 ]
 
 
@@ -95,7 +109,11 @@ def build_incident_nps_rationale(
         group = group.sort_values("week")
         responses = int(group["responses"].sum())
         weeks = int(group["week"].nunique()) if group["week"].notna().any() else len(group)
-        if responses < int(min_topic_responses) or weeks < 3 or group["focus_rate"].notna().sum() < 3:
+        if (
+            responses < int(min_topic_responses)
+            or weeks < 3
+            or group["focus_rate"].notna().sum() < 3
+        ):
             continue
         low_threshold = float(group["incidents"].quantile(0.30))
         high_threshold = float(group["incidents"].quantile(0.70))
@@ -113,26 +131,42 @@ def build_incident_nps_rationale(
         score_high = _weighted_mean(group.loc[high, "nps_mean"], group.loc[high, "responses"])
         stats = temporal.get(str(topic), {})
         incidents = int(group["incidents"].sum())
-        rows.append({
-            "nps_topic": str(topic), "touchpoint": _touchpoint_from_topic(topic), "weeks": weeks,
-            "responses": responses, "incidents": incidents,
-            "incident_rate_per_100_responses": incidents / responses * 100,
-            "low_incident_weeks": int(low.sum()), "high_incident_weeks": int(high.sum()),
-            "low_incident_threshold": low_threshold, "high_incident_threshold": high_threshold,
-            "focus_rate_low_incidence": focus_low, "focus_rate_high_incidence": focus_high,
-            "focus_rate_difference_pp": (focus_high - focus_low) * 100,
-            "score_mean_low_incidence": score_low, "score_mean_high_incidence": score_high,
-            "score_mean_difference": score_high - score_low,
-            "best_lag_weeks": stats.get("best_lag_weeks", np.nan),
-            "corr": stats.get("corr", np.nan), "max_cp_stability": stats.get("max_cp_stability", np.nan),
-            "incidents_lead_changepoint_share": stats.get("incidents_lead_changepoint_share", np.nan),
-        })
+        rows.append(
+            {
+                "nps_topic": str(topic),
+                "touchpoint": _touchpoint_from_topic(topic),
+                "weeks": weeks,
+                "responses": responses,
+                "incidents": incidents,
+                "incident_rate_per_100_responses": incidents / responses * 100,
+                "low_incident_weeks": int(low.sum()),
+                "high_incident_weeks": int(high.sum()),
+                "low_incident_threshold": low_threshold,
+                "high_incident_threshold": high_threshold,
+                "focus_rate_low_incidence": focus_low,
+                "focus_rate_high_incidence": focus_high,
+                "focus_rate_difference_pp": (focus_high - focus_low) * 100,
+                "score_mean_low_incidence": score_low,
+                "score_mean_high_incidence": score_high,
+                "score_mean_difference": score_high - score_low,
+                "best_lag_weeks": stats.get("best_lag_weeks", np.nan),
+                "corr": stats.get("corr", np.nan),
+                "max_cp_stability": stats.get("max_cp_stability", np.nan),
+                "incidents_lead_changepoint_share": stats.get(
+                    "incidents_lead_changepoint_share", np.nan
+                ),
+            }
+        )
     if not rows:
         return _empty_rationale_df()
-    return pd.DataFrame(rows).sort_values(
-        ["incidents", "responses", "focus_rate_difference_pp", "nps_topic"],
-        ascending=[False, False, False, True],
-    ).reset_index(drop=True)[RATIONALE_COLUMNS]
+    return (
+        pd.DataFrame(rows)
+        .sort_values(
+            ["incidents", "responses", "focus_rate_difference_pp", "nps_topic"],
+            ascending=[False, False, False, True],
+        )
+        .reset_index(drop=True)[RATIONALE_COLUMNS]
+    )
 
 
 def summarize_incident_nps_rationale(rationale_df: pd.DataFrame) -> IncidentRationaleSummary:
@@ -145,6 +179,8 @@ def summarize_incident_nps_rationale(rationale_df: pd.DataFrame) -> IncidentRati
         topics_analyzed=len(rationale_df),
         responses=int(pd.to_numeric(rationale_df["responses"], errors="coerce").fillna(0).sum()),
         incidents=total_incidents,
-        top3_incident_share=float(incidents.nlargest(3).sum()) / total_incidents if total_incidents else 0.0,
+        top3_incident_share=(
+            float(incidents.nlargest(3).sum()) / total_incidents if total_incidents else 0.0
+        ),
         median_lag_weeks=float(lags.median()) if not lags.empty else float("nan"),
     )

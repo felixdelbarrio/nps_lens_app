@@ -14,7 +14,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const [message, setMessage] = useState("");
   const [clusters, setClusters] = useState(0);
   const [subclusters, setSubclusters] = useState(0);
-  const [confidence, setConfidence] = useState(0.65);
+  const [certaintyThreshold, setCertaintyThreshold] = useState(0.65);
   const [minF1, setMinF1] = useState(0.65);
   const [left, setLeft] = useState<TaxonomyMode>("NORMALIZED");
   const [right, setRight] = useState<TaxonomyMode>("DISCOVERED");
@@ -30,7 +30,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   }
   async function generate(mode: TaxonomyMode, regenerate: boolean) {
     await action(async () => {
-      const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config: { clusters, subclusters, confidence, min_f1: minF1 } }));
+      const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config: { clusters, subclusters, certainty_threshold: certaintyThreshold, min_f1: minF1 } }));
       setMessage(result.cache_hit ? "Resultado reutilizado de la caché local." : "Taxonomía calculada y guardada en local.");
     });
   }
@@ -51,7 +51,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     <div className="field-grid">
       <label>Temas (0 = automático)<input type="number" min={0} max={20} value={clusters} onChange={e => setClusters(Number(e.target.value))} disabled={locked} /></label>
       <label>Subtemas (0 = automático)<input type="number" min={0} max={8} value={subclusters} onChange={e => setSubclusters(Number(e.target.value))} disabled={locked} /></label>
-      <label>Confianza mínima<input type="number" min={0.5} max={1} step={0.05} value={confidence} onChange={e => setConfidence(Number(e.target.value))} disabled={locked} /></label>
+      <label>Umbral de asignación<input type="number" min={0.5} max={1} step={0.05} value={certaintyThreshold} onChange={e => setCertaintyThreshold(Number(e.target.value))} disabled={locked} /></label>
       <label>Macro F1 mínimo<input type="number" min={0} max={1} step={0.05} value={minF1} onChange={e => setMinF1(Number(e.target.value))} disabled={locked} /></label>
     </div>
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>

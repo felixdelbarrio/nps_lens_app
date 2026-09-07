@@ -314,8 +314,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
-        if result["status"] == "completed" and dashboard_layer.taxonomy.state(UploadContext(service_origin, service_origin_n1, service_origin_n2)).get("restored"):
-            dashboard_layer.taxonomy.resume_local(UploadContext(service_origin, service_origin_n1, service_origin_n2))
+        if result["status"] == "completed" and dashboard_layer.taxonomy.state(
+            UploadContext(service_origin, service_origin_n1, service_origin_n2)
+        ).get("restored"):
+            dashboard_layer.taxonomy.resume_local(
+                UploadContext(service_origin, service_origin_n1, service_origin_n2)
+            )
         dashboard_layer.clear_caches()
         return result
 
@@ -620,7 +624,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(409, str(exc)) from exc
         content = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
         if len(content) > 30 * 1024 * 1024:
-            raise HTTPException(413, "El snapshot supera 30 MB; selecciona una política con menos lentes.")
+            raise HTTPException(
+                413, "El snapshot supera 30 MB; selecciona una política con menos lentes."
+            )
         return Response(
             content,
             media_type="application/json",

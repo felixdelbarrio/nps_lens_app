@@ -315,14 +315,14 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 - Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
 - Variación: Delta NPS Clásico -0.18 · Δ detractores +2.5 pp
 
-## 3) Dónde atacar primero (oportunidades)
-- Si mejoramos Palanca=Funcionamiento Continuo, el modelo estima un potencial de +57.2 puntos.
+## 3) Brechas NPS observadas
+- Funcionamiento Continuo presenta una brecha de -4,2 puntos frente al total.
 
 ## 4) Qué están diciendo (temas de texto)
 - Tema #1: fallas de continuidad, caídas y lentitud en procesos críticos.
 
-## 5) Próximos pasos recomendados
-- Validar releases, alinear owners y aterrizar quick wins del mes.
+## 5) Evidencia disponible
+- Revisar las series observadas, los vínculos semánticos y los casos asociados.
 """
 
     out = generate_business_review_ppt(
@@ -350,7 +350,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Confianza media", "value": "0.82"},
+            {"label": "Similitud media", "value": "0.82"},
             {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
@@ -389,7 +389,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Acceso > Login" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Acceso > Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -492,7 +492,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Acceso bloqueado" in t for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
@@ -621,11 +621,11 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
     assert any(
-        "Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in compact_texts
+        "Evidencia para el tópico NPS: Operativa crítica fallida" in t for t in compact_texts
     )
-    assert any("Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Rendimiento degradado" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Operativa crítica fallida" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Acceso bloqueado" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Rendimiento degradado" in t for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
     slide_9_texts = [
         paragraph.text or ""
@@ -635,7 +635,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
     ]
     assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
-    assert any("VÍNCULOS VALIDADOS" in t for t in texts)
+    assert any("VÍNCULOS SEMÁNTICOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
@@ -697,7 +697,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Causalidad en tópico NPS ancla: Acceso / Login" in t for t in texts)
+    assert any("Evidencia para el tópico NPS: Acceso / Login" in t for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 

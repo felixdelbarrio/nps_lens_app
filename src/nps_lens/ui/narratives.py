@@ -331,7 +331,9 @@ def _observed_evidence_lines(
         f"Los tres tópicos con más incidencias concentran **{format_percentage(summary.top3_incident_share)}** del total relacionado.",
     ]
     if np.isfinite(summary.median_lag_weeks):
-        lines.append(f"El mejor lag observado tiene una mediana de **{format_metric(summary.median_lag_weeks)} semanas**.")
+        lines.append(
+            f"El mejor lag observado tiene una mediana de **{format_metric(summary.median_lag_weeks)} semanas**."
+        )
     if int(scope.get("linked_pairs_total", 0)):
         lines.append(
             f"Se encontraron **{format_volume(scope['linked_pairs_total'])} vínculos semánticos** entre "
@@ -369,7 +371,11 @@ def build_incident_ppt_story(
         )
     )
     lines.extend(["", "## Evidencias vinculadas"])
-    cards = attribution_df.head(top_k).to_dict(orient="records") if attribution_df is not None and not attribution_df.empty else []
+    cards = (
+        attribution_df.head(top_k).to_dict(orient="records")
+        if attribution_df is not None and not attribution_df.empty
+        else []
+    )
     if not cards:
         lines.append("- No hay vínculos semánticos con el umbral y la ventana seleccionados.")
     for card in cards:
@@ -411,12 +417,17 @@ def build_ppt_8slide_script(
         ("Vínculos semánticos", observed[2:3] or ["Sin vínculos en la ventana seleccionada."]),
         ("Comparación de periodos", observed[3:] or ["Sin grupos alto/bajo comparables."]),
         ("Asociación temporal", ["Correlación, mejor lag y changepoints observados por tópico."]),
-        ("Evidencia Helix", ["Incidencias relacionadas, fechas y organización responsable observada."]),
+        (
+            "Evidencia Helix",
+            ["Incidencias relacionadas, fechas y organización responsable observada."],
+        ),
         ("Evidencia VoC", ["Comentarios vinculados con nota y fecha de respuesta."]),
-        ("Límites", ["La similitud, la correlación y el lag describen asociación; no prueban causalidad."]),
+        (
+            "Límites",
+            ["La similitud, la correlación y el lag describen asociación; no prueban causalidad."],
+        ),
     ]
     lines = ["# Guion de evidencia — NPS e incidencias"]
     for number, (title, bullets) in enumerate(sections, start=1):
         lines.extend(["", f"## Slide {number} — {title}", *[f"- {bullet}" for bullet in bullets]])
     return "\n".join(lines) + "\n"
-

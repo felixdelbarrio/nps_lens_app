@@ -514,8 +514,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_payload["scenarios"]["cards"][0]["anchor_topic"]
     assert linking_payload["entity_summary"]["table"][0]["Tópico NPS ancla"]
     assert [tab["label"] for tab in linking_payload["deep_dive"]["tabs"]] == [
-        "Ranking de hipótesis",
-        "Evidence wall",
+        "Asociaciones temporales",
+        "Evidencias",
     ]
 
 

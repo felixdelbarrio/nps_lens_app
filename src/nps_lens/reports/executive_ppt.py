@@ -2414,7 +2414,11 @@ def _build_causal_scenarios(
                 _fmt_pct_or_nd(row.get("focus_rate_high_incidence", np.nan)),
                 BBVA_COLORS["red"],
             ),
-            ("Nota media del tópico", _fmt_num_or_nd(row.get("avg_nps", np.nan)), BBVA_COLORS["green"]),
+            (
+                "Nota media del tópico",
+                _fmt_num_or_nd(row.get("avg_nps", np.nan)),
+                BBVA_COLORS["green"],
+            ),
             (
                 "Vínculos semánticos",
                 str(int(_safe_int(row.get("linked_pairs", 0), default=0))),

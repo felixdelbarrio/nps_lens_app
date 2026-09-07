@@ -614,7 +614,7 @@ def link_incidents_to_nps_topics(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return:
     - assignments per incident to best NPS topic (and similarity)
-    - evidence links (incident to specific detractor comments) for the evidence wall
+    - evidence links from incidents to specific detractor comments
     """
 
     if nps_detractors.empty or helix_incidents.empty:
@@ -1030,7 +1030,7 @@ def can_use_daily_resample(
     return coverage >= float(min_coverage)
 
 
-def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
+def association_summary_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
     """Summarize topic volumes and the observed high-vs-low incident difference."""
     if by_topic.empty:
         return pd.DataFrame(

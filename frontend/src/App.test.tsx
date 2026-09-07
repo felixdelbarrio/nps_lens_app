@@ -294,8 +294,8 @@ const linkingPayloadAvailable = {
     title: "Análisis de Tópicos de NPS afectados",
     subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
     kpis: [
-      { label: "NPS en riesgo", value: "3.90 pts" },
-      { label: "NPS recuperable", value: "2.40 pts" },
+      { label: "Respuestas analizadas", value: "26618" },
+      { label: "Incidencias", value: "233" },
       { label: "Concentración top-3", value: "74.0%" },
       { label: "Tiempo de reacción", value: "1.2 semanas" }
     ],
@@ -316,8 +316,8 @@ const linkingPayloadAvailable = {
       hint: "2 tópicos afectados por journeys de detracción."
     },
     tabs: [
-      { id: "ranking", label: "Ranking de hipótesis" },
-      { id: "evidence", label: "Evidence wall" }
+      { id: "ranking", label: "Asociaciones temporales" },
+      { id: "evidence", label: "Evidencias" }
     ],
     trending: {
       title: "NPS tópicos trending",
@@ -325,21 +325,21 @@ const linkingPayloadAvailable = {
       empty_state: "No hay señal suficiente para construir tópicos trending."
     },
     ranking: {
-      title: "Ranking de hipótesis",
+      title: "Asociaciones temporales",
       rows: [
         {
           "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
-          "Confidence (learned)": 0.133
+          "Incidencias": 18
         },
         {
           "Tópico NPS": "Consulta > Estado de cuenta / comprobantes",
-          "Confidence (learned)": 0.111
+          "Incidencias": 12
         }
       ],
       empty_state: ""
     },
     evidence: {
-      title: "Evidence wall",
+      title: "Evidencias",
       rows: [
         {
           nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
@@ -383,7 +383,7 @@ const linkingPayloadAvailable = {
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
           "Consulta / Operativa / Error funcional",
-          "Riesgo NPS"
+          "Comentarios VoC"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Uso / Edo de Cuenta" },
@@ -392,15 +392,8 @@ const linkingPayloadAvailable = {
             value: "Pagos/ Transferencias > Faltan detalles de movimientos"
           },
           { label: "Touchpoint afectado", value: "Consulta" },
-          { label: "Prob. detractores", value: "60.0%" },
           { label: "Delta NPS Clásico", value: "-0.0" },
-          { label: "Impacto total", value: "0.00 pts" },
-          { label: "Confianza", value: "0.16" },
           { label: "Vínculos semánticos", value: "16" },
-          { label: "Prioridad", value: "0.62" },
-          { label: "NPS en riesgo", value: "0.00 pts" },
-          { label: "NPS recuperable", value: "0.00 pts" },
-          { label: "Owner (rol)", value: "VoC + Analitica" }
         ],
         incident_records: [
           {
@@ -424,11 +417,9 @@ const linkingPayloadAvailable = {
         detail_table: [
           {
             "Tópico NPS": "Operativa crítica fallida",
-            Prioridad: 0.62
+            "Vínculos semánticos": 16
           }
         ],
-        matrix_figure: null,
-        risk_recovery_figure: null,
         heatmap_figure: null,
         changepoints_figure: null,
         lag_figure: null
@@ -449,21 +440,14 @@ const linkingPayloadAvailable = {
           "(8) Incidencias + comentarios",
           "Consulta de saldos",
           "Consulta / Disponibilidad / Saldos",
-          "Riesgo NPS"
+          "Comentarios VoC"
         ],
         spotlight_metrics: [
           { label: "Journey de detracción", value: "Consulta de saldos" },
           { label: "Tópico NPS ancla", value: "Consulta > Estado de cuenta / comprobantes" },
           { label: "Touchpoint afectado", value: "Consulta" },
-          { label: "Prob. detractores", value: "52.0%" },
           { label: "Delta NPS Clásico", value: "-0.0" },
-          { label: "Impacto total", value: "0.00 pts" },
-          { label: "Confianza", value: "0.14" },
           { label: "Vínculos semánticos", value: "14" },
-          { label: "Prioridad", value: "0.51" },
-          { label: "NPS en riesgo", value: "0.00 pts" },
-          { label: "NPS recuperable", value: "0.00 pts" },
-          { label: "Owner (rol)", value: "Canal Digital" }
         ],
         incident_records: [
           {
@@ -486,11 +470,9 @@ const linkingPayloadAvailable = {
         detail_table: [
           {
             "Tópico NPS": "Fricción en consulta de saldos",
-            Prioridad: 0.51
+            "Vínculos semánticos": 14
           }
         ],
-        matrix_figure: null,
-        risk_recovery_figure: null,
         heatmap_figure: null,
         changepoints_figure: null,
         lag_figure: null
@@ -739,7 +721,7 @@ describe("App", () => {
     expect(
       screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Ranking de hipótesis")).not.toBeInTheDocument();
+    expect(screen.queryByText("Asociaciones temporales")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
     expect(screen.getByText("Detalle de journeys de detracción")).toBeInTheDocument();
@@ -748,7 +730,7 @@ describe("App", () => {
     await user.click(
       screen.getByRole("tab", { name: "Análisis de Tópicos de NPS afectados" })
     );
-    expect(screen.getAllByText("Ranking de hipótesis").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Asociaciones temporales").length).toBeGreaterThan(0);
     expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Tópico NPS afectado/i })).toHaveValue("Todos");
     await user.selectOptions(
@@ -761,7 +743,7 @@ describe("App", () => {
       within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Evidence wall" }));
+    await user.click(screen.getByRole("tab", { name: "Evidencias" }));
     const evidenceTable = screen.getByRole("table");
     expect(
       within(evidenceTable).getByText("Consulta > Estado de cuenta / comprobantes")

@@ -46,9 +46,9 @@ from nps_lens.analytics.linking_policy import (
 from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
+    association_summary_by_topic,
     build_incident_display_text,
     can_use_daily_resample,
-    causal_rank_by_topic,
     daily_aggregates,
     detect_detractor_changepoints_with_bootstrap,
     estimate_best_lag_by_topic,
@@ -2105,7 +2105,7 @@ class DashboardService:
         links_df: pd.DataFrame,
         operational_benchmark: HelixOperationalBenchmark,
     ) -> dict[str, object]:
-        rank = causal_rank_by_topic(by_topic_weekly)
+        rank = association_summary_by_topic(by_topic_weekly)
         changepoints_df = detect_detractor_changepoints_with_bootstrap(
             by_topic_weekly,
             pen=6.0,
@@ -2309,25 +2309,43 @@ class DashboardService:
         summary = chain_df.copy()
         for column in ("linked_pairs", "linked_incidents", "linked_comments"):
             summary[column] = _numeric_series(summary, column, default=0).astype(int)
-        for column in ("avg_nps", "avg_similarity", "focus_rate_difference_pp", "score_mean_difference"):
+        for column in (
+            "avg_nps",
+            "avg_similarity",
+            "focus_rate_difference_pp",
+            "score_mean_difference",
+        ):
             summary[column] = _numeric_series(summary, column, default=np.nan).round(3)
         summary = summary.sort_values(
             ["linked_pairs", "linked_incidents", "linked_comments", "avg_similarity", "nps_topic"],
             ascending=[False, False, False, False, True],
         )
         columns = [
-            "nps_topic", "anchor_topic", "touchpoint", "linked_incidents", "linked_comments",
-            "linked_pairs", "avg_similarity", "avg_nps", "focus_rate_difference_pp",
+            "nps_topic",
+            "anchor_topic",
+            "touchpoint",
+            "linked_incidents",
+            "linked_comments",
+            "linked_pairs",
+            "avg_similarity",
+            "avg_nps",
+            "focus_rate_difference_pp",
             "score_mean_difference",
         ]
-        return summary[columns].rename(columns={
-            "nps_topic": entity_name, "anchor_topic": "Tópico NPS ancla",
-            "touchpoint": "Touchpoint relacionado", "linked_incidents": "Incidencias relacionadas",
-            "linked_comments": "Comentarios relacionados", "linked_pairs": "Vínculos semánticos",
-            "avg_similarity": "Similitud media", "avg_nps": "Nota media (0–10)",
-            "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
-            "score_mean_difference": "Diferencia nota media alta vs baja",
-        })
+        return summary[columns].rename(
+            columns={
+                "nps_topic": entity_name,
+                "anchor_topic": "Tópico NPS ancla",
+                "touchpoint": "Touchpoint relacionado",
+                "linked_incidents": "Incidencias relacionadas",
+                "linked_comments": "Comentarios relacionados",
+                "linked_pairs": "Vínculos semánticos",
+                "avg_similarity": "Similitud media",
+                "avg_nps": "Nota media (0–10)",
+                "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
+                "score_mean_difference": "Diferencia nota media alta vs baja",
+            }
+        )
 
     @staticmethod
     def _build_entity_summary_kpis(
@@ -2336,11 +2354,19 @@ class DashboardService:
         del touchpoint_source
         if chain_df is None or chain_df.empty:
             return []
-        entities = _series_or_default(chain_df, "nps_topic").astype(str).str.strip().replace("", np.nan)
+        entities = (
+            _series_or_default(chain_df, "nps_topic").astype(str).str.strip().replace("", np.nan)
+        )
         return [
             {"label": "Tópicos observados", "value": str(int(entities.nunique()))},
-            {"label": "Incidencias relacionadas", "value": str(int(_numeric_series(chain_df, "linked_incidents").sum()))},
-            {"label": "Vínculos semánticos", "value": str(int(_numeric_series(chain_df, "linked_pairs").sum()))},
+            {
+                "label": "Incidencias relacionadas",
+                "value": str(int(_numeric_series(chain_df, "linked_incidents").sum())),
+            },
+            {
+                "label": "Vínculos semánticos",
+                "value": str(int(_numeric_series(chain_df, "linked_pairs").sum())),
+            },
         ]
 
     def _build_linking_scenario_cards(
@@ -2361,51 +2387,74 @@ class DashboardService:
             title = str(row.get("nps_topic", "") or "").strip()
             topic = str(row.get("anchor_topic", "") or title).strip()
             card = self._serialize_rows(pd.DataFrame([row]))[0]
-            card.update({
-                "rank": index, "title": title,
-                "statement": (
-                    f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "
-                    f"{int(row.get('linked_incidents', 0) or 0)} incidencias y "
-                    f"{int(row.get('linked_comments', 0) or 0)} comentarios."
-                ),
-                "spotlight_metrics": [
-                    {"label": "Nota media del tópico", "value": format_metric(row.get("avg_nps"))},
-                    {"label": "Vínculos semánticos", "value": str(int(row.get("linked_pairs", 0) or 0))},
-                    {"label": "Incidencias relacionadas", "value": str(int(row.get("linked_incidents", 0) or 0))},
-                    {"label": "Similitud media", "value": format_metric(row.get("avg_similarity"))},
-                    {"label": "Diferencia nota media: incidencia alta vs baja", "value": format_metric(row.get("score_mean_difference"), signed=True)},
-                ],
-                "flow_steps": ["Incidencias Helix", "Vínculos semánticos", title or "Tópico NPS", "Comentarios VoC"],
-                "detail_table": self._serialize_rows(
-                    self._build_linking_detail_table(
-                        pd.DataFrame([row]),
-                        focus_name=focus_name,
-                        touchpoint_source=touchpoint_source,
-                    )
-                ),
-                "heatmap_figure": self._figure_payload(
-                    chart_case_incident_heatmap(by_topic_daily, theme, topic=topic)
-                ),
-                "changepoints_figure": self._figure_payload(
-                    self._build_changepoints_lag_figure(
-                        by_topic_weekly,
-                        rank_df,
-                        topic=topic,
-                        theme=theme,
-                        theme_mode=theme_mode,
-                        focus_name=focus_name,
-                    )
-                ),
-                "lag_figure": self._figure_payload(
-                    chart_case_lag_days(
-                        by_topic_daily,
-                        lag_days,
-                        theme,
-                        topic=topic,
-                        focus_name=focus_name,
-                    )
-                ),
-            })
+            card.update(
+                {
+                    "rank": index,
+                    "title": title,
+                    "statement": (
+                        f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "
+                        f"{int(row.get('linked_incidents', 0) or 0)} incidencias y "
+                        f"{int(row.get('linked_comments', 0) or 0)} comentarios."
+                    ),
+                    "spotlight_metrics": [
+                        {
+                            "label": "Nota media del tópico",
+                            "value": format_metric(row.get("avg_nps")),
+                        },
+                        {
+                            "label": "Vínculos semánticos",
+                            "value": str(int(row.get("linked_pairs", 0) or 0)),
+                        },
+                        {
+                            "label": "Incidencias relacionadas",
+                            "value": str(int(row.get("linked_incidents", 0) or 0)),
+                        },
+                        {
+                            "label": "Similitud media",
+                            "value": format_metric(row.get("avg_similarity")),
+                        },
+                        {
+                            "label": "Diferencia nota media: incidencia alta vs baja",
+                            "value": format_metric(row.get("score_mean_difference"), signed=True),
+                        },
+                    ],
+                    "flow_steps": [
+                        "Incidencias Helix",
+                        "Vínculos semánticos",
+                        title or "Tópico NPS",
+                        "Comentarios VoC",
+                    ],
+                    "detail_table": self._serialize_rows(
+                        self._build_linking_detail_table(
+                            pd.DataFrame([row]),
+                            focus_name=focus_name,
+                            touchpoint_source=touchpoint_source,
+                        )
+                    ),
+                    "heatmap_figure": self._serialize_figure(
+                        chart_case_incident_heatmap(by_topic_daily, theme, topic=topic)
+                    ),
+                    "changepoints_figure": self._serialize_figure(
+                        self._build_changepoints_lag_figure(
+                            by_topic_weekly,
+                            rank_df,
+                            topic=topic,
+                            theme=theme,
+                            theme_mode=theme_mode,
+                            focus_name=focus_name,
+                        )
+                    ),
+                    "lag_figure": self._serialize_figure(
+                        chart_case_lag_days(
+                            by_topic_daily,
+                            lag_days,
+                            theme,
+                            topic=topic,
+                            focus_name=focus_name,
+                        )
+                    ),
+                }
+            )
             cards.append(card)
         return cards
 
@@ -2417,26 +2466,41 @@ class DashboardService:
         if chain_df is None or chain_df.empty:
             return pd.DataFrame()
         columns = [
-            "nps_topic", "anchor_topic", "touchpoint", "responses", "incidents",
-            "incident_rate_per_100_responses", "focus_rate_high_incidence",
-            "focus_rate_difference_pp", "score_mean_difference", "linked_pairs",
-            "avg_similarity", "support_organizations", "historical_resolution_weeks",
+            "nps_topic",
+            "anchor_topic",
+            "touchpoint",
+            "responses",
+            "incidents",
+            "incident_rate_per_100_responses",
+            "focus_rate_high_incidence",
+            "focus_rate_difference_pp",
+            "score_mean_difference",
+            "linked_pairs",
+            "avg_similarity",
+            "support_organizations",
+            "historical_resolution_weeks",
         ]
         detail = chain_df.copy()
         for column in columns:
             if column not in detail:
                 detail[column] = np.nan
-        return detail[columns].rename(columns={
-            "nps_topic": "Tópico", "anchor_topic": "Tópico NPS ancla",
-            "touchpoint": "Touchpoint", "responses": "Respuestas", "incidents": "Incidencias",
-            "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
-            "focus_rate_high_incidence": "Tasa foco en periodos de incidencia alta",
-            "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
-            "score_mean_difference": "Diferencia nota media alta vs baja",
-            "linked_pairs": "Vínculos semánticos", "avg_similarity": "Similitud media",
-            "support_organizations": "Organizaciones responsables observadas",
-            "historical_resolution_weeks": "Duración media histórica de resolución (semanas)",
-        })
+        return detail[columns].rename(
+            columns={
+                "nps_topic": "Tópico",
+                "anchor_topic": "Tópico NPS ancla",
+                "touchpoint": "Touchpoint",
+                "responses": "Respuestas",
+                "incidents": "Incidencias",
+                "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
+                "focus_rate_high_incidence": "Tasa foco en periodos de incidencia alta",
+                "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
+                "score_mean_difference": "Diferencia nota media alta vs baja",
+                "linked_pairs": "Vínculos semánticos",
+                "avg_similarity": "Similitud media",
+                "support_organizations": "Organizaciones responsables observadas",
+                "historical_resolution_weeks": "Duración media histórica de resolución (semanas)",
+            }
+        )
 
     @staticmethod
     def _build_changepoints_lag_figure(
@@ -2871,7 +2935,7 @@ class DashboardService:
             assignments_df,
             focus_group=focus_group,
         )
-        rationale_rank = causal_rank_by_topic(by_topic_weekly)
+        rationale_rank = association_summary_by_topic(by_topic_weekly)
         rationale_df = build_incident_nps_rationale(
             by_topic_weekly,
             focus_group=focus_group,

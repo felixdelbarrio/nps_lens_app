@@ -255,8 +255,6 @@ function buildScenarioMetricRows(
     "Touchpoint detectado",
     "Source Service N2",
     "Tópico NPS ancla",
-    "Owner",
-    "Owner (rol)"
   ]);
   return spotlightMetrics.filter((metric) => !hiddenLabels.has(asString(metric.label)));
 }
@@ -777,7 +775,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             <section className="linking-panel">
               <div className="section-heading">
                 <div>
-                  <h3>{asString(asRecord(deepDive.ranking).title, "Ranking de hipótesis")}</h3>
+                  <h3>{asString(asRecord(deepDive.ranking).title, "Asociaciones temporales")}</h3>
                 </div>
               </div>
               <RecordTable
@@ -794,7 +792,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             <section className="linking-panel">
               <div className="section-heading">
                 <div>
-                  <h3>{asString(asRecord(deepDive.evidence).title, "Evidence wall")}</h3>
+                  <h3>{asString(asRecord(deepDive.evidence).title, "Evidencias")}</h3>
                 </div>
               </div>
               <RecordTable

@@ -40,14 +40,14 @@ const FIXED_TWO_DECIMAL_FORMATTER = new Intl.NumberFormat(LOCALE, {
 });
 
 const PERCENT_COLUMN_PATTERN =
-  /%|percent|percentage|porcentaje|share|ratio|rate|prob(?:ability|\.)?/i;
+  /%|percent|percentage|porcentaje|share|ratio|rate/i;
 const NON_PERCENT_COLUMN_PATTERN =
-  /\bpp\b|por 100|per 100|score|confidence|confianza|similaridad|cohesi|corr|lag|eta|pts?\b/i;
+  /\bpp\b|por 100|per 100|score|similaridad|cohesi|corr|lag|pts?\b/i;
 const SIGNED_COLUMN_PATTERN = /\bgap\b|brecha|diferencia|difference/i;
 const PLAIN_NUMERIC_PATTERN = /^[+-]?\d+(?:[.,]\d+)?$/;
 const PERCENT_VALUE_PATTERN = /^([+-]?\d+(?:[.,]\d+)?)\s*%$/;
 const NUMERIC_WITH_UNIT_PATTERN =
-  /^([+-]?\d+(?:[.,]\d+)?)(\s*(?:pp|pts?|puntos|semanas?|d[ií]as?|links?|incidencias?|comentarios(?:\s+voc)?|respuestas|validados?))$/i;
+  /^([+-]?\d+(?:[.,]\d+)?)(\s*(?:pp|pts?|puntos|semanas?|d[ií]as?|links?|incidencias?|comentarios(?:\s+voc)?|respuestas))$/i;
 const PERCENT_TOKENS = [
   "percent",
   "percentage",
@@ -56,8 +56,6 @@ const PERCENT_TOKENS = [
   "ratio",
   "rate",
   "focus",
-  "prob",
-  "probability",
   "detractor",
   "promoter",
   "promotores",
@@ -70,23 +68,17 @@ const NON_PERCENT_TOKENS = [
   "por 100",
   "per 100",
   "score",
-  "confidence",
-  "confianza",
   "similaridad",
   "similitud",
   "cohesion",
   "cohesión",
   "corr",
   "lag",
-  "eta",
   "pts",
   "puntos",
   "nps",
-  "uplift",
   "gap",
   "brecha",
-  "impacto",
-  "impact",
   "delta"
 ];
 
