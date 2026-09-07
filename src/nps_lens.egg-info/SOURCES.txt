@@ -22,8 +22,8 @@ src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/journey.py
 src/nps_lens/analytics/linking_policy.py
+src/nps_lens/analytics/nps_gaps.py
 src/nps_lens/analytics/nps_helix_link.py
-src/nps_lens/analytics/opportunities.py
 src/nps_lens/analytics/taxonomy.py
 src/nps_lens/analytics/text_mining.py
 src/nps_lens/api/__init__.py
@@ -125,6 +125,7 @@ tests/test_knowledge_cache.py
 tests/test_llm_insight_response.py
 tests/test_local_processes.py
 tests/test_normalization_registry.py
+tests/test_nps_gaps.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
 tests/test_nps_parser.py

@@ -232,7 +232,7 @@ const linkingPayloadAvailable = {
   navigation: [
     { id: "situation", label: "Situación del periodo" },
     { id: "entity-summary", label: "Journeys de detracción" },
-    { id: "scenarios", label: "Análisis de escenarios causales" },
+    { id: "scenarios", label: "Evidencia por escenario" },
     { id: "nps-deep-dive", label: "Análisis de Tópicos de NPS afectados" }
   ],
   kpis: {
@@ -243,12 +243,12 @@ const linkingPayloadAvailable = {
   },
   situation: {
     narrative: {
-      kicker: "Narrativa causal",
-      title: "2 journeys de detracción defendibles para detractores",
+      kicker: "Evidencia observada",
+      title: "2 journeys de detracción con vínculos para detractores",
       summary: "La política Helix↔VoC está fijada en similitud ≥ 0.20.",
       metrics: [
         {
-          label: "Método causal",
+          label: "Método de agrupación",
           value: "Journeys de detracción",
           hint: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
         },
@@ -272,16 +272,16 @@ const linkingPayloadAvailable = {
   },
   entity_summary: {
     title: "Journeys de detracción",
-    subtitle: "Cada escenario resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS.",
+    subtitle: "Cada escenario resume un journey del catálogo y su evidencia NPS y Helix.",
     kpis: [
       { label: "Journeys de detracción", value: "6" },
       { label: "Touchpoints cubiertos", value: "4" },
       { label: "Vínculos semánticos", value: "34" }
     ],
-    figure_title: "Evidencia validada por journey",
+    figure_title: "Vínculos semánticos por journey",
     figure: null,
     table_title: "Detalle de journeys de detracción",
-    empty_state: "No hay journeys de detracción defendibles con evidencia suficiente en esta ventana.",
+    empty_state: "No hay journeys de detracción con vínculos semánticos en esta ventana.",
     table: [
       {
         "Journey de detracción": "Uso / Edo de Cuenta",
@@ -292,7 +292,7 @@ const linkingPayloadAvailable = {
   },
   deep_dive: {
     title: "Análisis de Tópicos de NPS afectados",
-    subtitle: "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos.",
+    subtitle: "Profundización sobre los tópicos NPS asociados a los journeys de detracción activos.",
     kpis: [
       { label: "Respuestas analizadas", value: "26618" },
       { label: "Incidencias", value: "233" },
@@ -364,7 +364,7 @@ const linkingPayloadAvailable = {
     }
   },
   scenarios: {
-    title: "Análisis de escenarios causales",
+    title: "Evidencia por escenario",
     subtitle: "Escenarios priorizados bajo la lectura causal journeys de detracción.",
     cards: [
       {
@@ -702,9 +702,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("tab", { name: "Causalidad" }));
     await waitFor(() =>
-      expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
+      expect(screen.getByText("2 journeys de detracción con vínculos para detractores")).toBeInTheDocument()
     );
-    expect(screen.getByRole("combobox", { name: "Método causal" })).toHaveValue("executive_journeys");
+    expect(screen.getByRole("combobox", { name: "Método de agrupación" })).toHaveValue("executive_journeys");
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
     const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
     const incidentsMetric = screen.getByText("Incidencias del periodo");
@@ -759,9 +759,9 @@ describe("App", () => {
       ])
     );
 
-    await user.click(screen.getByRole("tab", { name: "Análisis de escenarios causales" }));
+    await user.click(screen.getByRole("tab", { name: "Evidencia por escenario" }));
     expect(
-      screen.queryByText("2 journeys de detracción defendibles para detractores")
+      screen.queryByText("2 journeys de detracción con vínculos para detractores")
     ).not.toBeInTheDocument();
     expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();

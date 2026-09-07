@@ -2765,7 +2765,7 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
     tf.word_wrap = True
     entries = records or [CausalEvidenceRecord("", line, "") for line in fallback]
     if not entries:
-        entries = [CausalEvidenceRecord("", "Sin evidencia Helix defendible en el periodo.", "")]
+        entries = [CausalEvidenceRecord("", "Sin evidencia Helix vinculada en el periodo.", "")]
     for index, record in enumerate(entries):
         paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
         paragraph.level = 0
@@ -2800,7 +2800,7 @@ def _fill_template_deck(
     cover = prs.slides[0]
     _set_template_text(
         cover.shapes[0],
-        "NPS : Comentarios\ny causalidad",
+        "NPS : Comentarios\ne incidencias",
         size=38,
         bold=True,
         color="FFFFFF",
@@ -2813,7 +2813,7 @@ def _fill_template_deck(
     )
     _set_template_text(
         cover.shapes[1],
-        f"{scope} · {context.period_label} · Método causal: "
+        f"{scope} · {context.period_label} · Método de agrupación: "
         f"{method.label if include_causal_section else 'No aplicado (sin evidencia Helix)'}",
         size=12,
         color="FFFFFF",
@@ -3063,7 +3063,7 @@ def _fill_template_deck(
     for offset, scenario in enumerate(scenarios):
         slide = prs.slides[6 + offset]
         row = scenario.row
-        title = str(row.get("nps_topic") or f"Escenario causal {offset + 1}")
+        title = str(row.get("nps_topic") or f"Escenario de evidencia {offset + 1}")
         title_shape = slide.shapes[1]
         full_title = f"Evidencia para el tópico NPS: {title}"
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
@@ -3218,8 +3218,8 @@ def generate_business_review_ppt(
     if not REPORT_TEMPLATE.exists():
         raise FileNotFoundError(f"No se encuentra la plantilla ejecutiva: {REPORT_TEMPLATE}")
     prs = Presentation(str(REPORT_TEMPLATE))
-    prs.core_properties.subject = "NPS Lens · comentarios y causalidad"
-    prs.core_properties.keywords = f"BBVA,NPS,causalidad,{REPORT_DESIGN_VERSION}"
+    prs.core_properties.subject = "NPS Lens · comentarios e incidencias"
+    prs.core_properties.keywords = f"BBVA,NPS,incidencias,{REPORT_DESIGN_VERSION}"
     prs.core_properties.comments = f"NPS Lens report design: {REPORT_DESIGN_VERSION}"
 
     context = _build_presentation_context(
@@ -3250,7 +3250,7 @@ def generate_business_review_ppt(
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = (
-        f"nps-comentarios-causalidad-{_slug(service_origin)}-"
+        f"nps-comentarios-incidencias-{_slug(service_origin)}-"
         f"{_slug(service_origin_n1)}-{stamp}.pptx"
     )
 

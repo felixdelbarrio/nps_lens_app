@@ -988,7 +988,7 @@ export function App() {
           ) : null}
           {showCausalMethodFilter ? (
             <label>
-              <span>Método causal</span>
+              <span>Método de agrupación</span>
               <select
                 disabled={actionsDisabled}
                 onChange={(event) => setTouchpointSource(event.target.value)}

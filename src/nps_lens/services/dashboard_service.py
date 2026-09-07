@@ -1948,9 +1948,9 @@ class DashboardService:
     ) -> list[dict[str, str]]:
         return [
             {
-                "label": "Método causal",
+                "label": "Método de agrupación",
                 "value": method_label,
-                "hint": "Flujo del método causal: " + method_flow,
+                "hint": "Recorrido de la evidencia: " + method_flow,
             },
             {
                 "label": "Respuestas analizadas",

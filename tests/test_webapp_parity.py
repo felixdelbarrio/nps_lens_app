@@ -40,7 +40,6 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     for causal_detail in (
         "Evidencia Helix",
         "Voz del cliente",
-        "Matriz visual",
         "Ficha cuantitativa",
         "Heat map",
         "Changepoints + lag",
@@ -75,7 +74,9 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
         "situation.metadata",
         "situation.note",
         "entity.kpis",
-        "risk_recovery_figure",
+        "heatmap_figure",
+        "changepoints_figure",
+        "lag_figure",
         "deep.topic_filter",
         "deep.kpis",
     ):

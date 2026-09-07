@@ -277,8 +277,8 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
       ? items
       : [
           { id: "situation", label: "Situación del periodo" },
-          { id: "entity-summary", label: "Resumen causal" },
-          { id: "scenarios", label: "Análisis de escenarios causales" },
+          { id: "entity-summary", label: "Resumen de evidencia" },
+          { id: "scenarios", label: "Evidencia por escenario" },
           { id: "nps-deep-dive", label: "Análisis de Tópicos de NPS afectados" }
         ];
   }, [linking.navigation]);
@@ -391,7 +391,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
       <div className="section-heading">
         <div>
           <p className="eyebrow">Causalidad</p>
-          <h2>Lectura causal operativa</h2>
+          <h2>Evidencia NPS ↔ Helix</h2>
           <p className="secondary-copy">
             {asString(method.summary, "Base cruzada entre incidencias y Voz del Cliente.")}
           </p>
@@ -403,13 +403,13 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
       {tab === "situation" ? (
         <div className="linking-stack">
           <section className="hero-banner hero-banner-wow">
-            <p className="eyebrow">{asString(narrative.kicker, "Narrativa causal")}</p>
-            <h3>{asString(narrative.title, "Sin escenarios defendibles en esta ventana")}</h3>
+            <p className="eyebrow">{asString(narrative.kicker, "Evidencia observada")}</p>
+            <h3>{asString(narrative.title, "Sin vínculos semánticos en esta ventana")}</h3>
             <p className="secondary-copy">{asString(narrative.summary)}</p>
             <div className="hero-metrics hero-metrics-wow">
               {narrativeMetrics.map((metric, index) => {
                 const label = asString(metric.label);
-                const isLeadMetric = label === "Método causal";
+                const isLeadMetric = label === "Método de agrupación";
                 return (
                   <article
                     className={`hero-metric-card${isLeadMetric ? " hero-metric-card-lead" : ""}`}
@@ -467,7 +467,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               </div>
             </div>
             <PlotFigure
-              emptyMessage={asString(entitySummary.empty_state, "No hay resumen causal disponible.")}
+              emptyMessage={asString(entitySummary.empty_state, "No hay resumen de evidencia disponible.")}
               figure={asFigure(entitySummary.figure)}
               testId="linking-entity-summary-figure"
             />
@@ -480,7 +480,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               </div>
             </div>
             <RecordTable
-              emptyMessage={asString(entitySummary.empty_state, "No hay detalle causal disponible.")}
+              emptyMessage={asString(entitySummary.empty_state, "No hay detalle de evidencia disponible.")}
               rows={entitySummaryRows}
             />
           </section>
@@ -491,14 +491,14 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
         <div className="linking-stack">
           <div className="section-heading">
             <div>
-              <h3>{asString(scenarios.title, "Análisis de escenarios causales")}</h3>
+              <h3>{asString(scenarios.title, "Evidencia por escenario")}</h3>
               <p className="secondary-copy">{asString(scenarios.subtitle)}</p>
             </div>
           </div>
 
           {!activeCard ? (
             <p className="empty-state">
-              Hay impacto estadístico, pero no se encontraron escenarios defendibles con link explícito entre Helix y VoC para mostrar.
+              No se encontraron vínculos semánticos entre casos Helix y comentarios VoC en esta ventana.
             </p>
           ) : (
             <>
@@ -536,7 +536,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               <section className="spotlight-card spotlight-card-wow">
                 <div className="spotlight-head">
                   <div className="spotlight-copy">
-                    <p className="eyebrow">Escenario causal priorizado</p>
+                    <p className="eyebrow">Evidencia observada</p>
                     <h3>{asString(activeCard.title, asString(activeCard.nps_topic))}</h3>
                     <p>{asString(activeCard.statement, asString(activeCard.chain_story))}</p>
                   </div>
@@ -553,7 +553,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
                 <div className="scenario-overview-grid">
                   <article className="scenario-fact-sheet">
-                    <h4>Ficha priorizada</h4>
+                    <h4>Ficha descriptiva</h4>
                     <dl className="scenario-fact-list">
                       {scenarioIdentityRows.map((item) => (
                         <div className="scenario-fact-row" key={item.label}>

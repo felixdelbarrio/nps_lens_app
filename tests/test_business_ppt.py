@@ -360,7 +360,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
-    assert out.file_name.startswith("nps-comentarios-causalidad-")
+    assert out.file_name.startswith("nps-comentarios-incidencias-")
     assert "thermal-causality-v3" in (prs.core_properties.keywords or "")
     assert len(prs.slides) == out.slide_count
     _assert_no_shape_overflow(prs)
@@ -379,7 +379,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 cover_texts.append(paragraph.text or "")
 
     assert any("NPS : Comentarios" in t for t in cover_texts)
-    assert any("Método causal:" in t for t in cover_texts)
+    assert any("Método de agrupación:" in t for t in cover_texts)
     assert any("NPS" in t for t in texts)
     assert any("todo el histórico" in t for t in texts)
     assert any("detractores hacen visible" in t for t in texts)

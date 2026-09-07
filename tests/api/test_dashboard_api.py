@@ -517,6 +517,18 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Asociaciones temporales",
         "Evidencias",
     ]
+    serialized_linking = json.dumps(linking_payload, ensure_ascii=False).casefold()
+    for removed_field in (
+        "confidence",
+        "priority",
+        "causal_score",
+        "potential_uplift",
+        "nps_points_at_risk",
+        "nps_points_recoverable",
+        "total_nps_impact",
+        "action_lane",
+    ):
+        assert f'"{removed_field}"' not in serialized_linking
 
 
 def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(

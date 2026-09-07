@@ -34,8 +34,8 @@ CAUSAL_METHOD_SPECS = {
         value=TOUCHPOINT_SOURCE_PALANCA,
         label="Por Palanca",
         summary=(
-            "La lectura causal organiza la atribución por palanca y muestra qué touchpoints "
-            "quedan afectados antes de llegar al comentario y al NPS."
+            "La evidencia se agrupa por palanca y muestra los touchpoints, comentarios "
+            "e incidencias relacionados."
         ),
         flow="Incidencias -> Touchpoint afectado -> Palanca -> Comentario -> NPS",
         entity_singular="Palanca",
@@ -43,29 +43,25 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Touchpoints afectados por Palanca",
         navigation_title="Touchpoints afectados por Palanca",
         navigation_subtitle=(
-            "Cada escenario resume una palanca causal y los touchpoints afectados que están "
-            "sosteniendo la fricción observada en NPS."
+            "Cada escenario resume una palanca y los vínculos observados en sus touchpoints."
         ),
         chart_title="Palancas con más touchpoints afectados",
         table_title="Detalle de touchpoints afectados por Palanca",
-        table_empty_message="No hay palancas defendibles con touchpoints afectados en esta ventana.",
-        situation_subtitle=(
-            "Cruce diario entre incidencias y NPS con lectura causal organizada por palanca."
-        ),
+        table_empty_message="No hay palancas con vínculos semánticos en esta ventana.",
+        situation_subtitle=("Cruce diario entre incidencias y NPS organizado por palanca."),
         situation_note=(
-            "El método causal activo interpreta la fricción como una secuencia: incidencia, "
-            "touchpoint afectado, palanca y comentario de cliente."
+            "La vista relaciona incidencias, touchpoints, palancas y comentarios de cliente."
         ),
         deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS explicados por las palancas causales activas."
+            "Profundización sobre los tópicos NPS asociados a las palancas activas."
         ),
     ),
     TOUCHPOINT_SOURCE_SUBPALANCA: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_SUBPALANCA,
         label="Por Subpalanca",
         summary=(
-            "La lectura causal fija la subpalanca como unidad operativa y explica qué "
-            "touchpoint queda afectado antes de reflejarse en el comentario y el NPS."
+            "La evidencia se agrupa por subpalanca y muestra los touchpoints, comentarios "
+            "e incidencias relacionados."
         ),
         flow="Incidencias -> Touchpoint afectado -> Subpalanca -> Comentario -> NPS",
         entity_singular="Subpalanca",
@@ -73,29 +69,23 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Touchpoints afectados por Subpalanca",
         navigation_title="Touchpoints afectados por Subpalanca",
         navigation_subtitle=(
-            "Cada escenario resume una subpalanca causal y el touchpoint donde se materializa la fricción."
+            "Cada escenario resume una subpalanca y los vínculos observados en su touchpoint."
         ),
         chart_title="Subpalancas con más touchpoints afectados",
         table_title="Detalle de touchpoints afectados por Subpalanca",
-        table_empty_message=(
-            "No hay subpalancas defendibles con touchpoints afectados en esta ventana."
-        ),
-        situation_subtitle=(
-            "Cruce diario entre incidencias y NPS con lectura causal organizada por subpalanca."
-        ),
-        situation_note=(
-            "El método causal activo interpreta la fricción al nivel operativo fino de la subpalanca."
-        ),
+        table_empty_message=("No hay subpalancas con vínculos semánticos en esta ventana."),
+        situation_subtitle=("Cruce diario entre incidencias y NPS organizado por subpalanca."),
+        situation_note=("La vista conserva el nivel operativo de la subpalanca."),
         deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS explicados por las subpalancas causales activas."
+            "Profundización sobre los tópicos NPS asociados a las subpalancas activas."
         ),
     ),
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
         label="Helix: Source Service N2",
         summary=(
-            "La lectura causal se apoya en BBVA_SourceServiceN2 para ordenar el análisis "
-            "por servicio origen de Hélix antes de llegar al comentario y al NPS."
+            "La evidencia se agrupa por BBVA_SourceServiceN2 y conserva sus vínculos con "
+            "comentarios y tópicos NPS."
         ),
         flow="Incidencias -> Helix Source N2 -> Comentario -> NPS",
         entity_singular="Source Service N2 de Hélix",
@@ -103,19 +93,17 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Incidencias por Source Service N2 de Hélix",
         navigation_title="Incidencias por Source Service N2 de Hélix",
         navigation_subtitle=(
-            "Cada escenario resume un Source Service N2 de Hélix y su conexión defendible con la caída de experiencia."
+            "Cada escenario resume un Source Service N2 de Hélix y sus vínculos observados."
         ),
-        chart_title="Source Service N2 de Hélix con más incidencias validadas",
-        table_title="Detalle causal por Source Service N2 de Hélix",
+        chart_title="Source Service N2 de Hélix con más incidencias relacionadas",
+        table_title="Detalle por Source Service N2 de Hélix",
         table_empty_message=(
-            "No hay incidencias defendibles agrupables por Source Service N2 de Hélix en esta ventana."
+            "No hay incidencias relacionadas agrupables por Source Service N2 de Hélix en esta ventana."
         ),
         situation_subtitle=(
-            "Cruce diario entre incidencias y NPS con lectura causal organizada por Source Service N2."
+            "Cruce diario entre incidencias y NPS organizado por Source Service N2."
         ),
-        situation_note=(
-            "El método causal activo prioriza el servicio origen reportado en Hélix como eje de lectura."
-        ),
+        situation_note=("La vista usa el servicio origen reportado en Hélix como eje de lectura."),
         deep_dive_subtitle=(
             "Profundización sobre los tópicos NPS asociados a los Source Service N2 activos."
         ),
@@ -124,7 +112,7 @@ CAUSAL_METHOD_SPECS = {
         value=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
         label="Journeys rotos",
         summary=(
-            "La lectura causal detecta journeys rotos a partir de incidencias, comentarios, "
+            "La vista agrupa journeys observados a partir de incidencias, comentarios, "
             "embeddings, keywords y clustering semántico antes de llegar al NPS."
         ),
         flow=(
@@ -138,25 +126,21 @@ CAUSAL_METHOD_SPECS = {
         navigation_subtitle=(
             "Cada escenario resume un journey roto detectado automáticamente y el touchpoint donde converge la evidencia."
         ),
-        chart_title="Journeys rotos con mayor evidencia validada",
+        chart_title="Journeys rotos con más vínculos semánticos",
         table_title="Detalle de journeys rotos detectados",
-        table_empty_message="No he identificado journeys rotos defendibles en esta ventana.",
-        situation_subtitle=(
-            "Cruce diario entre incidencias y NPS con lectura causal organizada por journeys rotos."
-        ),
-        situation_note=(
-            "El método causal activo agrupa señales semánticas convergentes para aislar journeys rotos defendibles."
-        ),
+        table_empty_message="No se han agrupado journeys rotos en esta ventana.",
+        situation_subtitle=("Cruce diario entre incidencias y NPS organizado por journeys rotos."),
+        situation_note=("La vista agrupa señales semánticas coincidentes por journey roto."),
         deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS explicados por los journeys rotos activos."
+            "Profundización sobre los tópicos NPS asociados a los journeys rotos activos."
         ),
     ),
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         label="Journeys de detracción",
         summary=(
-            "La lectura causal reorganiza la evidencia en journeys ejecutivos de detracción "
-            "para explicar dónde se rompe la experiencia y cómo cae el NPS."
+            "La vista organiza incidencias y comentarios vinculados mediante el catálogo "
+            "de journeys ejecutivos de detracción."
         ),
         flow=(
             "Incidencias + comentarios + tópico NPS -> Journey ejecutivo del catálogo -> "
@@ -167,21 +151,21 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Journeys de detracción",
         navigation_title="Journeys de detracción",
         navigation_subtitle=(
-            "Cada escenario resume un journey ejecutivo del catálogo y la evidencia que sostiene su impacto en NPS."
+            "Cada escenario resume un journey del catálogo y su evidencia NPS y Helix."
         ),
-        chart_title="Evidencia validada por journey",
+        chart_title="Vínculos semánticos por journey",
         table_title="Detalle de journeys de detracción",
         table_empty_message=(
-            "No hay journeys de detracción defendibles con evidencia suficiente en esta ventana."
+            "No hay journeys de detracción con vínculos semánticos en esta ventana."
         ),
         situation_subtitle=(
-            "Cruce diario entre incidencias y NPS con lectura causal organizada por journeys de detracción."
+            "Cruce diario entre incidencias y NPS organizado por journeys de detracción."
         ),
         situation_note=(
-            "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité."
+            "La vista organiza la evidencia mediante el catálogo de journeys ejecutivos."
         ),
         deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS explicados por los journeys de detracción activos."
+            "Profundización sobre los tópicos NPS asociados a los journeys de detracción activos."
         ),
     ),
 }
@@ -215,6 +199,6 @@ def linking_navigation(spec: CausalMethodSpec) -> list[dict[str, str]]:
     return [
         {"id": "situation", "label": "Situación del periodo"},
         {"id": "entity-summary", "label": spec.navigation_label},
-        {"id": "scenarios", "label": "Análisis de escenarios causales"},
+        {"id": "scenarios", "label": "Evidencia por escenario"},
         {"id": "nps-deep-dive", "label": "Análisis de Tópicos de NPS afectados"},
     ]
