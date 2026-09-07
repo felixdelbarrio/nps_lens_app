@@ -314,6 +314,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        if result["status"] == "completed" and dashboard_layer.taxonomy.state(UploadContext(service_origin, service_origin_n1, service_origin_n2)).get("restored"):
+            dashboard_layer.taxonomy.resume_local(UploadContext(service_origin, service_origin_n1, service_origin_n2))
         dashboard_layer.clear_caches()
         return result
 
@@ -616,8 +618,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+        content = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
+        if len(content) > 30 * 1024 * 1024:
+            raise HTTPException(413, "El snapshot supera 30 MB; selecciona una política con menos lentes.")
         return Response(
-            json.dumps(snapshot, ensure_ascii=False),
+            content,
             media_type="application/json",
             headers={"Content-Disposition": 'attachment; filename="nps-lens-taxonomy.json"'},
         )
@@ -663,7 +668,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         score_channel: Optional[str] = None,
         comparison_dimension: str = "Palanca",
         gap_dimension: str = "Palanca",
-        opportunity_dimension: str = "Palanca",
         cohort_row: str = "Palanca",
         cohort_col: str = "Canal",
         min_n: int = 200,
@@ -684,7 +688,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             score_channel=score_channel,
             comparison_dimension=comparison_dimension,
             gap_dimension=gap_dimension,
-            opportunity_dimension=opportunity_dimension,
             cohort_row=cohort_row,
             cohort_col=cohort_col,
             min_n=min_n,

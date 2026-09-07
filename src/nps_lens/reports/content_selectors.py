@@ -78,66 +78,31 @@ def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
     )
 
 
-def select_opportunities(opportunities_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select opportunities by impact, confidence and defendable volume."""
-
-    if opportunities_df is None or opportunities_df.empty:
-        return pd.DataFrame(columns=getattr(opportunities_df, "columns", []))
-    work = opportunities_df.copy()
-    work["potential_uplift"] = _numeric_series(work, "potential_uplift").fillna(0.0)
-    work["confidence"] = _numeric_series(work, "confidence").fillna(0.0)
-    work["n"] = _numeric_series(work, "n").fillna(0.0)
-    return (
-        work.sort_values(
-            ["potential_uplift", "confidence", "n", "value"], ascending=[False, False, False, True]
-        )
-        .head(max_rows)
-        .copy()
-    )
-
-
 def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select committee-ready causal scenarios by priority and evidence quality."""
+    """Order evidence by transparent counts and semantic similarity."""
 
     if chain_df is None or chain_df.empty:
         return pd.DataFrame(columns=getattr(chain_df, "columns", []))
     work = chain_df.copy()
-    if "rank" in work.columns:
-        work["rank"] = _numeric_series(work, "rank")
-        ranked = work.dropna(subset=["rank"]).copy()
-        ranked = ranked[ranked["rank"] > 0].copy()
-        if not ranked.empty:
-            return ranked.sort_values(["rank"], ascending=[True]).head(max_rows).copy()
     for column in (
-        "detractor_probability",
-        "focus_probability_with_incident",
-        "total_nps_impact",
-        "nps_points_at_risk",
-        "nps_points_recoverable",
-        "priority",
-        "confidence",
-        "causal_score",
         "linked_pairs",
         "linked_incidents",
         "linked_comments",
+        "responses",
+        "avg_similarity",
     ):
         work[column] = _numeric_series(work, column).fillna(0.0)
     return (
         work.sort_values(
             [
-                "detractor_probability",
-                "focus_probability_with_incident",
-                "total_nps_impact",
-                "nps_points_at_risk",
-                "nps_points_recoverable",
                 "linked_pairs",
                 "linked_incidents",
                 "linked_comments",
-                "confidence",
-                "causal_score",
-                "priority",
+                "responses",
+                "avg_similarity",
+                "nps_topic",
             ],
-            ascending=[False, False, False, False, False, False, False, False, False, False, False],
+            ascending=[False, False, False, False, False, True],
         )
         .head(max_rows)
         .copy()

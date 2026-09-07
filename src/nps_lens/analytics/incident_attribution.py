@@ -27,8 +27,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_access_blocked",
         "title": "Acceso bloqueado",
         "what_occurs": "El cliente no puede acceder a la aplicación o portal",
-        "expected_evidence": "Comentarios sobre login + incidencias de autenticación",
-        "impact_label": "Muy alto",
+        "evidence_pattern": "Comentarios sobre login + incidencias de autenticación",
         "touchpoint": "Login / autenticación",
         "palanca": "Acceso",
         "subpalanca": "Bloqueo / OTP",
@@ -40,7 +39,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "Cuando el acceso falla, el cliente no puede iniciar su relación digital, "
             "generando detracción inmediata."
         ),
-        "confidence_label": "Alto",
         "keywords": (
             "acceso",
             "login",
@@ -59,8 +57,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_critical_operation_failed",
         "title": "Operativa crítica fallida",
         "what_occurs": "Transferencias, pagos o firma no se completan",
-        "expected_evidence": "Comentarios de operación fallida + incidencias transaccionales",
-        "impact_label": "Alto",
+        "evidence_pattern": "Comentarios de operación fallida + incidencias transaccionales",
         "touchpoint": "Transferencias / pagos / firma",
         "palanca": "Operativa",
         "subpalanca": "Error funcional / timeout",
@@ -72,7 +69,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "La incapacidad de completar operaciones financieras genera pérdida directa "
             "de confianza en el canal digital."
         ),
-        "confidence_label": "Alto",
         "keywords": (
             "transfer",
             "pago",
@@ -93,8 +89,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_degraded_performance",
         "title": "Rendimiento degradado",
         "what_occurs": "Lentitud o cuelgues durante el uso",
-        "expected_evidence": "Comentarios de lentitud + incidencias de performance",
-        "impact_label": "Medio-alto",
+        "evidence_pattern": "Comentarios de lentitud + incidencias de performance",
         "touchpoint": "Lentitud / cuelgues",
         "palanca": "Uso recurrente",
         "subpalanca": "Degradación del servicio",
@@ -106,7 +101,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "No siempre bloquea la operación, pero erosiona progresivamente la percepción "
             "de calidad del servicio."
         ),
-        "confidence_label": "Medio",
         "keywords": (
             "lento",
             "lenta",
@@ -131,14 +125,12 @@ EXECUTIVE_JOURNEY_EDITOR_COLUMNS = [
     "id",
     "title",
     "what_occurs",
-    "expected_evidence",
-    "impact_label",
+    "evidence_pattern",
     "touchpoint",
     "palanca",
     "subpalanca",
     "route",
     "cx_readout",
-    "confidence_label",
     "keywords",
 ]
 
@@ -155,32 +147,23 @@ CHAIN_COLUMNS = [
     "linked_pairs",
     "avg_similarity",
     "avg_nps",
-    "detractor_probability",
-    "nps_delta_expected",
-    "total_nps_impact",
-    "nps_points_at_risk",
-    "nps_points_recoverable",
-    "priority",
-    "confidence",
-    "causal_score",
+    "focus_rate_high_incidence",
+    "score_mean_difference",
     "incident_records",
     "incident_examples",
     "comment_examples",
     "comment_records",
     "chain_story",
-    "delta_focus_rate_pp",
+    "focus_rate_difference_pp",
     "incident_rate_per_100_responses",
     "incidents",
     "responses",
-    "action_lane",
-    "owner_role",
-    "eta_weeks",
+    "support_organizations",
+    "historical_resolution_weeks",
     "presentation_mode",
     "journey_route",
-    "journey_expected_evidence",
+    "journey_evidence_pattern",
     "journey_cx_readout",
-    "journey_impact_label",
-    "journey_confidence_label",
 ]
 
 
@@ -239,10 +222,8 @@ BROKEN_JOURNEY_COLUMNS = [
     "helix_source_service_n2",
     "journey_keywords",
     "journey_route",
-    "journey_expected_evidence",
+    "journey_evidence_pattern",
     "journey_cx_readout",
-    "journey_impact_label",
-    "journey_confidence_label",
     "linked_pairs",
     "linked_incidents",
     "linked_comments",
@@ -445,15 +426,12 @@ def _normalize_executive_journey_entry(
         "id": journey_id,
         "title": title or f"Journey {position + 1}",
         "what_occurs": " ".join(str(base.get("what_occurs") or "").split()).strip(),
-        "expected_evidence": " ".join(str(base.get("expected_evidence") or "").split()).strip(),
-        "impact_label": " ".join(str(base.get("impact_label") or "").split()).strip() or "Medio",
+        "evidence_pattern": " ".join(str(base.get("evidence_pattern") or "").split()).strip(),
         "touchpoint": touchpoint,
         "palanca": palanca,
         "subpalanca": subpalanca,
         "route": " ".join(str(base.get("route") or "").split()).strip(),
         "cx_readout": " ".join(str(base.get("cx_readout") or "").split()).strip(),
-        "confidence_label": " ".join(str(base.get("confidence_label") or "").split()).strip()
-        or "Medio",
         "keywords": keywords,
     }
 
@@ -619,24 +597,6 @@ def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Serie
         if len(out) >= 5:
             break
     return out
-
-
-def _broken_journey_impact_label(linked_pairs: int, avg_nps: float) -> str:
-    if linked_pairs >= 10 or avg_nps <= 2.0:
-        return "Muy alto"
-    if linked_pairs >= 6 or avg_nps <= 4.0:
-        return "Alto"
-    if linked_pairs >= 3:
-        return "Medio"
-    return "Bajo"
-
-
-def _broken_journey_confidence_label(semantic_score: float, avg_similarity: float) -> str:
-    if semantic_score >= 0.72 and avg_similarity >= 0.85:
-        return "Alto"
-    if semantic_score >= 0.55 and avg_similarity >= 0.75:
-        return "Medio"
-    return "Bajo"
 
 
 def _touchpoint(
@@ -1052,9 +1012,7 @@ def _chain_story_for_source(
     helix_source_service_n2: str,
     journey_route: str,
     journey_cx_readout: str,
-    journey_expected_evidence: str,
-    journey_impact_label: str,
-    journey_confidence_label: str,
+    journey_evidence_pattern: str,
     incident_sample_count: int,
     incident_sample_label: str,
     comment_sample_count: int,
@@ -1065,17 +1023,15 @@ def _chain_story_for_source(
     if source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         return (
             f"{journey_route}. {journey_cx_readout} "
-            f"Evidencia esperada: {journey_expected_evidence}. "
-            f"Impacto esperado en NPS: {journey_impact_label}. "
-            f"Nivel de confianza causal esperado: {journey_confidence_label}. "
-            f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
+            f"Patrón buscado en el catálogo: {journey_evidence_pattern}. "
+            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
             f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
         )
     if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
         return (
             f"{journey_route}. {journey_cx_readout} "
-            f"Keywords del cluster: {journey_expected_evidence}. "
-            f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
+            f"Keywords del cluster: {journey_evidence_pattern}. "
+            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
             f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
         )
     if source == TOUCHPOINT_SOURCE_PALANCA:
@@ -1220,8 +1176,6 @@ def build_broken_journey_catalog(
             pd.to_numeric(grp["nps_score"], errors="coerce").mean(), default=np.nan
         )
         semantic_cohesion = _safe_float(grp["semantic_score"].mean(), default=0.0)
-        impact_label = _broken_journey_impact_label(linked_pairs, avg_nps)
-        confidence_label = _broken_journey_confidence_label(semantic_cohesion, avg_similarity)
         keyword_text = ", ".join(_broken_journey_title_case(word) for word in keywords[:4])
         cluster_rows.append(
             {
@@ -1236,7 +1190,7 @@ def build_broken_journey_catalog(
                     f"Incidencia -> {touchpoint or 'touchpoint detectado'} -> "
                     f"{palanca or 'palanca'} / {subpalanca or 'señal semántica'} -> comentario VoC -> NPS"
                 ),
-                "journey_expected_evidence": (
+                "journey_evidence_pattern": (
                     f"Keywords semánticas: {keyword_text or 'n/d'}. "
                     f"Helix Source Service N2 dominante: {helix_source_n2 or 'n/d'}."
                 ),
@@ -1245,8 +1199,6 @@ def build_broken_journey_catalog(
                     f"predominan {palanca or 'sin palanca'} / {subpalanca or 'sin subpalanca'} "
                     f"y el Score medio asociado es {avg_nps:.2f}."
                 ),
-                "journey_impact_label": impact_label,
-                "journey_confidence_label": confidence_label,
                 "linked_pairs": linked_pairs,
                 "linked_incidents": linked_incidents,
                 "linked_comments": linked_comments,
@@ -1283,10 +1235,8 @@ def build_broken_journey_catalog(
             "helix_source_service_n2",
             "journey_keywords",
             "journey_route",
-            "journey_expected_evidence",
+            "journey_evidence_pattern",
             "journey_cx_readout",
-            "journey_impact_label",
-            "journey_confidence_label",
             "linked_pairs",
             "linked_incidents",
             "linked_comments",
@@ -1716,10 +1666,8 @@ def build_incident_attribution_chains(
             "palanca",
             "subpalanca",
             "journey_route",
-            "journey_expected_evidence",
+            "journey_evidence_pattern",
             "journey_cx_readout",
-            "journey_impact_label",
-            "journey_confidence_label",
         ]
         journey_map = local_links[journey_cols].drop_duplicates(["incident_id", "nps_id"])
         enriched = enriched.drop(
@@ -1783,19 +1731,12 @@ def build_incident_attribution_chains(
         enriched["journey_route"] = [
             str(m.get("route", "")) if isinstance(m, dict) else "" for m in journey_matches
         ]
-        enriched["journey_expected_evidence"] = [
-            str(m.get("expected_evidence", "")) if isinstance(m, dict) else ""
+        enriched["journey_evidence_pattern"] = [
+            str(m.get("evidence_pattern", "")) if isinstance(m, dict) else ""
             for m in journey_matches
         ]
         enriched["journey_cx_readout"] = [
             str(m.get("cx_readout", "")) if isinstance(m, dict) else "" for m in journey_matches
-        ]
-        enriched["journey_impact_label"] = [
-            str(m.get("impact_label", "")) if isinstance(m, dict) else "" for m in journey_matches
-        ]
-        enriched["journey_confidence_label"] = [
-            str(m.get("confidence_label", "")) if isinstance(m, dict) else ""
-            for m in journey_matches
         ]
         enriched["touchpoint"] = enriched["journey_touchpoint"].where(
             enriched["journey_touchpoint"].astype(str).str.strip().ne(""),
@@ -1868,28 +1809,16 @@ def build_incident_attribution_chains(
                 and not grp["journey_route"].mode(dropna=True).empty
                 else ""
             )
-            journey_expected_evidence = (
-                str(grp["journey_expected_evidence"].mode(dropna=True).iloc[0])
-                if "journey_expected_evidence" in grp.columns
-                and not grp["journey_expected_evidence"].mode(dropna=True).empty
+            journey_evidence_pattern = (
+                str(grp["journey_evidence_pattern"].mode(dropna=True).iloc[0])
+                if "journey_evidence_pattern" in grp.columns
+                and not grp["journey_evidence_pattern"].mode(dropna=True).empty
                 else ""
             )
             journey_cx_readout = (
                 str(grp["journey_cx_readout"].mode(dropna=True).iloc[0])
                 if "journey_cx_readout" in grp.columns
                 and not grp["journey_cx_readout"].mode(dropna=True).empty
-                else ""
-            )
-            journey_impact_label = (
-                str(grp["journey_impact_label"].mode(dropna=True).iloc[0])
-                if "journey_impact_label" in grp.columns
-                and not grp["journey_impact_label"].mode(dropna=True).empty
-                else ""
-            )
-            journey_confidence_label = (
-                str(grp["journey_confidence_label"].mode(dropna=True).iloc[0])
-                if "journey_confidence_label" in grp.columns
-                and not grp["journey_confidence_label"].mode(dropna=True).empty
                 else ""
             )
         else:
@@ -1912,10 +1841,8 @@ def build_incident_attribution_chains(
                 else ""
             )
             journey_route = ""
-            journey_expected_evidence = ""
+            journey_evidence_pattern = ""
             journey_cx_readout = ""
-            journey_impact_label = ""
-            journey_confidence_label = ""
         if is_executive_mode or is_broken_mode:
             helix_source_service_n2 = (
                 str(grp["helix_source_service_n2"].mode(dropna=True).iloc[0])
@@ -1969,19 +1896,14 @@ def build_incident_attribution_chains(
         if not incident_records or not comment_records:
             continue
 
-        detractor_probability = _safe_float(
-            grp.get("focus_probability_with_incident", pd.Series([np.nan])).max(), default=np.nan
+        focus_rate_high_incidence = _safe_float(
+            grp.get("focus_rate_high_incidence", pd.Series([np.nan])).max(), default=np.nan
         )
-        nps_delta_expected = _safe_float(
-            grp.get("nps_delta_expected", pd.Series([np.nan])).mean(), default=np.nan
+        score_mean_difference = _safe_float(
+            grp.get("score_mean_difference", pd.Series([np.nan])).mean(), default=np.nan
         )
-        total_nps_impact = _safe_float(
-            grp.get("total_nps_impact", pd.Series([0.0])).max(), default=0.0
-        )
-        confidence = _safe_float(grp.get("confidence", pd.Series([0.0])).max(), default=0.0)
-        causal_score = _safe_float(grp.get("causal_score", pd.Series([0.0])).max(), default=0.0)
-        delta_focus_rate_pp = _safe_float(
-            grp.get("delta_focus_rate_pp", pd.Series([np.nan])).max(), default=np.nan
+        focus_rate_difference_pp = _safe_float(
+            grp.get("focus_rate_difference_pp", pd.Series([np.nan])).max(), default=np.nan
         )
         incident_rate_per_100_responses = _safe_float(
             grp.get("incident_rate_per_100_responses", pd.Series([np.nan])).max(),
@@ -2000,9 +1922,22 @@ def build_incident_attribution_chains(
         responses_total = _safe_float(
             grp.get("responses", pd.Series([np.nan])).max(), default=np.nan
         )
-        action_lane = _mode_text(grp.get("action_lane", pd.Series(dtype=object)))
-        owner_role = _mode_text(grp.get("owner_role", pd.Series(dtype=object)))
-        eta_weeks = _safe_float(grp.get("eta_weeks", pd.Series([np.nan])).max(), default=np.nan)
+        support_organizations = " · ".join(
+            sorted(
+                {
+                    str(value).strip()
+                    for value in grp.get("support_organizations", pd.Series(dtype=object)).dropna()
+                    if str(value).strip()
+                }
+            )
+        )
+        historical_resolution_weeks = _safe_float(
+            pd.to_numeric(
+                grp.get("historical_resolution_weeks", pd.Series(dtype=float)),
+                errors="coerce",
+            ).mean(),
+            default=np.nan,
+        )
 
         incident_ids = [
             str(rec.get("incident_id", "")).strip()
@@ -2030,9 +1965,7 @@ def build_incident_attribution_chains(
             helix_source_service_n2=helix_source_service_n2,
             journey_route=journey_route,
             journey_cx_readout=journey_cx_readout,
-            journey_expected_evidence=journey_expected_evidence,
-            journey_impact_label=journey_impact_label,
-            journey_confidence_label=journey_confidence_label,
+            journey_evidence_pattern=journey_evidence_pattern,
             incident_sample_count=incident_sample_count,
             incident_sample_label=incident_sample_label,
             comment_sample_count=comment_sample_count,
@@ -2053,40 +1986,27 @@ def build_incident_attribution_chains(
                 "linked_pairs": linked_pairs,
                 "avg_similarity": avg_similarity,
                 "avg_nps": avg_nps,
-                "detractor_probability": detractor_probability,
-                "nps_delta_expected": nps_delta_expected,
-                "total_nps_impact": total_nps_impact,
-                "nps_points_at_risk": _safe_float(
-                    grp.get("nps_points_at_risk", pd.Series([0.0])).max(), default=0.0
-                ),
-                "nps_points_recoverable": _safe_float(
-                    grp.get("nps_points_recoverable", pd.Series([0.0])).max(), default=0.0
-                ),
-                "priority": _safe_float(grp.get("priority", pd.Series([0.0])).max(), default=0.0),
-                "confidence": confidence,
-                "causal_score": causal_score,
+                "focus_rate_high_incidence": focus_rate_high_incidence,
+                "score_mean_difference": score_mean_difference,
                 "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "comment_records": comment_records,
                 "chain_story": story,
-                "delta_focus_rate_pp": delta_focus_rate_pp,
+                "focus_rate_difference_pp": focus_rate_difference_pp,
                 "incident_rate_per_100_responses": incident_rate_per_100_responses,
                 "incidents": incidents_total,
                 "responses": responses_total,
-                "action_lane": action_lane,
-                "owner_role": owner_role,
-                "eta_weeks": eta_weeks,
+                "support_organizations": support_organizations,
+                "historical_resolution_weeks": historical_resolution_weeks,
                 "presentation_mode": (
                     str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
                     if (is_executive_mode or is_broken_mode)
                     else str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
                 ),
                 "journey_route": journey_route,
-                "journey_expected_evidence": journey_expected_evidence,
+                "journey_evidence_pattern": journey_evidence_pattern,
                 "journey_cx_readout": journey_cx_readout,
-                "journey_impact_label": journey_impact_label,
-                "journey_confidence_label": journey_confidence_label,
             }
         )
 
@@ -2095,8 +2015,8 @@ def build_incident_attribution_chains(
 
     out = pd.DataFrame(rows)
     out = out.sort_values(
-        ["priority", "linked_pairs", "causal_score", "total_nps_impact"],
-        ascending=[False, False, False, False],
+        ["linked_pairs", "linked_incidents", "linked_comments", "avg_similarity", "nps_topic"],
+        ascending=[False, False, False, False, True],
     ).reset_index(drop=True)
     if int(top_k) > 0:
         out = out.head(int(top_k)).reset_index(drop=True)

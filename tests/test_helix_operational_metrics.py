@@ -33,15 +33,15 @@ def test_build_helix_operational_benchmark_aggregates_support_orgs_and_eta() -> 
 
     assert benchmark.incident_to_support_orgs["INC-1"] == ("Producto", "Tecnologia")
     assert benchmark.incident_to_support_orgs["INC-2"] == ("Operaciones",)
-    assert math.isclose(benchmark.support_org_eta_weeks["Producto"], 1.0)
-    assert math.isclose(benchmark.support_org_eta_weeks["Tecnologia"], 1.0)
-    assert math.isclose(benchmark.support_org_eta_weeks["Operaciones"], 2.0)
-    assert benchmark.overall_eta_weeks is not None
-    assert math.isclose(benchmark.overall_eta_weeks, 1.5)
+    assert math.isclose(benchmark.support_org_resolution_weeks["Producto"], 1.0)
+    assert math.isclose(benchmark.support_org_resolution_weeks["Tecnologia"], 1.0)
+    assert math.isclose(benchmark.support_org_resolution_weeks["Operaciones"], 2.0)
+    assert benchmark.overall_resolution_weeks is not None
+    assert math.isclose(benchmark.overall_resolution_weeks, 1.5)
 
     metrics = summarize_operational_metrics_for_incidents(["INC-1", "INC-2"], benchmark)
-    assert metrics.owner_role == "Producto · Tecnologia · Operaciones"
-    assert math.isclose(metrics.eta_weeks, (1.0 + 1.0 + 2.0) / 3.0)
+    assert metrics.support_organizations == "Producto · Tecnologia · Operaciones"
+    assert math.isclose(metrics.historical_resolution_weeks, (1.0 + 1.0 + 2.0) / 3.0)
 
 
 def test_build_helix_operational_benchmark_handles_iteracion_17_fixture() -> None:
@@ -57,7 +57,7 @@ def test_build_helix_operational_benchmark_handles_iteracion_17_fixture() -> Non
 
     assert len(result.df) == 2255
     assert len(benchmark.incident_to_support_orgs) == 2255
-    assert benchmark.overall_eta_weeks is not None
+    assert benchmark.overall_resolution_weeks is not None
 
 
 def test_helix_mixed_datetime_values_are_homogeneous_and_controlled() -> None:
@@ -99,8 +99,8 @@ def test_helix_mixed_datetime_values_are_homogeneous_and_controlled() -> None:
 
     benchmark = build_helix_operational_benchmark(helix)
 
-    assert math.isclose(benchmark.support_org_eta_weeks["Producto"], 1.0)
-    assert math.isclose(benchmark.overall_eta_weeks or 0.0, 1.0)
+    assert math.isclose(benchmark.support_org_resolution_weeks["Producto"], 1.0)
+    assert math.isclose(benchmark.overall_resolution_weeks or 0.0, 1.0)
 
 
 def test_enrich_rationale_with_operational_metrics_overrides_heuristic_values_when_helix_has_data() -> (
@@ -119,8 +119,8 @@ def test_enrich_rationale_with_operational_metrics_overrides_heuristic_values_wh
         [
             {
                 "nps_topic": "Operativa > Pagos",
-                "owner_role": "VoC + Analitica",
-                "eta_weeks": 3.0,
+                "support_organizations": "VoC + Analitica",
+                "historical_resolution_weeks": 3.0,
             }
         ]
     )
@@ -137,8 +137,8 @@ def test_enrich_rationale_with_operational_metrics_overrides_heuristic_values_wh
         benchmark=benchmark,
     )
 
-    assert enriched.iloc[0]["owner_role"] == "Canal Digital"
-    assert math.isclose(float(enriched.iloc[0]["eta_weeks"]), 3.0)
+    assert enriched.iloc[0]["support_organizations"] == "Canal Digital"
+    assert math.isclose(float(enriched.iloc[0]["historical_resolution_weeks"]), 3.0)
 
 
 def test_enrich_chain_with_operational_metrics_uses_incident_records() -> None:
@@ -155,13 +155,13 @@ def test_enrich_chain_with_operational_metrics_uses_incident_records() -> None:
         [
             {
                 "incident_records": [{"incident_id": "INC-20"}, {"incident_id": "INC-21"}],
-                "owner_role": "",
-                "eta_weeks": float("nan"),
+                "support_organizations": "",
+                "historical_resolution_weeks": float("nan"),
             }
         ]
     )
 
     enriched = enrich_chain_with_operational_metrics(chain_df, benchmark=benchmark)
 
-    assert enriched.iloc[0]["owner_role"] == "Producto · Tecnologia"
-    assert math.isclose(float(enriched.iloc[0]["eta_weeks"]), 2.5)
+    assert enriched.iloc[0]["support_organizations"] == "Producto · Tecnologia"
+    assert math.isclose(float(enriched.iloc[0]["historical_resolution_weeks"]), 2.5)

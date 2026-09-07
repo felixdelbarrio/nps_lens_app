@@ -167,13 +167,6 @@ export type DashboardPayload = {
     table?: Array<Record<string, unknown>>;
     has_data?: boolean;
   };
-  opportunities: {
-    dimension?: string;
-    figure?: PlotlyFigureSpec | null;
-    table?: Array<Record<string, unknown>>;
-    bullets?: string[];
-    has_data?: boolean;
-  };
   controls: {
     dimensions: string[];
     cohort_rows: string[];
@@ -289,7 +282,7 @@ export type PreferencesPayload = {
   touchpoint_source: string;
   min_similarity: number;
   max_days_apart: number;
-  min_n_opportunities: number;
+  min_n_nps_gaps: number;
   min_n_cross_comparisons: number;
 };
 
@@ -641,7 +634,7 @@ export function downloadExecutiveReport(params: {
 export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "DISCOVERED";
 export type TaxonomyContext = Record<string, string>;
 export type TaxonomyStatus = {
-  detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number };
+  detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number; originals_unavailable?: number };
   active: TaxonomyMode;
   requested_active: TaxonomyMode;
   default: TaxonomyMode;

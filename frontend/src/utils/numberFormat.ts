@@ -190,6 +190,7 @@ function isPercentColumn(columnName?: string) {
   }
   const normalizedColumnName = normalizeColumnName(columnName);
   if (
+    /^(?:nº|número de|number of)\s/.test(normalizedColumnName) ||
     NON_PERCENT_COLUMN_PATTERN.test(normalizedColumnName) ||
     NON_PERCENT_TOKENS.some((token) => normalizedColumnName.includes(token))
   ) {

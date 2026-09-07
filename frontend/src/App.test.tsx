@@ -56,7 +56,7 @@ const contextPayload = {
     touchpoint_source: "executive_journeys",
     min_similarity: 0.15,
     max_days_apart: 90,
-    min_n_opportunities: 200,
+    min_n_nps_gaps: 200,
     min_n_cross_comparisons: 30
   },
   nps_dataset: {
@@ -186,11 +186,7 @@ const dashboardPayload = {
   comparison: { has_data: false, table: [] },
   cohorts: {},
   gaps: { has_data: false, table: [] },
-  opportunities: {
-    has_data: false,
-    table: [],
-    bullets: ["Si mejoramos **Palanca=Acceso**, el modelo estima un **potencial de +24.0 puntos**."]
-  },
+
   controls: {
     dimensions: ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"],
     cohort_rows: ["Palanca", "Subpalanca"],
@@ -260,7 +256,7 @@ const linkingPayloadAvailable = {
         { label: "Comentarios enlazados", value: "22" },
         { label: "Incidencias del periodo", value: "233" },
         { label: "Incidencias con match", value: "20" },
-        { label: "Links validados", value: "30" },
+        { label: "Vínculos semánticos", value: "30" },
         { label: "% detractores medio", value: "15.2%" }
       ]
     },
@@ -280,7 +276,7 @@ const linkingPayloadAvailable = {
     kpis: [
       { label: "Journeys de detracción", value: "6" },
       { label: "Touchpoints cubiertos", value: "4" },
-      { label: "Links validados", value: "34" }
+      { label: "Vínculos semánticos", value: "34" }
     ],
     figure_title: "Evidencia validada por journey",
     figure: null,
@@ -290,7 +286,7 @@ const linkingPayloadAvailable = {
       {
         "Journey de detracción": "Uso / Edo de Cuenta",
         "Touchpoint del catálogo": "Consulta",
-        "Links validados": 18
+        "Vínculos semánticos": 18
       }
     ]
   },
@@ -380,14 +376,9 @@ const linkingPayloadAvailable = {
         linked_incidents: 12,
         linked_comments: 12,
         linked_pairs: 16,
-        detractor_probability: 0.6,
-        nps_delta_expected: -0.0,
-        total_nps_impact: 0.0,
-        confidence: 0.16,
-        priority: 0.62,
-        nps_points_at_risk: 0.0,
-        nps_points_recoverable: 0.0,
-        owner_role: "VoC + Analitica",
+        focus_rate_high_incidence: 0.6,
+        score_mean_difference: -0.0,
+        support_organizations: "VoC + Analitica",
         flow_steps: [
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
@@ -405,7 +396,7 @@ const linkingPayloadAvailable = {
           { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.16" },
-          { label: "Links validados", value: "16" },
+          { label: "Vínculos semánticos", value: "16" },
           { label: "Prioridad", value: "0.62" },
           { label: "NPS en riesgo", value: "0.00 pts" },
           { label: "NPS recuperable", value: "0.00 pts" },
@@ -451,14 +442,9 @@ const linkingPayloadAvailable = {
         linked_incidents: 8,
         linked_comments: 10,
         linked_pairs: 14,
-        detractor_probability: 0.52,
-        nps_delta_expected: -0.0,
-        total_nps_impact: 0.0,
-        confidence: 0.14,
-        priority: 0.51,
-        nps_points_at_risk: 0.0,
-        nps_points_recoverable: 0.0,
-        owner_role: "Canal Digital",
+        focus_rate_high_incidence: 0.52,
+        score_mean_difference: -0.0,
+        support_organizations: "Canal Digital",
         flow_steps: [
           "(8) Incidencias + comentarios",
           "Consulta de saldos",
@@ -473,7 +459,7 @@ const linkingPayloadAvailable = {
           { label: "Delta NPS Clásico", value: "-0.0" },
           { label: "Impacto total", value: "0.00 pts" },
           { label: "Confianza", value: "0.14" },
-          { label: "Links validados", value: "14" },
+          { label: "Vínculos semánticos", value: "14" },
           { label: "Prioridad", value: "0.51" },
           { label: "NPS en riesgo", value: "0.00 pts" },
           { label: "NPS recuperable", value: "0.00 pts" },
@@ -646,7 +632,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
-    expect(screen.getByRole("tab", { name: "Dónde se separa el NPS" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Brechas NPS" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Comparativas cruzadas" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Qué dicen los clientes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
@@ -740,7 +726,7 @@ describe("App", () => {
     expect(screen.getByText("Respuestas analizadas")).toBeInTheDocument();
     const linkedCommentsMetric = screen.getByText("Comentarios enlazados");
     const incidentsMetric = screen.getByText("Incidencias del periodo");
-    const linksMetric = screen.getByText("Links validados");
+    const linksMetric = screen.getByText("Vínculos semánticos");
     const focusMetric = screen.getByText("% detractores medio");
     expect(
       Boolean(linkedCommentsMetric.compareDocumentPosition(incidentsMetric) & Node.DOCUMENT_POSITION_FOLLOWING)

@@ -15,6 +15,9 @@ class DriverStat:
     detractor_rate: float
     promoter_rate: float
     gap_vs_overall: float
+    detractors: int
+    valid_n: int
+    sample_share: float
 
 
 def compute_nps_from_scores(scores: pd.Series) -> float:
@@ -32,10 +35,18 @@ def grouped_driver_stats(
     *,
     survey_score_col: str = "NPS",
 ) -> pd.DataFrame:
-    """Vectorized grouped NPS stats used by driver and opportunities ranking."""
+    """Vectorized grouped NPS stats used by driver and nps_gaps ranking."""
     if dimension not in df.columns:
         return pd.DataFrame(
-            columns=[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]
+            columns=[
+                dimension,
+                "n",
+                "valid_n",
+                "det_count",
+                "nps",
+                "detractor_rate",
+                "promoter_rate",
+            ]
         )
 
     work = pd.DataFrame(
@@ -60,7 +71,9 @@ def grouped_driver_stats(
     grouped["promoter_rate"] = grouped["pro_count"].astype(float) / valid
     grouped["nps"] = (grouped["promoter_rate"] - grouped["detractor_rate"]) * 100.0
     grouped.loc[grouped["valid_n"] <= 0, ["nps", "detractor_rate", "promoter_rate"]] = np.nan
-    return grouped[[dimension, "n", "valid_n", "nps", "detractor_rate", "promoter_rate"]]
+    return grouped[
+        [dimension, "n", "valid_n", "det_count", "nps", "detractor_rate", "promoter_rate"]
+    ]
 
 
 def driver_table(
@@ -86,6 +99,9 @@ def driver_table(
         prom = float(row["promoter_rate"]) if pd.notna(row["promoter_rate"]) else float("nan")
         out.append(
             DriverStat(
+                detractors=int(row["det_count"]),
+                valid_n=int(row["valid_n"]),
+                sample_share=n / len(df) if len(df) else 0.0,
                 dimension=dimension,
                 value=str(row[dimension]),
                 n=n,

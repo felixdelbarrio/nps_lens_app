@@ -310,3 +310,30 @@ def test_taxonomy_api_round_trip(settings, service) -> None:
     assert restored.status_code == 200, restored.text
     assert restored.json()["active"] == "DISCOVERED"
     assert client.get("/api/settings/equivalences", params=params).status_code == 200
+
+
+def test_migration_recovers_source_and_preserves_record_identity(service, settings) -> None:
+    tax, ctx = service
+    repo = tax.repository
+    expected = repo.load_records_df(ctx)
+    with repo._connect() as connection:
+        connection.execute("UPDATE records SET source_lever = 'LOST', source_sublever = 'LOST', source_preserved = 0")
+        connection.execute("PRAGMA user_version = 0")
+    repo.migrate_source_identity(settings.data_dir / "uploads")
+    recovered = repo.load_records_df(ctx)
+    assert recovered.source_lever.tolist() == expected.source_lever.tolist()
+    assert recovered._business_key.tolist() == expected._business_key.tolist()
+    assert recovered.source_preserved.eq(1).all()
+
+
+@pytest.mark.parametrize("mode", ["SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED"])
+def test_snapshot_default_resolves_without_changing_active(service, mode) -> None:
+    tax, ctx = service
+    if mode in ("COMPLETED", "DISCOVERED"):
+        tax.generate(ctx, mode, TaxonomyConfig())
+    tax.configure(ctx, {"active": "SOURCE", "default": mode})
+    with tax.snapshot_lens(ctx):
+        assert tax.resolve(ctx).attrs["taxonomy_mode"] == mode
+        snapshot = tax.snapshot(ctx)
+        assert snapshot["active"] == mode
+    assert tax.resolve(ctx).attrs["taxonomy_mode"] == "SOURCE"

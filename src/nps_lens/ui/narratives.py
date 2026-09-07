@@ -7,8 +7,6 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.incident_attribution import (
-    TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
-    TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import IncidentRationaleSummary
@@ -211,28 +209,17 @@ def executive_summary(df: pd.DataFrame) -> ExecSummary:
     )
 
 
-def explain_opportunities(opps_df: pd.DataFrame, max_items: int = 5) -> list[str]:
-    """Human-friendly bullets for opportunities table."""
-    if opps_df.empty:
-        return ["No se detectaron oportunidades con el umbral actual."]
-
-    out: list[str] = []
-    for _, r in opps_df.head(max_items).iterrows():
-        dim = str(r.get("dimension", ""))
-        val = str(r.get("value", ""))
-        uplift = float(r.get("potential_uplift", 0.0))
-        conf = float(r.get("confidence", 0.0))
-        n = int(r.get("n", 0))
-        out.append(
-            (
-                (
-                    f"Si mejoramos **{dim}={val}**, el modelo estima un "
-                    f"**potencial de {format_metric(uplift, signed=True)} puntos** "
-                    f"(confianza ~{format_metric(conf)}, n={format_volume(n)})."
-                )
-            )
-        )
-    return out
+def explain_nps_gaps(gaps_df: pd.DataFrame, max_items: int = 5) -> list[str]:
+    """Describe the observed difference from the overall NPS and its sample size."""
+    if gaps_df.empty:
+        return ["No se observan brechas negativas con el mínimo de respuestas seleccionado."]
+    return [
+        f"**{row['dimension']}={row['value']}**: NPS {format_metric(row['nps'])}, "
+        f"diferencia frente al global **{format_metric(row['gap_vs_overall'], signed=True)} puntos**, "
+        f"{format_volume(row['n'])} respuestas ({format_percentage(row['sample_share'])} de la muestra), "
+        f"{format_volume(row['detractors'])} detractores."
+        for _, row in gaps_df.head(max_items).iterrows()
+    ]
 
 
 def explain_topics(topics_df: pd.DataFrame, max_items: int = 5) -> list[str]:
@@ -252,7 +239,7 @@ def explain_topics(topics_df: pd.DataFrame, max_items: int = 5) -> list[str]:
 def build_executive_story(
     summary: ExecSummary,
     comparison: Optional[PeriodComparison] = None,
-    top_opportunities: Optional[list[str]] = None,
+    top_nps_gaps: Optional[list[str]] = None,
     top_topics: Optional[list[str]] = None,
 ) -> str:
     """Generate a copy/paste-ready executive story in Spanish.
@@ -296,10 +283,10 @@ def build_executive_story(
             f"- Variación: **{SCORE_DELTA_LABEL} {d_nps}** · **Δ detractores {format_metric(comparison.delta_detr_pp, signed=True)} pp**"
         )
 
-    if top_opportunities:
+    if top_nps_gaps:
         lines.append("")
-        lines.append("## 3) Dónde atacar primero (oportunidades)")
-        for b in top_opportunities[:5]:
+        lines.append("## 3) Brechas NPS observadas")
+        for b in top_nps_gaps[:5]:
             lines.append(f"- {b}")
 
     if top_topics:
@@ -309,11 +296,6 @@ def build_executive_story(
             lines.append(f"- {b}")
 
     lines.append("")
-    lines.append("## 5) Próximos pasos recomendados")
-    lines.append("- Validar si hay releases / incidencias / campañas en la ventana del cambio.")
-    lines.append("- Abrir 1-2 hipótesis por oportunidad priorizada y definir cómo se medirán.")
-    lines.append("- Generar un **Deep-Dive Pack** y guardar aprendizaje en la **Knowledge Cache**.")
-
     return "\n".join(lines) + "\n"
 
 
@@ -335,6 +317,40 @@ def _fmt_delta(value: float) -> str:
     return format_metric(value, signed=True)
 
 
+def _observed_evidence_lines(
+    summary: IncidentRationaleSummary,
+    rationale_df: pd.DataFrame,
+    attribution_df: Optional[pd.DataFrame],
+    attribution_summary: Optional[dict[str, int]],
+    focus_name: str,
+    top_k: int,
+) -> list[str]:
+    scope = attribution_summary or summarize_attribution_chains(attribution_df)
+    lines = [
+        f"Se analizaron **{summary.topics_analyzed} tópicos**, **{format_volume(summary.responses)} respuestas** y **{format_volume(summary.incidents)} incidencias**.",
+        f"Los tres tópicos con más incidencias concentran **{format_percentage(summary.top3_incident_share)}** del total relacionado.",
+    ]
+    if np.isfinite(summary.median_lag_weeks):
+        lines.append(f"El mejor lag observado tiene una mediana de **{format_metric(summary.median_lag_weeks)} semanas**.")
+    if int(scope.get("linked_pairs_total", 0)):
+        lines.append(
+            f"Se encontraron **{format_volume(scope['linked_pairs_total'])} vínculos semánticos** entre "
+            f"**{format_volume(scope['linked_incidents_total'])} incidencias** y "
+            f"**{format_volume(scope['linked_comments_total'])} comentarios**."
+        )
+    if rationale_df is not None and not rationale_df.empty:
+        for _, row in rationale_df.head(top_k).iterrows():
+            lines.append(
+                f"**{row.get('nps_topic', '')}**: {format_volume(row.get('responses', 0))} respuestas, "
+                f"{format_volume(row.get('incidents', 0))} incidencias, "
+                f"{format_metric(row.get('incident_rate_per_100_responses'))} por 100 respuestas; "
+                f"la tasa de {focus_name} difiere "
+                f"{format_metric(row.get('focus_rate_difference_pp'), signed=True)} pp entre periodos de incidencia alta y baja, "
+                f"y la nota media difiere {format_metric(row.get('score_mean_difference'), signed=True)} puntos."
+            )
+    return lines
+
+
 def build_incident_ppt_story(
     summary: IncidentRationaleSummary,
     rationale_df: pd.DataFrame,
@@ -344,136 +360,30 @@ def build_incident_ppt_story(
     focus_name: str = "detractores",
     top_k: int = 5,
 ) -> str:
-    """Narrative ready for PowerPoint committee sessions."""
-    scope = attribution_summary or summarize_attribution_chains(attribution_df)
-    cards = (
-        attribution_df.head(int(top_k)).to_dict(orient="records")
-        if attribution_df is not None and not attribution_df.empty
-        else []
-    )
-    lines: list[str] = []
-    lines.append("# Racional de negocio — Incidencias vs NPS")
-    lines.append("")
-    lines.append("## 1) Observación")
-    lines.append(
-        f"- Se analizaron **{summary.topics_analyzed} tópicos** con evidencia multi-fuente (NPS + Helix)."
-    )
-    lines.append(
-        f"- El modelo estima **{format_metric(summary.total_nps_impact)} pts de impacto total en NPS** asociados a fricción operativa."
-    )
-    lines.append(
-        f"- Potencial de recuperación estimado: **{format_metric(summary.nps_points_recoverable)} pts NPS**."
-    )
-    lines.append(
-        f"- La concentración de incidencias en top-3 tópicos alcanza **{format_percentage(summary.top3_incident_share)}**."
-    )
-    if summary.median_lag_weeks == summary.median_lag_weeks:
-        lines.append(
-            f"- Tiempo de reacción estimado (mediana de lag): **{format_metric(summary.median_lag_weeks)} semanas**."
+    """Narrate observed volumes, comparisons and semantic links without causal claims."""
+    lines = ["# Evidencia observada — Incidencias y NPS", "", "## Observación"]
+    lines.extend(
+        f"- {line}"
+        for line in _observed_evidence_lines(
+            summary, rationale_df, attribution_df, attribution_summary, focus_name, top_k
         )
-    lines.append(
-        f"- En el pico de afectación, la probabilidad del foco analizado sube a **{format_percentage(summary.peak_focus_probability)}**."
     )
-    lines.append(
-        f"- El delta NPS Clásico esperado en los journeys afectados es de **{format_metric(summary.expected_nps_delta, signed=True)} puntos**."
-    )
-    if int(scope.get("chains_total", 0)) > 0:
-        lines.append(
-            "- La cobertura consolidada del método causal suma "
-            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
-            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
-            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
-            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
-        )
-
-    lines.append("")
-    lines.append("## 2) Cadena de impacto")
+    lines.extend(["", "## Evidencias vinculadas"])
+    cards = attribution_df.head(top_k).to_dict(orient="records") if attribution_df is not None and not attribution_df.empty else []
     if not cards:
+        lines.append("- No hay vínculos semánticos con el umbral y la ventana seleccionados.")
+    for card in cards:
+        title = str(_card_value(card, "nps_topic", ""))
         lines.append(
-            "- No hay señal suficiente para construir una cadena causal robusta con el umbral actual."
+            f"- **{title}**: {format_volume(_card_value(card, 'linked_pairs', 0))} vínculos, "
+            f"similitud media {format_metric(_card_value(card, 'avg_similarity', np.nan))}, "
+            f"nota media {format_metric(_card_value(card, 'avg_nps', np.nan))}."
         )
-    else:
-        for card in cards:
-            title = str(_card_value(card, "nps_topic", _card_value(card, "title", "")))
-            touchpoint = str(_card_value(card, "touchpoint", ""))
-            incident_examples = _evidence_list(card, "incident_examples", 5)
-            comment_examples = _evidence_list(card, "comment_examples", 2)
-            incident_total = _evidence_total(card, "linked_incidents", "incident_examples", 5)
-            comment_total = _evidence_total(card, "linked_comments", "comment_examples", 2)
-            probability = float(
-                _card_value(
-                    card, "detractor_probability", _card_value(card, "focus_probability", np.nan)
-                )
-            )
-            delta_nps = float(_card_value(card, "nps_delta_expected", np.nan))
-            impact = float(_card_value(card, "total_nps_impact", 0.0))
-            statement = str(_card_value(card, "chain_story", _card_value(card, "statement", "")))
-            lines.append(
-                f"- **{title}**: ({len(incident_examples)}) incidencias Helix mostradas sobre **{touchpoint}** -> ({len(comment_examples)}) comentarios VoC -> riesgo de {focus_name}."
-            )
-            lines.append(
-                "  Impacto esperado: "
-                f"probabilidad {focus_name} **{_fmt_pct(probability)}** · "
-                f"Delta NPS Clásico **{_fmt_delta(delta_nps)}** · "
-                f"impacto total **{format_metric(impact)} pts** · "
-                f"evidencia validada **{format_volume(incident_total)} incidencias / {format_volume(comment_total)} comentarios**."
-            )
-            for incident in incident_examples:
-                lines.append(f"  Helix: {incident}")
-            for comment in comment_examples:
-                lines.append(f"  VoC: {comment}")
-            lines.append(f"  Conclusión: {statement}")
-
-    lines.append("")
-    lines.append("## 3) Evidencia estadística")
-    if cards:
-        for card in cards:
-            title = (
-                str(card.get("nps_topic", card.get("title", "")))
-                if isinstance(card, dict)
-                else str(card.title)
-            )
-            causal_score = (
-                float(card.get("causal_score", 0.0))
-                if isinstance(card, dict)
-                else float(card.causal_score)
-            )
-            confidence = (
-                float(card.get("confidence", 0.0))
-                if isinstance(card, dict)
-                else float(card.confidence)
-            )
-            concentration = (
-                float(card.get("linked_pairs", 0.0))
-                if isinstance(card, dict)
-                else float(card.concentration_share)
-            )
-            lines.append(
-                (
-                    f"- {title}: causal score **{causal_score:.2f}**, confianza **{confidence:.2f}**, "
-                    f"evidencia validada **{concentration:.0f} links**."
-                )
-            )
-    lines.append(
-        "- La lectura correcta no es incidencia ↔ comentario, sino incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS."
-    )
-
-    lines.append("")
-    lines.append("## 4) Plan operativo 30-60-90")
-    lines.append(
-        "- 30 días: activar quick wins en touchpoints críticos y cerrar brechas de instrumentación."
-    )
-    lines.append("- 60 días: desplegar fixes estructurales en tópicos P1 con mayor NPS en riesgo.")
-    lines.append(
-        "- 90 días: consolidar aprendizaje (confirmado/rechazado), medir recuperación y recalibrar prioridades."
-    )
-
-    lines.append("")
-    lines.append("## 5) KPI de seguimiento semanal")
-    lines.append(f"- % {focus_name}")
-    lines.append("- Incidencias por tópico priorizado")
-    lines.append("- Delta NPS Clásico esperado e impacto total atribuido")
-    lines.append("- Cumplimiento de ETA por owner/lane")
+        for incident in _evidence_list(card, "incident_examples", 2):
+            lines.append(f"  Helix: {incident}")
+        for comment in _evidence_list(card, "comment_examples", 2):
+            lines.append(f"  VoC: {comment}")
+    lines.append("- Las asociaciones temporales y semánticas no demuestran causalidad.")
     return "\n".join(lines) + "\n"
 
 
@@ -490,175 +400,23 @@ def build_ppt_8slide_script(
     period_label: str,
     top_k: int = 5,
 ) -> str:
-    """Generate a business-first 8-slide script for periodic committee sessions."""
-    scope = attribution_summary or summarize_attribution_chains(attribution_df)
-    top = rationale_df.head(int(top_k)).copy() if rationale_df is not None else pd.DataFrame()
-    cards = (
-        attribution_df.head(3).to_dict(orient="records")
-        if attribution_df is not None and not attribution_df.empty
-        else []
+    """Create an eight-section evidence script; selection uses direct counts."""
+    del touchpoint_source
+    observed = _observed_evidence_lines(
+        summary, rationale_df, attribution_df, attribution_summary, focus_name, top_k
     )
-    topics = top.get("nps_topic", pd.Series(dtype=str)).astype(str).tolist()
-    top_topics = ", ".join(topics[:3]) if topics else "Sin tópicos priorizados"
-
-    lines: list[str] = []
-    lines.append("# Guion de negocio — 8 slides (NPS vs incidencias)")
-    lines.append("")
-    lines.append("## Slide 1 — Mensaje principal")
-    lines.append(
-        f"- Contexto: **{service_origin} · {service_origin_n1}** | Periodo: **{period_label}**."
-    )
-    lines.append(
-        f"- Se estiman **{format_metric(summary.total_nps_impact)} pts de impacto total en NPS** asociados a incidencias."
-    )
-    lines.append(
-        f"- Potencial recuperable estimado: **{format_metric(summary.nps_points_recoverable)} pts NPS**."
-    )
-    lines.append(
-        f"- Concentración top-3 incidencias: **{format_percentage(summary.top3_incident_share)}**."
-    )
-    lines.append("- Decisión sugerida: activar plan semanal en tópicos P1.")
-    lines.append("")
-
-    lines.append("## Slide 2 — Qué está pasando en la señal")
-    lines.append(
-        f"- Evolución semanal de **% {focus_name} vs incidencias** (usar gráfico de timeline causal)."
-    )
-    lines.append("- Señalar semanas con ruptura y eventos operativos/release.")
-    lines.append("- Mensaje clave: cuándo la incidencia precede el deterioro NPS.")
-    lines.append("")
-
-    mode = str(touchpoint_source or "").strip()
-    if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-        lines.append("## Slide 3 — Journeys que explican la detracción")
-        lines.append(
-            "- Objetivo: identificar rutas de degradación de experiencia que conectan incidencias con la voz del cliente para priorizar causas raíz accionables."
-        )
-    elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-        lines.append("## Slide 3 — Journeys rotos detectados")
-        lines.append(
-            "- Narrativa obligatoria: incidencia -> embeddings / keywords / clustering semántico -> touchpoint roto -> comentario -> NPS."
-        )
-    else:
-        lines.append("## Slide 3 — Impact Chain")
-        lines.append(
-            "- Narrativa obligatoria: incidencia -> touchpoint -> experiencia negativa -> comentario -> NPS."
-        )
-    if int(scope.get("chains_total", 0)) > 0:
-        lines.append(
-            "- Cobertura consolidada del método: "
-            f"**{int(scope.get('chains_total', 0))} cadenas defendibles**, "
-            f"**{int(scope.get('linked_incidents_total', 0))} incidencias con match**, "
-            f"**{int(scope.get('linked_comments_total', 0))} comentarios enlazados** y "
-            f"**{int(scope.get('linked_pairs_total', 0))} links validados**."
-        )
-    if not cards:
-        lines.append("- No hay evidencia suficiente para construir la cadena con rigor.")
-    else:
-        for card in cards:
-            title = str(_card_value(card, "nps_topic", _card_value(card, "title", "")))
-            touchpoint = str(_card_value(card, "touchpoint", ""))
-            probability = float(
-                _card_value(
-                    card, "detractor_probability", _card_value(card, "focus_probability", np.nan)
-                )
-            )
-            delta_nps = float(_card_value(card, "nps_delta_expected", np.nan))
-            impact = float(_card_value(card, "total_nps_impact", 0.0))
-            incident_examples = _evidence_list(card, "incident_examples", 5)
-            comment_examples = _evidence_list(card, "comment_examples", 2)
-            incident_total = _evidence_total(card, "linked_incidents", "incident_examples", 5)
-            comment_total = _evidence_total(card, "linked_comments", "comment_examples", 2)
-            if mode == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-                expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
-                impact_label = str(_card_value(card, "journey_impact_label", "")).strip()
-                lines.append(
-                    f"- {title}: {expected_evidence or 'journey causal defendible'} | "
-                    f"impacto esperado {impact_label or 'alto'} | "
-                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Delta NPS Clásico {_fmt_delta(delta_nps)} | "
-                    f"impacto {format_metric(impact)} pts | "
-                    f"evidencia validada {format_volume(incident_total)}/{format_volume(comment_total)}."
-                )
-            elif mode == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-                expected_evidence = str(_card_value(card, "journey_expected_evidence", "")).strip()
-                lines.append(
-                    f"- {title}: {expected_evidence or 'cluster semántico defendible'} | "
-                    f"touchpoint {touchpoint or 'detectado automáticamente'} | "
-                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Delta NPS Clásico {_fmt_delta(delta_nps)} | "
-                    f"impacto {format_metric(impact)} pts | "
-                    f"evidencia validada {format_volume(incident_total)}/{format_volume(comment_total)}."
-                )
-            else:
-                lines.append(
-                    f"- {title}: ({len(incident_examples)}) incidencias mostradas sobre {touchpoint} | "
-                    f"({len(comment_examples)}) VoC | "
-                    f"probabilidad {focus_name} {_fmt_pct(probability)} | "
-                    f"Delta NPS Clásico {_fmt_delta(delta_nps)} | "
-                    f"impacto {format_metric(impact)} pts | "
-                    f"evidencia validada {format_volume(incident_total)}/{format_volume(comment_total)}."
-                )
-            for incident in incident_examples:
-                lines.append(f"- Helix: {incident}")
-            for comment in comment_examples:
-                lines.append(f"- VoC: {comment}")
-    lines.append("")
-
-    lines.append("## Slide 4 — Dónde duele (causas priorizadas)")
-    lines.append(f"- Tópicos con mayor criticidad: **{top_topics}**.")
-    if top.empty:
-        lines.append("- No hay evidencia suficiente para priorización robusta.")
-    else:
-        for _, r in top.iterrows():
-            lines.append(
-                (
-                    f"- {str(r.get('nps_topic',''))}: prioridad={float(r.get('priority',0.0)):.2f}, "
-                    f"confianza={float(r.get('confidence',0.0)):.2f}, "
-                    f"causal score={float(r.get('causal_score',0.0)):.2f}."
-                )
-            )
-    lines.append("")
-
-    lines.append("## Slide 5 — Cuánto impacta al NPS")
-    lines.append("- Mostrar barra comparativa **NPS en riesgo vs NPS recuperable** por tópico.")
-    if not top.empty:
-        risk_top = float(pd.to_numeric(top["nps_points_at_risk"], errors="coerce").fillna(0).sum())
-        rec_top = float(
-            pd.to_numeric(top["nps_points_recoverable"], errors="coerce").fillna(0).sum()
-        )
-        lines.append(
-            f"- Top temas analizados: riesgo={format_metric(risk_top)} pts | recuperable={format_metric(rec_top)} pts."
-        )
-    lines.append(
-        f"- Delta NPS Clásico esperado agregado: **{format_metric(summary.expected_nps_delta, signed=True)} pts** | impacto total atribuido **{format_metric(summary.total_nps_impact)} pts**."
-    )
-    lines.append("- Mensaje clave: impacto económico esperado de corregir tópicos P1.")
-    lines.append("")
-
-    lines.append("## Slide 6 — Qué atacamos primero")
-    lines.append("- Usar matriz de prioridad (confianza x NPS en riesgo x volumen incidencias).")
-    if top.empty:
-        lines.append("- Definir backlog inicial de hipótesis con instrumentación mínima.")
-    else:
-        for _, r in top.head(3).iterrows():
-            lines.append(
-                (
-                    f"- P1 {str(r.get('nps_topic',''))}: lane={str(r.get('action_lane',''))}, "
-                    f"owner={str(r.get('owner_role',''))}, ETA (semanas)={int(r.get('eta_weeks',0) or 0)}."
-                )
-            )
-    lines.append("")
-
-    lines.append("## Slide 7 — Plan 30-60-90")
-    lines.append("- 30 días: quick wins operativos + corrección de fricción evidente.")
-    lines.append("- 60 días: fixes estructurales y reducción de recurrencia de incidencias.")
-    lines.append("- 90 días: escalado de prácticas efectivas + recalibración de prioridades.")
-    lines.append("")
-
-    lines.append("## Slide 8 — Gobierno y métricas")
-    lines.append(f"- KPI leading: incidencias por tópico P1, SLA de resolución, % {focus_name}.")
-    lines.append("- KPI lagging: NPS, NPS en riesgo (pts), NPS recuperable realizado (pts).")
-    lines.append("- Cadencia: comité semanal con owners de producto, tecnología y operaciones.")
-    lines.append("")
+    sections = [
+        ("Alcance", [f"{service_origin} · {service_origin_n1} · {period_label}", *observed[:2]]),
+        ("Evolución", [f"Serie de incidencias y tasa de {focus_name} por semana."]),
+        ("Vínculos semánticos", observed[2:3] or ["Sin vínculos en la ventana seleccionada."]),
+        ("Comparación de periodos", observed[3:] or ["Sin grupos alto/bajo comparables."]),
+        ("Asociación temporal", ["Correlación, mejor lag y changepoints observados por tópico."]),
+        ("Evidencia Helix", ["Incidencias relacionadas, fechas y organización responsable observada."]),
+        ("Evidencia VoC", ["Comentarios vinculados con nota y fecha de respuesta."]),
+        ("Límites", ["La similitud, la correlación y el lag describen asociación; no prueban causalidad."]),
+    ]
+    lines = ["# Guion de evidencia — NPS e incidencias"]
+    for number, (title, bullets) in enumerate(sections, start=1):
+        lines.extend(["", f"## Slide {number} — {title}", *[f"- {bullet}" for bullet in bullets]])
     return "\n".join(lines) + "\n"
+

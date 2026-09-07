@@ -1031,7 +1031,7 @@ def can_use_daily_resample(
 
 
 def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
-    """Simple pragmatic causal score per topic from weekly aggregates."""
+    """Summarize topic volumes and the observed high-vs-low incident difference."""
     if by_topic.empty:
         return pd.DataFrame(
             columns=[
@@ -1041,7 +1041,6 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
                 "focus_rate",
                 "incidents",
                 "delta_focus_rate",
-                "score",
             ]
         )
 
@@ -1075,14 +1074,7 @@ def causal_rank_by_topic(by_topic: pd.DataFrame) -> pd.DataFrame:
     )
 
     out = agg.join(delta_df, how="left").reset_index()
-    # Pragmatic score: incidents presence * delta detractor_rate * support
-    out["support"] = np.clip(np.log1p(out["responses"]) / 10.0, 0, 1)
-    out["inc_signal"] = np.clip(np.log1p(out["incidents"]) / 5.0, 0, 1)
-    out["effect"] = out["delta_focus_rate"].fillna(0).abs()
-    out["score"] = (0.45 * out["inc_signal"] + 0.35 * out["effect"] + 0.20 * out["support"]).clip(
-        0, 1
-    )
-    out = out.sort_values(["score", "incidents", "responses"], ascending=False).reset_index(
-        drop=True
-    )
-    return out
+    return out.sort_values(
+        ["incidents", "responses", "delta_focus_rate", "nps_topic"],
+        ascending=[False, False, False, True],
+    ).reset_index(drop=True)

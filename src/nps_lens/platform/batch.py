@@ -155,11 +155,11 @@ def run_platform_batch(
         except Exception as e:
             routes_out = {"error": str(e)}
 
-        # --- Build top-k packs (rank opportunities) ---
+        # --- Build top-k packs (rank nps_gaps) ---
         from nps_lens.analytics.causal import best_effort_ate_logit
-        from nps_lens.analytics.opportunities import rank_opportunities
+        from nps_lens.analytics.nps_gaps import rank_nps_gaps
 
-        opps = rank_opportunities(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
+        opps = rank_nps_gaps(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
         exported_packs: List[Dict[str, str]] = []
         for top in opps[: int(spec.top_k_packs)]:
             slice_df = nps_df.loc[nps_df[top.dimension].astype(str) == top.value].copy()
@@ -170,7 +170,7 @@ def run_platform_batch(
                 control_cols=["Canal", "Palanca", "Subpalanca"],
             )
             pack = build_insight_pack(
-                title=f"Oportunidad priorizada: {top.dimension}={top.value}",
+                title=f"Brecha NPS observada: {top.dimension}={top.value}",
                 context={**context, "driver_dim": top.dimension, "driver_val": top.value},
                 nps_slice=slice_df,
                 driver={"dimension": top.dimension, "value": top.value},

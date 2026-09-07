@@ -31,7 +31,6 @@ from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
-from nps_lens.analytics.opportunities import rank_opportunities
 from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
@@ -45,7 +44,6 @@ from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
     select_negative_delta_rows,
     select_nonzero_kpis,
-    select_opportunities,
     select_text_clusters,
 )
 from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
@@ -71,11 +69,9 @@ from nps_lens.ui.charts import (
     chart_cohort_heatmap,
     chart_daily_nps_committee_stack,
     chart_driver_delta,
-    chart_opportunities_bar,
     chart_topic_bars,
 )
 from nps_lens.ui.historic_changes import get_changes_vs_historic
-from nps_lens.ui.narratives import explain_opportunities
 from nps_lens.ui.population import POP_ALL
 from nps_lens.ui.theme import get_theme
 
@@ -236,20 +232,6 @@ def _configure_text_frame(tf: object) -> None:
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     with contextlib.suppress(Exception):
         tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
-
-
-def _focus_risk_label(focus_name: str) -> str:
-    focus = str(focus_name or "").strip().lower()
-    if focus in {"detractores", "detractor", "detraccion", "detracción"}:
-        return "detracción"
-    if focus in {"promotores", "promotor"}:
-        return "promoción"
-    return str(focus_name or "impacto").strip()
-
-
-def _focus_probability_label(focus_name: str) -> str:
-    focus_label = _focus_risk_label(focus_name)
-    return f"Prob. de {focus_label}"
 
 
 def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
@@ -648,7 +630,12 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
     if comments.empty:
         return pd.DataFrame(columns=cols)
 
-    topics = summarize_taxonomy(current_nps_df.rename(columns={"palanca": "Palanca", "subpalanca": "Subpalanca", "comment_txt": "Comment"}), limit=top_k)
+    topics = summarize_taxonomy(
+        current_nps_df.rename(
+            columns={"palanca": "Palanca", "subpalanca": "Subpalanca", "comment_txt": "Comment"}
+        ),
+        limit=top_k,
+    )
     if not topics:
         return pd.DataFrame(columns=cols)
 
@@ -731,34 +718,6 @@ def _driver_change_table(
         - pd.to_numeric(merged["detr_baseline"], errors="coerce")
     ) * 100.0
     return merged[cols].sort_values(["delta_nps", "n_current"], ascending=[True, False])
-
-
-def _opportunities_table(
-    current_nps_df: pd.DataFrame,
-    *,
-    dimension: str = "Palanca",
-    min_n: int = 200,
-) -> pd.DataFrame:
-    cols = ["dimension", "value", "n", "current_nps", "potential_uplift", "confidence", "why"]
-    if current_nps_df is None or current_nps_df.empty:
-        return pd.DataFrame(columns=cols)
-    work = _normalize_presentation_categories(current_nps_df, columns=[dimension])
-    if "nps_topic" not in work.columns or work["nps_topic"].astype(str).str.strip().eq("").all():
-        work["nps_topic"] = build_nps_topic(work).astype(str).fillna("").str.strip()
-    dims = [str(dimension)] if str(dimension or "").strip() in work.columns else []
-    if not dims:
-        return pd.DataFrame(columns=cols)
-    work = work[work[dimension].astype(str).str.strip().ne("")].copy()
-    if work.empty:
-        return pd.DataFrame(columns=cols)
-    rows = rank_opportunities(
-        work,
-        dimensions=dims,
-        min_n=max(1, int(min_n)),
-    )
-    if not rows:
-        return pd.DataFrame(columns=cols)
-    return pd.DataFrame([row.__dict__ for row in rows])[cols]
 
 
 def _build_overview_figure(
@@ -988,58 +947,6 @@ def _build_web_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd
     )
 
 
-def _build_opportunity_figure(opp_df: pd.DataFrame) -> Optional[go.Figure]:
-    fig = chart_opportunities_bar(opp_df, get_theme("light"), top_k=max(len(opp_df), 1))
-    if fig is None or opp_df.empty:
-        return fig
-    plot_df = select_opportunities(opp_df, max_rows=EDITORIAL_LIMITS.max_opportunities)
-    label_count = len(plot_df)
-    label_lengths = (
-        plot_df["label"].astype(str).str.replace("<br>", " ", regex=False).str.len()
-        if "label" in plot_df.columns
-        else pd.Series(dtype=float)
-    )
-    max_len = int(label_lengths.max() or 0)
-    y_font_size = 30 if label_count <= 5 else 27 if label_count <= 7 else 24
-    left_margin = 340 if max_len >= 28 else 300 if max_len >= 22 else 255
-    uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
-    text_values = [
-        _fmt_signed_or_nd(value, decimals=1) if np.isfinite(value) else ""
-        for value in uplift.tolist()
-    ]
-    with contextlib.suppress(Exception):
-        fig.data[0].text = text_values
-        fig.data[0].textposition = "outside"
-        fig.data[0].cliponaxis = False
-        fig.data[0].textfont.size = 20
-    fig.update_yaxes(
-        title_text="", tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM), automargin=True
-    )
-    fig.update_xaxes(
-        title_text="Impacto estimado", tickfont=dict(size=19), title_font=dict(size=20), nticks=5
-    )
-    fig.update_layout(margin=dict(l=left_margin, r=72, t=18, b=54), bargap=0.34)
-    return fig
-
-
-def _prepare_opportunity_chart_df(opportunities_df: pd.DataFrame) -> pd.DataFrame:
-    opp_chart_df = select_opportunities(
-        opportunities_df, max_rows=EDITORIAL_LIMITS.max_opportunities
-    )
-    if opp_chart_df.empty:
-        return opp_chart_df
-
-    def _opp_label(row: pd.Series) -> str:
-        value = str(row.get("value", "")).strip()
-        base = value
-        return _compact_axis_label(
-            base, width=22 if len(base) >= 22 else 18, max_lines=2, max_chars=38
-        )
-
-    opp_chart_df["label"] = opp_chart_df.apply(_opp_label, axis=1)
-    return opp_chart_df
-
-
 def _first_existing_series(df: pd.DataFrame, *columns: str) -> pd.Series:
     for column in columns:
         if column in df.columns:
@@ -1063,7 +970,7 @@ def _build_journey_table(
         "links",
         "comments",
         "nps",
-        "confidence",
+        "similarity",
     ]
     if (
         str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
@@ -1071,11 +978,11 @@ def _build_journey_table(
         and not broken_journeys_df.empty
     ):
         source = broken_journeys_df.copy()
-        source["priority_sort"] = pd.to_numeric(
+        source["links_sort"] = pd.to_numeric(
             source.get("linked_pairs"),
             errors="coerce",
         ).fillna(0.0)
-        source["confidence_sort"] = pd.to_numeric(
+        source["similarity_sort"] = pd.to_numeric(
             source.get("semantic_cohesion"),
             errors="coerce",
         ).fillna(0.0)
@@ -1085,7 +992,7 @@ def _build_journey_table(
         ).fillna(10.0)
         out = (
             source.sort_values(
-                ["priority_sort", "confidence_sort", "nps_sort"],
+                ["links_sort", "similarity_sort", "nps_sort"],
                 ascending=[False, False, True],
             )
             .head(EDITORIAL_LIMITS.max_journey_rows)
@@ -1117,8 +1024,8 @@ def _build_journey_table(
                 .fillna(0)
                 .astype(int),
                 "nps": pd.to_numeric(_first_existing_series(out, "avg_nps"), errors="coerce"),
-                "confidence": pd.to_numeric(
-                    _first_existing_series(out, "semantic_cohesion"),
+                "similarity": pd.to_numeric(
+                    _first_existing_series(out, "avg_similarity"),
                     errors="coerce",
                 ).fillna(0.0),
             }
@@ -1164,8 +1071,8 @@ def _build_journey_table(
             .fillna(0)
             .astype(int),
             "nps": pd.to_numeric(_first_existing_series(source, "avg_nps"), errors="coerce"),
-            "confidence": pd.to_numeric(
-                _first_existing_series(source, "confidence"),
+            "similarity": pd.to_numeric(
+                _first_existing_series(source, "avg_similarity"),
                 errors="coerce",
             ).fillna(0.0),
         }
@@ -1212,7 +1119,7 @@ def _build_journey_summary_figure(
         automargin=True,
     )
     fig.update_xaxes(
-        title_text="Links validados Helix↔VoC",
+        title_text="Vínculos semánticos Helix↔VoC",
         tickfont=dict(size=17),
         title_font=dict(size=18),
         nticks=6,
@@ -1221,7 +1128,7 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
+            title=dict(text="Similitud media", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -2482,11 +2389,6 @@ def _build_dimension_view_model(
     )
     source_for_web = current_source_period if not current_source_period.empty else selected_raw
     web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
-    opportunities_min_n = max(20, min(200, int(max(len(selected_raw), 1) * 0.02)))
-    opportunities = _opportunities_table(
-        selected_raw, dimension=dimension, min_n=opportunities_min_n
-    )
-    opportunities = _prepare_opportunity_chart_df(opportunities)
     return DimensionViewModel(
         dimension=dimension,
         slide_number=slide_number,
@@ -2495,11 +2397,6 @@ def _build_dimension_view_model(
         change_figure=change_figure,
         web_heatmap_figure=_build_web_heatmap_figure(source_for_web, row_dim=dimension),
         web_table_df=web_table,
-        opportunities_df=opportunities,
-        opportunities_figure=_build_opportunity_figure(opportunities),
-        opportunity_bullets=explain_opportunities(
-            opportunities, max_items=EDITORIAL_LIMITS.max_opportunity_bullets
-        ),
     )
 
 
@@ -2513,24 +2410,24 @@ def _build_causal_scenarios(
     for idx, (_, row) in enumerate(selected.iterrows(), start=1):
         raw_kpis = [
             (
-                _focus_probability_label(focus_name),
-                _fmt_pct_or_nd(row.get("detractor_probability", np.nan)),
+                f"% {focus_name} en incidencia alta",
+                _fmt_pct_or_nd(row.get("focus_rate_high_incidence", np.nan)),
                 BBVA_COLORS["red"],
             ),
-            ("Confianza", _fmt_num_or_nd(row.get("confidence", np.nan)), BBVA_COLORS["green"]),
+            ("Nota media del tópico", _fmt_num_or_nd(row.get("avg_nps", np.nan)), BBVA_COLORS["green"]),
             (
-                "Vínculos validados",
+                "Vínculos semánticos",
                 str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
                 BBVA_COLORS["sky"],
             ),
             (
-                "Cambio esperado en NPS Clásico",
-                _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
+                "Diferencia nota media: incidencia alta vs baja",
+                _fmt_signed_or_nd(row.get("score_mean_difference", np.nan)),
                 BBVA_COLORS["orange"],
             ),
             (
-                "Impacto total",
-                f"{_fmt_num_or_nd(row.get('total_nps_impact', np.nan))} pts",
+                "Similitud media",
+                _fmt_num_or_nd(row.get("avg_similarity", np.nan)),
                 BBVA_COLORS["blue"],
             ),
         ]
@@ -3164,7 +3061,7 @@ def _fill_template_deck(
         row = scenario.row
         title = str(row.get("nps_topic") or f"Escenario causal {offset + 1}")
         title_shape = slide.shapes[1]
-        full_title = f"Causalidad en tópico NPS ancla: {title}"
+        full_title = f"Evidencia para el tópico NPS: {title}"
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
         title_shape.height = Inches(0.78)
         title_size = 22 if len(full_title) < 49 else 18 if len(full_title) < 65 else 16
@@ -3180,8 +3077,16 @@ def _fill_template_deck(
             slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT
         )
         _set_template_text(
+            slide.shapes[2],
+            "NOTA MEDIA DEL TÓPICO",
+            size=10,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
             slide.shapes[3],
-            _fmt_pct_or_nd(row.get("detractor_probability")),
+            _fmt_num_or_nd(row.get("avg_nps")),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3189,8 +3094,16 @@ def _fill_template_deck(
             align=PP_ALIGN.CENTER,
         )
         _set_template_text(
+            slide.shapes[5],
+            "SIMILITUD MEDIA",
+            size=10,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
             slide.shapes[6],
-            _fmt_num_or_nd(row.get("confidence")),
+            _fmt_num_or_nd(row.get("avg_similarity")),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3199,7 +3112,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS VALIDADOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
+            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3209,7 +3122,7 @@ def _fill_template_deck(
         content_shapes = [
             shape for shape in list(slide.shapes)[10:] if getattr(shape, "has_text_frame", False)
         ]
-        comments = scenario.comment_lines[:2] or ["Sin comentario VoC defendible en el periodo."]
+        comments = scenario.comment_lines[:2] or ["Sin comentario VoC vinculado en el periodo."]
         evidence_shape = content_shapes[-1]
         quote_shapes = content_shapes[:-1]
         if len(quote_shapes) == 1 and len(comments) >= 2:

@@ -24,9 +24,6 @@ class DimensionViewModel:
     change_figure: Optional[go.Figure]
     web_heatmap_figure: Optional[go.Figure]
     web_table_df: pd.DataFrame
-    opportunities_df: pd.DataFrame
-    opportunities_figure: Optional[go.Figure]
-    opportunity_bullets: list[str]
 
 
 @dataclass(frozen=True)

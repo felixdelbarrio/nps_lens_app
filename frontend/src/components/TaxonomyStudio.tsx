@@ -45,6 +45,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const locked = disabled || busy;
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>Lente activa: <strong>{NAMES[data.active]}</strong> · {data.detection.rows.toLocaleString("es")} respuestas</p></div></div>
+    {data.detection.originals_unavailable ? <p role="status">{data.detection.originals_unavailable} registros históricos no tienen el fichero original disponible. Origen muestra el valor conservado por la versión anterior.</p> : null}
     {data.requested_active !== data.active ? <p role="status">La lente anterior está desactualizada. Se muestra Normalizada hasta regenerarla.</p> : null}
     <p className="secondary-copy">Completar aprende de etiquetas humanas; descubrir crea una alternativa desde los comentarios. La nota NPS no participa en ninguno de los modelos.</p>
     <div className="field-grid">

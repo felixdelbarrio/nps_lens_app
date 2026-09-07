@@ -7,6 +7,7 @@ from typing import Callable
 from zipfile import ZipFile
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 from pptx import Presentation
 
@@ -218,6 +219,23 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     )
     assert dashboard_response.status_code == 200
     dashboard_payload = dashboard_response.json()
+    assert "opportunities" not in dashboard_payload
+
+    def keys(value):
+        if isinstance(value, dict):
+            return set(value).union(*(keys(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(keys(item) for item in value))
+        return set()
+
+    assert {"confidence", "priority", "potential_uplift", "causal_score"}.isdisjoint(
+        keys(dashboard_payload)
+    )
+    for gap in dashboard_payload["gaps"]["table"]:
+        assert gap["gap_vs_overall"] == pytest.approx(
+            gap["nps"] - dashboard_payload["gaps"]["overall_nps"]
+        )
+        assert 0 <= gap["detractors"] <= gap["valid_n"] <= gap["n"]
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
@@ -712,8 +730,6 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         return {
             "available": True,
             "kpis": {
-                "nps_points_at_risk": 2.1,
-                "nps_points_recoverable": 1.3,
                 "top3_incident_share": 0.7,
                 "median_lag_weeks": 1.0,
             },
@@ -727,7 +743,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
                         "rank": 1,
                         "nps_topic": "Acceso bloqueado",
                         "linked_pairs": 4,
-                        "detractor_probability": 0.6,
+                        "focus_rate_high_incidence": 0.6,
                     }
                 ]
             },

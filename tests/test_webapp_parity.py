@@ -12,7 +12,7 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
         "Causalidad",
         "Agregados por periodo",
         "NPS clásico vs detractores",
-        "Dónde se separa el NPS",
+        "Brechas NPS",
         "Comparativas cruzadas",
         "Qué dicen los clientes",
         "Cambios respecto al histórico",
@@ -31,7 +31,7 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
         "['comparison','Cambios respecto al histórico']"
     )
     assert web.index("['comparison','Cambios respecto al histórico']") < web.index(
-        "['gaps','Dónde se separa el NPS']"
+        "['gaps','Brechas NPS']"
     )
     assert "['opportunities'" not in web
     assert "Oportunidades priorizadas" not in web

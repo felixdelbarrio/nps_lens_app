@@ -46,6 +46,13 @@ class SqliteNpsRepository:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.db_path.exists():
+            with sqlite3.connect(self.db_path) as existing:
+                columns = {row[1] for row in existing.execute("PRAGMA table_info(records)")}
+                backup = self.db_path.with_suffix(".before-taxonomy.sqlite3")
+                if "channel" in columns and not backup.exists():
+                    with sqlite3.connect(backup) as target:
+                        existing.backup(target)
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
@@ -174,7 +181,10 @@ class SqliteNpsRepository:
             if version >= 2:
                 return
             old = pd.read_sql_query(
-                "SELECT r.business_key, r.last_upload_id, u.row_number FROM records r JOIN upload_records u ON u.business_key = r.business_key AND u.upload_id = r.last_upload_id WHERE r.source_preserved = 0",
+                'SELECT business_key, last_upload_id, external_id AS ID, response_at AS Fecha, '
+                'nps_score AS NPS, comment_text AS Comment, decision_user AS "UsuarioDecisión", '
+                'service_origin, service_origin_n1, service_origin_n2 '
+                'FROM records WHERE source_preserved = 0',
                 connection,
             )
             if not old.empty:
@@ -184,15 +194,26 @@ class SqliteNpsRepository:
                     paths = list(uploads_dir.glob(str(upload_id) + "__*"))
                     if not paths:
                         continue
-                    contexts = connection.execute(
-                        "SELECT service_origin, service_origin_n1, service_origin_n2 FROM records WHERE business_key = ?",
-                        (group.iloc[0]["business_key"],),
-                    ).fetchone()
-                    parsed = read_nps_thermal_excel(str(paths[0]), *contexts).df
-                    if "_source_row_number" not in parsed:
+                    from nps_lens.analytics.text_mining import preprocess_text
+
+                    first = group.iloc[0]
+                    parsed = read_nps_thermal_excel(
+                        str(paths[0]),
+                        first["service_origin"],
+                        first["service_origin_n1"],
+                        first["service_origin_n2"],
+                    ).df
+                    if parsed.empty:
                         continue
-                    joined = group.merge(
-                        parsed, left_on="row_number", right_on="_source_row_number"
+                    group = group.assign(Fecha=pd.to_datetime(group["Fecha"]))
+                    group["_recovery_key"] = business_keys(
+                        group.assign(Comment=group["Comment"].map(preprocess_text))
+                    )
+                    parsed["_recovery_key"] = business_keys(
+                        parsed.assign(Comment=parsed["Comment"].map(preprocess_text))
+                    )
+                    joined = group[["business_key", "_recovery_key"]].merge(
+                        parsed.drop_duplicates("_recovery_key", keep="last"), on="_recovery_key"
                     )
                     connection.executemany(
                         "UPDATE records SET source_channel = ?, source_lever = ?, source_sublever = ?, comment_text = ?, source_preserved = 1 WHERE business_key = ?",
@@ -210,7 +231,7 @@ class SqliteNpsRepository:
                     )
             frame = pd.read_sql_query(
                 'SELECT business_key, external_id AS ID, response_at AS Fecha, nps_score AS NPS, comment_text AS Comment, decision_user AS "UsuarioDecisión", '
-                'service_origin, service_origin_n1, service_origin_n2 FROM records ORDER BY last_seen_at',
+                "service_origin, service_origin_n1, service_origin_n2 FROM records ORDER BY last_seen_at",
                 connection,
             )
             if not frame.empty:
@@ -263,7 +284,7 @@ class SqliteNpsRepository:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO uploads (
+                INSERT INTO uploads (
                     upload_id,
                     filename,
                     file_hash,
@@ -282,6 +303,23 @@ class SqliteNpsRepository:
                     extra_columns_json,
                     missing_optional_columns_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(upload_id) DO UPDATE SET
+                filename = excluded.filename,
+                file_hash = excluded.file_hash,
+                uploaded_at = excluded.uploaded_at,
+                parser_version = excluded.parser_version,
+                service_origin = excluded.service_origin,
+                service_origin_n1 = excluded.service_origin_n1,
+                service_origin_n2 = excluded.service_origin_n2,
+                status = excluded.status,
+                total_rows = excluded.total_rows,
+                normalized_rows = excluded.normalized_rows,
+                inserted_rows = excluded.inserted_rows,
+                updated_rows = excluded.updated_rows,
+                duplicate_in_file_rows = excluded.duplicate_in_file_rows,
+                duplicate_historical_rows = excluded.duplicate_historical_rows,
+                extra_columns_json = excluded.extra_columns_json,
+                missing_optional_columns_json = excluded.missing_optional_columns_json
                 """,
                 (
                     attempt.upload_id,

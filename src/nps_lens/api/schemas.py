@@ -90,7 +90,7 @@ class PreferencesResponse(BaseModel):
     touchpoint_source: str = "executive_journeys"
     min_similarity: float = 0.15
     max_days_apart: int = 90
-    min_n_opportunities: int = 200
+    min_n_nps_gaps: int = 200
     min_n_cross_comparisons: int = 30
 
 
@@ -145,7 +145,6 @@ class DashboardResponse(BaseModel):
     comparison: dict[str, Any] = Field(default_factory=dict)
     cohorts: dict[str, Any] = Field(default_factory=dict)
     gaps: dict[str, Any] = Field(default_factory=dict)
-    opportunities: dict[str, Any] = Field(default_factory=dict)
     controls: dict[str, Any] = Field(default_factory=dict)
     empty_state: str = ""
 

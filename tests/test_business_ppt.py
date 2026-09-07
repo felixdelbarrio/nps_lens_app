@@ -26,7 +26,6 @@ from nps_lens.settings import Settings
 from nps_lens.ui.charts import (
     chart_daily_kpis,
     chart_daily_mix_business,
-    chart_incident_risk_recovery,
 )
 from nps_lens.ui.theme import get_theme
 
@@ -76,40 +75,22 @@ def _sample_payload() -> dict:
             {
                 "nps_topic": "Pagos > SPEI",
                 "touchpoint": "Pagos",
-                "priority": 0.91,
-                "confidence": 0.80,
-                "focus_probability_with_incident": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.9,
-                "causal_score": 0.84,
-                "nps_points_at_risk": 1.9,
-                "nps_points_recoverable": 1.2,
+                "focus_rate_high_incidence": 0.47,
+                "score_mean_difference": -4.8,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Acceso > Login",
                 "touchpoint": "Acceso",
-                "priority": 0.79,
-                "confidence": 0.71,
-                "focus_probability_with_incident": 0.39,
-                "nps_delta_expected": -3.6,
-                "total_nps_impact": 1.1,
-                "causal_score": 0.77,
-                "nps_points_at_risk": 1.1,
-                "nps_points_recoverable": 0.7,
+                "focus_rate_high_incidence": 0.39,
+                "score_mean_difference": -3.6,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Tarjetas > Bloqueo",
                 "touchpoint": "Tarjetas",
-                "priority": 0.68,
-                "confidence": 0.64,
-                "focus_probability_with_incident": 0.31,
-                "nps_delta_expected": -2.8,
-                "total_nps_impact": 0.9,
-                "causal_score": 0.66,
-                "nps_points_at_risk": 0.9,
-                "nps_points_recoverable": 0.5,
+                "focus_rate_high_incidence": 0.31,
+                "score_mean_difference": -2.8,
                 "best_lag_weeks": 2.0,
             },
         ]
@@ -164,21 +145,14 @@ def _sample_payload() -> dict:
                 "linked_pairs": 5,
                 "avg_similarity": 0.89,
                 "avg_nps": 1.5,
-                "detractor_probability": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.7,
-                "nps_points_at_risk": 1.7,
-                "nps_points_recoverable": 1.1,
-                "priority": 0.91,
-                "confidence": 0.82,
-                "causal_score": 0.86,
-                "delta_focus_rate_pp": 29.0,
+                "focus_rate_high_incidence": 0.47,
+                "score_mean_difference": -4.8,
+                "focus_rate_difference_pp": 29.0,
                 "incident_rate_per_100_responses": 8.5,
                 "incidents": 5,
                 "responses": 120,
-                "action_lane": "Fix estructural",
-                "owner_role": "Producto + Tecnologia",
-                "eta_weeks": 6.0,
+                "support_organizations": "Producto + Tecnologia",
+                "historical_resolution_weeks": 6.0,
                 "incident_records": [
                     {
                         "incident_id": "INC00001",
@@ -377,7 +351,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
             {"label": "Confianza media", "value": "0.82"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
 
@@ -476,10 +450,9 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
     attribution.loc[:, "touchpoint"] = ["Login / autenticación"]
     attribution.loc[:, "palanca"] = ["Acceso"]
     attribution.loc[:, "subpalanca"] = ["Bloqueo / OTP"]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Comentarios sobre login + incidencias de autenticación"
     ]
-    attribution.loc[:, "journey_impact_label"] = ["Muy alto"]
     attribution.loc[:, "presentation_mode"] = [TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS]
 
     out = generate_business_review_ppt(
@@ -506,7 +479,7 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "1"},
             {"label": "Touchpoints cubiertos", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -536,9 +509,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 5,
             "linked_comments": 3,
             "linked_pairs": 5,
-            "detractor_probability": 0.13,
-            "confidence": 0.20,
-            "priority": 0.91,
+            "focus_rate_high_incidence": 0.13,
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
         {
@@ -550,9 +521,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 8,
             "linked_comments": 5,
             "linked_pairs": 10,
-            "detractor_probability": 0.45,
-            "confidence": 0.15,
-            "priority": 0.62,
+            "focus_rate_high_incidence": 0.45,
             "incident_records": [
                 {
                     "incident_id": "INC000104256298",
@@ -590,9 +559,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 2,
             "linked_comments": 2,
             "linked_pairs": 2,
-            "detractor_probability": float("nan"),
-            "confidence": 0.0,
-            "priority": 0.10,
+            "focus_rate_high_incidence": float("nan"),
             "incident_records": [
                 {
                     "incident_id": "",
@@ -630,7 +597,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "3"},
             {"label": "Touchpoints cubiertos", "value": "3"},
-            {"label": "Links validados", "value": "17"},
+            {"label": "Vínculos semánticos", "value": "17"},
         ],
     )
 
@@ -687,7 +654,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
     attribution.loc[:, "journey_route"] = [
         "Incidencia -> Login -> Acceso / Login -> comentario VoC -> NPS"
     ]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Keywords semánticas: Login, Otp. Helix Source Service N2 dominante: Auth."
     ]
     attribution.loc[:, "journey_cx_readout"] = ["5 links Helix↔VoC convergen en este journey roto."]
@@ -717,7 +684,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         entity_summary_kpis=[
             {"label": "Journeys rotos", "value": "1"},
             {"label": "Touchpoints detectados", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -849,18 +816,14 @@ def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> N
             [
                 {
                     "nps_topic": "Acceso bloqueado",
-                    "priority": 0.91,
-                    "confidence": 0.20,
-                    "detractor_probability": 0.13,
+                    "focus_rate_high_incidence": 0.13,
                     "linked_pairs": 5,
                     "linked_incidents": 5,
                     "linked_comments": 3,
                 },
                 {
                     "nps_topic": "Operativa crítica fallida",
-                    "priority": 0.62,
-                    "confidence": 0.15,
-                    "detractor_probability": 0.45,
+                    "focus_rate_high_incidence": 0.45,
                     "linked_pairs": 10,
                     "linked_incidents": 8,
                     "linked_comments": 5,
@@ -1068,23 +1031,6 @@ def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Pa
     assert record["incident_id__href"] == record["url"]
 
 
-def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
-    rationale = pd.DataFrame(
-        {
-            "nps_topic": ["Pagos / Transferencias / No funciona bien / Error intermitente"],
-            "nps_points_at_risk": [0.74],
-            "nps_points_recoverable": [0.15],
-            "priority": [0.82],
-        }
-    )
-
-    fig = chart_incident_risk_recovery(rationale, get_theme("light"), top_k=1)
-    assert fig is not None
-    assert "<br>" in str(fig.data[0]["y"][0]) or "…" in str(fig.data[0]["y"][0])
-    assert fig.data[0]["cliponaxis"] is False
-    assert fig.data[1]["cliponaxis"] is False
-
-
 def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
@@ -1114,8 +1060,6 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
                 "linked_pairs": 16,
                 "linked_comments": 13,
                 "avg_nps": 2.0,
-                "confidence": 0.38,
-                "priority": 0.5,
             }
         ]
     )
@@ -1129,4 +1073,4 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "journey"] == "Operativa crítica fallida"
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
-    assert {"touchpoint", "subpalanca", "links", "confidence"}.issubset(table.columns)
+    assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)

@@ -127,7 +127,6 @@ omit = [
   "src/nps_lens/analytics/changepoints.py",
   "src/nps_lens/analytics/causal.py",
   "src/nps_lens/analytics/journey.py",
-  "src/nps_lens/analytics/opportunities.py",
   "src/nps_lens/analytics/nps_helix_link.py",
   "src/nps_lens/llm/client.py",
   "src/nps_lens/llm/pack.py",

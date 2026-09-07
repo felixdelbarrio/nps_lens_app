@@ -100,7 +100,7 @@ const SUMMARY_TABS = [
 const NPS_TABS = [
   { id: "topics", label: "Qué dicen los clientes" },
   { id: "comparison", label: "Cambios respecto al histórico" },
-  { id: "gaps", label: "Dónde se separa el NPS" }
+  { id: "gaps", label: "Brechas NPS" }
 ];
 
 const DATA_TABS = [
@@ -314,7 +314,7 @@ export function App() {
     setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
     setMinSimilarity(config.preferences.min_similarity ?? 0.15);
     setMaxDaysApart(config.preferences.max_days_apart ?? 90);
-    setMinN(config.preferences.min_n_opportunities ?? 200);
+    setMinN(config.preferences.min_n_nps_gaps ?? 200);
     setMinNCross(config.preferences.min_n_cross_comparisons ?? 30);
   }, [config]);
 
@@ -631,7 +631,7 @@ export function App() {
       touchpoint_source: touchpointSource,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
-      min_n_opportunities: minN,
+      min_n_nps_gaps: minN,
       min_n_cross_comparisons: minNCross
     }),
     [
@@ -1134,9 +1134,11 @@ export function App() {
       Valor: row.value ?? "",
       n: row.n ?? "",
       "NPS Clásico": row.nps ?? "",
+      "Nº detractores": row.detractors ?? "",
+      "Peso en la muestra": row.sample_share == null ? "" : formatPercentage(Number(row.sample_share)),
       "Brecha vs Global": row.gap_vs_overall ?? ""
     }));
-    const gapTitle = dashboard?.gaps.title || "Palancas con mayor brecha de NPS";
+    const gapTitle = dashboard?.gaps.title || "Brechas NPS";
     const gapSubtitle =
       dashboard?.gaps.subtitle ||
       "Las barras muestran cuánto se desvía el NPS de cada palanca respecto al NPS global del período.";

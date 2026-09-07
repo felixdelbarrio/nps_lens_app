@@ -86,7 +86,6 @@ class InsightResponseV1(BaseModel):
     title: str
     executive_summary: str
 
-    confidence: float = 0.0
     severity: int = 1
 
     journey_route: str = "unknown"
@@ -103,15 +102,6 @@ class InsightResponseV1(BaseModel):
     @classmethod
     def _clean_required_text(cls, v: str) -> str:
         return str(v or "").strip()
-
-    @field_validator("confidence")
-    @classmethod
-    def _conf_range(cls, v: float) -> float:
-        try:
-            v = float(v)
-        except Exception:
-            return 0.0
-        return max(0.0, min(1.0, v))
 
     @field_validator("severity")
     @classmethod

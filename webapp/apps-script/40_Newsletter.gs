@@ -98,11 +98,14 @@ function saveNewsletterRecipient(payload) {
 function _newsletterInsight_(edition) {
   const dashboard = edition.screens && edition.screens.dashboard || {};
   const kpis = dashboard.kpis || {};
-  const opportunities = dashboard.opportunities && dashboard.opportunities.table || [];
-  const opportunity = opportunities.length ? String(opportunities[0].opportunity || opportunities[0].topic || opportunities[0].name || '') : '';
+  const gaps = dashboard.gaps && dashboard.gaps.table || [];
+  const row = gaps.length ? gaps[0] : null;
+  const gap = row && row.gap_vs_overall != null
+    ? String(row.value || '') + ': ' + Number(row.gap_vs_overall).toFixed(1) + ' puntos frente al NPS global (n=' + String(row.n || 0) + ')'
+    : '';
   return {context: _cleanText_(dashboard.context_label || 'Edición actualizada', 240),
     samples: kpis.samples == null ? 'n/d' : String(kpis.samples),
-    nps: kpis.classic_nps == null ? 'n/d' : String(kpis.classic_nps), opportunity: _cleanText_(opportunity, 240)};
+    nps: kpis.classic_nps == null ? 'n/d' : String(kpis.classic_nps), gap: _cleanText_(gap, 240)};
 }
 
 function _newsletterEscape_(value) {
@@ -120,11 +123,11 @@ function _publishedNewsletterInsight_(scopeKey) {
 
 function _newsletterHtml_(insight, reportUrl, scopeKey) {
   const webUrl = ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey);
-  const opportunity = insight.opportunity ? '<div style="margin:20px 0;padding:18px;background:#EAF3FA;border-left:4px solid #2DCCCD"><b>Foco ejecutivo</b><br>' + _newsletterEscape_(insight.opportunity) + '</div>' : '';
+  const gap = insight.gap ? '<div style="margin:20px 0;padding:18px;background:#EAF3FA;border-left:4px solid #2DCCCD"><b>Brecha NPS observada</b><br>' + _newsletterEscape_(insight.gap) + '</div>' : '';
   return '<div style="font-family:Arial,sans-serif;color:#121F3F;max-width:680px;margin:auto;background:#F4F6F8">' +
     '<div style="background:#070E46;color:#fff;padding:32px"><div style="font-size:12px;letter-spacing:1.2px">BBVA BANCA DE EMPRESAS E INSTITUCIONES</div><h1 style="margin:12px 0 4px">NPS Lens</h1><div>La voz del cliente conectada con la operación</div></div>' +
     '<div style="padding:32px;background:#fff"><h2 style="font-family:Georgia,serif;color:#070E46">Una lectura preparada para decidir</h2><p>' + _newsletterEscape_(insight.context) + '</p>' +
-    '<div style="display:flex;gap:12px"><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>Muestras</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.samples) + '</b></div><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>NPS clásico</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.nps) + '</b></div></div>' + opportunity +
+    '<div style="display:flex;gap:12px"><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>Muestras</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.samples) + '</b></div><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>NPS clásico</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.nps) + '</b></div></div>' + gap +
     '<p><a href="' + webUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Abrir NPS Lens</a>' +
     (reportUrl ? ' <a href="' + reportUrl + '" style="display:inline-block;color:#001391;padding:13px 18px;font-weight:bold">Abrir presentación en Google Slides</a>' : '') + '</p></div></div>';
 }
@@ -132,7 +135,7 @@ function _newsletterHtml_(insight, reportUrl, scopeKey) {
 function _newsletterPlain_(insight, reportUrl, scopeKey) {
   return ['BBVA Banca de Empresas e Instituciones', 'NPS Lens', '', insight.context,
     'Muestras: ' + insight.samples, 'NPS clásico: ' + insight.nps,
-    insight.opportunity ? 'Foco ejecutivo: ' + insight.opportunity : '', '',
+    insight.gap ? 'Brecha NPS observada: ' + insight.gap : '', '',
     'Abrir NPS Lens: ' + ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey),
     reportUrl ? 'Abrir presentación: ' + reportUrl : ''].filter(Boolean).join('\n');
 }

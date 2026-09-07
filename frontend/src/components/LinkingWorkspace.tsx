@@ -20,7 +20,6 @@ type SelectOption = {
 const SCENARIO_DETAIL_TABS = [
   { id: "helix", label: "Evidencia Helix" },
   { id: "voc", label: "Voz del cliente" },
-  { id: "matrix", label: "Matriz visual" },
   { id: "detail", label: "Ficha cuantitativa" },
   { id: "heat", label: "Heat map" },
   { id: "cp", label: "Changepoints + lag" },
@@ -212,7 +211,7 @@ function buildScenarioIdentityRows(
   const palanca = asString(activeCard.palanca);
   const subpalanca = asString(activeCard.subpalanca);
 
-  appendRow(methodLabel || "Escenario causal", title);
+  appendRow(methodLabel || "Tópico observado", title);
   if (anchorTopic && normalizeComparableValue(anchorTopic) !== normalizeComparableValue(title)) {
     appendRow("Tópico NPS ancla", anchorTopic);
   }
@@ -238,9 +237,11 @@ function buildScenarioIdentityRows(
     }
   }
 
-  appendRow("Owner (rol)", asString(activeCard.owner_role, "n/d"));
-  appendRow("Lane de acción", asString(activeCard.action_lane, "n/d"));
-  appendRow("ETA (semanas)", displayValue(activeCard.eta_weeks, "ETA (semanas)"));
+  appendRow("Organizaciones responsables observadas", asString(activeCard.support_organizations, "n/d"));
+  appendRow(
+    "Duración media histórica de resolución (semanas)",
+    displayValue(activeCard.historical_resolution_weeks, "duración histórica")
+  );
   return rows;
 }
 
@@ -677,23 +678,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 ) : (
                   renderVocCards(activeVocRecords)
                 )
-              ) : null}
-
-              {scenarioDetailTab === "matrix" ? (
-                <div className="figure-split">
-                  <section className="linking-panel">
-                    <PlotFigure
-                      emptyMessage="No hay suficientes focos para construir la matriz de prioridad."
-                      figure={asFigure(activeCard.matrix_figure)}
-                    />
-                  </section>
-                  <section className="linking-panel">
-                    <PlotFigure
-                      emptyMessage="No hay suficientes señales para comparar riesgo y recuperación."
-                      figure={asFigure(activeCard.risk_recovery_figure)}
-                    />
-                  </section>
-                </div>
               ) : null}
 
               {scenarioDetailTab === "detail" ? (

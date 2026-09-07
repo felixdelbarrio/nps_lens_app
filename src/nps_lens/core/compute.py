@@ -8,7 +8,6 @@ from nps_lens.analytics.causal import CausalHypothesis, best_effort_ate_logit
 from nps_lens.analytics.changepoints import ChangePoint, detect_nps_changepoints
 from nps_lens.analytics.drivers import DriverStat, driver_table
 from nps_lens.analytics.journey import RouteCandidate, build_routes
-from nps_lens.analytics.opportunities import Opportunity, rank_opportunities
 from nps_lens.core.metrics import NpsSummary, daily_kpis, daily_mix, summarize
 
 
@@ -18,10 +17,6 @@ def compute_summary(df: pd.DataFrame) -> NpsSummary:
 
 def compute_driver_table(df: pd.DataFrame, dimension: str) -> list[DriverStat]:
     return driver_table(df, dimension=dimension)
-
-
-def compute_opportunities(df: pd.DataFrame, dimensions: list[str], min_n: int) -> list[Opportunity]:
-    return rank_opportunities(df, dimensions=dimensions, min_n=min_n)
 
 
 def compute_routes(
