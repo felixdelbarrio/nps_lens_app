@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from typing import Callable
@@ -696,12 +697,19 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
     _upload_nps_march(client)
     service = app.state.dashboard_service
     captured: dict[str, object] = {}
+    dashboard_request: dict[str, object] = {}
+    linking_request: dict[str, object] = {}
+    dataset_requests: dict[str, dict[str, object]] = {}
 
-    monkeypatch.setattr(service, "nps_dashboard", lambda **_: {"kpis": {}})
-    monkeypatch.setattr(
-        service,
-        "linking_dashboard",
-        lambda **_: {
+    def _dashboard(**kwargs):
+        dashboard_request.update(kwargs)
+        return {"kpis": {}}
+
+    monkeypatch.setattr(service, "nps_dashboard", _dashboard)
+
+    def _linking(**kwargs):
+        linking_request.update(kwargs)
+        return {
             "available": True,
             "kpis": {
                 "nps_points_at_risk": 2.1,
@@ -723,17 +731,29 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
                     }
                 ]
             },
-        },
-    )
+        }
+
     monkeypatch.setattr(
         service,
-        "dataset_rows",
-        lambda *, dataset_kind, **_: {"dataset_kind": dataset_kind, "rows": []},
+        "linking_dashboard",
+        _linking,
     )
+
+    def _dataset(*, dataset_kind, **kwargs):
+        dataset_requests[dataset_kind] = kwargs
+        return {"dataset_kind": dataset_kind, "rows": []}
+
+    monkeypatch.setattr(service, "dataset_rows", _dataset)
 
     def _executive_report(**kwargs):
         captured.update(kwargs)
-        return BusinessPptResult("informe-ejecutivo.pptx", b"EXECUTIVE", 10)
+        return BusinessPptResult(
+            "informe-ejecutivo.pptx",
+            b"EXECUTIVE",
+            10,
+            compact_file_name="informe-ejecutivo-sin-evolucion-nps.pptx",
+            compact_content=b"COMPACT",
+        )
 
     monkeypatch.setattr(service, "generate_ppt_report", _executive_report)
 
@@ -741,13 +761,31 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         context=UploadContext("BBVA México", "Senda", ""),
         pop_year="2026",
         pop_month="03",
+        nps_group="Promotores",
+        score_channel="Web",
     )
 
     assert captured["touchpoint_source"] == "executive_journeys"
     assert captured["report_dimension_analysis"] == ""
+    assert dashboard_request["nps_group"] == "Promotores"
+    assert dashboard_request["score_channel"] == "Web"
+    assert linking_request["nps_group"] == "Todos"
+    assert linking_request["score_channel"] == "Web"
+    assert captured["nps_group"] == "Todos"
+    assert dataset_requests["nps"]["nps_group"] == "Promotores"
     with ZipFile(BytesIO(artifact.content)) as archive:
         assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
+        assert archive.read("informe-ejecutivo-sin-evolucion-nps.pptx") == b"COMPACT"
         assert b"presentaci\xc3\xb3n ejecutiva" in archive.read("newsletter.html")
+        publication = json.loads(archive.read("publication.json"))
+        assert publication["static_views"] == {
+            "default": {"nps_group": "Promotores", "score_channel": "Web"},
+            "immutable": True,
+        }
+        assert publication["filters"]["causal_nps_group"] == "Todos"
+        assert publication["manifest"]["report_without_evolution"] == (
+            "informe-ejecutivo-sin-evolucion-nps.pptx"
+        )
     assert client.get("/api/dashboard/report/exclusive.pptx").status_code == 404
 
 

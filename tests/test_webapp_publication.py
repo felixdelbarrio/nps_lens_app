@@ -89,7 +89,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.8.0'" in config
+    assert "version: '2.9.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
@@ -103,15 +103,26 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "serverP95Ms" in activity and "renderP95Ms" in activity
     assert "slowCalls" in activity
     assert "performanceEvents" in activity
+    assert "row[3] === 'server_call' || row[3] === 'snapshot_load'" in activity
     assert "function exportActivityReport" not in activity
     assert "function getNewsletterSettings" not in newsletter
     assert "function getNewsletterWorkspace" in newsletter
+    assert "_presentationEntryUrl_(publication.scopeKey)" in newsletter
+    assert "function _compactSlidesProperty_(scopeKey)" in publication
+    assert "report_without_evolution" in publication
+    assert "!_evolutionNpsVisible_() && compactId" in publication
     assert "_configuredPublicationFolder_" not in newsletter
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
     assert "if(viewer.reportUrl)" in app
-    assert "_publishedShell_" in webapp
+    assert "viewer.shellDeferred = Boolean(publication)" in webapp
+    assert "function getPublishedShell(" in webapp
+    assert "event.parameter.presentation === '1'" in webapp
+    assert "viewer.evolutionNpsVisible = _evolutionNpsVisible_()" in webapp
+    assert "_encodedSnapshot_" in webapp
+    assert "DecompressionStream" in app
+    assert "snapshot_load" in app
     assert "viewer.publicationCatalog = _publicationCatalog_()" in webapp
     assert "delete edition.snapshots" in publication
     assert "NPS_LENS_SHELL_" in publication
@@ -121,9 +132,9 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "rpc('getPublicationCatalog')" not in app
     assert "rpc('getAdministration')" not in app
     assert "Promise.all([rpc('getNewsletter" not in app
-    assert "location.reload()" not in app
+    assert "saveEvolutionNpsSettings" in app
     assert "importPublicationArchive','ok'" in app
-    assert "data-settings=\"publication\"" in app
+    assert 'data-settings="publication"' in app
     assert "function getPublicationSettings" in publication
     assert "_cacheKey_" in publication and "_cacheKey_" in activity and "_cacheKey_" in newsletter
     assert app.strip().endswith("</script>")
@@ -138,5 +149,7 @@ def test_admin_cleanup_trashes_every_publication_artifact_and_invalidates_caches
     assert "item.snapshotFileId" in setup
     assert "item.pptxFileId" in setup
     assert "item.slidesFileId" in setup
+    assert "_compactPptxProperty_" in setup
+    assert "_compactSlidesProperty_" in setup
     assert "setTrashed(true)" in setup
     assert "cacheEpochProperty" in setup

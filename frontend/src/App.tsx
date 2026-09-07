@@ -76,9 +76,9 @@ const MAIN_AREAS = [
 ];
 
 const INSIGHT_TABS = [
-  { id: "summary", label: "Sumario del Periodo" },
-  { id: "nps-analysis", label: "Analítica NPS" },
-  { id: "linking", label: "Incidencias ↔ NPS" }
+  { id: "summary", label: "Evolución NPS" },
+  { id: "nps-analysis", label: "Comentarios" },
+  { id: "linking", label: "Causalidad" }
 ];
 
 const INGEST_TABS = [
@@ -91,13 +91,13 @@ const INGEST_TABS = [
 const SUMMARY_TABS = [
   { id: "period-aggregates", label: "Agregados por periodo" },
   { id: "daily", label: "NPS clásico vs detractores" },
-  { id: "volume-mix", label: "Como y Cuando lo dicen" },
-  { id: "gaps", label: "Donde se separa el NPS" },
-  { id: "opportunities", label: "Oportunidades priorizadas" },
-  { id: "cohorts", label: "Comparativas cruzadas" }
+  { id: "volume-mix", label: "Cómo y cuándo lo dicen" }
 ];
 
 const NPS_TABS = [
+  { id: "gaps", label: "Dónde se separa el NPS" },
+  { id: "opportunities", label: "Oportunidades priorizadas" },
+  { id: "cohorts", label: "Comparativas cruzadas" },
   { id: "topics", label: "Qué dicen los clientes" },
   { id: "comparison", label: "Cambios respecto al histórico" }
 ];
@@ -780,8 +780,8 @@ export function App() {
       service_origin_n2: serviceOriginN2,
       pop_year: popYear,
       pop_month: popMonth,
-      nps_group: LINKING_NPS_GROUP,
-      score_channel: LINKING_SCORE_CHANNEL,
+      nps_group: npsGroup,
+      score_channel: scoreChannel,
       min_n: minN,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
@@ -947,7 +947,7 @@ export function App() {
             <p className="eyebrow">Filters</p>
             <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Sincronizados para Analítica NPS, Incidencias y reportes causales
+              Sincronizados para Comentarios, Causalidad y reportes ejecutivos
             </p>
           </div>
         </div>
@@ -1364,13 +1364,7 @@ export function App() {
       );
     }
 
-    if (summaryTab === "opportunities") {
-      return renderOpportunitiesPanel();
-    }
-    if (summaryTab === "gaps") {
-      return renderGapsPanel();
-    }
-    return renderCohortsPanel();
+    return null;
   }
 
   function renderSummarySection() {
@@ -1403,6 +1397,15 @@ export function App() {
   }
 
   function renderNpsSection() {
+    const content = npsTab === "gaps"
+      ? renderGapsPanel()
+      : npsTab === "opportunities"
+        ? renderOpportunitiesPanel()
+        : npsTab === "cohorts"
+          ? renderCohortsPanel()
+          : npsTab === "topics"
+            ? renderTopicsPanel()
+            : renderComparisonPanel();
     return (
       <>
         <NavigationTabs
@@ -1412,7 +1415,7 @@ export function App() {
           onChange={setNpsTab}
           value={npsTab}
         />
-        {npsTab === "topics" ? renderTopicsPanel() : renderComparisonPanel()}
+        {content}
       </>
     );
   }
@@ -1423,7 +1426,7 @@ export function App() {
         <section className="surface-card stack-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Incidencias ↔ NPS</p>
+              <p className="eyebrow">Causalidad</p>
               <h2>Base cruzada y readiness operativo</h2>
             </div>
           </div>

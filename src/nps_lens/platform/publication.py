@@ -142,7 +142,14 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
     )
 
 
-def _archive(publication: dict[str, object], *, report_name: str, report_content: bytes) -> bytes:
+def _archive(
+    publication: dict[str, object],
+    *,
+    report_name: str,
+    report_content: bytes,
+    compact_report_name: str = "",
+    compact_report_content: bytes = b"",
+) -> bytes:
     target = BytesIO()
     with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         archive.writestr(
@@ -151,6 +158,8 @@ def _archive(publication: dict[str, object], *, report_name: str, report_content
         )
         archive.writestr("newsletter.html", _newsletter(publication, report_name))
         archive.writestr(report_name, report_content)
+        if compact_report_name and compact_report_content:
+            archive.writestr(compact_report_name, compact_report_content)
     return target.getvalue()
 
 
@@ -159,6 +168,8 @@ def build_publication_archive(
     *,
     report_name: str,
     report_content: bytes,
+    compact_report_name: str = "",
+    compact_report_content: bytes = b"",
     file_name: str,
     max_bytes: int = MAX_PUBLICATION_BYTES,
 ) -> PublicationArtifact:
@@ -185,12 +196,24 @@ def build_publication_archive(
                 "truncated": nps_included < nps_total or helix_included < helix_total,
             }
         )
-    content = _archive(publication, report_name=report_name, report_content=report_content)
+    content = _archive(
+        publication,
+        report_name=report_name,
+        report_content=report_content,
+        compact_report_name=compact_report_name,
+        compact_report_content=compact_report_content,
+    )
     if len(content) > max_bytes:
         raise ValueError("La publicación estática supera el límite absoluto permitido.")
     if isinstance(manifest, dict):
         manifest["size_bytes"] = len(content)
-        content = _archive(publication, report_name=report_name, report_content=report_content)
+        content = _archive(
+            publication,
+            report_name=report_name,
+            report_content=report_content,
+            compact_report_name=compact_report_name,
+            compact_report_content=compact_report_content,
+        )
     return PublicationArtifact(
         file_name=file_name,
         content=content,

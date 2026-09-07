@@ -391,7 +391,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     <section className="surface-card stack-panel linking-workspace">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Incidencias ↔ NPS</p>
+          <p className="eyebrow">Causalidad</p>
           <h2>Lectura causal operativa</h2>
           <p className="secondary-copy">
             {asString(method.summary, "Base cruzada entre incidencias y Voz del Cliente.")}

@@ -12,6 +12,14 @@ function _publicationShellProperty_(scopeKey) {
   return 'NPS_LENS_SHELL_' + String(scopeKey || '').trim();
 }
 
+function _compactPptxProperty_(scopeKey) {
+  return 'NPS_LENS_COMPACT_PPTX_' + String(scopeKey || '').trim();
+}
+
+function _compactSlidesProperty_(scopeKey) {
+  return 'NPS_LENS_COMPACT_SLIDES_' + String(scopeKey || '').trim();
+}
+
 function _clearPublicationCache_() {
   publicationRowsCache = null;
   CacheService.getScriptCache().remove(_cacheKey_('publications'));
@@ -78,10 +86,8 @@ function _snapshotCacheKey_(fileId) {
   return _cacheKey_('snapshot-' + fileId);
 }
 
-function _cacheSnapshot_(fileId, jsonText) {
+function _cacheEncodedSnapshot_(fileId, encoded) {
   try {
-    const encoded = Utilities.base64EncodeWebSafe(Utilities.gzip(
-      Utilities.newBlob(jsonText, 'application/json')).getBytes());
     const chunks = [];
     for (let offset = 0; offset < encoded.length; offset += SNAPSHOT_CACHE_CHUNK_CHARS) {
       chunks.push(encoded.slice(offset, offset + SNAPSHOT_CACHE_CHUNK_CHARS));
@@ -95,7 +101,7 @@ function _cacheSnapshot_(fileId, jsonText) {
   }
 }
 
-function _loadSnapshot_(fileId) {
+function _encodedSnapshot_(fileId) {
   const cache = CacheService.getScriptCache(), key = _snapshotCacheKey_(fileId);
   const count = Number(cache.get(key));
   try {
@@ -103,14 +109,21 @@ function _loadSnapshot_(fileId) {
       const keys = Array.from({length:count}, (_, index) => key + '-' + index);
       const values = cache.getAll(keys);
       if (keys.every(chunkKey => values[chunkKey])) {
-        const bytes = Utilities.base64DecodeWebSafe(keys.map(chunkKey => values[chunkKey]).join(''));
-        return JSON.parse(Utilities.ungzip(Utilities.newBlob(bytes)).getDataAsString('UTF-8'));
+        return keys.map(chunkKey => values[chunkKey]).join('');
       }
     }
   } catch (error) { cache.remove(key); }
-  const text = DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8');
-  _cacheSnapshot_(fileId, text);
-  return JSON.parse(text);
+  const blob = DriveApp.getFileById(fileId).getBlob(), bytes = blob.getBytes();
+  const gzipBytes = bytes[0] === 31 && (bytes[1] === 139 || bytes[1] === -117)
+    ? bytes : Utilities.gzip(Utilities.newBlob(bytes, 'application/json')).getBytes();
+  const encoded = Utilities.base64EncodeWebSafe(gzipBytes);
+  _cacheEncodedSnapshot_(fileId, encoded);
+  return encoded;
+}
+
+function _loadSnapshot_(fileId) {
+  const bytes = Utilities.base64DecodeWebSafe(_encodedSnapshot_(fileId));
+  return JSON.parse(Utilities.ungzip(Utilities.newBlob(bytes)).getDataAsString('UTF-8'));
 }
 
 function _normalizedDatasetFilter_(value) {
@@ -173,7 +186,7 @@ function _publicationCatalog_() {
   return _publicationRows_().map(item => ({
     scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.buug,item.n1,item.year,item.month,item.causalMethodLabel].join(' · '),
     buug:item.buug,n1:item.n1,n2:item.n2,year:item.year,month:item.month,causalMethod:item.causalMethod,
-    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:'https://docs.google.com/presentation/d/'+encodeURIComponent(item.slidesFileId)+'/edit'
+    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_presentationEntryUrl_(item.scopeKey)
   }));
 }
 
@@ -195,38 +208,59 @@ function importPublicationArchive(form) {
   const members = Utilities.unzip(Utilities.newBlob(archiveBytes,'application/zip',archiveName));
   const editionBlob = members.find(blob => blob.getName() === 'publication.json');
   const reports = members.filter(blob => blob.getName().toLowerCase().endsWith('.pptx'));
-  if (!editionBlob || reports.length !== 1) throw new Error('La edición debe contener publication.json y una única presentación PPTX.');
-  const edition = _validateArchive_(JSON.parse(editionBlob.getDataAsString('UTF-8'))), reportBlob = reports[0];
-  if (String(edition.manifest.report || '') !== reportBlob.getName()) throw new Error('La presentación no coincide con el manifiesto.');
+  if (!editionBlob) throw new Error('La edición debe contener publication.json.');
+  const edition = _validateArchive_(JSON.parse(editionBlob.getDataAsString('UTF-8')));
+  const reportName = String(edition.manifest.report || '');
+  const compactReportName = String(edition.manifest.report_without_evolution || '');
+  const expectedReports = [reportName, compactReportName].filter(Boolean);
+  const reportBlob = reports.find(blob => blob.getName() === reportName);
+  const compactReportBlob = compactReportName ? reports.find(blob => blob.getName() === compactReportName) : null;
+  if (!reportBlob || (compactReportName && !compactReportBlob) || reports.length !== expectedReports.length) {
+    throw new Error('Las presentaciones PPTX no coinciden con el manifiesto de la edición.');
+  }
   const destination = _publicationFolder_(), previous = _publicationRows_().find(item => item.scopeKey === edition.scope.key);
   const shellProperty = _publicationShellProperty_(edition.scope.key), previousShellFileId = _property_(shellProperty);
+  const compactPptxProperty = _compactPptxProperty_(edition.scope.key), previousCompactPptxFileId = _property_(compactPptxProperty);
+  const compactSlidesProperty = _compactSlidesProperty_(edition.scope.key), previousCompactSlidesFileId = _property_(compactSlidesProperty);
   const previousSelectedScope = _property_(NPS_LENS.selectedScopeProperty);
   const newsletterInsight = JSON.stringify(_newsletterInsight_(edition));
-  let snapshotFileId='', shellFileId='', pptxFileId='', slidesFileId='', committed=false;
+  let snapshotFileId='', shellFileId='', pptxFileId='', slidesFileId='', compactPptxFileId='', compactSlidesFileId='', committed=false;
   try {
     const snapshotText = JSON.stringify(edition.snapshots.data);
-    const snapshotBlob = Utilities.newBlob(snapshotText,'application/json','nps-lens-'+edition.scope.key+'-data.json');
-    snapshotFileId = String(Drive.Files.create({name:snapshotBlob.getName(),mimeType:'application/json',parents:[destination.id]},snapshotBlob,{supportsAllDrives:true,fields:'id'}).id);
+    const snapshotBytes = Utilities.gzip(Utilities.newBlob(snapshotText,'application/json')).getBytes();
+    const snapshotBlob = Utilities.newBlob(snapshotBytes,'application/gzip','nps-lens-'+edition.scope.key+'-data.json.gz');
+    snapshotFileId = String(Drive.Files.create({name:snapshotBlob.getName(),mimeType:'application/gzip',parents:[destination.id]},snapshotBlob,{supportsAllDrives:true,fields:'id'}).id);
     delete edition.snapshots;
     const shellText = JSON.stringify(edition);
-    const shellBlob = Utilities.newBlob(shellText,'application/json','nps-lens-'+edition.scope.key+'-web.json');
-    shellFileId = String(Drive.Files.create({name:shellBlob.getName(),mimeType:'application/json',parents:[destination.id]},shellBlob,{supportsAllDrives:true,fields:'id'}).id);
+    const shellBytes = Utilities.gzip(Utilities.newBlob(shellText,'application/json')).getBytes();
+    const shellBlob = Utilities.newBlob(shellBytes,'application/gzip','nps-lens-'+edition.scope.key+'-web.json.gz');
+    shellFileId = String(Drive.Files.create({name:shellBlob.getName(),mimeType:'application/gzip',parents:[destination.id]},shellBlob,{supportsAllDrives:true,fields:'id'}).id);
     pptxFileId = String(Drive.Files.create({name:reportBlob.getName(),mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
     slidesFileId = String(Drive.Files.create({name:reportBlob.getName().replace(/\.pptx$/i,''),mimeType:'application/vnd.google-apps.presentation',parents:[destination.id]},reportBlob,{supportsAllDrives:true,fields:'id'}).id);
     if (!slidesFileId) throw new Error('Google Drive no ha confirmado la presentación nativa.');
+    if (compactReportBlob) {
+      compactPptxFileId = String(Drive.Files.create({name:compactReportBlob.getName(),mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',parents:[destination.id]},compactReportBlob,{supportsAllDrives:true,fields:'id'}).id);
+      compactSlidesFileId = String(Drive.Files.create({name:compactReportBlob.getName().replace(/\.pptx$/i,''),mimeType:'application/vnd.google-apps.presentation',parents:[destination.id]},compactReportBlob,{supportsAllDrives:true,fields:'id'}).id);
+      if (!compactSlidesFileId) throw new Error('Google Drive no ha confirmado la presentación compacta.');
+    }
     const s=edition.scope,row=[s.key,s.audience_key,s.buug,s.n1,s.n2||'',s.year,s.month,s.causal_method,s.causal_method_label,snapshotFileId,pptxFileId,slidesFileId,newsletterInsight,edition.generated_at,new Date(),viewer.email];
     const sheet=_sheet_(NPS_LENS.publicationsSheet);
-    PropertiesService.getScriptProperties().setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});
+    const properties = PropertiesService.getScriptProperties();
+    properties.setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});
+    if(compactPptxFileId) properties.setProperty(compactPptxProperty,compactPptxFileId); else properties.deleteProperty(compactPptxProperty);
+    if(compactSlidesFileId) properties.setProperty(compactSlidesProperty,compactSlidesFileId); else properties.deleteProperty(compactSlidesProperty);
     if(previous) sheet.getRange(previous.row,1,1,PUBLICATION_HEADERS.length).setValues([row]); else sheet.appendRow(row);
     committed = true; _clearPublicationCache_();
-    _cacheSnapshot_(shellFileId, shellText);
-    if(previous) [previous.snapshotFileId,previous.pptxFileId,previous.slidesFileId,previousShellFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
+    _cacheEncodedSnapshot_(shellFileId, Utilities.base64EncodeWebSafe(shellBytes));
+    if(previous) [previous.snapshotFileId,previous.pptxFileId,previous.slidesFileId,previousShellFileId,previousCompactPptxFileId,previousCompactSlidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
   } catch(error) {
     if (!committed) {
       const properties = PropertiesService.getScriptProperties();
       if(previousShellFileId) properties.setProperty(shellProperty,previousShellFileId); else properties.deleteProperty(shellProperty);
+      if(previousCompactPptxFileId) properties.setProperty(compactPptxProperty,previousCompactPptxFileId); else properties.deleteProperty(compactPptxProperty);
+      if(previousCompactSlidesFileId) properties.setProperty(compactSlidesProperty,previousCompactSlidesFileId); else properties.deleteProperty(compactSlidesProperty);
       if(previousSelectedScope) properties.setProperty(NPS_LENS.selectedScopeProperty,previousSelectedScope); else properties.deleteProperty(NPS_LENS.selectedScopeProperty);
-      [snapshotFileId,shellFileId,pptxFileId,slidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(ignore){}});
+      [snapshotFileId,shellFileId,pptxFileId,slidesFileId,compactPptxFileId,compactSlidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(ignore){}});
     }
     throw error;
   }
@@ -235,5 +269,13 @@ function importPublicationArchive(form) {
 
 function _reportUrl_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
-  return publication ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(publication.slidesFileId) + '/edit' : '';
+  if (!publication) return '';
+  const compactId = _property_(_compactSlidesProperty_(publication.scopeKey));
+  const slidesId = !_evolutionNpsVisible_() && compactId ? compactId : publication.slidesFileId;
+  return slidesId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(slidesId) + '/edit' : '';
+}
+
+function _presentationEntryUrl_(scopeKey) {
+  const base = ScriptApp.getService().getUrl();
+  return base ? base + '?presentation=1&scope=' + encodeURIComponent(String(scopeKey || '')) : '';
 }

@@ -1,99 +1,162 @@
 <script>
 (() => {
   'use strict';
-  const publication = JSON.parse(document.getElementById('publication-data').textContent || '{}');
+  let publication = JSON.parse(document.getElementById('publication-data').textContent || '{}');
   const viewer = JSON.parse(document.getElementById('viewer-data').textContent || '{}');
-  const staticViews = publication.static_views || {};
-  const defaultView = staticViews.default || {score_channel:'Web',nps_group:'Detractores'};
+  let staticViews = publication.static_views || {};
+  let defaultView = staticViews.default || {score_channel:'Web',nps_group:'Detractores'};
   let dashboard = publication.screens?.dashboard || {};
-  const linking = publication.screens?.linking || {};
-  const datasets = publication.screens?.data || {};
+  let linking = publication.screens?.linking || {};
+  let datasets = publication.screens?.data || {};
   const $ = id => document.getElementById(id);
   const rows = value => Array.isArray(value) ? value : [];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
-  const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['gaps','Dónde se separa el NPS'],['opportunities','Oportunidades priorizadas'],['cohorts','Comparativas cruzadas']];
-  const npsViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']];
-  const linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : [['situation','Situación'],['entity-summary','Resumen causal'],['scenarios','Escenarios'],['nps-deep-dive','Detalle NPS']];
+  const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen']];
+  const npsViews = [['gaps','Dónde se separa el NPS'],['opportunities','Oportunidades priorizadas'],['cohorts','Comparativas cruzadas'],['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico']];
+  const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen causal'],['scenarios','Análisis de escenarios causales'],['nps-deep-dive','Análisis de Tópicos de NPS afectados']];
+  let linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : fallbackLinkingViews;
+  const insightSections = [...(viewer.evolutionNpsVisible===false?[]:[['summary','Evolución NPS']]),['nps-analysis','Comentarios'],['linking','Causalidad']];
   const areas = [
-    {id:'insights',label:'Insights',sections:[['summary','Sumario del Periodo'],['nps-analysis','Analítica NPS'],['linking','Incidencias ↔ NPS']]},
+    {id:'insights',label:'Insights',sections:insightSections},
     {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}
   ];
-  const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,adminRoute:'',settingsView:'telemetry',scoreChannel:defaultView.score_channel||'Web',npsGroup:defaultView.nps_group||'Detractores',started:performance.now()};
+  const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,scenarioDetail:'helix',evidenceView:'table',deepDiveTab:'ranking',deepDiveTopic:'Todos',adminRoute:'',settingsView:'evolution',scoreChannel:defaultView.score_channel||'Web',npsGroup:defaultView.nps_group||'Detractores',started:performance.now()};
   const scopeCatalog = rows(viewer.publicationCatalog);
   const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
   const activityQueue = [];
   const datasetCache = {};
   let activityTimer = 0;
   let activityCache = {key:'',report:null};
+  let telemetryReady = !viewer.shellDeferred;
 
   function purgeCharts() {
     if (!window.Plotly) return;
     document.querySelectorAll('.chart').forEach(node => window.Plotly.purge(node));
   }
 
-  function detailViews(section) {
-    if (section === 'summary') return summaryViews;
-    if (section === 'nps-analysis') return npsViews;
-    if (section === 'linking') return linkingViews;
-    return [];
+  const PUBLIC_VIEW_REGISTRY = {
+    summary: summaryViews,
+    'nps-analysis': npsViews,
+    linking: linkingViews
+  };
+
+  function applyPublication(payload) {
+    publication=payload||{};
+    staticViews=publication.static_views||{};
+    defaultView=staticViews.default||defaultView;
+    dashboard=publication.screens?.dashboard||{};
+    linking=publication.screens?.linking||{};
+    datasets=publication.screens?.data||{};
+    linkingViews=rows(linking.navigation).length?rows(linking.navigation).map(item=>[item.id,item.label]):fallbackLinkingViews;
+    PUBLIC_VIEW_REGISTRY.linking=linkingViews;
+    state.scoreChannel=defaultView.score_channel||state.scoreChannel;
+    state.npsGroup=defaultView.nps_group||state.npsGroup;
+    Object.entries(publication.brand?.design_tokens||{}).forEach(([key,value])=>{
+      if(/^color\.[a-z0-9.-]+$/i.test(key)&&/^#[0-9a-f]{6}$/i.test(String(value)))document.documentElement.style.setProperty(`--bbva-${key.replaceAll('.','-')}`,value);
+    });
   }
-  function table(items, limit = 250) {
+
+  async function decodePublication(encoded) {
+    const normalized=String(encoded||'').replace(/-/g,'+').replace(/_/g,'/');
+    const padded=normalized+'='.repeat((4-normalized.length%4)%4);
+    const binary=atob(padded), bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+    const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  }
+
+  function detailViews(section) {
+    return PUBLIC_VIEW_REGISTRY[section] || [];
+  }
+  function richText(value) {
+    return esc(value).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  }
+  function table(items, limit = 250, preferredColumns = []) {
     const data = rows(items).slice(0, limit);
     if (!data.length) return '<div class="empty">No hay información suficiente en esta edición.</div>';
-    const columns = [...new Set(data.flatMap(row => Object.keys(row || {})))].slice(0, 14);
+    const available = [...new Set(data.flatMap(row => Object.keys(row || {})))];
+    const columns = [...preferredColumns.filter(key => available.includes(key)), ...available.filter(key => !preferredColumns.includes(key))].filter(key => !/__href$/.test(key)).slice(0, 14);
     return `<div class="table-wrap"><table><thead><tr>${columns.map(key => `<th>${esc(label(key))}</th>`).join('')}</tr></thead><tbody>${data.map(row => `<tr>${columns.map(key => {
       const raw = row?.[key];
-      const text = typeof raw === 'object' ? JSON.stringify(raw) : format(raw);
-      const href = String(row?.url || row?.incident_id__href || '');
-      return `<td>${href && /incident|record id/i.test(key) ? `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>` : esc(text)}</td>`;
+      const text = Array.isArray(raw) ? raw.join(' · ') : typeof raw === 'object' && raw !== null ? JSON.stringify(raw) : format(raw);
+      const href = String(row?.[`${key}__href`] || row?.url || row?.incident_id__href || '');
+      return `<td>${href && /incident|record id|^id$/i.test(key) ? `<a href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>` : esc(text)}</td>`;
     }).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
-  function metric(name, value) { return `<article class="card"><div class="metric-label">${esc(name)}</div><div class="metric-value">${esc(format(value))}</div></article>`; }
+  function metric(name, value, delta) {
+    const deltaClass=delta?.favorable===true?'positive':delta?.favorable===false?'negative':'';
+    return `<article class="metric-card"><span>${esc(name)}</span><strong>${esc(format(value))}</strong>${delta?`<small class="metric-delta ${deltaClass}">${esc(delta.display||format(delta.value))}</small>`:''}</article>`;
+  }
+  function metrics(items, className='') { return `<div class="metric-grid ${className}">${rows(items).map(item=>metric(item.label,item.value,item.delta)).join('')}</div>`; }
   function figure(spec, id) {
     if (!spec?.data?.length) return '<div class="empty">No hay señal suficiente para construir esta visualización.</div>';
     setTimeout(() => { const target = $(id); if (target && window.Plotly) Plotly.newPlot(target, spec.data, spec.layout || {}, {displayModeBar:false,responsive:true}); }, 0);
     return `<div id="${id}" class="chart"></div>`;
   }
-  function hero(title, copy) {
-    const channels=rows(staticViews.score_channels), groups=rows(staticViews.nps_groups);
+  function topicFigure(spec, selectedTopic) {
+    if (!spec?.data?.length || selectedTopic === 'Todos') return spec;
+    const clone=JSON.parse(JSON.stringify(spec)), trace=clone.data[0]||{}, labels=rows(trace.y);
+    const indexes=labels.map((value,index)=>({value:String(value).replace(/^TOP\s+\d+\s+·\s+/i,'').trim(),index})).filter(item=>item.value===selectedTopic).map(item=>item.index);
+    if(!indexes.length)return null;
+    Object.keys(trace).forEach(key=>{if(Array.isArray(trace[key])&&trace[key].length===labels.length)trace[key]=indexes.map(index=>trace[key][index]);});
+    return clone;
+  }
+  function snapshotFilters() {
     const method=publication.scope?.causal_method_label||publication.filters?.touchpoint_source||'—';
-    const filters=channels.length?`<div class="toolbar snapshot-filters"><label class="field">Canal<select id="static-channel">${channels.map(value=>`<option ${value===state.scoreChannel?'selected':''}>${esc(value)}</option>`).join('')}</select></label><label class="field">Grupo Score<select id="static-group">${groups.map(value=>`<option ${value===state.npsGroup?'selected':''}>${esc(value)}</option>`).join('')}</select></label>${viewer.isAdmin?`<label class="field">Método causal<select id="static-scope">${(scopeCatalog.length?scopeCatalog:[{scopeKey:publication.scope?.key,label:method}]).map(item=>`<option value="${esc(item.scopeKey)}" ${item.scopeKey===publication.scope?.key?'selected':''}>${esc(item.label)}</option>`).join('')}</select></label>`:`<label class="field">Método causal<span class="pill">${esc(method)}</span></label>`}</div>`:'';
-    return `<div class="hero"><h3>${esc(title)}</h3><p>${esc(copy || 'Información consolidada con las mismas reglas de negocio de NPS Lens local.')}</p><div class="pills">${rows(dashboard.context_pills).map(value => `<span class="pill">${esc(value)}</span>`).join('')}</div>${filters}</div>`;
+    if(!viewer.isAdmin||scopeCatalog.length<2)return '';
+    return `<div class="toolbar snapshot-filters"><label class="field">Edición publicada<select id="static-scope">${scopeCatalog.map(item=>`<option value="${esc(item.scopeKey)}" ${item.scopeKey===publication.scope?.key?'selected':''}>${esc(item.label||method)}</option>`).join('')}</select></label></div>`;
   }
-  function contentTabs(items) {
-    return items.length ? `<nav class="content-tabs" aria-label="Detalle de pantalla">${items.map(([id,name]) => `<button class="tab ${id === state.view ? 'active' : ''}" data-detail="${esc(id)}">${esc(name)}</button>`).join('')}</nav>` : '';
+  function hero(title, copy, options={}) {
+    const pills=options.pills===false?[]:rows(options.pills||dashboard.context_pills);
+    return `<section class="surface-card context-card"><div class="section-heading"><div>${options.eyebrow?`<p class="eyebrow">${esc(options.eyebrow)}</p>`:''}<h2>${esc(title)}</h2><p class="secondary-copy">${esc(copy || 'Información consolidada con las mismas reglas de negocio de NPS Lens local.')}</p></div></div>${pills.length?`<div class="pills">${pills.map(value=>`<span class="pill">${esc(value)}</span>`).join('')}</div>`:''}${options.filters?snapshotFilters():''}${options.body||''}</section>`;
   }
-  function kpiCards(block, fallback) {
+  function contentTabs(items, active=state.view, dataAttribute='detail') {
+    return items.length ? `<nav class="content-tabs" aria-label="Detalle de pantalla">${items.map(([id,name]) => `<button class="tab ${id === active ? 'active' : ''}" data-${dataAttribute}="${esc(id)}">${esc(name)}</button>`).join('')}</nav>` : '';
+  }
+  function kpiCards(block, fallback, withDeltas) {
     const kpis = block?.kpis || fallback || {};
     const display = block?.display || {};
-    return [['Comentarios','comments'],['Score medio','nps_average'],['NPS clásico','classic_nps'],['Detractores','detractor_rate'],['Promotores','promoter_rate']].map(([name,key]) => metric(name,display[key] ?? kpis[key])).join('');
+    const deltas=(withDeltas??block?.show_deltas)?block?.deltas||{}:{};
+    return `<div class="metric-grid metric-grid-5">${[['Comentarios','comments'],['Score medio','nps_average'],['NPS clásico','classic_nps'],['Detractores','detractor_rate'],['Promotores','promoter_rate']].map(([name,key]) => metric(name,display[key] ?? kpis[key],deltas[key])).join('')}</div>`;
   }
+  function noteList(items, empty='') { const values=rows(items); return values.length?`<article class="note-card"><ul class="plain-list">${values.map(item=>`<li>${richText(item)}</li>`).join('')}</ul></article>`:(empty?`<article class="note-card"><p class="secondary-copy">${esc(empty)}</p></article>`:''); }
+  function heading(eyebrow,title,copy,controls='') { return `<div class="section-heading section-heading-inline"><div>${eyebrow?`<p class="eyebrow">${esc(eyebrow)}</p>`:''}<h3>${esc(title)}</h3>${copy?`<p class="secondary-copy">${esc(copy)}</p>`:''}</div>${controls}</div>`; }
+  function readonlyField(name,value){return `<div class="readonly-field"><span>${esc(name)}</span><strong>${esc(value||'—')}</strong></div>`;}
   function summary(view) {
     const overview = dashboard.overview || {};
-    const tabs = contentTabs(summaryViews);
+    const cumulative=dashboard.scope?.cumulative;
+    const overviewHeader=hero(cumulative?.label||'Datos acumulados',cumulative?.note,{eyebrow:'Ámbito de análisis',filters:true,body:kpiCards(cumulative,dashboard.kpis,false)});
+    const tabs = overviewHeader+contentTabs(summaryViews);
     if (view === 'period-aggregates') {
-      const cumulative = dashboard.scope?.cumulative;
+      const historical=dashboard.scope?.historical;
       const period = dashboard.scope?.period;
-      return tabs + hero(cumulative?.label || 'Datos acumulados', cumulative?.note) + `<div class="grid">${kpiCards(cumulative,dashboard.kpis)}<article class="card wide"><h3>${esc(period?.label || dashboard.context_label || 'Periodo seleccionado')}</h3><div class="grid nested-grid">${kpiCards(period,dashboard.kpis)}</div>${figure(overview.period_aggregates_figure,'period-chart')}</article></div>`;
+      return tabs+`<section class="surface-card stack-panel">${historical?heading('',historical.label,historical.note)+kpiCards(historical,dashboard.kpis,false):''}${heading('',period?.label||dashboard.context_label||'Periodo seleccionado','')}${kpiCards(period,dashboard.kpis)}${figure(overview.period_aggregates_figure,'period-chart')}</section>`;
     }
-    if (view === 'daily') return tabs + hero('NPS clásico vs detractores','Nivel, tendencia y composición diaria con la misma lectura de la aplicación local.') + `<div class="grid"><article class="card wide">${figure(overview.daily_kpis_figure,'daily-kpis')}</article><article class="card wide">${figure(overview.daily_mix_figure,'daily-mix')}</article></div>`;
-    if (view === 'volume-mix') return tabs + hero('Cómo y cuándo lo dicen','Volumen, canal y mezcla de respuesta a lo largo del periodo.') + `<div class="grid"><article class="card wide">${figure(overview.daily_volume_mix_figure,'volume-chart')}</article></div>`;
-    if (view === 'gaps') return tabs + hero(dashboard.gaps?.title || 'Dónde se separa el NPS',dashboard.gaps?.subtitle) + `<div class="grid"><article class="card wide">${figure(dashboard.gaps?.figure,'gaps-chart')}</article><article class="card wide">${table(dashboard.gaps?.table)}</article></div>`;
-    if (view === 'opportunities') return tabs + hero('Oportunidades priorizadas','Conceptos equivalentes se muestran con una única denominación de negocio.') + `<div class="grid"><article class="card wide">${figure(dashboard.opportunities?.figure,'opportunity-chart')}</article><article class="card wide">${table(dashboard.opportunities?.table)}</article></div>`;
-    return tabs + hero('Comparativas cruzadas','Lecturas por cohortes protegidas por el tamaño mínimo de muestra.') + `<div class="grid"><article class="card wide">${figure(dashboard.cohorts?.figure,'cohort-chart')}</article><article class="card wide">${table(dashboard.cohorts?.table)}</article></div>`;
+    if (view === 'daily') return tabs+`<section class="surface-card stack-panel">${figure(overview.daily_kpis_figure,'daily-kpis')}${figure(overview.daily_mix_figure,'daily-mix')}${noteList(overview.daily_explanation_bullets)}</section>`;
+    if (view === 'volume-mix') return tabs+`<section class="surface-card">${figure(overview.daily_volume_mix_figure,'volume-chart')}</section>`;
+    return tabs;
   }
   function npsAnalysis(view) {
-    const tabs = contentTabs(npsViews);
-    if (view === 'topics') return tabs + hero('Qué dicen los clientes','Temas, evidencias y lenguaje real de cliente.') + `<div class="grid"><article class="card wide"><h3>Temas principales</h3>${figure(dashboard.overview?.topics_figure,'topics-chart')}${table(dashboard.overview?.topics_table)}</article></div>`;
-    return tabs + hero('Cambios respecto al histórico','Diferencias comparables con su base y dirección.') + `<div class="grid"><article class="card wide">${figure(dashboard.comparison?.figure,'comparison-chart')}</article><article class="card wide">${table(dashboard.comparison?.table)}</article></div>`;
+    const tabs=hero('Análisis de comentarios','Canal y grupo aplicados a todas las lecturas de esta sección.',{filters:true})+contentTabs(npsViews);
+    if (view === 'gaps') { const gaps=dashboard.gaps||{}; return tabs+`<section class="surface-card stack-panel">${heading('Brechas',gaps.title||'Palancas con mayor brecha de NPS',gaps.subtitle,readonlyField('Dimensión',gaps.dimension))}<p class="metric-note">NPS Global del período: <strong>${esc(format(gaps.overall_nps))}</strong></p>${figure(gaps.figure,'gaps-chart')}${table(rows(gaps.table).map(row=>({Valor:row.value,n:row.n,'NPS Clásico':row.nps,'Brecha vs Global':row.gap_vs_overall})),250,['Valor','n','NPS Clásico','Brecha vs Global'])}</section>`; }
+    if (view === 'opportunities') { const opportunity=dashboard.opportunities||{}; return tabs+`<section class="surface-card stack-panel">${heading('Priorización','Oportunidades priorizadas','',readonlyField('Dimensión',opportunity.dimension))}${figure(opportunity.figure,'opportunity-chart')}${noteList(opportunity.bullets,'No se detectaron oportunidades con el umbral actual.')}${table(rows(opportunity.table).map(row=>({Etiqueta:row.label||`${row.dimension}=${row.value}`,n:row.n,'Score actual':row.current_nps,Uplift:row.potential_uplift,Confianza:row.confidence})),250,['Etiqueta','n','Score actual','Uplift','Confianza'])}</section>`; }
+    if (view === 'cohorts') { const cohorts=dashboard.cohorts||{}; return tabs+`<section class="surface-card stack-panel">${heading('Cohortes','Bolsas de fricción','',`<div class="inline-actions">${readonlyField('Filas',cohorts.row_dimension)}${readonlyField('Columnas',cohorts.column_dimension)}</div>`)}${figure(cohorts.figure,'cohort-chart')}</section>`; }
+    if (view === 'topics') { const overview=dashboard.overview||{}; const topicRows=rows(overview.topics_table).map(row=>({Cluster:row.cluster_id,n:row.n,Términos:rows(row.top_terms).join(', '),Ejemplos:rows(row.examples).join(' · ')})); return tabs+`<section class="surface-card stack-panel">${figure(overview.topics_figure,'topics-chart')}${table(topicRows,250,['Cluster','n','Términos','Ejemplos'])}${noteList(overview.insight_bullets)}</section>`; }
+    const comparison=dashboard.comparison||{}, summary=comparison.summary||{};
+    const comparisonRows=rows(comparison.table).map(row=>({Valor:row.value,'Delta NPS Clásico':row.delta_nps,'Score actual':row.nps_current,'Score base':row.nps_baseline,'n actual':row.n_current,'n base':row.n_baseline}));
+    return tabs+`<section class="surface-card stack-panel">${heading('Comparativa',summary.label_current||'Sin base comparativa','',readonlyField('Dimensión',comparison.dimension))}<div class="delta-strip"><span>Delta NPS Clásico: <strong>${esc(format(summary.delta_nps))}</strong></span><span>Δ detractores: <strong>${esc(format(summary.delta_detr_pp))} pp</strong></span><span>Base actual: <strong>${esc(format(summary.n_current))}</strong></span><span>Base histórica: <strong>${esc(format(summary.n_baseline))}</strong></span></div>${figure(comparison.figure,'comparison-chart')}${table(comparisonRows,250,['Valor','Delta NPS Clásico','Score actual','Score base','n actual','n base'])}</section>`;
   }
+  function scenarioIdentity(card){const method=linking.causal_method||{}, values=[], seen=new Set(); const add=(name,value)=>{const text=String(value??'').trim();const key=text.toLowerCase();if(text&&text!=='n/d'&&text!=='—'&&!seen.has(key)){values.push({label:name,value:text});seen.add(key);}};add(method.label||'Escenario causal',card.title);if(card.anchor_topic!==card.title)add('Tópico NPS ancla',card.anchor_topic);if(method.value==='bbva_source_service_n2')add('Source Service N2',card.helix_source_service_n2);else{add(method.value==='broken_journeys'?'Touchpoint detectado':'Touchpoint afectado',card.touchpoint);if(method.value!=='palanca_touchpoint')add('Palanca',card.palanca);if(method.value!=='domain_touchpoint')add('Subpalanca',card.subpalanca);}add('Owner (rol)',card.owner_role);add('Lane de acción',card.action_lane);add('ETA (semanas)',card.eta_weeks);return values;}
+  function scenarioEvidence(records,kind){if(state.evidenceView==='table'){if(kind==='helix')return table(rows(records).map(row=>({ID:row.incident_id,ID__href:row.url||row.incident_id__href,'Evidencia Helix':row.summary})),50,['ID','Evidencia Helix']);return table(rows(records).map(row=>({ID:row.comment_id,Fecha:row.date,Score:row.nps,Grupo:row.group,Palanca:row.palanca,Subpalanca:row.subpalanca,Comentario:row.comment})),50,['ID','Fecha','Score','Grupo','Palanca','Subpalanca','Comentario']);}return `<div class="evidence-card-grid">${rows(records).map(row=>`<article class="evidence-card"><div class="evidence-pill-row"><span class="evidence-pill">${esc(kind==='helix'?(row.incident_id||'INC'):`ID: ${row.comment_id||'-'}`)}</span>${kind==='voc'?`<span class="evidence-pill">Fecha: ${esc(format(row.date))}</span><span class="evidence-pill">Score: ${esc(format(row.nps))}</span>`:''}</div><p>${esc(row.summary||row.comment||'')}</p></article>`).join('')||'<div class="empty">Sin evidencia visible.</div>'}</div>`;}
   function scenarioCard(card,index,total) {
     if (!card) return '<div class="empty">No hay escenarios defendibles en esta edición.</div>';
     const title=card.title||card.anchor_topic||`Escenario ${index+1}`;
     const story=card.statement||card.chain_story||card.rationale||card.summary||'';
-    return `<article class="card wide scenario" id="active-scenario" tabindex="-1" aria-label="Escenario causal ${index+1} de ${total}"><header class="scenario-head"><div><p class="eyebrow">Escenario causal priorizado</p><h3>${esc(title)}</h3><p class="scenario-story">${esc(story)}</p></div><span class="scenario-rank" aria-label="Prioridad ${esc(card.rank||index+1)}">#${esc(card.rank||index+1)}</span></header><div class="scenario-flow">${rows(card.flow_steps).map(step=>`<span>${esc(step)}</span>`).join('')}</div><div class="scenario-grid">${rows(card.spotlight_metrics).map(item => `<div class="fact"><span>${esc(item.label || 'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><details open><summary>Evidencia Helix</summary>${table(card.incident_records,20)}</details><details><summary>Voz del cliente</summary>${table(card.comment_records,20)}</details><details><summary>Matriz visual</summary>${figure(card.matrix_figure,`matrix-${index}`)}</details><details><summary>Ficha cuantitativa</summary>${table(card.detail_table,30)}</details><details><summary>Heat map</summary>${figure(card.heatmap_figure,`heat-${index}`)}</details><details><summary>Changepoints + lag</summary>${figure(card.changepoints_figure,`cp-${index}`)}</details><details><summary>Lag en días</summary>${figure(card.lag_figure,`lag-${index}`)}</details></article>`;
+    const helix=rows(card.incident_records), voc=rows(card.comment_records), hidden=new Set(['Palanca','Subpalanca','Touchpoint afectado','Touchpoint detectado','Source Service N2','Tópico NPS ancla','Owner','Owner (rol)']);
+    const details=[['helix',`Evidencia Helix (${helix.length})`],['voc',`Voz del cliente (${voc.length})`],['matrix','Matriz visual'],['detail','Ficha cuantitativa'],['heat','Heat map'],['cp','Changepoints + lag'],['lag','Lag en días']];
+    let detail=''; if(state.scenarioDetail==='helix')detail=scenarioEvidence(helix,'helix');else if(state.scenarioDetail==='voc')detail=scenarioEvidence(voc,'voc');else if(state.scenarioDetail==='matrix')detail=`<div class="figure-split">${figure(card.matrix_figure,`matrix-${index}`)}${figure(card.risk_recovery_figure,`risk-${index}`)}</div>`;else if(state.scenarioDetail==='detail')detail=table(card.detail_table,30);else if(state.scenarioDetail==='heat')detail=figure(card.heatmap_figure,`heat-${index}`);else if(state.scenarioDetail==='cp')detail=figure(card.changepoints_figure,`cp-${index}`);else detail=figure(card.lag_figure,`lag-${index}`);
+    return `<article class="surface-card scenario" id="active-scenario" tabindex="-1" aria-label="Escenario causal ${index+1} de ${total}"><header class="scenario-head"><div><p class="eyebrow">Escenario causal priorizado</p><h3>${esc(title)}</h3><p class="scenario-story">${esc(story)}</p></div><span class="scenario-rank" aria-label="Prioridad ${esc(card.rank||index+1)}">#${esc(card.rank||index+1)}</span></header><div class="scenario-flow">${rows(card.flow_steps).map(step=>`<span>${esc(step)}</span>`).join('')}</div><div class="scenario-overview-grid"><article class="scenario-fact-sheet"><h4>Ficha priorizada</h4><dl>${scenarioIdentity(card).map(item=>`<div><dt>${esc(item.label)}</dt><dd>${esc(item.value)}</dd></div>`).join('')}</dl></article><div class="scenario-evidence-stack"><article class="scenario-fact-sheet"><h4>${helix.length} incidencias enlazadas</h4><div class="evidence-pill-row">${helix.slice(0,6).map(row=>{const href=row.url||row.incident_id__href;return href?`<a class="evidence-pill" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(row.incident_id||'INC')}</a>`:`<span class="evidence-pill">${esc(row.incident_id||'INC')}</span>`;}).join('')}</div></article><article class="scenario-fact-sheet"><h4>${voc.length} comentarios enlazados</h4><div class="evidence-pill-row">${voc.slice(0,6).map(row=>`<span class="evidence-pill">${esc(row.comment_id||'VOC')}</span>`).join('')}</div></article></div></div><div class="scenario-grid">${rows(card.spotlight_metrics).filter(item=>!hidden.has(item.label)).map(item=>`<div class="fact"><span>${esc(item.label||'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><div class="evidence-toolbar"><div class="segmented"><button data-evidence-view="table" class="${state.evidenceView==='table'?'active':''}">Tabla</button><button data-evidence-view="cards" class="${state.evidenceView==='cards'?'active':''}">Cards</button></div><span><strong>${helix.length}</strong> evidencias Helix visibles · <strong>${voc.length}</strong> comentarios VoC visibles</span></div>${contentTabs(details,state.scenarioDetail,'scenario-detail')}${detail}</article>`;
   }
   function scenarioWorkspace(cards) {
     const items=rows(cards), total=items.length;
@@ -105,19 +168,29 @@
   function linkingView(view) {
     const tabs = contentTabs(linkingViews);
     if (!linking.available) return tabs + hero('Cruce todavía no disponible',linking.empty_state || 'Se necesita una base Helix y NPS suficiente.');
-    if (view === 'situation') return tabs + hero(linking.situation?.narrative?.title || 'Situación causal',linking.situation?.narrative?.summary) + `<div class="grid">${Object.entries(linking.kpis || {}).slice(0,9).map(([key,value]) => metric(label(key),value)).join('')}<article class="card wide">${figure(linking.situation?.figure,'situation-chart')}</article></div>`;
-    if (view === 'entity-summary') return tabs + hero(linking.entity_summary?.title || 'Resumen causal',linking.entity_summary?.subtitle) + `<div class="grid"><article class="card wide">${figure(linking.entity_summary?.figure,'entity-chart')}</article><article class="card wide">${table(linking.entity_summary?.table)}</article></div>`;
-    if (view === 'scenarios') return tabs + hero(linking.scenarios?.title || 'Escenarios causales',linking.scenarios?.subtitle) + `<div class="grid scenario-workspace">${scenarioWorkspace(linking.scenarios?.cards)}</div>`;
-    return tabs + hero(linking.deep_dive?.title || 'Análisis de tópicos NPS',linking.deep_dive?.subtitle) + `<div class="grid"><article class="card wide"><h3>Tópicos en tendencia</h3>${figure(linking.deep_dive?.trending?.figure,'trending-chart')}</article><article class="card wide"><h3>Ranking de hipótesis</h3>${table(linking.deep_dive?.ranking?.rows)}</article><article class="card wide"><h3>Muro de evidencias</h3>${table(linking.deep_dive?.evidence?.rows)}</article></div>`;
+    const method=linking.causal_method||{}; const context=hero('Ámbito del análisis causal',method.summary,{pills:linking.context_pills,filters:false})+tabs;
+    if (view === 'situation') {const situation=linking.situation||{}, narrative=situation.narrative||{};return context+`<section class="surface-card stack-panel">${heading(narrative.kicker||'Narrativa causal',narrative.title||'Sin escenarios defendibles en esta ventana',narrative.summary)}${metrics(narrative.metrics,'metric-grid-3')}${rows(situation.metadata).length?`<div class="pills">${rows(situation.metadata).map(item=>`<span class="pill"><strong>${esc(item.label)}:</strong> ${esc(item.value)}</span>`).join('')}</div>`:''}${situation.note?`<article class="note-card"><p>${esc(situation.note)}</p></article>`:''}</section>`;}
+    if (view === 'entity-summary') {const entity=linking.entity_summary||{};return context+`<section class="surface-card stack-panel">${heading('',entity.title||'Resumen causal',entity.subtitle)}${metrics(entity.kpis,'metric-grid-3')}${heading('',entity.figure_title||'Lectura visual','')}${figure(entity.figure,'entity-chart')}${heading('',entity.table_title||'Detalle causal','')}${table(entity.table)}</section>`;}
+    if (view === 'scenarios') return context+`<section class="linking-stack">${heading('',linking.scenarios?.title||'Escenarios causales',linking.scenarios?.subtitle)}<div class="scenario-workspace">${scenarioWorkspace(linking.scenarios?.cards)}</div></section>`;
+    const deep=linking.deep_dive||{}, options=rows(deep.topic_filter?.options); const filter=`<label class="field topic-filter">${esc(deep.topic_filter?.label||'Tópico')}<select id="deep-topic">${options.map(item=>`<option value="${esc(item.value)}" ${item.value===state.deepDiveTopic?'selected':''}>${esc(item.label)}</option>`).join('')}</select><small>${esc(deep.topic_filter?.hint||'')}</small></label>`; const selected=state.deepDiveTopic; const matches=row=>selected==='Todos'||String(row['Tópico NPS']||row.nps_topic||row.topic||row.label||'')===selected; const deepTabs=rows(deep.tabs).map(item=>[item.id,item.label]); const active=state.deepDiveTab==='evidence'?deep.evidence||{}:deep.ranking||{};
+    return context+`<section class="surface-card stack-panel">${heading('',deep.title||'Análisis de tópicos NPS',deep.subtitle)}${metrics(deep.kpis)}${filter}${heading('',deep.trending?.title||'NPS tópicos trending','')}${figure(topicFigure(deep.trending?.figure,selected),'trending-chart')}${contentTabs(deepTabs,state.deepDiveTab,'deep-detail')}${heading('',active.title||'Detalle','')}${table(rows(active.rows).filter(matches))}</section>`;
   }
   function data(view) {
     const source = datasets[view] || {};
     const cacheKey=view==='helix'?view:`${view}|${state.scoreChannel}|${state.npsGroup}`;
     if(source.deferred&&!datasetCache[cacheKey])setTimeout(()=>loadStaticDataset(view,cacheKey),0);
     const visible=datasetCache[cacheKey]||source;
-    return hero(view === 'nps' ? 'Base NPS' : 'Base Helix','Muestra estática de soporte incluida en la edición publicada.') + `<div class="grid"><article class="card wide"><div class="pills"><span class="pill">${esc(format(visible.total_rows || rows(visible.rows).length))} filas</span><span class="pill">${esc(rows(visible.columns).length)} columnas</span></div>${source.deferred&&!datasetCache[cacheKey]?'<div class="status">Cargando datos del ámbito…</div>':table(visible.rows,500)}</article></div>`;
+    const title=view==='nps'?'Base NPS':'Base Helix';
+    return hero(title,'Vista tabular del mismo dataset persistido que soporta el análisis local.',{eyebrow:'Datos',filters:view==='nps'})+`<section class="surface-card stack-panel"><div class="table-meta"><span>Filas: <strong>${esc(format(visible.total_rows??rows(visible.rows).length))}</strong></span><span>Columnas: <strong>${esc(rows(visible.columns).length)}</strong></span></div>${visible.error?`<p class="error">${esc(visible.error)}</p>`:source.deferred&&!datasetCache[cacheKey]?'<div class="status">Cargando datos del ámbito…</div>':table(visible.rows,500)}</section>`;
   }
   async function loadStaticDataset(view,cacheKey){try{datasetCache[cacheKey]=await rpc('getPublishedDataset',[view,publication.scope?.key||viewer.scopeKey,state.scoreChannel,state.npsGroup]);if(state.area==='data'&&state.section===view)render();}catch(error){datasetCache[cacheKey]={rows:[],columns:[],total_rows:0,error:error.message};if(state.area==='data'&&state.section===view)render();}}
+  function localPublishedDataset(kind,scoreChannel,npsGroup){
+    const source=publication.snapshots?.data?.datasets?.[kind];
+    if(!source)return {dataset_kind:kind,total_rows:0,columns:[],rows:[]};
+    const normalize=value=>String(value||'todos').trim().toLowerCase().replace(/^detractores$/,'detractor').replace(/^promotores$/,'promotor').replace(/^neutros$/,'pasivo');
+    const page=kind==='helix'?source.page:source.pages?.[`${normalize(scoreChannel)}|${normalize(npsGroup)}`];
+    return {dataset_kind:kind,total_rows:page?.total_rows||0,columns:source.columns||[],rows:page?.rows||[]};
+  }
   const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,performanceVersion:'2.3',performanceEvents:18,historicalEvents:0,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
   function rpc(name, args = []) {
     const callStarted = performance.now();
@@ -125,9 +198,11 @@
       if (viewer.local) {
         if (name === 'getActivityReport') return resolve(localActivity);
         if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
+        if (name === 'getPublishedDataset') return resolve(localPublishedDataset(args[0],args[2],args[3]));
         if (name === 'getNewsletterWorkspace') return resolve({subject:'NPS y causalidad con incidencias - BBVA México ENTERPRISE WEB - 2026 Marzo - Journeys de detracción',scope:publication.scope||{key:'local'},activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}],sender:{ready:true,name:'NPS Lens',effective:'nps-lens.group@bbva.com'}});
         if (name === 'getPublicationSettings') return resolve({id:'local-preview',name:'Vista previa local',url:''});
-        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope') return resolve({});
+        if (name === 'getEvolutionNpsSettings') return resolve({visible:true});
+        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope' || name === 'saveEvolutionNpsSettings') return resolve({visible:true});
         if (name === 'testNewsletter') return resolve({sent:1});
         if (name === 'sendNewsletter') return resolve({sent:1});
         return resolve({});
@@ -162,6 +237,7 @@
     downloadJson(`nps-lens-webapp-diagnostico-${stamp}.json`,JSON.stringify(payload));
   }
   function queueActivity(name, detail = '', status = 'ok', durationMs = 0) {
+    if(!telemetryReady)return;
     const administrativeView = state.adminRoute === 'settings' ? state.settingsView : state.adminRoute;
     activityQueue.push({occurredAt:new Date().toISOString(),sessionId,name,area:state.adminRoute || state.area,section:state.adminRoute ? administrativeView : state.section,view:state.adminRoute ? administrativeView : state.view,durationMs:Math.max(0,Math.round(durationMs)),status,detail});
     clearTimeout(activityTimer);
@@ -186,7 +262,11 @@
     return report;
   }
   function settings(view) {
-    const tabs = '<nav class="settings-tabs"><button class="button '+(view==='telemetry'?'':'ghost')+'" data-settings="telemetry">Telemetría</button><button class="button '+(view==='adoption'?'':'ghost')+'" data-settings="adoption">Adopción</button><button class="button '+(view==='publication'?'':'ghost')+'" data-settings="publication">Publicación</button></nav>';
+    const tabs = '<nav class="settings-tabs"><button class="button '+(view==='evolution'?'':'ghost')+'" data-settings="evolution">Evolución NPS</button><button class="button '+(view==='telemetry'?'':'ghost')+'" data-settings="telemetry">Telemetría</button><button class="button '+(view==='adoption'?'':'ghost')+'" data-settings="adoption">Adopción</button><button class="button '+(view==='publication'?'':'ghost')+'" data-settings="publication">Publicación</button></nav>';
+    if(view==='evolution'){
+      setTimeout(async()=>{try{const value=await rpc('getEvolutionNpsSettings');$('evolution-visible').checked=value.visible!==false;}catch(error){$('evolution-status').textContent=error.message;}},0);
+      return hero('Evolución NPS','Control global de visibilidad para todos los ámbitos y usuarios de la WebApp y sus presentaciones.')+tabs+'<article class="card wide"><div class="toggle-row"><div><h3>Mostrar Evolución NPS</h3><p class="secondary-copy">Al ocultarla, la navegación pública omite la sección y la presentación abre la variante sin las diapositivas 2 y 3.</p></div><label class="switch"><input id="evolution-visible" type="checkbox"><span aria-hidden="true"></span></label></div><button id="evolution-save" class="button">Guardar visibilidad global</button><p id="evolution-status" class="status">El cambio se aplica a todos los usuarios y ámbitos publicados.</p></article>';
+    }
     if(view==='publication'){
       setTimeout(async()=>{try{const folder=await rpc('getPublicationSettings');$('publication-folder').value=folder.id||'';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}},0);
       return hero('Publicación','Define la carpeta de Drive donde se guardan el PPTX importado y la presentación nativa utilizada por la newsletter.')+tabs+'<article class="card wide"><div class="admin-form"><label class="field">ID o enlace de carpeta<input id="publication-folder" placeholder="ID o enlace de Google Drive"></label><button id="publication-folder-save" class="button secondary">Guardar y validar</button><a id="publication-folder-open" class="button ghost" target="_blank" hidden>Abrir carpeta</a></div><p id="publication-folder-status" class="status">La siguiente importación utilizará esta carpeta.</p></article>';
@@ -215,6 +295,10 @@
   function wireNewsletterScopeActions(){if($('newsletter-scope-open'))$('newsletter-scope-open').onclick=async()=>{try{await rpc('selectPublicationScope',[$('newsletter-scope').value]);location.href=location.pathname+'?scope='+encodeURIComponent($('newsletter-scope').value)+'#admin/newsletter';}catch(error){$('newsletter-status').textContent=error.message;}};}
   function wireContentActions() {
     document.querySelectorAll('[data-detail]').forEach(button => { button.onclick = () => { state.view = button.dataset.detail; render(); }; });
+    document.querySelectorAll('[data-scenario-detail]').forEach(button=>button.onclick=()=>{state.scenarioDetail=button.dataset.scenarioDetail;render();});
+    document.querySelectorAll('[data-evidence-view]').forEach(button=>button.onclick=()=>{state.evidenceView=button.dataset.evidenceView;render();});
+    document.querySelectorAll('[data-deep-detail]').forEach(button=>button.onclick=()=>{state.deepDiveTab=button.dataset.deepDetail;render();});
+    if($('deep-topic'))$('deep-topic').onchange=event=>{state.deepDiveTopic=event.target.value;render();};
     document.querySelectorAll('[data-scenario-step]').forEach(button=>button.onclick=()=>{const total=rows(linking.scenarios?.cards).length;if(total>1){state.scenarioIndex=(state.scenarioIndex+Number(button.dataset.scenarioStep)+total)%total;render();$('active-scenario')?.focus({preventScroll:true});queueActivity('scenario_changed',String(state.scenarioIndex+1));}});
     if ($('publication-form')) $('publication-form').onsubmit = async event => {
       event.preventDefault(); const status = $('publication-status'); status.textContent = 'Validando y publicando…';
@@ -226,11 +310,10 @@
     if($('activity-refresh')) $('activity-refresh').onclick=refresh;
     if($('activity-download')) $('activity-download').onclick=async()=>{try{await downloadActivityReport();$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
     if($('publication-folder-save')) $('publication-folder-save').onclick=async()=>{try{const folder=await rpc('savePublicationFolder',[$('publication-folder').value]);$('publication-folder-status').textContent='Carpeta validada y guardada.';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}};
+    if($('evolution-save')) $('evolution-save').onclick=async()=>{const button=$('evolution-save');button.disabled=true;$('evolution-status').textContent='Guardando visibilidad global…';try{await rpc('saveEvolutionNpsSettings',[$('evolution-visible').checked]);location.reload();}catch(error){button.disabled=false;$('evolution-status').textContent=error.message;}};
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-send')) $('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios activos.`;queueActivity('newsletter_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
-    if($('static-channel')) $('static-channel').onchange=event=>{state.scoreChannel=event.target.value;const available=staticViews.dashboard_by_filter?.[state.scoreChannel]||{};if(!available[state.npsGroup])state.npsGroup=Object.keys(available)[0]||state.npsGroup;dashboard=available[state.npsGroup]||dashboard;render();};
-    if($('static-group')) $('static-group').onchange=event=>{state.npsGroup=event.target.value;dashboard=staticViews.dashboard_by_filter?.[state.scoreChannel]?.[state.npsGroup]||dashboard;render();};
     if($('static-scope')) $('static-scope').onchange=event=>{location.href=location.pathname+'?scope='+encodeURIComponent(event.target.value)+location.hash;};
     wireRecipientActions();
   }
@@ -248,7 +331,10 @@
     }
     const area = areas.find(item => item.id === state.area) || areas[0];
     const section = area.sections.find(item => item[0] === state.section) || area.sections[0];
-    state.section = section[0]; $('screen-title').textContent = section[1];
+    state.section = section[0];
+    const availableViews = detailViews(state.section);
+    if (!availableViews.some(item => item[0] === state.view)) state.view = availableViews[0]?.[0] || state.section;
+    $('screen-title').textContent = section[1];
     document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active',button.dataset.area === area.id));
     $('secondary-nav').innerHTML = area.sections.map(([id,name]) => `<button class="tab ${id === state.section ? 'active' : ''}" data-section="${esc(id)}">${esc(name)}</button>`).join('');
     document.querySelectorAll('[data-section]').forEach(button => { button.onclick = () => { state.section = button.dataset.section; state.view = detailViews(state.section)[0]?.[0] || state.section; render(); }; });
@@ -267,17 +353,30 @@
   document.querySelectorAll('[data-area]').forEach(button => { button.onclick = () => { const area = areas.find(item => item.id === button.dataset.area); state.adminRoute=''; state.area = area.id; state.section = area.sections[0][0]; state.view = detailViews(state.section)[0]?.[0] || state.section; render(); }; });
   if(viewer.isAdmin){document.body.classList.add('is-admin');document.querySelectorAll('[data-admin-route]').forEach(button=>button.onclick=()=>{state.adminRoute=button.dataset.adminRoute;render();});}else{document.querySelectorAll('.admin-only').forEach(node=>node.remove());}
   const hash = location.hash.slice(1).split('/');
-  if(hash[0]==='admin' && viewer.isAdmin && ['newsletter','import','settings'].includes(hash[1])){state.adminRoute=hash[1];state.settingsView=['telemetry','adoption','publication'].includes(hash[2])?hash[2]:'telemetry';}
+  if(hash[0]==='admin' && viewer.isAdmin && ['newsletter','import','settings'].includes(hash[1])){state.adminRoute=hash[1];state.settingsView=['evolution','telemetry','adoption','publication'].includes(hash[2])?hash[2]:'evolution';}
   const hashArea = areas.find(area => area.id === hash[0]);
   if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
-  const filters = publication.filters || {};
-  $('edition-date').textContent = publication.generated_at ? new Date(publication.generated_at).toLocaleString('es-ES') : 'Pendiente de publicación';
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  $('edition-context').innerHTML = [filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month] || filters.month].filter(Boolean).map(value => `<span>${esc(value)}</span>`).join('');
+  function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
   if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
   window.addEventListener('error',event => queueActivity('client_error',event.message,'error'));
   window.addEventListener('pagehide',flushActivity);
-  queueActivity('app_enter');
-  render();
+  async function start(){
+    if(viewer.shellDeferred){
+      const shellStarted=performance.now();
+      $('content').innerHTML='<section class="surface-card loading-state"><div class="loading-bar"></div><h3>Abriendo la edición publicada</h3><p>Preparando el snapshot sin recalcular información.</p></section>';
+      try{
+        const compressed=typeof DecompressionStream==='function';
+        const response=await rpc('getPublishedShell',[viewer.scopeKey,compressed]);
+        applyPublication(compressed?await decodePublication(response.payload):response.payload);
+      }catch(error){telemetryReady=true;queueActivity('snapshot_load','getPublishedShell','error',performance.now()-shellStarted);$('content').innerHTML=`<section class="surface-card"><p class="error">${esc(error.message||error)}</p></section>`;return;}
+      telemetryReady=true;queueActivity('snapshot_load','getPublishedShell','ok',performance.now()-shellStarted);
+    }
+    if(!viewer.shellDeferred)applyPublication(publication);
+    updatePublicationChrome();
+    queueActivity('app_enter','', 'ok', Math.max(0,Math.round(performance.now())));
+    render();
+  }
+  start();
 })();
 </script>

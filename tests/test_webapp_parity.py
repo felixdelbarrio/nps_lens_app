@@ -7,11 +7,12 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     local = (ROOT / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
     web = (ROOT / "webapp" / "apps-script" / "App.html").read_text(encoding="utf-8")
     shared_views = [
-        "Sumario del periodo",
-        "Analítica NPS",
-        "Incidencias ↔ NPS",
+        "Evolución NPS",
+        "Comentarios",
+        "Causalidad",
         "Agregados por periodo",
         "NPS clásico vs detractores",
+        "Dónde se separa el NPS",
         "Oportunidades priorizadas",
         "Comparativas cruzadas",
         "Qué dicen los clientes",
@@ -20,6 +21,12 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     for label in shared_views:
         assert label.casefold() in local.casefold()
         assert label.casefold() in web.casefold()
+    assert '{ id: "gaps", label: "Dónde se separa el NPS" }' in local
+    assert '{ id: "topics", label: "Qué dicen los clientes" }' in local
+    assert local.index('{ id: "gaps"') < local.index('{ id: "topics"')
+    assert web.index("['gaps','Dónde se separa el NPS']") < web.index(
+        "['topics','Qué dicen los clientes']"
+    )
     for causal_detail in (
         "Evidencia Helix",
         "Voz del cliente",
@@ -38,10 +45,36 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
 def test_public_webapp_has_no_filter_controls_and_admin_is_explicit() -> None:
     web = (ROOT / "webapp" / "apps-script" / "App.html").read_text(encoding="utf-8")
     assert "data-filter" not in web
+    assert "static-channel" not in web
+    assert "static-group" not in web
     assert "activity-days" in web  # El único selector pertenece a la administración.
     assert "Newsletter" in web
     assert "Telemetría" in web
     assert "if(viewer.isAdmin)" in "".join(web.split())
+
+
+def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None:
+    web = (ROOT / "webapp" / "apps-script" / "App.html").read_text(encoding="utf-8")
+
+    for payload_field in (
+        "historical.note",
+        "daily_explanation_bullets",
+        "opportunity.bullets",
+        "overview.insight_bullets",
+        "comparison.summary",
+        "narrative.metrics",
+        "situation.metadata",
+        "situation.note",
+        "entity.kpis",
+        "risk_recovery_figure",
+        "deep.topic_filter",
+        "deep.kpis",
+    ):
+        assert payload_field in web
+
+    assert "data-scenario-detail" in web
+    assert "data-deep-detail" in web
+    assert "data-evidence-view" in web
 
 
 def test_admin_navigation_and_activity_are_centralized() -> None:
@@ -53,6 +86,8 @@ def test_admin_navigation_and_activity_are_centralized() -> None:
     assert 'data-admin-route="newsletter"' in index
     assert 'data-admin-route="import"' in index
     assert "Adopción" in app
+    assert 'data-settings="evolution"' in app
+    assert "saveEvolutionNpsSettings" in app
     assert "Probar newsletter" in app
     assert "recordActivityEvents" in app
     assert "recordTelemetry" not in app

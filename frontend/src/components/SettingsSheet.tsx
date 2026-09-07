@@ -233,7 +233,7 @@ export function SettingsSheet({
               <div>
                 <h3>Análisis causal</h3>
                 <p className="secondary-copy">
-                  El método causal ya se selecciona en los filtros de Incidencias ↔ NPS; aquí se mantienen únicamente los umbrales operativos.
+                  El método causal ya se selecciona en los filtros de Causalidad; aquí se mantienen únicamente los umbrales operativos.
                 </p>
               </div>
             </div>

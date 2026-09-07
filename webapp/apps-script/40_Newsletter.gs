@@ -62,7 +62,7 @@ function getNewsletterWorkspace() {
     scope: publication,
     recipients: recipients.map(item => ({email: item.email, active: item.active})),
     activeCount: recipients.filter(item => item.active).length,
-    presentationUrl: _reportUrl_(publication.scopeKey),
+    presentationUrl: _presentationEntryUrl_(publication.scopeKey),
     sender: _newsletterSenderIdentity_(false)
   };
 }
@@ -170,8 +170,8 @@ function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
 }
 
 function _sendNewsletterTo_(recipients, subject, publication) {
-  const reportUrl = _reportUrl_(publication.scopeKey);
-  if (!reportUrl) throw new Error('Publica primero una edición con su presentación nativa.');
+  if (!_reportUrl_(publication.scopeKey)) throw new Error('Publica primero una edición con su presentación nativa.');
+  const reportUrl = _presentationEntryUrl_(publication.scopeKey);
   const sender = _newsletterSenderIdentity_(true);
   if (!sender.ready) throw new Error('El remitente corporativo ' + sender.requested +
     ' no está aceptado para ' + (sender.executor || 'el propietario del despliegue') +

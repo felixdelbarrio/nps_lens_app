@@ -386,7 +386,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
-    assert out.file_name.startswith("nps-termico-causal-")
+    assert out.file_name.startswith("nps-comentarios-causalidad-")
     assert "thermal-causality-v3" in (prs.core_properties.keywords or "")
     assert len(prs.slides) == out.slide_count
     _assert_no_shape_overflow(prs)
@@ -404,7 +404,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
             for paragraph in shape.text_frame.paragraphs:
                 cover_texts.append(paragraph.text or "")
 
-    assert any("Análisis NPS" in t for t in texts)
+    assert any("NPS : Comentarios" in t for t in cover_texts)
+    assert any("Método causal:" in t for t in cover_texts)
     assert any("NPS" in t for t in texts)
     assert any("todo el histórico" in t for t in texts)
     assert any("detractores hacen visible" in t for t in texts)
@@ -435,6 +436,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
+    assert out.compact_file_name.endswith("-sin-evolucion-nps.pptx")
+    assert len(Presentation(BytesIO(out.compact_content)).slides) == out.slide_count - 2
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
@@ -641,6 +644,18 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
     ]
 
     assert out.slide_count == 9
+    compact_prs = Presentation(BytesIO(out.compact_content))
+    assert len(compact_prs.slides) == 7
+    compact_texts = [
+        paragraph.text or ""
+        for slide in compact_prs.slides
+        for shape in slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+    ]
+    assert any(
+        "Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in compact_texts
+    )
     assert any("Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in texts)
     assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
     assert any("Causalidad en tópico NPS ancla: Rendimiento degradado" in t for t in texts)

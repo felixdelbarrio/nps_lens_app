@@ -18,13 +18,18 @@ function clearNpsLensCachesAndReports() {
   try {
     const rows = _publicationRows_(), properties = PropertiesService.getScriptProperties(), stored = properties.getProperties();
     const ids = Array.from(new Set(rows.flatMap(item => [item.snapshotFileId,item.pptxFileId,item.slidesFileId,
-      stored[_publicationShellProperty_(item.scopeKey)]]).filter(Boolean)));
+      stored[_publicationShellProperty_(item.scopeKey)],stored[_compactPptxProperty_(item.scopeKey)],
+      stored[_compactSlidesProperty_(item.scopeKey)]]).filter(Boolean)));
     const failed = [];
     ids.forEach(id => { try { DriveApp.getFileById(id).setTrashed(true); } catch (error) { failed.push(id); } });
     if (failed.length) throw new Error('No se han podido enviar a la papelera ' + failed.length + ' ficheros.');
     const sheet = _sheet_(NPS_LENS.publicationsSheet), lastRow = sheet.getLastRow();
     if (lastRow > 1) sheet.getRange(2,1,lastRow-1,PUBLICATION_HEADERS.length).clearContent();
-    rows.forEach(item => properties.deleteProperty(_publicationShellProperty_(item.scopeKey)));
+    rows.forEach(item => {
+      properties.deleteProperty(_publicationShellProperty_(item.scopeKey));
+      properties.deleteProperty(_compactPptxProperty_(item.scopeKey));
+      properties.deleteProperty(_compactSlidesProperty_(item.scopeKey));
+    });
     properties.deleteProperty(NPS_LENS.selectedScopeProperty);
     NPS_LENS_REQUEST.cacheEpoch = String(Date.now());
     properties.setProperty(NPS_LENS.cacheEpochProperty, NPS_LENS_REQUEST.cacheEpoch);

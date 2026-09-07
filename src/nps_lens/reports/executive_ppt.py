@@ -99,6 +99,8 @@ class BusinessPptResult:
     content: bytes
     slide_count: int
     saved_path: str = ""
+    compact_file_name: str = ""
+    compact_content: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -2145,10 +2147,9 @@ def _kaleido_png(
             panel_height_in=panel_height_in,
         )
         fingerprint = hashlib.sha256(
-            (
-                themed.to_json()
-                + f"|{width}|{height}|{panel_width_in}|{panel_height_in}"
-            ).encode("utf-8")
+            (themed.to_json() + f"|{width}|{height}|{panel_width_in}|{panel_height_in}").encode(
+                "utf-8"
+            )
         ).hexdigest()
         with _FIGURE_PNG_LOCK:
             cached = _FIGURE_PNG_CACHE.get(fingerprint)
@@ -2893,13 +2894,29 @@ def _fill_template_deck(
     dimension = "Subpalanca" if dimension_mode == "subpalanca" else "Palanca"
     view = context.dimensions[dimension]
     month = _month_label_es(context.period_end).title()
+    method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
-    _set_template_text(cover.shapes[0], "Análisis NPS\ntérmico", size=42, bold=True, color="FFFFFF", font="Source Serif 4")
-    scope = " · ".join(
-        value for value in (context.service_origin, context.service_origin_n1, context.service_origin_n2) if value
+    _set_template_text(
+        cover.shapes[0],
+        "NPS : Comentarios\ny causalidad",
+        size=38,
+        bold=True,
+        color="FFFFFF",
+        font="Source Serif 4",
     )
-    _set_template_text(cover.shapes[1], f"{scope} · {context.period_label}", size=13, color="FFFFFF")
+    scope = " · ".join(
+        value
+        for value in (context.service_origin, context.service_origin_n1, context.service_origin_n2)
+        if value
+    )
+    _set_template_text(
+        cover.shapes[1],
+        f"{scope} · {context.period_label} · Método causal: "
+        f"{method.label if include_causal_section else 'No aplicado (sin evidencia Helix)'}",
+        size=12,
+        color="FFFFFF",
+    )
 
     comparison = prs.slides[1]
     delta = _safe_float(context.overview.get("classic_delta"), default=float("nan"))
@@ -2912,10 +2929,27 @@ def _fill_template_deck(
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
     )
-    _set_template_text(comparison.shapes[2], f"Comparativa de indicadores\nBase histórica frente a {month.lower()}", size=12, bold=True, color="FFFFFF", font="Source Serif 4")
+    _set_template_text(
+        comparison.shapes[2],
+        f"Comparativa de indicadores\nBase histórica frente a {month.lower()}",
+        size=12,
+        bold=True,
+        color="FFFFFF",
+        font="Source Serif 4",
+    )
     _set_template_table(comparison.shapes[6].table, _template_period_rows(context))
-    _set_template_text(comparison.shapes[8], f"La mayor fricción del periodo se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.", size=13, color=BBVA_COLORS["ink"])
-    _set_template_text(comparison.shapes[12], f"La mejor señal de experiencia se observa en {context.overview.get('strength_point') or 'sin señal suficiente'}.", size=13, color=BBVA_COLORS["ink"])
+    _set_template_text(
+        comparison.shapes[8],
+        f"La mayor fricción del periodo se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
+        size=13,
+        color=BBVA_COLORS["ink"],
+    )
+    _set_template_text(
+        comparison.shapes[12],
+        f"La mejor señal de experiencia se observa en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
+        size=13,
+        color=BBVA_COLORS["ink"],
+    )
     comparison.shapes[8].top = Inches(1.58)
     comparison.shapes[8].height = Inches(1.16)
     comparison.shapes[12].top = Inches(3.48)
@@ -2932,45 +2966,139 @@ def _fill_template_deck(
     )
 
     history = prs.slides[2]
-    _set_template_text(history.shapes[5], "El NPS clásico explica el periodo dentro de todo el histórico", size=25, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
-    _set_template_text(history.shapes[2], f"NPS clásico y distribución por grupo\nHistórico completo · periodo {context.period_label} resaltado", size=12, bold=True, color="FFFFFF", font="Source Serif 4")
+    _set_template_text(
+        history.shapes[5],
+        "El NPS clásico explica el periodo dentro de todo el histórico",
+        size=25,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+    )
+    _set_template_text(
+        history.shapes[2],
+        f"NPS clásico y distribución por grupo\nHistórico completo · periodo {context.period_label} resaltado",
+        size=12,
+        bold=True,
+        color="FFFFFF",
+        font="Source Serif 4",
+    )
     bullets = (
         f"El periodo arranca con NPS clásico {_fmt_num_or_nd(context.overview.get('start_classic'))} y termina en {_fmt_num_or_nd(context.overview.get('end_classic'))}.\n\n"
         f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}.\n\n"
         "NPS Clásico = % Promotores - % Detractores.\n\n"
         "La curva conserva todo el histórico; el mensaje se limita al periodo solicitado."
     )
-    _set_template_text(history.shapes[3], bullets, size=11.5, color=BBVA_COLORS["ink"], font="Source Serif 4")
-    _set_template_text(history.shapes[4], f"Durante {context.period_label}, el NPS clásico varía {_fmt_signed_or_nd(delta)} puntos.", size=11.5, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
-    _replace_template_picture(history, 6, context.overview_figure, empty_note="Sin histórico suficiente para construir la curva.")
+    _set_template_text(
+        history.shapes[3], bullets, size=11.5, color=BBVA_COLORS["ink"], font="Source Serif 4"
+    )
+    _set_template_text(
+        history.shapes[4],
+        f"Durante {context.period_label}, el NPS clásico varía {_fmt_signed_or_nd(delta)} puntos.",
+        size=11.5,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER,
+    )
+    _replace_template_picture(
+        history,
+        6,
+        context.overview_figure,
+        empty_note="Sin histórico suficiente para construir la curva.",
+    )
 
     topics = prs.slides[3]
-    _set_template_text(topics.shapes[4], "Los detractores hacen visible dónde se rompe la experiencia", size=25, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
+    _set_template_text(
+        topics.shapes[4],
+        "Los detractores hacen visible dónde se rompe la experiencia",
+        size=25,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+    )
     topic_rows = [["Tema", "Top terms", "Ejemplo 1", "Ejemplo 2"]]
     selected_topics = select_text_clusters(context.text_topics_df, max_clusters=3)
     for row in selected_topics.itertuples():
         examples = [str(value) for value in list(getattr(row, "examples", []))[:2]]
-        topic_rows.append([str(getattr(row, "cluster_id", "")), _clip(getattr(row, "top_terms_txt", ""), 58), _clip(examples[0] if examples else "", 64), _clip(examples[1] if len(examples) > 1 else "", 64)])
+        topic_rows.append(
+            [
+                str(getattr(row, "cluster_id", "")),
+                _clip(getattr(row, "top_terms_txt", ""), 58),
+                _clip(examples[0] if examples else "", 64),
+                _clip(examples[1] if len(examples) > 1 else "", 64),
+            ]
+        )
     _set_template_table(topics.shapes[6].table, topic_rows)
     leader = topic_rows[1][1] if len(topic_rows) > 1 else "sin señal textual suficiente"
-    _set_template_text(topics.shapes[3], f"La escucha detractora concentra su señal principal en {leader}.", size=11, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
+    _set_template_text(
+        topics.shapes[3],
+        f"La escucha detractora concentra su señal principal en {leader}.",
+        size=11,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER,
+    )
 
     change = prs.slides[4]
     change_rows = [["Valor", "Delta NPS Clásico", "NPS actual", "NPS base", "n actual", "n base"]]
     for row in view.change_table_df.head(4).itertuples():
-        change_rows.append([_clip(row.value, 23), _fmt_signed_or_nd(row.delta_nps), _fmt_num_or_nd(row.nps_current), _fmt_num_or_nd(row.nps_baseline), _fmt_count_or_nd(row.n_current), _fmt_count_or_nd(row.n_baseline)])
+        change_rows.append(
+            [
+                _clip(row.value, 23),
+                _fmt_signed_or_nd(row.delta_nps),
+                _fmt_num_or_nd(row.nps_current),
+                _fmt_num_or_nd(row.nps_baseline),
+                _fmt_count_or_nd(row.n_current),
+                _fmt_count_or_nd(row.n_baseline),
+            ]
+        )
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
-    _set_template_text(change.shapes[0], f"{worst[0]} lidera el deterioro frente a la base", size=25, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
+    _set_template_text(
+        change.shapes[0],
+        f"{worst[0]} lidera el deterioro frente a la base",
+        size=25,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+    )
     change.shapes[4].height = Inches(0.62)
-    _set_template_text(change.shapes[4], f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {context.baseline_label}", size=11, bold=True, color="FFFFFF", font="Source Serif 4")
+    _set_template_text(
+        change.shapes[4],
+        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {context.baseline_label}",
+        size=11,
+        bold=True,
+        color="FFFFFF",
+        font="Source Serif 4",
+    )
     _set_template_table(change.shapes[7].table, change_rows)
-    _set_template_text(change.shapes[6], f"{worst[0]} presenta el mayor Delta NPS Clásico ({worst[1]} puntos).", size=11, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
-    _replace_template_picture(change, 8, view.change_figure, empty_note=f"Sin base suficiente para comparar {dimension.lower()}.")
+    _set_template_text(
+        change.shapes[6],
+        f"{worst[0]} presenta el mayor Delta NPS Clásico ({worst[1]} puntos).",
+        size=11,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER,
+    )
+    _replace_template_picture(
+        change,
+        8,
+        view.change_figure,
+        empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
+    )
 
     pain = prs.slides[5]
     pain_rows = list(view.web_table_df.head(4).itertuples())
     leader_name = str(getattr(pain_rows[0], "value", "Sin señal")) if pain_rows else "Sin señal"
-    _set_template_text(pain.shapes[0], f"{leader_name} concentra el mayor dolor en la Web", size=25, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
+    _set_template_text(
+        pain.shapes[0],
+        f"{leader_name} concentra el mayor dolor en la Web",
+        size=25,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+    )
     for column in range(4):
         row = pain_rows[column] if column < len(pain_rows) else None
         offset = 2 + column * 6 if column else 2
@@ -2979,17 +3107,58 @@ def _fill_template_deck(
         score_index = (13, 16, 19, 22)[column]
         detractor_index = (6, 15, 18, 21)[column]
         del offset
-        _set_template_text(pain.shapes[header_index], _clip(getattr(row, "value", "Sin datos") if row else "Sin datos", 28), size=11, bold=True, color=BBVA_COLORS["ink"], align=PP_ALIGN.CENTER)
-        _set_template_text(pain.shapes[volume_index], f"{_fmt_count_or_nd(getattr(row, 'n', 0))} comentarios\ndentro del periodo analizado" if row else "Sin comentarios", size=10.5, color="666666")
-        _set_template_text(pain.shapes[score_index], f"Score del canal Web:\n{_fmt_num_or_nd(getattr(row, 'nps', np.nan), decimals=1)}" if row else "Score del canal Web:\nn/d", size=10.5, color="666666")
-        _set_template_text(pain.shapes[detractor_index], f"Detractores del periodo:\n{_fmt_pct_or_nd(getattr(row, 'detractor_rate', np.nan))}" if row else "Detractores del periodo:\nn/d", size=10.5, color="666666")
-    _set_template_text(pain.shapes[7], f"{leader_name} combina la señal Web más crítica del periodo.", size=11, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
+        _set_template_text(
+            pain.shapes[header_index],
+            _clip(getattr(row, "value", "Sin datos") if row else "Sin datos", 28),
+            size=11,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
+            pain.shapes[volume_index],
+            (
+                f"{_fmt_count_or_nd(getattr(row, 'n', 0))} comentarios\ndentro del periodo analizado"
+                if row
+                else "Sin comentarios"
+            ),
+            size=10.5,
+            color="666666",
+        )
+        _set_template_text(
+            pain.shapes[score_index],
+            (
+                f"Score del canal Web:\n{_fmt_num_or_nd(getattr(row, 'nps', np.nan), decimals=1)}"
+                if row
+                else "Score del canal Web:\nn/d"
+            ),
+            size=10.5,
+            color="666666",
+        )
+        _set_template_text(
+            pain.shapes[detractor_index],
+            (
+                f"Detractores del periodo:\n{_fmt_pct_or_nd(getattr(row, 'detractor_rate', np.nan))}"
+                if row
+                else "Detractores del periodo:\nn/d"
+            ),
+            size=10.5,
+            color="666666",
+        )
+    _set_template_text(
+        pain.shapes[7],
+        f"{leader_name} combina la señal Web más crítica del periodo.",
+        size=11,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER,
+    )
 
     scenarios = context.causal.scenarios[:3] if include_causal_section else []
     keep_slides = 6 + len(scenarios)
     while len(prs.slides) > keep_slides:
         _remove_slide(prs, len(prs.slides) - 1)
-    method = get_causal_method_spec(context.causal.touchpoint_source)
     for offset, scenario in enumerate(scenarios):
         slide = prs.slides[6 + offset]
         row = scenario.row
@@ -2999,11 +3168,44 @@ def _fill_template_deck(
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
         title_shape.height = Inches(0.78)
         title_size = 22 if len(full_title) < 49 else 18 if len(full_title) < 65 else 16
-        _set_template_text(title_shape, full_title, size=title_size, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4")
-        _set_template_text(slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT)
-        _set_template_text(slide.shapes[3], _fmt_pct_or_nd(row.get("detractor_probability")), size=30, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
-        _set_template_text(slide.shapes[6], _fmt_num_or_nd(row.get("confidence")), size=30, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
-        _set_template_text(slide.shapes[9], f"VÍNCULOS VALIDADOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.", size=11, bold=True, color=BBVA_COLORS["ink"], font="Source Serif 4", align=PP_ALIGN.CENTER)
+        _set_template_text(
+            title_shape,
+            full_title,
+            size=title_size,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            font="Source Serif 4",
+        )
+        _set_template_text(
+            slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT
+        )
+        _set_template_text(
+            slide.shapes[3],
+            _fmt_pct_or_nd(row.get("detractor_probability")),
+            size=30,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            font="Source Serif 4",
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
+            slide.shapes[6],
+            _fmt_num_or_nd(row.get("confidence")),
+            size=30,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            font="Source Serif 4",
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
+            slide.shapes[9],
+            f"VÍNCULOS VALIDADOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
+            size=11,
+            bold=True,
+            color=BBVA_COLORS["ink"],
+            font="Source Serif 4",
+            align=PP_ALIGN.CENTER,
+        )
         content_shapes = [
             shape for shape in list(slide.shapes)[10:] if getattr(shape, "has_text_frame", False)
         ]
@@ -3034,7 +3236,13 @@ def _fill_template_deck(
             evidence_shape.top = Inches(2.39)
             evidence_shape.height = Inches(2.26)
         for index, quote_shape in enumerate(quote_shapes):
-            _set_template_text(quote_shape, comments[index] if index < len(comments) else "", size=11, bold=False, color=BBVA_COLORS["ink"])
+            _set_template_text(
+                quote_shape,
+                comments[index] if index < len(comments) else "",
+                size=11,
+                bold=False,
+                color=BBVA_COLORS["ink"],
+            )
         _scenario_evidence(evidence_shape, scenario)
 
 
@@ -3093,7 +3301,7 @@ def generate_business_review_ppt(
     if not REPORT_TEMPLATE.exists():
         raise FileNotFoundError(f"No se encuentra la plantilla ejecutiva: {REPORT_TEMPLATE}")
     prs = Presentation(str(REPORT_TEMPLATE))
-    prs.core_properties.subject = "NPS Lens · análisis NPS térmico y causalidad"
+    prs.core_properties.subject = "NPS Lens · comentarios y causalidad"
     prs.core_properties.keywords = f"BBVA,NPS,causalidad,{REPORT_DESIGN_VERSION}"
     prs.core_properties.comments = f"NPS Lens report design: {REPORT_DESIGN_VERSION}"
 
@@ -3124,10 +3332,25 @@ def generate_business_review_ppt(
     )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
-    file_name = f"nps-termico-causal-{_slug(service_origin)}-{_slug(service_origin_n1)}-{stamp}.pptx"
+    file_name = (
+        f"nps-comentarios-causalidad-{_slug(service_origin)}-"
+        f"{_slug(service_origin_n1)}-{stamp}.pptx"
+    )
 
     buff = BytesIO()
     prs.save(buff)
+    content = buff.getvalue()
+    compact_prs = Presentation(BytesIO(content))
+    for slide_index in (2, 1):
+        if len(compact_prs.slides) > slide_index:
+            _remove_slide(compact_prs, slide_index)
+    compact_buff = BytesIO()
+    compact_prs.save(compact_buff)
+    compact_file_name = file_name.replace(".pptx", "-sin-evolucion-nps.pptx")
     return BusinessPptResult(
-        file_name=file_name, content=buff.getvalue(), slide_count=len(prs.slides)
+        file_name=file_name,
+        content=content,
+        slide_count=len(prs.slides),
+        compact_file_name=compact_file_name,
+        compact_content=compact_buff.getvalue(),
     )
