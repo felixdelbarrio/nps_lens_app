@@ -611,11 +611,12 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Media semanal" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Agregados por periodo" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Comparativas cruzadas" })).toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "Evolución promotores vs detractores" })
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Sumario del Periodo" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Analítica NPS" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Evolución NPS" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Comentarios" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
     expect(screen.getByText("PERIOD CONTAINER")).toBeInTheDocument();
@@ -641,23 +642,21 @@ describe("App", () => {
     expect(
       screen.getByText("KPIs agregados para el periodo del 2026-01-01 al 2026-03-31.")
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
-    const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
-    expect(opportunityNote).not.toBeNull();
-    expect(opportunityNote).not.toHaveTextContent("**");
-    expect(within(opportunityNote as HTMLElement).getByText("Palanca=Acceso").tagName).toBe("STRONG");
-
-    await user.click(screen.getByRole("tab", { name: "Analítica NPS" }));
+    await user.click(screen.getByRole("tab", { name: "Comentarios" }));
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
+    expect(screen.getByRole("tab", { name: "Dónde se separa el NPS" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Comparativas cruzadas" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Qué dicen los clientes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Oportunidades priorizadas" })).not.toBeInTheDocument();
+
     await user.selectOptions(screen.getByRole("combobox", { name: "Canal" }), "App");
     await waitFor(() =>
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
-    await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
+    await user.click(screen.getByRole("tab", { name: "Causalidad" }));
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
 
@@ -733,7 +732,7 @@ describe("App", () => {
       ).toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("tab", { name: "Incidencias ↔ NPS" }));
+    await user.click(screen.getByRole("tab", { name: "Causalidad" }));
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción defendibles para detractores")).toBeInTheDocument()
     );

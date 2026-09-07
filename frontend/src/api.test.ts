@@ -54,6 +54,9 @@ describe("artifact downloads", () => {
         report_dimension_analysis: "palanca"
       });
       expect(String(fetchMock.mock.calls[0]?.[0])).toContain(endpoint);
+      if (endpoint.includes("publication")) {
+        expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("score_channel");
+      }
       expect(savedPath).toBe("");
       expect(createObjectUrl).toHaveBeenCalledOnce();
       expect(click).toHaveBeenCalledOnce();

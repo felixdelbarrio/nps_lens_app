@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchEquivalences, updateEquivalences, type EquivalenceRegistryPayload } from "../api";
 
-const DIMENSION_LABELS: Record<string, string> = { "NPS Group": "Clasificación NPS", Palanca: "Palancas de experiencia", Subpalanca: "Motivos detallados" };
+const DIMENSION_LABELS: Record<string, string> = { Palanca: "Palancas de experiencia", Subpalanca: "Motivos detallados" };
 
 export function EquivalenceMaintenance({ disabled = false }: { disabled?: boolean }) {
   const [registry, setRegistry] = useState<EquivalenceRegistryPayload | null>(null);

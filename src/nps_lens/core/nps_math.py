@@ -36,23 +36,24 @@ def _score_series(df: pd.DataFrame, *, score_col: str = "NPS") -> pd.Series[Any]
     return pd.to_numeric(df[score_col], errors="coerce")
 
 
-def _group_series(df: pd.DataFrame, *, group_col: str = "NPS Group") -> pd.Series[Any]:
-    if group_col not in df.columns:
-        return pd.Series("", index=df.index, dtype="string")
-    return df[group_col].astype(str).str.strip().str.lower()
+def classify_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
+    """Derive the snapshot group exclusively from a valid integer NPS score."""
+    score = pd.to_numeric(scores, errors="coerce")
+    valid = score.between(0, 10) & score.mod(1).eq(0)
+    groups = pd.Series("", index=scores.index, dtype="string")
+    groups.loc[valid & score.le(6)] = "DETRACTOR"
+    groups.loc[valid & score.between(7, 8)] = "PASIVO"
+    groups.loc[valid & score.ge(9)] = "PROMOTOR"
+    return groups
 
 
 def _focus_mask_from_series(
     score: pd.Series[Any],
-    group: pd.Series[Any],
     *,
     focus_group: FocusGroup,
 ) -> pd.Series[Any]:
-    if focus_group == "promoter":
-        return group.str.contains("promot", na=False) | (score >= 9.0)
-    if focus_group == "passive":
-        return group.str.contains("pas|neu", na=False) | ((score >= 7.0) & (score <= 8.0))
-    return group.str.contains("detr", na=False) | (score <= 6.0)
+    labels = {"detractor": "DETRACTOR", "passive": "PASIVO", "promoter": "PROMOTOR"}
+    return classify_nps_scores(score).eq(labels[focus_group])
 
 
 def focus_mask(
@@ -60,12 +61,10 @@ def focus_mask(
     *,
     focus_group: str,
     score_col: str = "NPS",
-    group_col: str = "NPS Group",
 ) -> pd.Series[Any]:
     fg = normalize_focus_group(focus_group)
     score = _score_series(df, score_col=score_col)
-    group = _group_series(df, group_col=group_col)
-    return _focus_mask_from_series(score, group, focus_group=fg)
+    return _focus_mask_from_series(score, focus_group=fg)
 
 
 def filter_by_nps_group(
@@ -73,7 +72,6 @@ def filter_by_nps_group(
     group_mode: str,
     *,
     score_col: str = "NPS",
-    group_col: str = "NPS Group",
 ) -> pd.DataFrame:
     gm = str(group_mode or "Todos").strip().lower()
     if gm in {"todos", "all"}:
@@ -81,14 +79,10 @@ def filter_by_nps_group(
     if df is None or df.empty:
         return df
     if gm.startswith("prom"):
-        return df.loc[
-            focus_mask(df, focus_group="promoter", score_col=score_col, group_col=group_col)
-        ]
+        return df.loc[focus_mask(df, focus_group="promoter", score_col=score_col)]
     if gm.startswith("neu") or gm.startswith("pas"):
-        return df.loc[
-            focus_mask(df, focus_group="passive", score_col=score_col, group_col=group_col)
-        ]
-    return df.loc[focus_mask(df, focus_group="detractor", score_col=score_col, group_col=group_col)]
+        return df.loc[focus_mask(df, focus_group="passive", score_col=score_col)]
+    return df.loc[focus_mask(df, focus_group="detractor", score_col=score_col)]
 
 
 def daily_metrics(
@@ -102,7 +96,8 @@ def daily_metrics(
         return pd.DataFrame(columns=_DAILY_METRICS_COLUMNS)
 
     day = pd.to_datetime(df[date_col], errors="coerce").dt.floor("D")
-    score = _score_series(df, score_col=score_col).clip(lower=0.0, upper=10.0)
+    score = _score_series(df, score_col=score_col)
+    score = score.where(classify_nps_scores(score).ne(""))
     work = pd.DataFrame({"day": day, "score": score}).dropna(subset=["day", "score"])
     if work.empty:
         return pd.DataFrame(columns=_DAILY_METRICS_COLUMNS)
@@ -144,7 +139,6 @@ def grouped_focus_rates(
     frequency: Literal["D", "W"] = "D",
     date_col: str = "Fecha",
     score_col: str = "NPS",
-    group_col: str = "NPS Group",
 ) -> pd.DataFrame:
     if df is None or df.empty or date_col not in df.columns:
         period_col = "date" if frequency == "D" else "week"
@@ -159,7 +153,6 @@ def grouped_focus_rates(
         {
             period_col: bucket,
             "_score": _score_series(df, score_col=score_col),
-            "_group": _group_series(df, group_col=group_col),
         }
     ).dropna(subset=[period_col])
     if work.empty:
@@ -167,15 +160,9 @@ def grouped_focus_rates(
             columns=[period_col, "responses", "detractor_rate", "passive_rate", "promoter_rate"]
         )
 
-    work["_is_detractor"] = _focus_mask_from_series(
-        work["_score"], work["_group"], focus_group="detractor"
-    )
-    work["_is_passive"] = _focus_mask_from_series(
-        work["_score"], work["_group"], focus_group="passive"
-    )
-    work["_is_promoter"] = _focus_mask_from_series(
-        work["_score"], work["_group"], focus_group="promoter"
-    )
+    work["_is_detractor"] = _focus_mask_from_series(work["_score"], focus_group="detractor")
+    work["_is_passive"] = _focus_mask_from_series(work["_score"], focus_group="passive")
+    work["_is_promoter"] = _focus_mask_from_series(work["_score"], focus_group="promoter")
 
     out = (
         work.groupby(period_col, as_index=False)

@@ -16,11 +16,11 @@ def test_equivalence_key_unifies_joiners_case_accents_and_spacing() -> None:
     assert len({equivalence_key(value) for value in values}) == 1
 
 
-def test_default_registry_unifies_business_labels_and_neutrals() -> None:
+def test_default_registry_unifies_business_labels() -> None:
     registry = EquivalenceRegistry.default()
     assert registry.normalize("Palanca", "Pagos y transferencias") == "Pagos/transferencias"
     assert registry.normalize("Palanca", "Pagos/ Transferencias") == "Pagos/transferencias"
-    assert registry.normalize("NPS Group", "NEUTROS") == "PASIVO"
+    assert "NPS Group" not in registry.to_dict()["dimensions"]
 
 
 def test_registry_rejects_ambiguous_aliases() -> None:

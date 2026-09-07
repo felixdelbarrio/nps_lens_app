@@ -8,12 +8,13 @@ from typing import Optional, Union
 import pandas as pd
 
 from nps_lens import PIPELINE_VERSION
+from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.core.store import DatasetContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.08.24.canonical2"
+PARSER_VERSION = "2026.09.07.score-groups"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -25,7 +26,6 @@ NPS_THERMAL_REQUIRED = [
 
 NPS_THERMAL_OPTIONAL = [
     "ID",
-    "NPS Group",
     "Comment",
     "UsuarioDecisión",
     "Browser",
@@ -51,10 +51,6 @@ _HEADER_ALIASES = {
     "gfcustsurveyopinionid": "ID",
     "nps": "NPS",
     "npsresponse": "NPS",
-    "npsgroup": "NPS Group",
-    "usertype": "NPS Group",
-    "gruponps": "NPS Group",
-    "nps_group": "NPS Group",
     "comment": "Comment",
     "commentresponse": "Comment",
     "comments": "Comment",
@@ -142,31 +138,6 @@ def _split_csvish(value: object) -> list[str]:
 
 def _normalize_comment(value: object) -> str:
     return _coerce_string(value)
-
-
-def _normalize_nps_group(
-    score: object,
-    group: object,
-    registry: EquivalenceRegistry,
-) -> str:
-    explicit = registry.normalize("NPS Group", group).upper()
-    if explicit:
-        if "PROM" in explicit:
-            return "PROMOTOR"
-        if "PAS" in explicit or "NEUT" in explicit:
-            return "PASIVO"
-        if "DET" in explicit:
-            return "DETRACTOR"
-        return explicit
-
-    numeric = pd.to_numeric(pd.Series([score]), errors="coerce").iloc[0]
-    if pd.isna(numeric):
-        return ""
-    if numeric >= 9:
-        return "PROMOTOR"
-    if numeric <= 6:
-        return "DETRACTOR"
-    return "PASIVO"
 
 
 def _vectorized_hash(frame: pd.DataFrame, columns: list[str], prefix: str = "") -> pd.Series:
@@ -281,16 +252,7 @@ def read_nps_thermal_excel(
         column for column in NPS_THERMAL_OPTIONAL if column not in df.columns
     ]
     for column in missing_optional_columns:
-        if column == "NPS Group":
-            issues.append(
-                ValidationIssue(
-                    level="WARN",
-                    code="optional_column_missing",
-                    message="Falta NPS Group; se derivará desde NPS.",
-                    column=column,
-                )
-            )
-        elif column == "Comment":
+        if column == "Comment":
             issues.append(
                 ValidationIssue(
                     level="WARN",
@@ -399,10 +361,7 @@ def read_nps_thermal_excel(
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
-    work["NPS Group"] = [
-        _normalize_nps_group(score, group, registry)
-        for score, group in zip(work["NPS"].tolist(), work["NPS Group"].tolist())
-    ]
+    work["NPS Group"] = classify_nps_scores(work["NPS"])
 
     invalid_date_rows = int(work["Fecha"].isna().sum())
     if invalid_date_rows:
@@ -415,19 +374,19 @@ def read_nps_thermal_excel(
                 details={"rows": invalid_date_rows},
             )
         )
-    invalid_nps_rows = int(work["NPS"].isna().sum())
+    invalid_nps_rows = int(work["NPS Group"].eq("").sum())
     if invalid_nps_rows:
         issues.append(
             ValidationIssue(
                 level="WARN",
                 code="invalid_nps_dropped",
-                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido.",
+                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido (debe ser un entero de 0 a 10).",
                 column="NPS",
                 details={"rows": invalid_nps_rows},
             )
         )
 
-    work = work.loc[work["Fecha"].notna() & work["NPS"].notna()].copy()
+    work = work.loc[work["Fecha"].notna() & work["NPS Group"].ne("")].copy()
     if work.empty:
         issues.append(
             ValidationIssue(

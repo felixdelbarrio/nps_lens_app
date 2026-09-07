@@ -1,5 +1,5 @@
 const NPS_LENS = Object.freeze({
-  version: '2.8.0',
+  version: '2.9.0',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   newsletterFrom: 'nps-lens.group@bbva.com',
@@ -7,6 +7,7 @@ const NPS_LENS = Object.freeze({
   publicationFolderProperty: 'NPS_LENS_PUBLICATION_FOLDER_ID',
   cacheEpochProperty: 'NPS_LENS_CACHE_EPOCH',
   selectedScopeProperty: 'NPS_LENS_SELECTED_SCOPE_KEY',
+  evolutionNpsVisibleProperty: 'NPS_LENS_EVOLUTION_NPS_VISIBLE',
   adminEmailsProperty: 'NPS_LENS_ADMIN_EMAILS',
   activitySheet: 'ACTIVIDAD_NPS_LENS',
   recipientsSheet: 'DESTINATARIOS_NEWSLETTER',

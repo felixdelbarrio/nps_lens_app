@@ -58,7 +58,7 @@ function getActivityReport(request) {
   const performanceVersion = NPS_LENS.version.split('.').slice(0, 2).join('.');
   const performanceEvents = selected.filter(row => String(row[10] || '').indexOf('v' + performanceVersion + '.') === 0);
   const viewEvents = performanceEvents.filter(row => row[3] === 'view');
-  const serverCalls = performanceEvents.filter(row => row[3] === 'server_call');
+  const serverCalls = performanceEvents.filter(row => row[3] === 'server_call' || row[3] === 'snapshot_load');
   const users = counts(selected, 1).map(item => ({email: item.name, events: item.events}));
   const report = {
     generatedAt: new Date().toISOString(), periodDays: days,

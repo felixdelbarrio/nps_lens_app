@@ -3,7 +3,7 @@ function _administration_(publication, viewer) {
     version: NPS_LENS.version,
     generatedAt: publication ? publication.generatedAt : '',
     selectedScopeKey: publication ? publication.scopeKey : '',
-    reportUrl: publication && publication.slidesFileId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(publication.slidesFileId) + '/edit' : '',
+    reportUrl: publication ? _presentationEntryUrl_(publication.scopeKey) : '',
     access: {
       email: viewer.email,
       role: viewer.role,
@@ -11,6 +11,21 @@ function _administration_(publication, viewer) {
       configurationReady: viewer.configurationReady
     }
   };
+}
+
+function _evolutionNpsVisible_() {
+  return _property_(NPS_LENS.evolutionNpsVisibleProperty).toLowerCase() !== 'false';
+}
+
+function getEvolutionNpsSettings() {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  return {visible:_evolutionNpsVisible_()};
+}
+
+function saveEvolutionNpsSettings(visible) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  PropertiesService.getScriptProperties().setProperty(NPS_LENS.evolutionNpsVisibleProperty, visible === false ? 'false' : 'true');
+  return {visible:_evolutionNpsVisible_()};
 }
 
 function getAdministration() {

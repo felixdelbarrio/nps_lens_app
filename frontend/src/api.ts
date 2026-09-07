@@ -267,7 +267,6 @@ export type DashboardQuery = {
   score_channel: string;
   comparison_dimension: string;
   gap_dimension: string;
-  opportunity_dimension: string;
   cohort_row: string;
   cohort_col: string;
   min_n: number;
@@ -605,8 +604,16 @@ async function downloadArtifact(
   return "";
 }
 
-export function downloadWebPublication(params: ExportQuery) {
-  return downloadArtifact("/api/dashboard/publication.zip", params, "nps-lens-publicacion.zip");
+export function downloadWebPublication(
+  params: Omit<ExportQuery, "score_channel"> & Partial<Pick<ExportQuery, "score_channel">>
+) {
+  const { score_channel: omittedChannel, ...publicationParams } = params;
+  void omittedChannel;
+  return downloadArtifact(
+    "/api/dashboard/publication.zip",
+    publicationParams,
+    "nps-lens-publicacion.zip"
+  );
 }
 
 export function downloadTelemetry() {

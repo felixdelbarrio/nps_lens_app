@@ -19,11 +19,6 @@ _EMPTY_MARKERS = {"", "nan", "none", "null", "nat", "<na>"}
 
 
 DEFAULT_EQUIVALENCES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
-    "NPS Group": (
-        ("DETRACTOR", ("detractor", "detractores", "detractoras")),
-        ("PASIVO", ("pasivo", "pasivos", "neutro", "neutros", "neutral", "passive")),
-        ("PROMOTOR", ("promotor", "promotores", "promotora", "promotoras", "promoter")),
-    ),
     "Palanca": (
         (
             "Pagos/transferencias",
@@ -114,7 +109,7 @@ class EquivalenceRegistry:
         lookups: dict[str, dict[str, str]] = {}
         for dimension, raw_groups in groups.items():
             dimension_name = clean_label(dimension)
-            if not dimension_name:
+            if dimension_name not in {"Canal", "Palanca", "Subpalanca"}:
                 continue
             dimension_groups: list[EquivalenceGroup] = []
             dimension_lookup: dict[str, str] = {}

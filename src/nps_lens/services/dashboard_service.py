@@ -1054,9 +1054,7 @@ class DashboardService:
                 max_days_apart=max_days_apart,
             )
             helix_annotated = annotate_incident_link_quality(helix_window)
-            helix_slice = helix_annotated.loc[
-                helix_annotated["Causal Match Eligible"]
-            ].copy()
+            helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
             base: dict[str, object] = {
                 "ready": False,
                 "resolved_channel": resolved_channel,
@@ -1705,6 +1703,8 @@ class DashboardService:
             content=report.content,
             slide_count=report.slide_count,
             saved_path=str(saved_path),
+            compact_file_name=report.compact_file_name,
+            compact_content=report.compact_content,
         )
 
     def _persist_artifact(self, content: bytes, file_name: str) -> Path:
@@ -1720,7 +1720,6 @@ class DashboardService:
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
-        score_channel: Optional[str] = None,
         min_n: int = 200,
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
@@ -1737,8 +1736,10 @@ class DashboardService:
             causal_method=active_touchpoint_source,
         )
         history_df = self._load_nps_df(context)
-        publish_channel = self._resolve_score_channel(history_df, "Web")
-        publish_group = self._resolve_nps_group(history_df, "Detractores")
+        publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+        publish_group = self._resolve_nps_group(history_df, nps_group)
+        causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+        causal_group = self._resolve_nps_group(history_df, POP_ALL)
         dashboard = self.nps_dashboard(
             context=context,
             pop_year=pop_year,
@@ -1751,8 +1752,8 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=publish_group,
-            score_channel=publish_channel,
+            nps_group=causal_group,
+            score_channel=causal_channel,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
             touchpoint_source=active_touchpoint_source,
@@ -1761,8 +1762,8 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=publish_group,
-            score_channel=publish_channel,
+            nps_group=causal_group,
+            score_channel=causal_channel,
             min_n=min_n,
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
@@ -1775,8 +1776,8 @@ class DashboardService:
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
-            nps_group=POP_ALL,
-            score_channel=POP_ALL,
+            nps_group=publish_group,
+            score_channel=publish_channel,
             limit=row_limit,
         )
         helix_data = self.dataset_rows(
@@ -1802,34 +1803,13 @@ class DashboardService:
         }
         generated_at = datetime.now(timezone.utc).isoformat()
         registry = EquivalenceRegistry.load(self.settings.equivalences_path)
-        channels = self._available_score_channels(history_df)
-        groups = _DEFAULT_NPS_GROUPS.copy()
-        dashboard_views: dict[str, dict[str, object]] = {}
-        period_frame = self._apply_population_filters(history_df, pop_year, pop_month)
-        for channel in channels:
-            channel_frame = self._apply_score_channel_filter(period_frame, channel)
-            if channel_frame.empty:
-                continue
-            group_views: dict[str, object] = {}
-            for group in groups:
-                if filter_by_nps_group(channel_frame, group).empty:
-                    continue
-                group_views[group] = self.nps_dashboard(
-                    context=context,
-                    pop_year=pop_year,
-                    pop_month=pop_month,
-                    nps_group=group,
-                    score_channel=channel,
-                    min_n=min_n,
-                )
-            if group_views:
-                dashboard_views[channel] = group_views
         publication: dict[str, object] = {
             "schema_version": PUBLICATION_SCHEMA_VERSION,
             "generated_at": generated_at,
             "brand": {
                 "name": "BBVA Banca de Empresas e Instituciones",
                 "design_system": "BBVA Experience",
+                "design_tokens": DesignTokens.default().colors_light,
             },
             "scope": scope,
             "filters": {
@@ -1844,12 +1824,12 @@ class DashboardService:
                 "min_similarity": min_similarity,
                 "max_days_apart": max_days_apart,
                 "touchpoint_source": active_touchpoint_source,
+                "causal_nps_group": causal_group,
+                "causal_score_channel": causal_channel,
             },
             "static_views": {
                 "default": {"score_channel": publish_channel, "nps_group": publish_group},
-                "score_channels": list(dashboard_views),
-                "nps_groups": groups,
-                "dashboard_by_filter": dashboard_views,
+                "immutable": True,
             },
             "screens": {
                 "dashboard": dashboard,
@@ -1863,6 +1843,7 @@ class DashboardService:
                 "equivalence_registry": registry.to_dict(),
                 "privacy": "No incluye configuración administrativa ni telemetría.",
                 "report": report.file_name,
+                "report_without_evolution": report.compact_file_name,
             },
         }
         date_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1870,6 +1851,8 @@ class DashboardService:
             publication,
             report_name=report.file_name,
             report_content=report.content,
+            compact_report_name=report.compact_file_name,
+            compact_report_content=report.compact_content,
             file_name=f"nps-lens-publicacion-{date_stamp}.zip",
         )
         saved_path = self._persist_artifact(artifact.content, artifact.file_name)
