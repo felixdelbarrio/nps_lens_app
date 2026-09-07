@@ -30,13 +30,17 @@ Este documento define:
 ### Columnas mínimas esperadas
 - `Fecha` (o equivalente; se normaliza a `Fecha`)
 - `ID` (si existe; recomendable)
-- `NPS` (score numérico 0-10; se conserva el nombre histórico de columna)
-- `NPS Group` (Promotor/Pasivo/Detractor) o derivable; en UI/reportes se etiqueta como `Grupo Score`
+- `NPS` (nota entera de 0 a 10; las filas con notas inválidas se descartan con diagnóstico)
 - `Comment` (texto)
 - `Canal`
 - `Palanca`
 - `Subpalanca`
 - Opcionales: `Segmento`, `UsuarioDecisión`, etc.
+
+### Clasificación automática
+`NPS Group` es un campo calculado: ≤6 → `DETRACTOR`, 7–8 → `PASIVO` (neutro), ≥9 → `PROMOTOR`. Las etiquetas manuales del Excel no participan en la clasificación ni en los cálculos. La regla fija se muestra en Configuración → Reglas de ingesta y no admite equivalencias.
+
+La lectura del histórico recalcula el grupo desde `NPS`. Las nuevas publicaciones mantienen el campo `NPS Group` y sus valores en el Snapshot que consume la WebApp; no requieren cambios en ella. Los snapshots ya publicados son inmutables: para reflejar la corrección se genera una nueva publicación local.
 
 ### Normalización
 - `Fecha` → datetime naive

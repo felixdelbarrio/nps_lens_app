@@ -1720,7 +1720,6 @@ class DashboardService:
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
-        score_channel: Optional[str] = None,
         min_n: int = 200,
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
@@ -1737,7 +1736,7 @@ class DashboardService:
             causal_method=active_touchpoint_source,
         )
         history_df = self._load_nps_df(context)
-        publish_channel = self._resolve_score_channel(history_df, score_channel)
+        publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
         publish_group = self._resolve_nps_group(history_df, nps_group)
         causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
         causal_group = self._resolve_nps_group(history_df, POP_ALL)

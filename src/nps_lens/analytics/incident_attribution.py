@@ -13,6 +13,7 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from nps_lens.analytics.nps_helix_link import build_incident_display_text
+from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -638,20 +639,6 @@ def _broken_journey_confidence_label(semantic_score: float, avg_similarity: floa
     return "Bajo"
 
 
-def _derive_nps_group(group_value: object, score_value: object) -> str:
-    group_txt = str(group_value or "").strip()
-    if group_txt:
-        return group_txt
-    score = _safe_float(score_value, default=np.nan)
-    if not np.isfinite(score):
-        return ""
-    if score <= 6:
-        return "DETRACTOR"
-    if score >= 9:
-        return "PROMOTER"
-    return "PASSIVE"
-
-
 def _touchpoint(
     palanca: object,
     subpalanca: object,
@@ -745,12 +732,7 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
     if comment_norm_series is None:
         comment_norm_series = df["comment_txt"]
     df["comment_norm"] = comment_norm_series.astype(str).fillna("").str.strip()
-    df["nps_group"] = (
-        df.get("NPS Group", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
-    )
+    df["nps_group"] = classify_nps_scores(df["nps_score"])
     df["palanca"] = (
         df.get("Palanca", pd.Series([""] * len(df), index=df.index))
         .astype(str)
@@ -1974,7 +1956,7 @@ def build_incident_attribution_chains(
                 "comment_id": str(r.get("nps_id", "") or "").strip(),
                 "date": _format_nps_date(r.get("nps_date")),
                 "nps": _format_nps_score(r.get("nps_score")),
-                "group": _derive_nps_group(r.get("nps_group"), r.get("nps_score")),
+                "group": r.get("nps_group", ""),
                 "palanca": str(r.get("palanca", "") or "").strip(),
                 "subpalanca": str(r.get("subpalanca", "") or "").strip(),
                 "comment": " ".join(

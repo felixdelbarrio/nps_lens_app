@@ -762,7 +762,6 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         pop_year="2026",
         pop_month="03",
         nps_group="Promotores",
-        score_channel="Web",
     )
 
     assert captured["touchpoint_source"] == "executive_journeys"
@@ -773,6 +772,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
     assert linking_request["score_channel"] == "Web"
     assert captured["nps_group"] == "Todos"
     assert dataset_requests["nps"]["nps_group"] == "Promotores"
+    assert dataset_requests["nps"]["score_channel"] == "Web"
     with ZipFile(BytesIO(artifact.content)) as archive:
         assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
         assert archive.read("informe-ejecutivo-sin-evolucion-nps.pptx") == b"COMPACT"

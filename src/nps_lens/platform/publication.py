@@ -147,8 +147,8 @@ def _archive(
     *,
     report_name: str,
     report_content: bytes,
-    compact_report_name: str = "",
-    compact_report_content: bytes = b"",
+    compact_report_name: str,
+    compact_report_content: bytes,
 ) -> bytes:
     target = BytesIO()
     with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
@@ -158,8 +158,7 @@ def _archive(
         )
         archive.writestr("newsletter.html", _newsletter(publication, report_name))
         archive.writestr(report_name, report_content)
-        if compact_report_name and compact_report_content:
-            archive.writestr(compact_report_name, compact_report_content)
+        archive.writestr(compact_report_name, compact_report_content)
     return target.getvalue()
 
 
@@ -168,8 +167,8 @@ def build_publication_archive(
     *,
     report_name: str,
     report_content: bytes,
-    compact_report_name: str = "",
-    compact_report_content: bytes = b"",
+    compact_report_name: str,
+    compact_report_content: bytes,
     file_name: str,
     max_bytes: int = MAX_PUBLICATION_BYTES,
 ) -> PublicationArtifact:

@@ -8,7 +8,7 @@ import { ServiceOriginMaintenance } from "./ServiceOriginMaintenance";
 import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
 import { TelemetryPanel } from "./TelemetryPanel";
 
-export type SettingsTab = "appearance" | "advanced" | "maintenance" | "equivalences" | "telemetry";
+export type SettingsTab = "appearance" | "ingestion" | "advanced" | "maintenance" | "equivalences" | "telemetry";
 
 type SettingsSheetProps = {
   open: boolean;
@@ -27,8 +27,6 @@ type SettingsSheetProps = {
   setMinSimilarity: (value: number) => void;
   maxDaysApart: number;
   setMaxDaysApart: (value: number) => void;
-  minN: number;
-  setMinN: (value: number) => void;
   minNCross: number;
   setMinNCross: (value: number) => void;
   serviceOrigins: string[];
@@ -43,6 +41,7 @@ type SettingsSheetProps = {
 
 const SETTINGS_TABS = [
   { id: "appearance", label: "Configuración" },
+  { id: "ingestion", label: "Reglas de ingesta" },
   { id: "advanced", label: "Ajustes avanzados" },
   { id: "equivalences", label: "Equivalencias" },
   { id: "telemetry", label: "Telemetría" },
@@ -66,8 +65,6 @@ export function SettingsSheet({
   setMinSimilarity,
   maxDaysApart,
   setMaxDaysApart,
-  minN,
-  setMinN,
   minNCross,
   setMinNCross,
   serviceOrigins,
@@ -227,6 +224,33 @@ export function SettingsSheet({
           </section>
         ) : null}
 
+        {activeTab === "ingestion" ? (
+          <section className="settings-group">
+            <div className="section-heading"><div>
+              <h3>Reglas de ingesta</h3>
+              <p className="secondary-copy">
+                La clasificación se calcula automáticamente desde la puntuación NPS.
+                Las etiquetas del archivo importado no intervienen en los resultados.
+              </p>
+            </div></div>
+            <article className="settings-subsection">
+              <div className="settings-subsection-copy">
+                <h4>Clasificación automática NPS</h4>
+                <p className="secondary-copy">Regla fija para todas las respuestas con una nota entera de 0 a 10.</p>
+              </div>
+              <ul>
+                <li>≤6: detractor</li>
+                <li>7–8: neutro</li>
+                <li>≥9: promotor</li>
+              </ul>
+              <p className="field-hint">
+                Las filas sin una puntuación válida se descartan y se detallan en el resultado de la carga.
+                La regla también se aplica al histórico y a las nuevas publicaciones.
+              </p>
+            </article>
+          </section>
+        ) : null}
+
         {activeTab === "advanced" ? (
           <section className="settings-group">
             <div className="section-heading">
@@ -274,20 +298,10 @@ export function SettingsSheet({
                 <div className="settings-subsection-copy">
                   <h4>Umbrales avanzados</h4>
                   <p className="secondary-copy">
-                    Se restauran los cuatro parámetros operativos separando causalidad y priorización.
+                    Ajusta el volumen mínimo exigido a las comparativas cruzadas.
                   </p>
                 </div>
                 <div className="field-grid">
-                  <label>
-                    <span>Mínimo N para oportunidades</span>
-                    <input
-                      min={50}
-                      onChange={(event) => setMinN(Number(event.target.value))}
-                      step={10}
-                      type="number"
-                      value={minN}
-                    />
-                  </label>
                   <label>
                     <span>Mínimo N para comparativas cruzadas</span>
                     <input

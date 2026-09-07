@@ -54,6 +54,8 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         publication,
         report_name="informe.pptx",
         report_content=b"PPTX" * 100,
+        compact_report_name="informe-sin-evolucion-nps.pptx",
+        compact_report_content=b"COMPACT" * 100,
         file_name="publication.zip",
         max_bytes=25_000,
     )
@@ -63,6 +65,7 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
             "publication.json",
             "newsletter.html",
             "informe.pptx",
+            "informe-sin-evolucion-nps.pptx",
         }
         contract = json.loads(archive.read("publication.json"))
         assert contract["manifest"]["size_budget_bytes"] == 25_000

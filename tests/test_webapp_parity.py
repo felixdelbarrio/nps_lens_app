@@ -13,7 +13,6 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
         "Agregados por periodo",
         "NPS clásico vs detractores",
         "Dónde se separa el NPS",
-        "Oportunidades priorizadas",
         "Comparativas cruzadas",
         "Qué dicen los clientes",
         "Cambios respecto al histórico",
@@ -21,12 +20,23 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     for label in shared_views:
         assert label.casefold() in local.casefold()
         assert label.casefold() in web.casefold()
-    assert '{ id: "gaps", label: "Dónde se separa el NPS" }' in local
-    assert '{ id: "topics", label: "Qué dicen los clientes" }' in local
-    assert local.index('{ id: "gaps"') < local.index('{ id: "topics"')
-    assert web.index("['gaps','Dónde se separa el NPS']") < web.index(
-        "['topics','Qué dicen los clientes']"
+    summary_block = local[local.index("const SUMMARY_TABS") : local.index("const NPS_TABS")]
+    comments_block = local[local.index("const NPS_TABS") : local.index("const DATA_TABS")]
+    assert summary_block.index('{ id: "volume-mix"') < summary_block.index('{ id: "cohorts"')
+    assert comments_block.index('{ id: "topics"') < comments_block.index('{ id: "comparison"')
+    assert comments_block.index('{ id: "comparison"') < comments_block.index('{ id: "gaps"')
+    assert 'id: "cohorts"' not in comments_block
+    assert "opportunities" not in comments_block
+    assert web.index("['topics','Qué dicen los clientes']") < web.index(
+        "['comparison','Cambios respecto al histórico']"
     )
+    assert web.index("['comparison','Cambios respecto al histórico']") < web.index(
+        "['gaps','Dónde se separa el NPS']"
+    )
+    assert "['opportunities'" not in web
+    assert "Oportunidades priorizadas" not in web
+    assert "['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']" in web
+    assert "readonlyField('Canal','Web')" in web
     for causal_detail in (
         "Evidencia Helix",
         "Voz del cliente",
@@ -59,7 +69,6 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
     for payload_field in (
         "historical.note",
         "daily_explanation_bullets",
-        "opportunity.bullets",
         "overview.insight_bullets",
         "comparison.summary",
         "narrative.metrics",

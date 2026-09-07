@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.domain.models import SummarySnapshot, UploadAttempt, UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 
@@ -587,6 +588,7 @@ class SqliteNpsRepository:
         if frame.empty:
             return frame
         frame["Fecha"] = pd.to_datetime(frame["Fecha"], errors="coerce")
+        frame["NPS Group"] = classify_nps_scores(frame["NPS"])
         # Business dimensions repeat heavily across the corpus. Categoricals preserve
         # their exact labels while avoiding one Python string object per row.
         for column in (
@@ -657,7 +659,7 @@ class SqliteNpsRepository:
         registry: EquivalenceRegistry,
         context: Optional[UploadContext] = None,
     ) -> int:
-        query = "SELECT business_key, nps_group, channel, lever, sublever FROM records"
+        query = "SELECT business_key, channel, lever, sublever FROM records"
         params: list[Any] = []
         if context is not None:
             query += (
@@ -669,24 +671,22 @@ class SqliteNpsRepository:
 
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
-            updates: list[tuple[str, str, str, str, str]] = []
+            updates: list[tuple[str, str, str, str]] = []
             for row in rows:
-                nps_group = registry.normalize("NPS Group", row["nps_group"])
                 channel = registry.normalize("Canal", row["channel"])
                 lever = registry.normalize("Palanca", row["lever"])
                 sublever = registry.normalize("Subpalanca", row["sublever"])
                 if (
-                    nps_group != str(row["nps_group"])
-                    or channel != str(row["channel"])
+                    channel != str(row["channel"])
                     or lever != str(row["lever"])
                     or sublever != str(row["sublever"])
                 ):
-                    updates.append((nps_group, channel, lever, sublever, str(row["business_key"])))
+                    updates.append((channel, lever, sublever, str(row["business_key"])))
             if updates:
                 connection.executemany(
                     """
                     UPDATE records
-                    SET nps_group = ?, channel = ?, lever = ?, sublever = ?
+                    SET channel = ?, lever = ?, sublever = ?
                     WHERE business_key = ?
                     """,
                     updates,

@@ -611,6 +611,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /Ingesta/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Media semanal" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Agregados por periodo" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Comparativas cruzadas" })).toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "Evolución promotores vs detractores" })
     ).not.toBeInTheDocument();
@@ -646,14 +647,10 @@ describe("App", () => {
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
     expect(screen.getByRole("tab", { name: "Dónde se separa el NPS" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Comparativas cruzadas" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Comparativas cruzadas" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Qué dicen los clientes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Oportunidades priorizadas" }));
-    const opportunityNote = screen.getByText(/Si mejoramos/i).closest("li");
-    expect(opportunityNote).not.toBeNull();
-    expect(opportunityNote).not.toHaveTextContent("**");
-    expect(within(opportunityNote as HTMLElement).getByText("Palanca=Acceso").tagName).toBe("STRONG");
+    expect(screen.queryByRole("tab", { name: "Oportunidades priorizadas" })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Canal" }), "App");
     await waitFor(() =>

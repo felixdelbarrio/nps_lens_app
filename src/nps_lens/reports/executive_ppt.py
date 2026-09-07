@@ -98,9 +98,9 @@ class BusinessPptResult:
     file_name: str
     content: bytes
     slide_count: int
+    compact_file_name: str
+    compact_content: bytes
     saved_path: str = ""
-    compact_file_name: str = ""
-    compact_content: bytes = b""
 
 
 @dataclass(frozen=True)

@@ -110,7 +110,8 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "_presentationEntryUrl_(publication.scopeKey)" in newsletter
     assert "function _compactSlidesProperty_(scopeKey)" in publication
     assert "report_without_evolution" in publication
-    assert "!_evolutionNpsVisible_() && compactId" in publication
+    assert "_evolutionNpsVisible_() ? publication.slidesFileId : compactId" in publication
+    assert "reports.length !== 2" in publication
     assert "_configuredPublicationFolder_" not in newsletter
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
