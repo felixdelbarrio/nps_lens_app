@@ -605,7 +605,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("generate-report-button")).toBeEnabled());
   });
 
-  it("renders the restored linking workspace with method-driven summary, deep dive and scenarios", async () => {
+  it("renders the linking workspace with method-driven situation and scenarios", async () => {
     const user = userEvent.setup();
     currentLinkingPayload = linkingPayloadAvailable;
 
