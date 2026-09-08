@@ -92,12 +92,19 @@ def test_admin_navigation_and_activity_are_centralized() -> None:
     assert 'data-admin-route="newsletter"' in index
     assert 'data-admin-route="import"' in index
     assert "Adopción" in app
-    assert 'data-settings="evolution"' in app
+    assert "['evolution','Evolución NPS']" in app
+    assert "contentTabs(settingsViews,view,'settings','Secciones de configuración')" in app
+    assert 'class="settings-page"' in app
+    assert 'class="settings-tabs"' not in app
+    assert "activity-metrics" in app
     assert "saveEvolutionNpsSettings" in app
     assert "Probar newsletter" in app
     assert "recordActivityEvents" in app
     assert "recordTelemetry" not in app
     assert ".workspace-action" in design
+    assert ".settings-page{display:flex;flex-direction:column;gap:24px;min-width:0;width:100%}" in design
+    assert ".settings-tabs{" not in design
+    assert ".activity-metrics{grid-column:1/-1}" in design
 
 
 def test_initial_administrator_is_resolved_without_runtime_identity_inference() -> None:

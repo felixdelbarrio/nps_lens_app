@@ -17,6 +17,7 @@
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']];
   const npsViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico'],['gaps','Brechas NPS']];
   const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen de evidencia'],['scenarios','Análisis de escenarios de evidencia']];
+  const settingsViews = [['evolution','Evolución NPS'],['telemetry','Telemetría'],['adoption','Adopción'],['publication','Publicación']];
   let linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : fallbackLinkingViews;
   const insightSections = [...(viewer.evolutionNpsVisible===false?[]:[['summary','Evolución NPS']]),['nps-analysis','Comentarios'],['linking','Causalidad']];
   const areas = [
@@ -109,8 +110,8 @@
     const pills=options.pills===false?[]:rows(options.pills||dashboard.context_pills);
     return `<section class="surface-card context-card"><div class="section-heading"><div>${options.eyebrow?`<p class="eyebrow">${esc(options.eyebrow)}</p>`:''}<h2>${esc(title)}</h2><p class="secondary-copy">${esc(copy || 'Información consolidada con las mismas reglas de negocio de NPS Lens local.')}</p></div></div>${pills.length?`<div class="pills">${pills.map(value=>`<span class="pill">${esc(value)}</span>`).join('')}</div>`:''}${options.filters?snapshotFilters():''}${options.body||''}</section>`;
   }
-  function contentTabs(items, active=state.view, dataAttribute='detail') {
-    return items.length ? `<nav class="content-tabs" aria-label="Detalle de pantalla">${items.map(([id,name]) => `<button class="tab ${id === active ? 'active' : ''}" data-${dataAttribute}="${esc(id)}">${esc(name)}</button>`).join('')}</nav>` : '';
+  function contentTabs(items, active=state.view, dataAttribute='detail', ariaLabel='Detalle de pantalla') {
+    return items.length ? `<nav class="content-tabs" aria-label="${esc(ariaLabel)}">${items.map(([id,name]) => `<button class="tab ${id === active ? 'active' : ''}" data-${dataAttribute}="${esc(id)}">${esc(name)}</button>`).join('')}</nav>` : '';
   }
   function kpiCards(block, fallback, withDeltas) {
     const kpis = block?.kpis || fallback || {};
@@ -248,8 +249,8 @@
     rpc('recordActivityEvents',[batch]).catch(() => {});
   }
   function renderActivity(report, adoption) {
-    if (adoption) return `<div class="grid">${metric('Usuarios únicos',report.summary.users)}${metric('Sesiones',report.summary.sessions)}${metric('Acciones registradas',report.summary.events)}<article class="card half"><h3>Actividad por usuario</h3>${table(report.users,100)}</article><article class="card half"><h3>Acciones más utilizadas</h3>${table(report.actions,100)}</article><article class="card wide"><h3>Última actividad</h3>${table(report.events,250)}</article></div>`;
-    return `<div class="grid">${metric(`Eventos ${report.summary.performanceVersion}.x`,report.summary.performanceEvents)}${metric('Histórico conservado',report.summary.historicalEvents)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}<article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
+    if (adoption) return `<div class="grid"><div class="metric-grid metric-grid-3 activity-metrics">${metric('Usuarios únicos',report.summary.users)}${metric('Sesiones',report.summary.sessions)}${metric('Acciones registradas',report.summary.events)}</div><article class="card half"><h3>Actividad por usuario</h3>${table(report.users,100)}</article><article class="card half"><h3>Acciones más utilizadas</h3>${table(report.actions,100)}</article><article class="card wide"><h3>Última actividad</h3>${table(report.events,250)}</article></div>`;
+    return `<div class="grid"><div class="metric-grid metric-grid-5 activity-metrics">${metric(`Eventos ${report.summary.performanceVersion}.x`,report.summary.performanceEvents)}${metric('Histórico conservado',report.summary.historicalEvents)}${metric('Errores',report.summary.errors)}${metric('P95 servidor',`${format(report.summary.serverP95Ms)} ms`)}${metric('P95 render',`${format(report.summary.renderP95Ms)} ms`)}</div><article class="card wide"><h3>Llamadas más lentas</h3>${table(report.slowCalls,100)}</article><article class="card half"><h3>Áreas más consultadas</h3>${table(report.screens,100)}</article><article class="card half"><h3>Operaciones más utilizadas</h3>${table(report.actions,100)}</article></div>`;
   }
   async function loadActivityReport(force = false) {
     const request = {days:Number($('activity-days')?.value || 30),email:$('activity-email')?.value || ''};
@@ -260,19 +261,27 @@
     return report;
   }
   function settings(view) {
-    const tabs = '<nav class="settings-tabs"><button class="button '+(view==='evolution'?'':'ghost')+'" data-settings="evolution">Evolución NPS</button><button class="button '+(view==='telemetry'?'':'ghost')+'" data-settings="telemetry">Telemetría</button><button class="button '+(view==='adoption'?'':'ghost')+'" data-settings="adoption">Adopción</button><button class="button '+(view==='publication'?'':'ghost')+'" data-settings="publication">Publicación</button></nav>';
+    const tabs = contentTabs(settingsViews,view,'settings','Secciones de configuración');
+    let title;
+    let copy;
+    let body;
     if(view==='evolution'){
       setTimeout(async()=>{try{const value=await rpc('getEvolutionNpsSettings');$('evolution-visible').checked=value.visible!==false;}catch(error){$('evolution-status').textContent=error.message;}},0);
-      return hero('Evolución NPS','Control global de visibilidad para todos los ámbitos y usuarios de la WebApp y sus presentaciones.')+tabs+'<article class="card wide"><div class="toggle-row"><div><h3>Mostrar Evolución NPS</h3><p class="secondary-copy">Al ocultarla, la navegación pública omite la sección y la presentación abre la variante sin las diapositivas 2 y 3.</p></div><label class="switch"><input id="evolution-visible" type="checkbox"><span aria-hidden="true"></span></label></div><button id="evolution-save" class="button">Guardar visibilidad global</button><p id="evolution-status" class="status">El cambio se aplica a todos los usuarios y ámbitos publicados.</p></article>';
-    }
-    if(view==='publication'){
+      title = 'Evolución NPS';
+      copy = 'Control global de visibilidad para todos los ámbitos y usuarios de la WebApp y sus presentaciones.';
+      body = '<article class="surface-card stack-panel"><div class="toggle-row"><div><h3>Mostrar Evolución NPS</h3><p class="secondary-copy">Al ocultarla, la navegación pública omite la sección y la presentación abre la variante sin las diapositivas 2 y 3.</p></div><label class="switch"><input id="evolution-visible" type="checkbox"><span aria-hidden="true"></span></label></div><button id="evolution-save" class="button">Guardar visibilidad global</button><p id="evolution-status" class="status">El cambio se aplica a todos los usuarios y ámbitos publicados.</p></article>';
+    } else if(view==='publication'){
       setTimeout(async()=>{try{const folder=await rpc('getPublicationSettings');$('publication-folder').value=folder.id||'';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}},0);
-      return hero('Publicación','Define la carpeta de Drive donde se guardan el PPTX importado y la presentación nativa utilizada por la newsletter.')+tabs+'<article class="card wide"><div class="admin-form"><label class="field">ID o enlace de carpeta<input id="publication-folder" placeholder="ID o enlace de Google Drive"></label><button id="publication-folder-save" class="button secondary">Guardar y validar</button><a id="publication-folder-open" class="button ghost" target="_blank" hidden>Abrir carpeta</a></div><p id="publication-folder-status" class="status">La siguiente importación utilizará esta carpeta.</p></article>';
+      title = 'Publicación';
+      copy = 'Define la carpeta de Drive donde se guardan el PPTX importado y la presentación nativa utilizada por la newsletter.';
+      body = '<article class="surface-card stack-panel"><div class="admin-form"><label class="field">ID o enlace de carpeta<input id="publication-folder" placeholder="ID o enlace de Google Drive"></label><button id="publication-folder-save" class="button secondary">Guardar y validar</button><a id="publication-folder-open" class="button ghost" target="_blank" hidden>Abrir carpeta</a></div><p id="publication-folder-status" class="status">La siguiente importación utilizará esta carpeta.</p></article>';
+    } else {
+      setTimeout(async () => { try { const report = await loadActivityReport(); if($('activity-body')) $('activity-body').innerHTML = renderActivity(report,view === 'adoption'); } catch (error) { if($('activity-body')) $('activity-body').innerHTML = `<p class="error">${esc(error.message)}</p>`; } },0);
+      title = view === 'adoption' ? 'Adopción y uso' : 'Telemetría de experiencia';
+      copy = view === 'adoption' ? 'Conoce quién utiliza NPS Lens y qué recorridos realiza para orientar la evolución del producto.' : 'Tiempos, errores y recorridos preparados para que CODEX identifique cuellos de botella sin exponer datos de cliente.';
+      body = '<article class="surface-card stack-panel"><div class="admin-form"><label class="field">Periodo<select id="activity-days"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option><option value="365">12 meses</option></select></label><label class="field">Usuario (opcional)<input id="activity-email" type="email" placeholder="usuario@bbva.com"></label><button id="activity-refresh" class="button secondary">Actualizar</button></div><div id="activity-body" class="status">Preparando lectura…</div><div class="toolbar"><button id="activity-download" class="button">Descargar diagnóstico JSON</button><span id="activity-status" class="status"></span></div></article>';
     }
-    setTimeout(async () => { try { const report = await loadActivityReport(); if($('activity-body')) $('activity-body').innerHTML = renderActivity(report,view === 'adoption'); } catch (error) { if($('activity-body')) $('activity-body').innerHTML = `<p class="error">${esc(error.message)}</p>`; } },0);
-    const title = view === 'adoption' ? 'Adopción y uso' : 'Telemetría de experiencia';
-    const copy = view === 'adoption' ? 'Conoce quién utiliza NPS Lens y qué recorridos realiza para orientar la evolución del producto.' : 'Tiempos, errores y recorridos preparados para que CODEX identifique cuellos de botella sin exponer datos de cliente.';
-    return hero(title,copy) + tabs + '<article class="card wide"><div class="admin-form"><label class="field">Periodo<select id="activity-days"><option value="7">7 días</option><option value="30" selected>30 días</option><option value="90">90 días</option><option value="365">12 meses</option></select></label><label class="field">Usuario (opcional)<input id="activity-email" type="email" placeholder="usuario@bbva.com"></label><button id="activity-refresh" class="button secondary">Actualizar</button></div><div id="activity-body" class="status">Preparando lectura…</div><div class="toolbar"><button id="activity-download" class="button">Descargar diagnóstico JSON</button><span id="activity-status" class="status"></span></div></article>';
+    return `<div class="settings-page">${hero(title,copy)}${tabs}${body}</div>`;
   }
   function recipientRows(items) {
     return rows(items).map(item => `<div class="recipient-row"><span class="recipient-email">${esc(item.email)}</span><span class="badge ${item.active?'active':'inactive'}">${item.active?'Activo':'Inactivo'}</span><button class="button ghost" data-recipient="${esc(item.email)}" data-active="${item.active?'false':'true'}">${item.active?'Desactivar':'Activar'}</button></div>`).join('') || '<div class="empty">Todavía no hay destinatarios.</div>';

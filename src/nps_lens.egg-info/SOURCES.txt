@@ -106,6 +106,7 @@ src/nps_lens/ui/plotly_theme.py
 src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
+tests/test_causal_identity_regressions.py
 tests/test_config_env.py
 tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
