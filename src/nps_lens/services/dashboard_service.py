@@ -48,11 +48,9 @@ from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
     association_summary_by_topic,
     build_incident_display_text,
-    can_use_daily_resample,
     daily_aggregates,
     detect_detractor_changepoints_with_bootstrap,
     estimate_best_lag_by_topic,
-    estimate_best_lag_days_by_topic,
     incidents_lead_changepoints_flag,
     link_incidents_to_nps_topics,
     weekly_aggregates,
@@ -1187,9 +1185,7 @@ class DashboardService:
                 operational_benchmark=operational_benchmark,
             )
             links_df = cast(pd.DataFrame, core["links_df"])
-            overall_daily = cast(pd.DataFrame, core["overall_daily"])
             by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
-            by_topic_daily = cast(pd.DataFrame, core["by_topic_daily"])
             executive_journey_catalog = load_executive_journey_catalog(
                 self.settings.knowledge_dir,
                 service_origin=context.service_origin,
@@ -1201,25 +1197,18 @@ class DashboardService:
                 focus_df=focus_df,
                 helix_df=helix_slice,
                 by_topic_weekly=by_topic_weekly,
-                by_topic_daily=by_topic_daily,
                 executive_journey_catalog=executive_journey_catalog,
             )
             canonical_bundle = self._build_rationale_bundle(
                 by_topic_weekly=by_topic_weekly,
-                by_topic_daily=by_topic_daily,
-                overall_daily=overall_daily,
                 focus_group=focus_group,
-                context=context,
                 links_df=links_df,
                 operational_benchmark=operational_benchmark,
             )
             links_mode_df = mode_payload["links_mode_df"]
             mode_bundle = self._build_rationale_bundle(
                 by_topic_weekly=mode_payload["by_topic_weekly_mode"],
-                by_topic_daily=mode_payload["by_topic_daily_mode"],
-                overall_daily=overall_daily,
                 focus_group=focus_group,
-                context=context,
                 links_df=links_mode_df,
                 operational_benchmark=operational_benchmark,
             )
@@ -2048,7 +2037,6 @@ class DashboardService:
         focus_df: pd.DataFrame,
         helix_df: pd.DataFrame,
         by_topic_weekly: pd.DataFrame,
-        by_topic_daily: pd.DataFrame,
         executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     ) -> dict[str, pd.DataFrame]:
         broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(
@@ -2058,7 +2046,6 @@ class DashboardService:
         )
         links_mode_df = links_df.copy()
         by_topic_weekly_mode = by_topic_weekly.copy()
-        by_topic_daily_mode = by_topic_daily.copy()
         causal_topic_map_df = build_causal_topic_map(
             links_df,
             focus_df,
@@ -2073,10 +2060,6 @@ class DashboardService:
                 by_topic_weekly,
                 causal_topic_map_df,
             )
-            by_topic_daily_mode = remap_topic_timeseries_to_causal_entities(
-                by_topic_daily,
-                causal_topic_map_df,
-            )
 
         return {
             "broken_journeys_df": broken_journeys_df,
@@ -2084,7 +2067,6 @@ class DashboardService:
             "causal_topic_map_df": causal_topic_map_df,
             "links_mode_df": links_mode_df,
             "by_topic_weekly_mode": by_topic_weekly_mode,
-            "by_topic_daily_mode": by_topic_daily_mode,
         }
 
     def _helix_base_url(self) -> str:
@@ -2160,10 +2142,7 @@ class DashboardService:
         self,
         *,
         by_topic_weekly: pd.DataFrame,
-        by_topic_daily: pd.DataFrame,
-        overall_daily: pd.DataFrame,
         focus_group: str,
-        context: UploadContext,
         links_df: pd.DataFrame,
         operational_benchmark: HelixOperationalBenchmark,
     ) -> dict[str, object]:
@@ -2181,20 +2160,6 @@ class DashboardService:
             changepoints_df,
             window_weeks=4,
         )
-        lag_days_df = (
-            estimate_best_lag_days_by_topic(
-                by_topic_daily,
-                max_lag_days=21,
-                min_points=30,
-            )
-            if can_use_daily_resample(
-                overall_daily,
-                min_days_with_responses=20,
-                min_coverage=0.45,
-            )
-            else pd.DataFrame()
-        )
-
         ranking_df = pd.DataFrame()
         ranking_view_df = pd.DataFrame()
         top_topic = ""
@@ -2281,17 +2246,14 @@ class DashboardService:
             links_df=links_df,
             benchmark=operational_benchmark,
         )
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
         return {
             "rank_df": rank,
             "changepoints_df": changepoints_df,
             "lag_weeks_df": lag_weeks_df,
             "lead_share_df": lead_share_df,
-            "lag_days_df": lag_days_df,
             "ranking_df": ranking_df,
             "ranking_view_df": ranking_view_df,
             "rationale_df": rationale_df,
-            "rationale_summary": rationale_summary,
             "top_topic": top_topic,
         }
 
@@ -2771,7 +2733,7 @@ class DashboardService:
             assignments_df,
             focus_group=focus_group,
         )
-        overall_daily, by_topic_daily = daily_aggregates(
+        overall_daily, _ = daily_aggregates(
             nps_df,
             helix_df,
             assignments_df,
@@ -2789,20 +2751,6 @@ class DashboardService:
             links_df=links_df,
             benchmark=benchmark,
         )
-        rationale_summary = summarize_incident_nps_rationale(rationale_df)
-        lag_days = (
-            estimate_best_lag_days_by_topic(
-                by_topic_daily,
-                max_lag_days=21,
-                min_points=30,
-            )
-            if can_use_daily_resample(
-                overall_daily,
-                min_days_with_responses=20,
-                min_coverage=0.45,
-            )
-            else pd.DataFrame()
-        )
         evidence_df = self._build_linking_evidence_table(
             focus_df,
             helix_df,
@@ -2819,11 +2767,8 @@ class DashboardService:
             "overall_weekly": overall_weekly,
             "by_topic_weekly": by_topic_weekly,
             "overall_daily": overall_daily,
-            "by_topic_daily": by_topic_daily,
             "rationale_rank": rationale_rank,
             "rationale_df": rationale_df,
-            "rationale_summary": rationale_summary,
-            "lag_days": lag_days,
             "evidence_df": evidence_df,
             "top_topic": top_topic,
         }
