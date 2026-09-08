@@ -268,10 +268,6 @@ const linkingPayloadAvailable = {
     ],
     figure: null,
     note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité.",
-    associations: {
-      title: "Asociaciones temporales observadas",
-      rows: [{ "Tópico NPS": "Consulta > Estado de cuenta / comprobantes", Respuestas: 132, "Tasa foco": 0.21 }]
-    },
     evidence: {
       title: "Evidencias",
       subtitle: "Diez tópicos afectados con mayor evidencia.",
@@ -638,7 +634,7 @@ describe("App", () => {
     expect(
       screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Asociaciones temporales observadas")).toBeInTheDocument();
+    expect(screen.queryByText("Asociaciones temporales observadas")).not.toBeInTheDocument();
     expect(screen.getByText("Evidencias")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));

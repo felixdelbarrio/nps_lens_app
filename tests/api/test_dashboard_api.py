@@ -494,7 +494,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert "scenarios" in linking_payload
     assert "deep_dive" not in linking_payload
     assert len(linking_payload["navigation"]) == 3
-    assert linking_payload["situation"]["associations"]["rows"]
+    assert "associations" not in linking_payload["situation"]
     evidence_rows = linking_payload["situation"]["evidence"]["rows"]
     assert evidence_rows
     assert {"Respuestas", "Tasa foco"}.issubset(evidence_rows[0])

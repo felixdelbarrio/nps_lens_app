@@ -794,12 +794,14 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
         raise ValueError("driver_df must include gap_vs_overall")
     d = d.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(top_k).copy()
     plot_df = d.iloc[::-1].copy()
+    gap_values = pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").fillna(0.0)
+    plot_df["gap_vs_overall"] = gap_values
     plot_df["gap_direction"] = np.where(
-        pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").fillna(0.0) < 0.0,
+        gap_values < 0.0,
         "por debajo del promedio global",
         "por encima del promedio global",
     )
-    plot_df["abs_gap"] = pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").abs()
+    plot_df["abs_gap"] = gap_values.abs()
     fig = px.bar(
         plot_df,
         x="gap_vs_overall",
@@ -825,6 +827,40 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     )
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
+
+    zero_rows = plot_df.loc[gap_values.abs().le(1e-9)]
+    if not zero_rows.empty:
+        fig.add_scatter(
+            x=[0.0] * len(zero_rows),
+            y=zero_rows["value"],
+            mode="markers+text",
+            marker={
+                "color": theme.warning,
+                "size": 11,
+                "line": {"color": theme.brand, "width": 1},
+            },
+            text=["0 pts"] * len(zero_rows),
+            textposition="middle right",
+            textfont={"color": theme.text},
+            hovertemplate="%{y}<br>Brecha vs Global: 0 pts<extra></extra>",
+            showlegend=False,
+        )
+    if len(zero_rows) == len(plot_df):
+        fig.update_xaxes(
+            range=[-1.0, 1.0],
+            zeroline=True,
+            zerolinecolor=theme.chart_zero_line,
+            zerolinewidth=2,
+        )
+        fig.add_annotation(
+            x=0.5,
+            y=1.08,
+            xref="paper",
+            yref="paper",
+            text="Sin brechas: todos los segmentos coinciden con el NPS global del filtro activo.",
+            showarrow=False,
+            font={"color": theme.muted, "size": 12},
+        )
     return apply_plotly_template(fig, theme)
 
 

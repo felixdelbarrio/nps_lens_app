@@ -35,10 +35,7 @@ from nps_lens.analytics.incident_attribution import (
     remap_topic_timeseries_to_causal_entities,
     summarize_attribution_chains,
 )
-from nps_lens.analytics.incident_rationale import (
-    build_incident_nps_rationale,
-    summarize_incident_nps_rationale,
-)
+from nps_lens.analytics.incident_rationale import build_incident_nps_rationale
 from nps_lens.analytics.linking_policy import (
     LINK_MAX_VISIBLE_COMMENTS,
     LINK_MAX_VISIBLE_INCIDENTS,
@@ -46,12 +43,8 @@ from nps_lens.analytics.linking_policy import (
 from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
-    association_summary_by_topic,
     build_incident_display_text,
     daily_aggregates,
-    detect_detractor_changepoints_with_bootstrap,
-    estimate_best_lag_by_topic,
-    incidents_lead_changepoints_flag,
     link_incidents_to_nps_topics,
     weekly_aggregates,
 )
@@ -1181,7 +1174,6 @@ class DashboardService:
                 focus_group=focus_group,
                 min_similarity=min_similarity,
                 max_days_apart=max_days_apart,
-                operational_benchmark=operational_benchmark,
             )
             links_df = cast(pd.DataFrame, core["links_df"])
             by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
@@ -1198,14 +1190,8 @@ class DashboardService:
                 by_topic_weekly=by_topic_weekly,
                 executive_journey_catalog=executive_journey_catalog,
             )
-            canonical_bundle = self._build_rationale_bundle(
-                by_topic_weekly=by_topic_weekly,
-                focus_group=focus_group,
-                links_df=links_df,
-                operational_benchmark=operational_benchmark,
-            )
             links_mode_df = mode_payload["links_mode_df"]
-            mode_bundle = self._build_rationale_bundle(
+            rationale_df = self._build_rationale_df(
                 by_topic_weekly=mode_payload["by_topic_weekly_mode"],
                 focus_group=focus_group,
                 links_df=links_mode_df,
@@ -1215,7 +1201,7 @@ class DashboardService:
                 links_mode_df,
                 focus_df,
                 helix_slice,
-                rationale_df=cast(pd.DataFrame, mode_bundle["rationale_df"]),
+                rationale_df=rationale_df,
                 top_k=0,
                 max_incident_examples=0,
                 max_comment_examples=0,
@@ -1236,8 +1222,7 @@ class DashboardService:
                     "ready": True,
                     "core": core,
                     "mode_payload": mode_payload,
-                    "canonical_bundle": canonical_bundle,
-                    "mode_bundle": mode_bundle,
+                    "rationale_df": rationale_df,
                     "chains": chains,
                     "executive_journey_catalog": executive_journey_catalog,
                 }
@@ -1341,6 +1326,7 @@ class DashboardService:
         core = cast(dict[str, object], analysis["core"])
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
+        by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
         links_df = cast(pd.DataFrame, core["links_df"])
         mode_payload = cast(dict[str, object], analysis["mode_payload"])
         causal_topic_map_df = cast(pd.DataFrame, mode_payload["causal_topic_map_df"])
@@ -1349,10 +1335,6 @@ class DashboardService:
         average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
         show_all_groups = str(resolved_group or "").strip().lower() == str(POP_ALL).lower()
 
-        canonical_bundle = cast(dict[str, object], analysis["canonical_bundle"])
-        canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
-        canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
-        canonical_rationale_df = cast(pd.DataFrame, canonical_bundle["rationale_df"])
         evidence_df = self._build_linking_evidence_table(
             focus_df,
             helix_slice,
@@ -1386,29 +1368,10 @@ class DashboardService:
                 _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
             )
         affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)[:10]
-        filtered_rationale_df = _filter_frame_by_topic_values(
-            canonical_rationale_df,
-            affected_topics,
-        )
-        filtered_ranking_df = _filter_frame_by_topic_values(
-            canonical_ranking_df,
-            affected_topics,
-        )
-        filtered_ranking_view_df = _filter_frame_by_topic_values(
-            canonical_ranking_view_df,
-            affected_topics,
-            column="Tópico NPS",
-        )
         filtered_evidence_df = _filter_frame_by_topic_values(
             evidence_df,
             affected_topics,
         )
-        active_rationale_summary = summarize_incident_nps_rationale(filtered_rationale_df)
-        median_lag_weeks = pd.to_numeric(
-            pd.Series([active_rationale_summary.median_lag_weeks]),
-            errors="coerce",
-        ).iloc[0]
-        median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
         timeline_figure = self._serialize_figure(
             self._build_linking_overview_figure(
                 trend_df,
@@ -1432,17 +1395,9 @@ class DashboardService:
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
 
-        ranking_rows = self._serialize_rows(filtered_ranking_view_df.head(10))
         evidence_sorted_df = filtered_evidence_df.copy()
         if not evidence_sorted_df.empty:
-            topic_rank = {
-                topic: index
-                for index, topic in enumerate(
-                    _unique_string_values(
-                        _series_or_default(filtered_ranking_df, "nps_topic").astype(str).tolist()
-                    )
-                )
-            }
+            topic_rank = {topic: index for index, topic in enumerate(affected_topics)}
             evidence_sorted_df["__topic_order"] = evidence_sorted_df.get(
                 "nps_topic",
                 pd.Series([""] * len(evidence_sorted_df), index=evidence_sorted_df.index),
@@ -1456,12 +1411,19 @@ class DashboardService:
                 ascending=[True, False],
             ).drop(columns="__topic_order")
 
-        if not evidence_sorted_df.empty and not filtered_ranking_view_df.empty:
-            topic_metrics = filtered_ranking_view_df[
-                ["Tópico NPS", "Respuestas", "Tasa foco"]
-            ].rename(columns={"Tópico NPS": "nps_topic"})
+        metrics_source = _filter_frame_by_topic_values(by_topic_weekly, affected_topics)
+        if not evidence_sorted_df.empty and not metrics_source.empty:
+            topic_metrics = (
+                metrics_source.groupby("nps_topic", observed=True)
+                .agg(Respuestas=("responses", "sum"), focus_count=("focus_count", "sum"))
+                .reset_index()
+            )
+            topic_metrics["Tasa foco"] = (
+                topic_metrics["focus_count"]
+                / topic_metrics["Respuestas"].replace({0: np.nan})
+            )
             evidence_sorted_df = evidence_sorted_df.merge(
-                topic_metrics.drop_duplicates("nps_topic"), on="nps_topic", how="left"
+                topic_metrics.drop(columns="focus_count"), on="nps_topic", how="left"
             )
         # Preserve evidence for every affected topic instead of allowing the
         # first topic to consume the whole static-snapshot row budget.
@@ -1499,10 +1461,8 @@ class DashboardService:
                 ),
                 "incidents_excluded_quality": excluded_quality,
                 "linked_pairs": int(len(links_mode_df)),
-                "topics_analyzed": int(active_rationale_summary.topics_analyzed),
-                "top3_incident_share": float(active_rationale_summary.top3_incident_share),
+                "topics_analyzed": len(affected_topics),
                 "average_focus_rate": average_focus,
-                "median_lag_weeks": median_lag_value,
             },
             "situation": {
                 "narrative": {
@@ -1534,11 +1494,6 @@ class DashboardService:
                 ],
                 "figure": timeline_figure,
                 "note": " ".join([note for note in situation_notes if note]),
-                "associations": {
-                    "title": "Asociaciones temporales observadas",
-                    "rows": ranking_rows,
-                    "empty_state": "No hay suficiente serie temporal para calcular asociaciones.",
-                },
                 "evidence": {
                     "title": "Evidencias",
                     "subtitle": "Comentarios e incidencias vinculados para los 10 tópicos afectados con mayor evidencia.",
@@ -1672,8 +1627,7 @@ class DashboardService:
                 )
                 overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
                 overall_series = overall_daily if not overall_daily.empty else overall_weekly
-                mode_bundle = cast(dict[str, object], causal["mode_bundle"])
-                rationale_df = cast(pd.DataFrame, mode_bundle["rationale_df"])
+                rationale_df = cast(pd.DataFrame, causal["rationale_df"])
                 attribution_all_df = cast(pd.DataFrame, causal["chains"])
                 attribution_df = self._select_top_chain_rows(attribution_all_df)
                 mode_payload = cast(dict[str, object], causal["mode_payload"])
@@ -2135,124 +2089,24 @@ class DashboardService:
         out["incident_records"] = normalized_records
         return out
 
-    def _build_rationale_bundle(
+    def _build_rationale_df(
         self,
         *,
         by_topic_weekly: pd.DataFrame,
         focus_group: str,
         links_df: pd.DataFrame,
         operational_benchmark: HelixOperationalBenchmark,
-    ) -> dict[str, object]:
-        rank = association_summary_by_topic(by_topic_weekly)
-        changepoints_df = detect_detractor_changepoints_with_bootstrap(
-            by_topic_weekly,
-            pen=6.0,
-            n_boot=200,
-            block_size=2,
-            tol_periods=1,
-        )
-        lag_weeks_df = estimate_best_lag_by_topic(by_topic_weekly, max_lag_weeks=6)
-        lead_share_df = incidents_lead_changepoints_flag(
-            by_topic_weekly,
-            changepoints_df,
-            window_weeks=4,
-        )
-        ranking_df = pd.DataFrame()
-        ranking_view_df = pd.DataFrame()
-        top_topic = ""
-        if not rank.empty:
-            ranking_df = (
-                rank.merge(changepoints_df, on="nps_topic", how="left")
-                .merge(lag_weeks_df, on="nps_topic", how="left")
-                .merge(lead_share_df, on="nps_topic", how="left")
-            )
-            ranking_df = ranking_df.sort_values(
-                ["incidents", "responses", "nps_topic"],
-                ascending=[False, False, True],
-            ).reset_index(drop=True)
-            top_topic = str(ranking_df.iloc[0]["nps_topic"])
-
-            formatted_rank = ranking_df.copy()
-            formatted_rank["corr"] = _numeric_series(formatted_rank, "corr", default=np.nan).round(
-                3
-            )
-            formatted_rank["max_cp_stability"] = _numeric_series(
-                formatted_rank, "max_cp_stability", default=np.nan
-            ).round(3)
-            formatted_rank["incidents_lead_changepoint_share"] = (
-                _numeric_series(
-                    formatted_rank,
-                    "incidents_lead_changepoint_share",
-                    default=np.nan,
-                )
-                .mul(100.0)
-                .round(0)
-            )
-            formatted_rank["best_lag_weeks"] = _numeric_series(
-                formatted_rank, "best_lag_weeks", default=np.nan
-            )
-            formatted_rank["changepoints"] = formatted_rank.get(
-                "changepoints",
-                pd.Series([[]] * len(formatted_rank), index=formatted_rank.index),
-            ).map(
-                lambda value: (
-                    "[" + ", ".join([str(item) for item in value]) + "]"
-                    if isinstance(value, list) and value
-                    else "[]"
-                )
-            )
-            ranking_view_df = formatted_rank[
-                [
-                    "nps_topic",
-                    "responses",
-                    "focus_rate",
-                    "delta_focus_rate",
-                    "best_lag_weeks",
-                    "corr",
-                    "incidents_lead_changepoint_share",
-                    "max_cp_level",
-                    "max_cp_stability",
-                    "changepoints",
-                    "incidents",
-                ]
-            ].rename(
-                columns={
-                    "nps_topic": "Tópico NPS",
-                    "responses": "Respuestas",
-                    "focus_rate": "Tasa foco",
-                    "delta_focus_rate": "Diferencia tasa foco alta vs baja",
-                    "best_lag_weeks": "Lag (semanas)",
-                    "corr": "Corr@Lag",
-                    "incidents_lead_changepoint_share": "Incidencias→CP (share)",
-                    "max_cp_level": "CP Significance",
-                    "max_cp_stability": "CP Stability",
-                    "changepoints": "Changepoints",
-                    "incidents": "Incidencias (asignadas)",
-                }
-            )
-
-        rationale_rank = ranking_df if not ranking_df.empty else rank
+    ) -> pd.DataFrame:
         rationale_df = build_incident_nps_rationale(
             by_topic_weekly,
             focus_group=focus_group,
-            rank_df=rationale_rank,
             min_topic_responses=80,
         )
-        rationale_df = enrich_rationale_with_operational_metrics(
+        return enrich_rationale_with_operational_metrics(
             rationale_df,
             links_df=links_df,
             benchmark=operational_benchmark,
         )
-        return {
-            "rank_df": rank,
-            "changepoints_df": changepoints_df,
-            "lag_weeks_df": lag_weeks_df,
-            "lead_share_df": lead_share_df,
-            "ranking_df": ranking_df,
-            "ranking_view_df": ranking_view_df,
-            "rationale_df": rationale_df,
-            "top_topic": top_topic,
-        }
 
     @staticmethod
     def _build_entity_summary_df(
@@ -2712,12 +2566,7 @@ class DashboardService:
         focus_group: str,
         min_similarity: float,
         max_days_apart: int,
-        operational_benchmark: Optional[HelixOperationalBenchmark] = None,
     ) -> dict[str, object]:
-        benchmark = operational_benchmark or self._safe_helix_operational_benchmark(
-            helix_df,
-            context="_compute_linking_core",
-        )
         assignments_df, links_df = link_incidents_to_nps_topics(
             focus_df,
             helix_df,
@@ -2736,38 +2585,11 @@ class DashboardService:
             assignments_df,
             focus_group=focus_group,
         )
-        rationale_rank = association_summary_by_topic(by_topic_weekly)
-        rationale_df = build_incident_nps_rationale(
-            by_topic_weekly,
-            focus_group=focus_group,
-            rank_df=rationale_rank,
-            min_topic_responses=80,
-        )
-        rationale_df = enrich_rationale_with_operational_metrics(
-            rationale_df,
-            links_df=links_df,
-            benchmark=benchmark,
-        )
-        evidence_df = self._build_linking_evidence_table(
-            focus_df,
-            helix_df,
-            links_df,
-            max_rows=300,
-        )
-        top_topic = ""
-        if not rationale_df.empty:
-            top_topic = str(rationale_df.iloc[0]["nps_topic"])
-        elif not rationale_rank.empty:
-            top_topic = str(rationale_rank.iloc[0]["nps_topic"])
         return {
             "links_df": links_df,
             "overall_weekly": overall_weekly,
             "by_topic_weekly": by_topic_weekly,
             "overall_daily": overall_daily,
-            "rationale_rank": rationale_rank,
-            "rationale_df": rationale_df,
-            "evidence_df": evidence_df,
-            "top_topic": top_topic,
         }
 
     def _empty_linking_payload(

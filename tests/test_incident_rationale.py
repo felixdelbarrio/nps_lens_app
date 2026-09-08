@@ -4,7 +4,6 @@ import pytest
 from nps_lens.analytics.incident_rationale import (
     RATIONALE_COLUMNS,
     build_incident_nps_rationale,
-    summarize_incident_nps_rationale,
 )
 
 FORBIDDEN = {
@@ -35,28 +34,14 @@ def _weekly() -> pd.DataFrame:
 
 
 def test_rationale_contains_only_observed_or_reproducible_statistics() -> None:
-    rank = pd.DataFrame(
-        {
-            "nps_topic": ["Pagos > SPEI", "Acceso > Login"],
-            "corr": [-0.71, 0.12],
-            "best_lag_weeks": [1, 4],
-            "max_cp_stability": [0.73, 0.20],
-            "incidents_lead_changepoint_share": [0.75, 0.20],
-        }
-    )
-    result = build_incident_nps_rationale(_weekly(), rank_df=rank, min_topic_responses=100)
+    result = build_incident_nps_rationale(_weekly(), min_topic_responses=100)
     assert list(result.columns) == RATIONALE_COLUMNS
     assert FORBIDDEN.isdisjoint(result.columns)
     pagos = result.set_index("nps_topic").loc["Pagos > SPEI"]
     assert pagos["focus_rate_high_incidence"] > pagos["focus_rate_low_incidence"]
     assert pagos["focus_rate_difference_pp"] > 0
     assert pagos["score_mean_difference"] < 0
-    assert pagos["corr"] == pytest.approx(-0.71)
     assert pagos["low_incident_weeks"] > 0 and pagos["high_incident_weeks"] > 0
-    summary = summarize_incident_nps_rationale(result)
-    assert summary.topics_analyzed == 2
-    assert summary.responses == int(result["responses"].sum())
-    assert summary.incidents == int(result["incidents"].sum())
 
 
 def test_rates_are_weighted_by_responses_and_sparse_inputs_are_omitted() -> None:
@@ -75,4 +60,3 @@ def test_rates_are_weighted_by_responses_and_sparse_inputs_are_omitted() -> None
     assert row["focus_rate_high_incidence"] == pytest.approx(0.45)
     assert build_incident_nps_rationale(frame, min_topic_responses=1000).empty
     assert build_incident_nps_rationale(pd.DataFrame()).empty
-    assert summarize_incident_nps_rationale(pd.DataFrame()).topics_analyzed == 0

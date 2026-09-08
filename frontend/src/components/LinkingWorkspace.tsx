@@ -200,7 +200,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const situationMetadata = asRows(situation.metadata);
   const entitySummaryKpis = asRows(entitySummary.kpis);
   const entitySummaryRows = asRows(entitySummary.table);
-  const situationAssociations = asRecord(situation.associations);
   const situationEvidence = asRecord(situation.evidence);
   const [activeChainIndex, setActiveChainIndex] = useState(0);
   const [scenarioDetailTab, setScenarioDetailTab] = useState("helix");
@@ -297,14 +296,6 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               <p className="secondary-copy">{asString(situation.note)}</p>
             </article>
           ) : null}
-
-          <section className="linking-panel">
-            <div className="section-heading"><div><h3>{asString(situationAssociations.title, "Asociaciones temporales observadas")}</h3></div></div>
-            <RecordTable
-              emptyMessage={asString(situationAssociations.empty_state, "No hay asociaciones temporales disponibles.")}
-              rows={asRows(situationAssociations.rows)}
-            />
-          </section>
 
           <section className="linking-panel">
             <div className="section-heading"><div>

@@ -70,7 +70,6 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
         "situation.metadata",
         "situation.note",
         "entity.kpis",
-        "situation.associations",
         "situation.evidence",
     ):
         assert payload_field in web
@@ -78,6 +77,7 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
     assert "data-scenario-detail" in web
     assert "data-deep-detail" not in web
     assert "data-evidence-view" in web
+    assert "Asociaciones temporales observadas" not in web
 
 
 def test_admin_navigation_and_activity_are_centralized() -> None:

@@ -1,20 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
-
-
-@dataclass(frozen=True)
-class IncidentRationaleSummary:
-    topics_analyzed: int
-    responses: int
-    incidents: int
-    top3_incident_share: float
-    median_lag_weeks: float
-
 
 RATIONALE_COLUMNS = [
     "nps_topic",
@@ -33,10 +22,6 @@ RATIONALE_COLUMNS = [
     "score_mean_low_incidence",
     "score_mean_high_incidence",
     "score_mean_difference",
-    "best_lag_weeks",
-    "corr",
-    "max_cp_stability",
-    "incidents_lead_changepoint_share",
 ]
 
 
@@ -44,36 +29,9 @@ def _empty_rationale_df() -> pd.DataFrame:
     return pd.DataFrame(columns=RATIONALE_COLUMNS)
 
 
-def _safe_num(value: Any, default: float = 0.0) -> float:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return float(default)
-    return result if np.isfinite(result) else float(default)
-
-
 def _touchpoint_from_topic(topic: object) -> str:
     parts = [part.strip() for part in str(topic or "").split(">") if part.strip()]
     return parts[0] if parts else "Journey sin etiquetar"
-
-
-def _rank_lookup(rank_df: Optional[pd.DataFrame]) -> dict[str, dict[str, float]]:
-    """Extract only reproducible temporal statistics from the topic analysis."""
-    if rank_df is None or rank_df.empty or "nps_topic" not in rank_df.columns:
-        return {}
-    result: dict[str, dict[str, float]] = {}
-    for _, row in rank_df.iterrows():
-        topic = str(row.get("nps_topic", "")).strip()
-        if topic:
-            result[topic] = {
-                "corr": _safe_num(row.get("corr"), np.nan),
-                "best_lag_weeks": _safe_num(row.get("best_lag_weeks"), np.nan),
-                "max_cp_stability": _safe_num(row.get("max_cp_stability"), np.nan),
-                "incidents_lead_changepoint_share": _safe_num(
-                    row.get("incidents_lead_changepoint_share"), np.nan
-                ),
-            }
-    return result
 
 
 def _weighted_mean(values: pd.Series, weights: pd.Series) -> float:
@@ -87,7 +45,6 @@ def build_incident_nps_rationale(
     by_topic_weekly: pd.DataFrame,
     *,
     focus_group: str = "detractor",
-    rank_df: Optional[pd.DataFrame] = None,
     min_topic_responses: int = 80,
 ) -> pd.DataFrame:
     """Compare low and high incident weeks with transparent, weighted statistics."""
@@ -103,7 +60,6 @@ def build_incident_nps_rationale(
     frame["focus_rate"] = pd.to_numeric(frame["focus_rate"], errors="coerce").clip(0, 1)
     frame["nps_mean"] = pd.to_numeric(frame.get("nps_mean"), errors="coerce")
     frame = frame[frame["nps_topic"].ne("") & frame["responses"].gt(0)]
-    temporal = _rank_lookup(rank_df)
     rows: list[dict[str, Any]] = []
     for topic, group in frame.groupby("nps_topic", observed=True):
         group = group.sort_values("week")
@@ -129,7 +85,6 @@ def build_incident_nps_rationale(
         focus_high = _weighted_mean(group.loc[high, "focus_rate"], group.loc[high, "responses"])
         score_low = _weighted_mean(group.loc[low, "nps_mean"], group.loc[low, "responses"])
         score_high = _weighted_mean(group.loc[high, "nps_mean"], group.loc[high, "responses"])
-        stats = temporal.get(str(topic), {})
         incidents = int(group["incidents"].sum())
         rows.append(
             {
@@ -149,12 +104,6 @@ def build_incident_nps_rationale(
                 "score_mean_low_incidence": score_low,
                 "score_mean_high_incidence": score_high,
                 "score_mean_difference": score_high - score_low,
-                "best_lag_weeks": stats.get("best_lag_weeks", np.nan),
-                "corr": stats.get("corr", np.nan),
-                "max_cp_stability": stats.get("max_cp_stability", np.nan),
-                "incidents_lead_changepoint_share": stats.get(
-                    "incidents_lead_changepoint_share", np.nan
-                ),
             }
         )
     if not rows:
@@ -166,21 +115,4 @@ def build_incident_nps_rationale(
             ascending=[False, False, False, True],
         )
         .reset_index(drop=True)[RATIONALE_COLUMNS]
-    )
-
-
-def summarize_incident_nps_rationale(rationale_df: pd.DataFrame) -> IncidentRationaleSummary:
-    if rationale_df is None or rationale_df.empty:
-        return IncidentRationaleSummary(0, 0, 0, 0.0, float("nan"))
-    incidents = pd.to_numeric(rationale_df["incidents"], errors="coerce").fillna(0)
-    total_incidents = int(incidents.sum())
-    lags = pd.to_numeric(rationale_df["best_lag_weeks"], errors="coerce").dropna()
-    return IncidentRationaleSummary(
-        topics_analyzed=len(rationale_df),
-        responses=int(pd.to_numeric(rationale_df["responses"], errors="coerce").fillna(0).sum()),
-        incidents=total_incidents,
-        top3_incident_share=(
-            float(incidents.nlargest(3).sum()) / total_incidents if total_incidents else 0.0
-        ),
-        median_lag_weeks=float(lags.median()) if not lags.empty else float("nan"),
     )
