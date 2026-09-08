@@ -22,6 +22,9 @@ CATEGORICAL_DIMENSIONS = {
     "helix.BBVA_RootCauseSub",
     "helix.Priority",
     "helix.Status",
+    "helix.Product Categorization Tier 1",
+    "helix.Product Categorization Tier 2",
+    "helix.Product Categorization Tier 3",
     "helix.Operational Categorization Tier 1",
     "helix.Operational Categorization Tier 2",
     "helix.Operational Categorization Tier 3",
@@ -242,20 +245,32 @@ class EquivalenceRegistry:
         }
 
     def collision_report(self, dimension: str, values: Iterable[object]) -> list[dict[str, object]]:
+        # Suggestions are deterministic and include configured labels even when
+        # only an unconfigured spelling is present in the current dataset. They
+        # never change the exact, scoped matching policy without an explicit save.
+        if dimension not in CATEGORICAL_DIMENSIONS:
+            raise ValueError(f"Dimensión categórica no soportada: {dimension}")
+        targets: dict[str, set[str]] = {}
+        for group in self._groups.get(dimension, ()):
+            for candidate in (group.canonical, *group.aliases):
+                targets.setdefault(equivalence_key(candidate), set()).add(group.canonical)
         observed: dict[str, set[str]] = {}
         for value in values:
             raw = clean_label(value)
-            if not raw:
+            if raw:
+                observed.setdefault(equivalence_key(raw), set()).add(str(value))
+        report: list[dict[str, object]] = []
+        for key, raw_values in sorted(observed.items()):
+            configured = targets.get(key, set())
+            # Multiple exact groups can intentionally distinguish format variants.
+            # Do not propose an arbitrary target in that case.
+            if len(configured) > 1:
                 continue
-            observed.setdefault(equivalence_key(raw), set()).add(str(value))
-        return [
-            {
-                "canonical": self.normalize(dimension, next(iter(raw_values))),
-                "variants": sorted(raw_values),
-            }
-            for _, raw_values in sorted(observed.items())
-            if len(raw_values) > 1
-        ]
+            canonical = next(iter(configured)) if configured else sorted(raw_values)[0]
+            unresolved = any(self.normalize(dimension, raw) != canonical for raw in raw_values)
+            if len(raw_values) > 1 or (configured and unresolved):
+                report.append({"canonical": canonical, "variants": sorted(raw_values)})
+        return report
 
     def apply(self, domain: str, frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy(deep=False)

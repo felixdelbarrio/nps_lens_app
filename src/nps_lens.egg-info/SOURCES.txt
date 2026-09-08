@@ -135,7 +135,6 @@ tests/test_platform_artifacts.py
 tests/test_platform_batch.py
 tests/test_platform_resources.py
 tests/test_plotly_theme.py
-tests/test_ppt_script.py
 tests/test_ppt_wrapped_table_layout.py
 tests/test_publication_scope.py
 tests/test_snapshot_telemetry.py
@@ -143,6 +142,7 @@ tests/test_store_parquet_resilience.py
 tests/test_taxonomy_engine.py
 tests/test_text_mining.py
 tests/test_ui_business_periods.py
+tests/test_ui_charts.py
 tests/test_ui_population.py
 tests/test_upload_service.py
 tests/test_webapp_parity.py

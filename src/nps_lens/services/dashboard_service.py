@@ -886,22 +886,18 @@ class DashboardService:
         overall_value = compute_nps_from_scores(current_df["NPS"])
         overall_nps = float(overall_value) if np.isfinite(overall_value) else None
         stats = pd.DataFrame(
-            [
-                item.__dict__
-                for item in driver_table(current_df, dimension, overall_nps=overall_nps)
-            ]
+            [item.__dict__ for item in driver_table(current_df, dimension, overall_nps=overall_nps)]
         )
         if not stats.empty:
-            stats = stats.sort_values(
-                ["gap_vs_overall", "n"], ascending=[True, False]
-            ).reset_index(drop=True)
+            stats = stats.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).reset_index(
+                drop=True
+            )
         return {
             "dimension": dimension,
             "overall_nps": overall_nps,
             "title": "Brechas NPS",
             "subtitle": (
-                "Desviación de cada segmento respecto al NPS global "
-                "del canal y periodo activos."
+                "Desviación de cada segmento respecto al NPS global " "del canal y periodo activos."
             ),
             "figure": self._serialize_figure(chart_driver_bar(stats, theme)),
             "table": self._serialize_rows(stats.head(30)),
@@ -923,13 +919,10 @@ class DashboardService:
         groups = [
             group
             for group in _DEFAULT_NPS_GROUPS
-            if group == POP_ALL
-            or not filter_by_nps_group(history_df, group).empty
+            if group == POP_ALL or not filter_by_nps_group(history_df, group).empty
         ]
         dimensions = [
-            dimension
-            for dimension in _DEFAULT_DIMENSIONS
-            if dimension in history_df.columns
+            dimension for dimension in _DEFAULT_DIMENSIONS if dimension in history_df.columns
         ]
         if "Palanca" not in dimensions:
             dimensions.insert(0, "Palanca")
@@ -944,14 +937,10 @@ class DashboardService:
             gaps[channel] = {}
             gap_current = self._apply_population_filters(channel_history, pop_year, pop_month)
             for dimension in dimensions:
-                gaps[channel][dimension] = self._build_gap_payload(
-                    gap_current, dimension, theme
-                )
+                gaps[channel][dimension] = self._build_gap_payload(gap_current, dimension, theme)
             for group in groups:
                 analysis_history = filter_by_nps_group(channel_history, group)
-                current = self._apply_population_filters(
-                    analysis_history, pop_year, pop_month
-                )
+                current = self._apply_population_filters(analysis_history, pop_year, pop_month)
                 topics_df = self._topics_df(current)
                 if not topics_df.empty:
                     topics_df = topics_df.sort_values(
@@ -963,9 +952,7 @@ class DashboardService:
                     "insights": explain_topics(topics_df, max_items=5),
                 }
                 comparisons[channel][group] = {}
-                windows = default_windows(
-                    analysis_history, pop_year=pop_year, pop_month=pop_month
-                )
+                windows = default_windows(analysis_history, pop_year=pop_year, pop_month=pop_month)
                 for dimension in dimensions:
                     comparison: dict[str, object] = {}
                     if windows[0] is not None and windows[1] is not None:
@@ -1394,10 +1381,9 @@ class DashboardService:
                 .agg(Respuestas=("responses", "sum"), focus_count=("focus_count", "sum"))
                 .reset_index()
             )
-            topic_metrics["Tasa foco"] = (
-                topic_metrics["focus_count"]
-                / topic_metrics["Respuestas"].replace({0: np.nan})
-            )
+            topic_metrics["Tasa foco"] = topic_metrics["focus_count"] / topic_metrics[
+                "Respuestas"
+            ].replace({0: np.nan})
             evidence_sorted_df = evidence_sorted_df.merge(
                 topic_metrics.drop(columns="focus_count"), on="nps_topic", how="left"
             )
@@ -1966,11 +1952,13 @@ class DashboardService:
         by_topic_weekly: pd.DataFrame,
         executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     ) -> dict[str, pd.DataFrame]:
-        broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(
-            links_df,
-            focus_df,
-            helix_df,
-        )
+        broken_journeys_df, broken_journey_links_df = pd.DataFrame(), pd.DataFrame()
+        if touchpoint_source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+            broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(
+                links_df,
+                focus_df,
+                helix_df,
+            )
         links_mode_df = links_df.copy()
         by_topic_weekly_mode = by_topic_weekly.copy()
         causal_topic_map_df = build_causal_topic_map(
@@ -2439,7 +2427,7 @@ class DashboardService:
             "helix-frame",
             *self._context_key(context),
             self._path_revision(stored.path),
-            self._path_revision(self.settings.equivalences_path),
+            self.taxonomy.registry(context).signature("helix"),
         )
         with self._analytics_lock:
             cached = self._frame_cache.get(key)

@@ -102,11 +102,11 @@ CAUSAL_METHOD_SPECS = {
         value=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
         label="Journeys rotos",
         summary=(
-            "La vista agrupa journeys observados a partir de incidencias, comentarios, "
-            "embeddings, keywords y clustering semántico antes de llegar al NPS."
+            "La vista agrupa vínculos semánticos entre incidencias y comentarios por "
+            "recorrido de la taxonomía activa, con una identidad única antes de llegar al NPS."
         ),
         flow=(
-            "Incidencias + comentarios + embeddings + keywords + clustering semántico -> "
+            "Incidencias + comentarios + similitud textual + taxonomía activa -> "
             "Journey roto -> Touchpoint detectado -> NPS"
         ),
         entity_singular="Journey roto",

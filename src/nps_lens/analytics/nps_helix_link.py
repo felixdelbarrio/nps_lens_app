@@ -32,11 +32,11 @@ def tokenset(value: object) -> Tuple[str, ...]:
 
 
 def build_nps_topic(df: pd.DataFrame) -> pd.Series:
-    pal = df.get("Palanca", pd.Series([""] * len(df), index=df.index)).astype(str)
-    sub = df.get("Subpalanca", pd.Series([""] * len(df), index=df.index)).astype(str)
-    topic = (pal.fillna("").str.strip() + " > " + sub.fillna("").str.strip()).str.strip()
-    topic = topic.str.replace(r"^>\s*", "", regex=True).str.replace(r"\s*>$", "", regex=True)
-    return topic.replace({"nan > nan": ""}).fillna("")
+    parts = [
+        df.get(column, pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+        for column in ("Palanca", "Subpalanca")
+    ]
+    return (parts[0] + " > " + parts[1]).str.strip().str.replace(r"^>\s*|\s*>$", "", regex=True)
 
 
 def _ordered_cols_ci(df: pd.DataFrame, candidates: list[str]) -> list[str]:
@@ -593,6 +593,7 @@ def weekly_aggregates(
     else:
         by_topic["incidents"] = by_topic["incidents"].fillna(0)
     return overall, by_topic
+
 
 def daily_aggregates(
     nps_df: pd.DataFrame,
