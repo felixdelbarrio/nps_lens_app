@@ -43,7 +43,7 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
     publication: dict[str, object] = {
         "schema_version": "3.0",
         "screens": {
-            "dashboard": {"kpis": {"samples": 800}},
+            "dashboard": {"kpis": {"samples": 800, "delta_nps": float("nan")}},
             "linking": {},
             "data": {"nps": {"deferred": True}, "helix": {"deferred": True}},
         },
@@ -73,7 +73,11 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
             "informe.pptx",
             "informe-sin-evolucion-nps.pptx",
         }
-        contract = json.loads(archive.read("publication.json"))
+        publication_json = archive.read("publication.json")
+        assert b"NaN" not in publication_json
+        assert b"Infinity" not in publication_json
+        contract = json.loads(publication_json)
+        assert contract["screens"]["dashboard"]["kpis"]["delta_nps"] is None
         assert set(contract["snapshots"]) == {"data"}
         assert contract["manifest"]["size_budget_bytes"] == 25_000
         assert contract["manifest"]["publication_json_bytes"] < 100_000

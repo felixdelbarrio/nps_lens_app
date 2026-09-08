@@ -80,7 +80,6 @@ from nps_lens.domain.helix_links import (
     resolve_helix_incident_url,
 )
 from nps_lens.domain.models import UploadContext
-from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -1843,7 +1842,6 @@ class DashboardService:
                 if isinstance(dataset, dict)
             }
             generated_at = datetime.now(timezone.utc).isoformat()
-            registry = EquivalenceRegistry.load(self.settings.equivalences_path)
             publication: dict[str, object] = {
                 "schema_version": PUBLICATION_SCHEMA_VERSION,
                 "generated_at": generated_at,
@@ -1884,7 +1882,6 @@ class DashboardService:
                 "manifest": {
                     "generated_at": generated_at,
                     "scope": scope,
-                    "equivalence_registry": registry.to_dict(),
                     "privacy": "No incluye configuración administrativa ni telemetría.",
                     "report": report.file_name,
                     "report_without_evolution": report.compact_file_name,

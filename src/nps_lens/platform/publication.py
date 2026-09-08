@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -149,7 +150,13 @@ def _archive(
     with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         archive.writestr(
             "publication.json",
-            json.dumps(publication, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            json.dumps(
+                publication,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            ),
         )
         archive.writestr("newsletter.html", _newsletter(publication, report_name))
         archive.writestr(report_name, report_content)
@@ -167,6 +174,9 @@ def build_publication_archive(
     file_name: str,
     max_bytes: int = MAX_PUBLICATION_BYTES,
 ) -> PublicationArtifact:
+    publication = _strict_json_value(publication)
+    if not isinstance(publication, dict):
+        raise TypeError("La publicación debe ser un objeto JSON.")
     snapshots = publication.get("snapshots", {})
     data = snapshots.get("data", {}) if isinstance(snapshots, dict) else {}
     datasets = data.get("datasets", {}) if isinstance(data, dict) else {}
@@ -192,7 +202,12 @@ def build_publication_archive(
             }
         )
     publication_json_bytes = len(
-        json.dumps(publication, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            publication,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     )
     if publication_json_bytes > MAX_PUBLICATION_JSON_BYTES:
         raise ValueError("El snapshot de publicación contiene más datos de los permitidos.")
@@ -223,3 +238,14 @@ def build_publication_archive(
         included_nps_rows=nps_included,
         included_helix_rows=helix_included,
     )
+
+
+def _strict_json_value(value: object) -> object:
+    """Replace non-finite floats recursively at the publication boundary."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _strict_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strict_json_value(item) for item in value]
+    return value

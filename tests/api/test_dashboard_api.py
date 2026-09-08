@@ -813,6 +813,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         assert publication["manifest"]["report_without_evolution"] == (
             "informe-ejecutivo-sin-evolucion-nps.pptx"
         )
+        assert "equivalence_registry" not in publication["manifest"]
     assert client.get("/api/dashboard/report/exclusive.pptx").status_code == 404
 
 
