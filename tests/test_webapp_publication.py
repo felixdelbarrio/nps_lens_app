@@ -142,6 +142,27 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")
 
 
+def test_publication_import_preserves_global_evolution_visibility() -> None:
+    publication = Path("webapp/apps-script/10_Publication.gs").read_text(encoding="utf-8")
+    start = publication.index("function importPublicationArchive")
+    end = publication.index("function _reportUrl_", start)
+    import_body = publication[start:end]
+
+    assert "evolutionNpsVisibleProperty" not in import_body
+    assert "NPS_LENS_EVOLUTION_NPS_VISIBLE" not in import_body
+
+
+def test_newsletter_locks_the_published_causal_method() -> None:
+    root = Path("webapp/apps-script")
+    webapp = (root / "60_WebApp.gs").read_text(encoding="utf-8")
+    newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
+    app = (root / "App.html").read_text(encoding="utf-8")
+
+    assert "?source=newsletter&scope=" in newsletter
+    assert "viewer.causalMethodLocked" in webapp
+    assert "viewer.causalMethodLocked?'disabled':''" in app
+
+
 def test_admin_cleanup_trashes_every_publication_artifact_and_invalidates_caches() -> None:
     setup = Path("webapp/apps-script/90_Setup.gs").read_text(encoding="utf-8")
 

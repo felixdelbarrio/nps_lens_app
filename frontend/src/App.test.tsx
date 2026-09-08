@@ -232,8 +232,7 @@ const linkingPayloadAvailable = {
   navigation: [
     { id: "situation", label: "Situación del periodo" },
     { id: "entity-summary", label: "Journeys de detracción" },
-    { id: "scenarios", label: "Evidencia por escenario" },
-    { id: "nps-deep-dive", label: "Análisis de Tópicos de NPS afectados" }
+    { id: "scenarios", label: "Evidencia por escenario" }
   ],
   kpis: {
     responses: 26618,
@@ -268,7 +267,16 @@ const linkingPayloadAvailable = {
       { label: "Foco analítico", value: "Journeys de detracción" }
     ],
     figure: null,
-    note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité."
+    note: "El método causal activo transforma la evidencia en journeys ejecutivos con foco de comité.",
+    associations: {
+      title: "Asociaciones temporales observadas",
+      rows: [{ "Tópico NPS": "Consulta > Estado de cuenta / comprobantes", Respuestas: 132, "Tasa foco": 0.21 }]
+    },
+    evidence: {
+      title: "Evidencias",
+      subtitle: "Diez tópicos afectados con mayor evidencia.",
+      rows: [{ nps_topic: "Consulta > Estado de cuenta / comprobantes", Respuestas: 132, "Tasa foco": 0.21 }]
+    }
   },
   entity_summary: {
     title: "Journeys de detracción",
@@ -289,79 +297,6 @@ const linkingPayloadAvailable = {
         "Vínculos semánticos": 18
       }
     ]
-  },
-  deep_dive: {
-    title: "Análisis de Tópicos de NPS afectados",
-    subtitle: "Profundización sobre los tópicos NPS asociados a los journeys de detracción activos.",
-    kpis: [
-      { label: "Respuestas analizadas", value: "26618" },
-      { label: "Incidencias", value: "233" },
-      { label: "Concentración top-3", value: "74.0%" },
-      { label: "Tiempo de reacción", value: "1.2 semanas" }
-    ],
-    topic_filter: {
-      label: "Tópico NPS afectado",
-      options: [
-        { value: "Todos", label: "Todos (2 tópicos afectados)" },
-        {
-          value: "Pagos/ Transferencias > Faltan detalles de movimientos",
-          label: "Pagos/ Transferencias > Faltan detalles de movimientos"
-        },
-        {
-          value: "Consulta > Estado de cuenta / comprobantes",
-          label: "Consulta > Estado de cuenta / comprobantes"
-        }
-      ],
-      default: "Todos",
-      hint: "2 tópicos afectados por journeys de detracción."
-    },
-    tabs: [
-      { id: "ranking", label: "Asociaciones temporales" },
-      { id: "evidence", label: "Evidencias" }
-    ],
-    trending: {
-      title: "NPS tópicos trending",
-      figure: null,
-      empty_state: "No hay señal suficiente para construir tópicos trending."
-    },
-    ranking: {
-      title: "Asociaciones temporales",
-      rows: [
-        {
-          "Tópico NPS": "Pagos/ Transferencias > Faltan detalles de movimientos",
-          "Incidencias": 18
-        },
-        {
-          "Tópico NPS": "Consulta > Estado de cuenta / comprobantes",
-          "Incidencias": 12
-        }
-      ],
-      empty_state: ""
-    },
-    evidence: {
-      title: "Evidencias",
-      rows: [
-        {
-          nps_topic: "Pagos/ Transferencias > Faltan detalles de movimientos",
-          similarity: 0.339,
-          incident_id: "INC000104231684",
-          incident_id__href:
-            "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU4",
-          incident_summary: "ACOTAMIENTO IRD...",
-          detractor_comment: "mal no funciona los pagos al sua ni impuestos cdmx"
-        },
-        {
-          nps_topic: "Consulta > Estado de cuenta / comprobantes",
-          similarity: 0.121,
-          incident_id: "INC000104355468",
-          incident_id__href:
-            "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5",
-          incident_summary: "ACOTAMIENTO IRD El usuario Mario Alberto Santillan Medina...",
-          detractor_comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
-        }
-      ],
-      empty_state: ""
-    }
   },
   scenarios: {
     title: "Evidencia por escenario",
@@ -414,15 +349,6 @@ const linkingPayloadAvailable = {
             comment: "AL DESCARGAR EL ESTADO DE CUENTA ME DIRECCIONA..."
           }
         ],
-        detail_table: [
-          {
-            "Tópico NPS": "Operativa crítica fallida",
-            "Vínculos semánticos": 16
-          }
-        ],
-        heatmap_figure: null,
-        changepoints_figure: null,
-        lag_figure: null
       },
       {
         chain_key: "chain-2",
@@ -467,15 +393,6 @@ const linkingPayloadAvailable = {
             comment: "Los saldos tardan mucho en reflejarse."
           }
         ],
-        detail_table: [
-          {
-            "Tópico NPS": "Fricción en consulta de saldos",
-            "Vínculos semánticos": 14
-          }
-        ],
-        heatmap_figure: null,
-        changepoints_figure: null,
-        lag_figure: null
       }
     ]
   }
@@ -721,43 +638,14 @@ describe("App", () => {
     expect(
       screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Asociaciones temporales")).not.toBeInTheDocument();
+    expect(screen.getByText("Asociaciones temporales observadas")).toBeInTheDocument();
+    expect(screen.getByText("Evidencias")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Journeys de detracción" }));
     expect(screen.getByText("Detalle de journeys de detracción")).toBeInTheDocument();
     expect(screen.getByText("Uso / Edo de Cuenta")).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("tab", { name: "Análisis de Tópicos de NPS afectados" })
-    );
-    expect(screen.getAllByText("Asociaciones temporales").length).toBeGreaterThan(0);
-    expect(screen.getByText("NPS tópicos trending")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /Tópico NPS afectado/i })).toHaveValue("Todos");
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: /Tópico NPS afectado/i }),
-      "Consulta > Estado de cuenta / comprobantes"
-    );
-    const rankingTable = screen.getByRole("table");
-    expect(within(rankingTable).getByText("Consulta > Estado de cuenta / comprobantes")).toBeInTheDocument();
-    expect(
-      within(rankingTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
-    ).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Evidencias" }));
-    const evidenceTable = screen.getByRole("table");
-    expect(
-      within(evidenceTable).getByText("Consulta > Estado de cuenta / comprobantes")
-    ).toBeInTheDocument();
-    expect(
-      within(evidenceTable).queryByText("Pagos/ Transferencias > Faltan detalles de movimientos")
-    ).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          href: "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/IDGH5CDNHIEUEAT3VXLMT3VXLM0OU5"
-        })
-      ])
-    );
+    expect(screen.queryByRole("tab", { name: "Análisis de Tópicos de NPS afectados" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Evidencia por escenario" }));
     expect(

@@ -189,7 +189,6 @@ export type LinkingPayload = {
   situation?: Record<string, unknown>;
   entity_summary?: Record<string, unknown>;
   scenarios?: Record<string, unknown>;
-  deep_dive?: Record<string, unknown>;
 };
 
 export type DatasetTable = {

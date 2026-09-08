@@ -12,9 +12,10 @@ function doGet(event) {
   viewer.scopeKey = publication ? publication.scopeKey : '';
   viewer.reportUrl = publication ? _presentationEntryUrl_(publication.scopeKey) : '';
   viewer.evolutionNpsVisible = _evolutionNpsVisible_();
+  viewer.causalMethodLocked = String(event && event.parameter && event.parameter.source || '') === 'newsletter';
   viewer.shellDeferred = Boolean(publication);
+  viewer.publicationCatalog = _publicationCatalog_();
   if (viewer.isAdmin) {
-    viewer.publicationCatalog = _publicationCatalog_();
     viewer.selectedScopeKey = (_selectedPublication_() || {}).scopeKey || '';
     viewer.administration = {version:NPS_LENS.version,generatedAt:publication ? publication.generatedAt : '',access:{
       email:viewer.email,role:viewer.role,source:viewer.adminSource,configurationReady:viewer.configurationReady}};

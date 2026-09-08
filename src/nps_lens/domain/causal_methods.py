@@ -26,7 +26,6 @@ class CausalMethodSpec:
     table_empty_message: str
     situation_subtitle: str
     situation_note: str
-    deep_dive_subtitle: str
 
 
 CAUSAL_METHOD_SPECS = {
@@ -52,9 +51,6 @@ CAUSAL_METHOD_SPECS = {
         situation_note=(
             "La vista relaciona incidencias, touchpoints, palancas y comentarios de cliente."
         ),
-        deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS asociados a las palancas activas."
-        ),
     ),
     TOUCHPOINT_SOURCE_SUBPALANCA: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_SUBPALANCA,
@@ -76,9 +72,6 @@ CAUSAL_METHOD_SPECS = {
         table_empty_message=("No hay subpalancas con vínculos semánticos en esta ventana."),
         situation_subtitle=("Cruce diario entre incidencias y NPS organizado por subpalanca."),
         situation_note=("La vista conserva el nivel operativo de la subpalanca."),
-        deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS asociados a las subpalancas activas."
-        ),
     ),
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
@@ -104,9 +97,6 @@ CAUSAL_METHOD_SPECS = {
             "Cruce diario entre incidencias y NPS organizado por Source Service N2."
         ),
         situation_note=("La vista usa el servicio origen reportado en Hélix como eje de lectura."),
-        deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS asociados a los Source Service N2 activos."
-        ),
     ),
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -131,9 +121,6 @@ CAUSAL_METHOD_SPECS = {
         table_empty_message="No se han agrupado journeys rotos en esta ventana.",
         situation_subtitle=("Cruce diario entre incidencias y NPS organizado por journeys rotos."),
         situation_note=("La vista agrupa señales semánticas coincidentes por journey roto."),
-        deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS asociados a los journeys rotos activos."
-        ),
     ),
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS: CausalMethodSpec(
         value=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -163,9 +150,6 @@ CAUSAL_METHOD_SPECS = {
         ),
         situation_note=(
             "La vista organiza la evidencia mediante el catálogo de journeys ejecutivos."
-        ),
-        deep_dive_subtitle=(
-            "Profundización sobre los tópicos NPS asociados a los journeys de detracción activos."
         ),
     ),
 }
@@ -200,5 +184,4 @@ def linking_navigation(spec: CausalMethodSpec) -> list[dict[str, str]]:
         {"id": "situation", "label": "Situación del periodo"},
         {"id": "entity-summary", "label": spec.navigation_label},
         {"id": "scenarios", "label": "Evidencia por escenario"},
-        {"id": "nps-deep-dive", "label": "Análisis de Tópicos de NPS afectados"},
     ]

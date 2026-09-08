@@ -122,7 +122,7 @@ function _publishedNewsletterInsight_(scopeKey) {
 }
 
 function _newsletterHtml_(insight, reportUrl, scopeKey) {
-  const webUrl = ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey);
+  const webUrl = ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey);
   const gap = insight.gap ? '<div style="margin:20px 0;padding:18px;background:#EAF3FA;border-left:4px solid #2DCCCD"><b>Brecha NPS observada</b><br>' + _newsletterEscape_(insight.gap) + '</div>' : '';
   return '<div style="font-family:Arial,sans-serif;color:#121F3F;max-width:680px;margin:auto;background:#F4F6F8">' +
     '<div style="background:#070E46;color:#fff;padding:32px"><div style="font-size:12px;letter-spacing:1.2px">BBVA BANCA DE EMPRESAS E INSTITUCIONES</div><h1 style="margin:12px 0 4px">NPS Lens</h1><div>La voz del cliente conectada con la operación</div></div>' +
@@ -136,7 +136,7 @@ function _newsletterPlain_(insight, reportUrl, scopeKey) {
   return ['BBVA Banca de Empresas e Instituciones', 'NPS Lens', '', insight.context,
     'Muestras: ' + insight.samples, 'NPS clásico: ' + insight.nps,
     insight.gap ? 'Brecha NPS observada: ' + insight.gap : '', '',
-    'Abrir NPS Lens: ' + ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey),
+    'Abrir NPS Lens: ' + ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey),
     reportUrl ? 'Abrir presentación: ' + reportUrl : ''].filter(Boolean).join('\n');
 }
 

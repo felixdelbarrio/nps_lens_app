@@ -239,13 +239,8 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
-    assert (
-        abs(
-            dashboard_payload["gaps"]["overall_nps"]
-            - dashboard_payload["scope"]["period"]["kpis"]["classic_nps"]
-        )
-        < 1e-9
-    )
+    assert "Canal: Web" in dashboard_payload["context_pills"]
+    assert dashboard_payload["gaps"]["overall_nps"] is not None
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
     assert dashboard_payload["scope"]["cumulative"]["note"].startswith(
         "KPIs agregados para el periodo del "
@@ -259,12 +254,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     )
     assert dashboard_payload["overview"]["daily_volume_mix_figure"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
-    assert dashboard_payload["controls"]["dimensions"] == [
-        "Palanca",
-        "Subpalanca",
-        "Canal",
-        "UsuarioDecisión",
-    ]
+    assert dashboard_payload["controls"]["dimensions"] == ["Palanca", "Subpalanca"]
     assert "report_markdown" not in dashboard_payload
 
     records = app.state.repository.load_records_df(
@@ -502,21 +492,19 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
     assert "scenarios" in linking_payload
-    assert "deep_dive" in linking_payload
-    assert linking_payload["navigation"][3]["label"] == "Análisis de Tópicos de NPS afectados"
-    assert linking_payload["deep_dive"]["title"] == "Análisis de Tópicos de NPS afectados"
-    assert linking_payload["deep_dive"]["topic_filter"]["default"] == "Todos"
-    assert isinstance(linking_payload["deep_dive"]["topic_filter"]["options"], list)
-    assert linking_payload["deep_dive"]["topic_filter"]["options"][0]["value"] == "Todos"
-    assert linking_payload["deep_dive"]["ranking"]["rows"]
-    assert linking_payload["deep_dive"]["evidence"]["rows"]
-    assert linking_payload["deep_dive"]["trending"]["figure"] is not None
+    assert "deep_dive" not in linking_payload
+    assert len(linking_payload["navigation"]) == 3
+    assert linking_payload["situation"]["associations"]["rows"]
+    evidence_rows = linking_payload["situation"]["evidence"]["rows"]
+    assert evidence_rows
+    assert {"Respuestas", "Tasa foco"}.issubset(evidence_rows[0])
+    assert len({row["nps_topic"] for row in evidence_rows}) <= 10
+    assert max(
+        sum(row["nps_topic"] == topic for row in evidence_rows)
+        for topic in {row["nps_topic"] for row in evidence_rows}
+    ) <= 10
     assert linking_payload["scenarios"]["cards"][0]["anchor_topic"]
     assert linking_payload["entity_summary"]["table"][0]["Tópico NPS ancla"]
-    assert [tab["label"] for tab in linking_payload["deep_dive"]["tabs"]] == [
-        "Asociaciones temporales",
-        "Evidencias",
-    ]
     serialized_linking = json.dumps(linking_payload, ensure_ascii=False).casefold()
     for removed_field in (
         "confidence",
@@ -810,6 +798,17 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
             "default": {"nps_group": "Promotores", "score_channel": "Web"},
             "immutable": True,
         }
+        assert "comments" in publication["screens"]
+        comment_controls = publication["screens"]["comments"]["controls"]
+        assert comment_controls["defaults"] == {
+            "channel": "Web",
+            "group": "Detractores",
+            "dimension": "Palanca",
+        }
+        assert "comparison" not in publication["screens"]["dashboard"]
+        assert "gaps" not in publication["screens"]["dashboard"]
+        assert "topics_table" not in publication["screens"]["dashboard"]["overview"]
+        assert "deep_dive" not in publication["screens"]["linking"]
         assert publication["filters"]["causal_nps_group"] == "Todos"
         assert publication["manifest"]["report_without_evolution"] == (
             "informe-ejecutivo-sin-evolucion-nps.pptx"

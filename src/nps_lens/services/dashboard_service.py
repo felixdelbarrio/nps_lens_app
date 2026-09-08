@@ -65,7 +65,7 @@ from nps_lens.core.nps_math import (
     grouped_focus_rates,
 )
 from nps_lens.core.store import DatasetContext, HelixIncidentStore
-from nps_lens.design.tokens import DesignTokens, cp_level_color, palette
+from nps_lens.design.tokens import DesignTokens
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -111,8 +111,6 @@ from nps_lens.ui.business import (
     slice_by_window,
 )
 from nps_lens.ui.charts import (
-    chart_case_incident_heatmap,
-    chart_case_lag_days,
     chart_causal_entity_bar,
     chart_cohort_heatmap,
     chart_daily_kpis,
@@ -142,7 +140,7 @@ _DEFAULT_NPS_GROUPS = [POP_ALL, "Detractores", "Neutros", "Promotores"]
 _DEFAULT_SCORE_CHANNELS = [POP_ALL]
 _PREFERRED_SCORE_CHANNEL = "Web"
 _PREFERRED_NPS_GROUP = "Detractores"
-_DEFAULT_DIMENSIONS = ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"]
+_DEFAULT_DIMENSIONS = ["Palanca", "Subpalanca"]
 _COHORT_ROW_DIMENSIONS = {"Palanca": "Palanca", "Subpalanca": "Subpalanca"}
 _COHORT_COLUMN_DIMENSIONS = {
     "Canal": "Canal",
@@ -187,16 +185,6 @@ def _filter_frame_by_topic_values(
 
     mask = frame[column].astype(str).str.strip().isin(normalized_topics)
     return frame.loc[mask].copy().reset_index(drop=True)
-
-
-def _topic_filter_options(topics: Sequence[object]) -> list[dict[str, str]]:
-    normalized_topics = _unique_string_values(topics)
-    topic_count = len(normalized_topics)
-    topic_label = "tópico afectado" if topic_count == 1 else "tópicos afectados"
-    return [
-        {"value": "Todos", "label": f"Todos ({topic_count} {topic_label})"},
-        *[{"value": topic, "label": topic} for topic in normalized_topics],
-    ]
 
 
 def _chain_record_ids(value: object, *, field_name: str) -> list[str]:
@@ -832,14 +820,19 @@ class DashboardService:
                 "has_data": not delta_df.empty,
             }
 
-        overall_nps = period_scope_kpis.get("classic_nps")
+        filtered_scores = _numeric_series(analysis_current_df, "NPS", default=np.nan).dropna()
+        overall_nps = (
+            float((filtered_scores.ge(9).mean() - filtered_scores.le(6).mean()) * 100.0)
+            if not filtered_scores.empty
+            else None
+        )
         gap_stats = pd.DataFrame(
             [
                 stat.__dict__
                 for stat in driver_table(
-                    scope_current_df,
+                    analysis_current_df,
                     gap_dimension,
-                    overall_nps=cast(Optional[float], overall_nps),
+                    overall_nps=overall_nps,
                 )
             ]
         )
@@ -923,6 +916,130 @@ class DashboardService:
                 "min_n_cross": min_n_cross,
             },
             "empty_state": "",
+        }
+
+    def _build_comments_snapshot(
+        self,
+        *,
+        history_df: pd.DataFrame,
+        pop_year: str,
+        pop_month: str,
+        min_n_cross: int = 30,
+        theme_mode: str = "light",
+    ) -> dict[str, object]:
+        """Materialize only the three comment views used by the static WebApp."""
+        theme = get_theme(theme_mode)
+        channels = self._available_score_channels(history_df)
+        groups = [
+            group
+            for group in _DEFAULT_NPS_GROUPS
+            if group == POP_ALL
+            or not filter_by_nps_group(history_df, group).empty
+        ]
+        dimensions = [
+            dimension
+            for dimension in _DEFAULT_DIMENSIONS
+            if dimension in history_df.columns
+        ]
+        if "Palanca" not in dimensions:
+            dimensions.insert(0, "Palanca")
+
+        topics: dict[str, dict[str, object]] = {}
+        comparisons: dict[str, dict[str, dict[str, object]]] = {}
+        gaps: dict[str, dict[str, dict[str, object]]] = {}
+        for channel in channels:
+            channel_history = self._apply_score_channel_filter(history_df, channel)
+            topics[channel] = {}
+            comparisons[channel] = {}
+            gaps[channel] = {}
+            for group in groups:
+                analysis_history = filter_by_nps_group(channel_history, group)
+                current = self._apply_population_filters(
+                    analysis_history, pop_year, pop_month
+                )
+                topics_df = self._topics_df(current)
+                if not topics_df.empty:
+                    topics_df = topics_df.sort_values(
+                        ["n", "cluster_id"], ascending=[False, True]
+                    ).reset_index(drop=True)
+                topics[channel][group] = {
+                    "figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
+                    "rows": self._serialize_rows(topics_df),
+                    "insights": explain_topics(topics_df, max_items=5),
+                }
+                comparisons[channel][group] = {}
+                gaps[channel][group] = {}
+                current_scores = _numeric_series(current, "NPS", default=np.nan).dropna()
+                overall_nps = (
+                    float(
+                        (current_scores.ge(9).mean() - current_scores.le(6).mean()) * 100.0
+                    )
+                    if not current_scores.empty
+                    else None
+                )
+                windows = default_windows(
+                    analysis_history, pop_year=pop_year, pop_month=pop_month
+                )
+                for dimension in dimensions:
+                    comparison: dict[str, object] = {}
+                    if windows[0] is not None and windows[1] is not None:
+                        current_window = slice_by_window(analysis_history, windows[0])
+                        baseline_window = slice_by_window(analysis_history, windows[1])
+                        story = compare_periods(current_window, baseline_window)
+                        delta_df = get_changes_vs_historic(
+                            current_window,
+                            baseline_window,
+                            dimension=dimension,
+                            min_n=min_n_cross,
+                        )
+                        comparison = {
+                            "summary": {
+                                "label_current": story.label_current,
+                                "label_baseline": story.label_baseline,
+                                "delta_nps": story.delta_nps,
+                                "delta_detr_pp": story.delta_detr_pp,
+                                "n_current": story.n_current,
+                                "n_baseline": story.n_baseline,
+                            },
+                            "dimension": dimension,
+                            "figure": self._serialize_figure(chart_driver_delta(delta_df, theme)),
+                            "table": self._serialize_rows(delta_df.head(30)),
+                        }
+                    comparisons[channel][group][dimension] = comparison
+                    gap_df = pd.DataFrame(
+                        [
+                            item.__dict__
+                            for item in driver_table(
+                                current, dimension, overall_nps=overall_nps
+                            )
+                        ]
+                    )
+                    if not gap_df.empty:
+                        gap_df = gap_df.sort_values(
+                            ["gap_vs_overall", "n"], ascending=[True, False]
+                        ).reset_index(drop=True)
+                    gaps[channel][group][dimension] = {
+                        "dimension": dimension,
+                        "overall_nps": overall_nps,
+                        "title": "Brechas NPS",
+                        "subtitle": "Desviación de cada segmento respecto al NPS global del filtro activo.",
+                        "figure": self._serialize_figure(chart_driver_bar(gap_df, theme)),
+                        "table": self._serialize_rows(gap_df.head(30)),
+                    }
+        return {
+            "controls": {
+                "channels": channels,
+                "groups": groups,
+                "dimensions": dimensions,
+                "defaults": {
+                    "channel": _PREFERRED_SCORE_CHANNEL,
+                    "group": _PREFERRED_NPS_GROUP,
+                    "dimension": "Palanca",
+                },
+            },
+            "topics": topics,
+            "comparison": comparisons,
+            "gaps": gaps,
         }
 
     def dataset_rows(
@@ -1240,24 +1357,14 @@ class DashboardService:
         mode_payload = cast(dict[str, object], analysis["mode_payload"])
         causal_topic_map_df = cast(pd.DataFrame, mode_payload["causal_topic_map_df"])
         links_mode_df = cast(pd.DataFrame, mode_payload["links_mode_df"])
-        by_topic_weekly_mode = cast(pd.DataFrame, mode_payload["by_topic_weekly_mode"])
-        by_topic_daily_mode = cast(pd.DataFrame, mode_payload["by_topic_daily_mode"])
         trend_df = overall_daily if not overall_daily.empty else overall_weekly
         average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
         show_all_groups = str(resolved_group or "").strip().lower() == str(POP_ALL).lower()
 
         canonical_bundle = cast(dict[str, object], analysis["canonical_bundle"])
-        mode_bundle = cast(dict[str, object], analysis["mode_bundle"])
         canonical_ranking_df = cast(pd.DataFrame, canonical_bundle["ranking_df"])
         canonical_ranking_view_df = cast(pd.DataFrame, canonical_bundle["ranking_view_df"])
         canonical_rationale_df = cast(pd.DataFrame, canonical_bundle["rationale_df"])
-        mode_ranking_df = cast(pd.DataFrame, mode_bundle["ranking_df"])
-        mode_rank_source_df = (
-            mode_ranking_df
-            if not mode_ranking_df.empty
-            else cast(pd.DataFrame, mode_bundle["rank_df"])
-        )
-        mode_lag_days_df = cast(pd.DataFrame, mode_bundle["lag_days_df"])
         evidence_df = self._build_linking_evidence_table(
             focus_df,
             helix_slice,
@@ -1280,17 +1387,7 @@ class DashboardService:
             max_incident_examples=LINK_MAX_VISIBLE_INCIDENTS,
             max_comment_examples=LINK_MAX_VISIBLE_COMMENTS,
         )
-        scenario_cards = self._build_linking_scenario_cards(
-            chain_cards_df,
-            by_topic_weekly=by_topic_weekly_mode,
-            by_topic_daily=by_topic_daily_mode,
-            lag_days=mode_lag_days_df,
-            rank_df=mode_rank_source_df,
-            theme=theme,
-            theme_mode=theme_mode,
-            focus_name=focus_name,
-            touchpoint_source=active_touchpoint_source,
-        )
+        scenario_cards = self._build_linking_scenario_cards(chain_cards_df)
         entity_summary_df = self._build_entity_summary_df(
             chain_candidates_df,
             touchpoint_source=active_touchpoint_source,
@@ -1300,7 +1397,7 @@ class DashboardService:
             entity_summary_chart_df["entity_label"] = (
                 _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
             )
-        affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)
+        affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)[:10]
         filtered_rationale_df = _filter_frame_by_topic_values(
             canonical_rationale_df,
             affected_topics,
@@ -1324,12 +1421,6 @@ class DashboardService:
             errors="coerce",
         ).iloc[0]
         median_lag_value = float(median_lag_weeks) if pd.notna(median_lag_weeks) else None
-        topic_filter_options = _topic_filter_options(affected_topics)
-        active_topic_count = max(len(topic_filter_options) - 1, 0)
-        topic_filter_method_label = method_spec.label.lower()
-        if topic_filter_method_label.startswith("por "):
-            topic_filter_method_label = topic_filter_method_label[4:]
-
         timeline_figure = self._serialize_figure(
             self._build_linking_overview_figure(
                 trend_df,
@@ -1353,7 +1444,7 @@ class DashboardService:
                 "La línea principal usa media móvil de 7 días para resaltar tendencia sin perder el detalle diario."
             )
 
-        ranking_rows = self._serialize_rows(filtered_ranking_view_df.head(20))
+        ranking_rows = self._serialize_rows(filtered_ranking_view_df.head(10))
         evidence_sorted_df = filtered_evidence_df.copy()
         if not evidence_sorted_df.empty:
             topic_rank = {
@@ -1377,7 +1468,21 @@ class DashboardService:
                 ascending=[True, False],
             ).drop(columns="__topic_order")
 
-        deep_dive_rows = self._serialize_rows(evidence_sorted_df)
+        if not evidence_sorted_df.empty and not filtered_ranking_view_df.empty:
+            topic_metrics = filtered_ranking_view_df[
+                ["Tópico NPS", "Respuestas", "Tasa foco"]
+            ].rename(columns={"Tópico NPS": "nps_topic"})
+            evidence_sorted_df = evidence_sorted_df.merge(
+                topic_metrics.drop_duplicates("nps_topic"), on="nps_topic", how="left"
+            )
+        # Preserve evidence for every affected topic instead of allowing the
+        # first topic to consume the whole static-snapshot row budget.
+        evidence_visible_df = (
+            evidence_sorted_df.groupby("nps_topic", sort=False, group_keys=False).head(10)
+            if "nps_topic" in evidence_sorted_df.columns
+            else evidence_sorted_df.head(100)
+        )
+        evidence_rows = self._serialize_rows(evidence_visible_df)
         return {
             "available": True,
             "context_pills": self._context_pills(
@@ -1441,6 +1546,17 @@ class DashboardService:
                 ],
                 "figure": timeline_figure,
                 "note": " ".join([note for note in situation_notes if note]),
+                "associations": {
+                    "title": "Asociaciones temporales observadas",
+                    "rows": ranking_rows,
+                    "empty_state": "No hay suficiente serie temporal para calcular asociaciones.",
+                },
+                "evidence": {
+                    "title": "Evidencias",
+                    "subtitle": "Comentarios e incidencias vinculados para los 10 tópicos afectados con mayor evidencia.",
+                    "rows": evidence_rows,
+                    "empty_state": "No hay vínculos semánticos para los tópicos afectados.",
+                },
             },
             "entity_summary": {
                 "title": method_spec.navigation_title,
@@ -1470,63 +1586,6 @@ class DashboardService:
                 "title": "Evidencia por tópico",
                 "subtitle": f"Orden: vínculos, incidencias, comentarios y similitud ({method_spec.label.lower()}).",
                 "cards": scenario_cards,
-            },
-            "deep_dive": {
-                "title": "Análisis de Tópicos de NPS afectados",
-                "subtitle": method_spec.deep_dive_subtitle,
-                "kpis": [
-                    {
-                        "label": "Respuestas observadas",
-                        "value": str(active_rationale_summary.responses),
-                    },
-                    {
-                        "label": "Incidencias relacionadas",
-                        "value": str(active_rationale_summary.incidents),
-                    },
-                    {
-                        "label": "Concentración top-3",
-                        "value": format_percentage(active_rationale_summary.top3_incident_share),
-                    },
-                    {
-                        "label": "Tiempo de reacción",
-                        "value": (
-                            f"{format_metric(median_lag_value)} semanas"
-                            if median_lag_value is not None
-                            else "n/d"
-                        ),
-                    },
-                ],
-                "topic_filter": {
-                    "label": "Tópico NPS afectado",
-                    "options": topic_filter_options,
-                    "default": "Todos",
-                    "hint": (
-                        f"{active_topic_count} tópico afectado por {topic_filter_method_label}."
-                        if active_topic_count == 1
-                        else f"{active_topic_count} tópicos afectados por {topic_filter_method_label}."
-                    ),
-                },
-                "tabs": [
-                    {"id": "ranking", "label": "Asociaciones temporales"},
-                    {"id": "evidence", "label": "Evidencias"},
-                ],
-                "trending": {
-                    "title": "Incidencias relacionadas por tópico",
-                    "figure": self._serialize_figure(
-                        self._build_topics_trending_figure(filtered_ranking_df, theme)
-                    ),
-                    "empty_state": "No hay incidencias relacionadas por tópico.",
-                },
-                "ranking": {
-                    "title": "Asociaciones temporales observadas",
-                    "rows": ranking_rows,
-                    "empty_state": "No hay suficiente serie temporal para calcular asociaciones.",
-                },
-                "evidence": {
-                    "title": "Comentarios e incidencias vinculados",
-                    "rows": deep_dive_rows,
-                    "empty_state": "No hay vínculos semánticos para el foco seleccionado.",
-                },
             },
         }
 
@@ -1728,6 +1787,19 @@ class DashboardService:
                 score_channel=publish_channel,
                 min_n=min_n,
             )
+            comments = self._build_comments_snapshot(
+                history_df=history_df,
+                pop_year=pop_year,
+                pop_month=pop_month,
+            )
+            dashboard_overview = cast(dict[str, object], dashboard.get("overview", {}))
+            dashboard["overview"] = {
+                key: value
+                for key, value in dashboard_overview.items()
+                if key not in {"topics_figure", "topics_table", "insight_bullets"}
+            }
+            dashboard.pop("comparison", None)
+            dashboard.pop("gaps", None)
             linking = self.linking_dashboard(
                 context=context,
                 pop_year=pop_year,
@@ -1813,6 +1885,7 @@ class DashboardService:
                 },
                 "screens": {
                     "dashboard": dashboard,
+                    "comments": comments,
                     "linking": linking,
                     "data": static_data,
                 },
@@ -2223,62 +2296,6 @@ class DashboardService:
         }
 
     @staticmethod
-    def _build_topics_trending_figure(rank_df: pd.DataFrame, theme: Theme) -> object:
-        if rank_df is None or rank_df.empty or "incidents" not in rank_df.columns:
-            return None
-
-        import plotly.graph_objects as go
-
-        tokens = DesignTokens.default()
-        pal = palette(tokens, theme.mode)
-        topn = rank_df.head(15).copy()
-        if topn.empty:
-            return None
-        topn["rank"] = np.arange(1, len(topn) + 1)
-        topn["topic_label"] = topn.apply(
-            lambda row: (
-                f"TOP {int(row['rank'])} · {row['nps_topic']}"
-                if int(row["rank"]) <= 3
-                else str(row["nps_topic"])
-            ),
-            axis=1,
-        )
-        topn["topic_label"] = topn["topic_label"].astype(str).str.slice(0, 72)
-        topn_plot = topn.iloc[::-1].copy()
-        colors: list[str] = []
-        for rank in topn_plot["rank"].tolist():
-            if int(rank) == 1:
-                colors.append(pal["color.primary.bg.alert"])
-            elif int(rank) == 2:
-                colors.append(pal["color.primary.bg.warning"])
-            elif int(rank) == 3:
-                colors.append(pal["color.primary.bg.success"])
-            else:
-                colors.append(
-                    pal.get("color.neutral.bg.01", pal.get("color.primary.bg.bar", "#CAD1D8"))
-                )
-
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=topn_plot["incidents"],
-                y=topn_plot["topic_label"],
-                orientation="h",
-                marker=dict(color=colors),
-                text=[str(int(value)) for value in topn_plot["incidents"].tolist()],
-                textposition="outside",
-                hovertemplate="Tópico=%{y}<br>Incidencias=%{x}<extra></extra>",
-            )
-        )
-        fig.update_layout(
-            height=440,
-            margin=dict(l=10, r=10, t=62, b=10),
-            xaxis=dict(title="Incidencias relacionadas"),
-            yaxis=dict(title="Tópicos observados"),
-        )
-        return apply_plotly_theme(fig, theme)
-
-    @staticmethod
     def _build_entity_summary_df(
         chain_df: pd.DataFrame,
         *,
@@ -2358,23 +2375,12 @@ class DashboardService:
             },
         ]
 
-    def _build_linking_scenario_cards(
-        self, chain_df: pd.DataFrame, **kwargs: object
-    ) -> list[dict[str, object]]:
+    def _build_linking_scenario_cards(self, chain_df: pd.DataFrame) -> list[dict[str, object]]:
         if chain_df is None or chain_df.empty:
             return []
-        by_topic_weekly = cast(pd.DataFrame, kwargs.get("by_topic_weekly", pd.DataFrame()))
-        by_topic_daily = cast(pd.DataFrame, kwargs.get("by_topic_daily", pd.DataFrame()))
-        lag_days = cast(pd.DataFrame, kwargs.get("lag_days", pd.DataFrame()))
-        rank_df = cast(pd.DataFrame, kwargs.get("rank_df", pd.DataFrame()))
-        theme = cast(Theme, kwargs["theme"])
-        theme_mode = str(kwargs.get("theme_mode", theme.mode))
-        focus_name = str(kwargs.get("focus_name", "grupo foco"))
-        touchpoint_source = str(kwargs.get("touchpoint_source", TOUCHPOINT_SOURCE_DOMAIN))
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
             title = str(row.get("nps_topic", "") or "").strip()
-            topic = str(row.get("anchor_topic", "") or title).strip()
             card = self._serialize_rows(pd.DataFrame([row]))[0]
             card.update(
                 {
@@ -2413,163 +2419,10 @@ class DashboardService:
                         title or "Tópico NPS",
                         "Comentarios VoC",
                     ],
-                    "detail_table": self._serialize_rows(
-                        self._build_linking_detail_table(
-                            pd.DataFrame([row]),
-                            focus_name=focus_name,
-                            touchpoint_source=touchpoint_source,
-                        )
-                    ),
-                    "heatmap_figure": self._serialize_figure(
-                        chart_case_incident_heatmap(by_topic_daily, theme, topic=topic)
-                    ),
-                    "changepoints_figure": self._serialize_figure(
-                        self._build_changepoints_lag_figure(
-                            by_topic_weekly,
-                            rank_df,
-                            topic=topic,
-                            theme=theme,
-                            theme_mode=theme_mode,
-                            focus_name=focus_name,
-                        )
-                    ),
-                    "lag_figure": self._serialize_figure(
-                        chart_case_lag_days(
-                            by_topic_daily,
-                            lag_days,
-                            theme,
-                            topic=topic,
-                            focus_name=focus_name,
-                        )
-                    ),
                 }
             )
             cards.append(card)
         return cards
-
-    @staticmethod
-    def _build_linking_detail_table(
-        chain_df: pd.DataFrame, *, focus_name: str, touchpoint_source: str
-    ) -> pd.DataFrame:
-        del focus_name, touchpoint_source
-        if chain_df is None or chain_df.empty:
-            return pd.DataFrame()
-        columns = [
-            "nps_topic",
-            "anchor_topic",
-            "touchpoint",
-            "responses",
-            "incidents",
-            "incident_rate_per_100_responses",
-            "focus_rate_high_incidence",
-            "focus_rate_difference_pp",
-            "score_mean_difference",
-            "linked_pairs",
-            "avg_similarity",
-            "support_organizations",
-            "historical_resolution_weeks",
-        ]
-        detail = chain_df.copy()
-        for column in columns:
-            if column not in detail:
-                detail[column] = np.nan
-        return detail[columns].rename(
-            columns={
-                "nps_topic": "Tópico",
-                "anchor_topic": "Tópico NPS ancla",
-                "touchpoint": "Touchpoint",
-                "responses": "Respuestas",
-                "incidents": "Incidencias",
-                "incident_rate_per_100_responses": "Incidencias por 100 respuestas",
-                "focus_rate_high_incidence": "Tasa foco en periodos de incidencia alta",
-                "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
-                "score_mean_difference": "Diferencia nota media alta vs baja",
-                "linked_pairs": "Vínculos semánticos",
-                "avg_similarity": "Similitud media",
-                "support_organizations": "Organizaciones responsables observadas",
-                "historical_resolution_weeks": "Duración media histórica de resolución (semanas)",
-            }
-        )
-
-    @staticmethod
-    def _build_changepoints_lag_figure(
-        by_topic_weekly: pd.DataFrame,
-        rank_df: pd.DataFrame,
-        *,
-        topic: str,
-        theme: Theme,
-        theme_mode: str,
-        focus_name: str,
-    ) -> object:
-        topic_key = str(topic or "").strip()
-        if not topic_key or by_topic_weekly.empty or rank_df.empty:
-            return None
-
-        g = (
-            by_topic_weekly[by_topic_weekly["nps_topic"].astype(str).str.strip() == topic_key]
-            .sort_values("week")
-            .copy()
-        )
-        lag_row = rank_df[rank_df["nps_topic"].astype(str).str.strip() == topic_key].head(1)
-        if g.empty or lag_row.empty:
-            return None
-
-        lag_raw = pd.to_numeric(lag_row["best_lag_weeks"], errors="coerce").iloc[0]
-        lag_weeks = int(lag_raw) if pd.notna(lag_raw) else 0
-        g["week"] = pd.to_datetime(g["week"], errors="coerce")
-        g = g.dropna(subset=["week"])
-        if g.empty:
-            return None
-        g["focus_rate"] = _numeric_series(g, "focus_rate", default=0.0)
-        g["incidents"] = _numeric_series(g, "incidents", default=0.0)
-        g["incidents_shifted"] = g["incidents"].shift(lag_weeks)
-
-        cps = lag_row.get("changepoints", pd.Series([[]])).iloc[0]
-        if not isinstance(cps, list):
-            cps = [] if pd.isna(cps) else [str(cps)]
-        cp_level = str(lag_row.get("max_cp_level", pd.Series([""])).iloc[0] or "")
-        cp_color = cp_level_color(DesignTokens.default(), theme_mode, cp_level)
-        pal = palette(DesignTokens.default(), theme_mode)
-
-        import plotly.graph_objects as go
-
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=g["week"],
-                y=g["focus_rate"],
-                name=f"% {focus_name}",
-                mode="lines+markers",
-                line=dict(color=pal["color.primary.accent.value-07.default"], width=2),
-                marker=dict(color=pal["color.primary.accent.value-07.default"], size=6),
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=g["week"],
-                y=g["incidents_shifted"],
-                name=f"# incidencias (shift {lag_weeks}w)",
-                yaxis="y2",
-                opacity=0.70,
-                marker=dict(color=pal["color.primary.accent.value-01.default"]),
-            )
-        )
-        for cp in cps[:8]:
-            with contextlib.suppress(Exception):
-                fig.add_vline(
-                    x=pd.to_datetime(cp),
-                    line_width=2,
-                    line_dash="dot",
-                    line_color=cp_color,
-                )
-        fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=62, b=10),
-            yaxis=dict(title=f"% {focus_name}", tickformat=".0%"),
-            yaxis2=dict(title="Incidencias (shifted)", overlaying="y", side="right"),
-            legend=dict(orientation="h"),
-        )
-        return apply_plotly_theme(fig, theme)
 
     @staticmethod
     def _align_evidence_to_best_axis(
@@ -3005,7 +2858,6 @@ class DashboardService:
             "situation": {},
             "entity_summary": {},
             "scenarios": {},
-            "deep_dive": {},
         }
 
     def _build_linking_overview_figure(

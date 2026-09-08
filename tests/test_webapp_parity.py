@@ -37,25 +37,21 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     assert "Oportunidades priorizadas" not in web
     assert "['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']" in web
     assert "readonlyField('Canal','Web')" in web
-    for causal_detail in (
-        "Evidencia Helix",
-        "Voz del cliente",
-        "Ficha cuantitativa",
-        "Heat map",
-        "Changepoints + lag",
-        "Lag en días",
-    ):
+    for causal_detail in ("Evidencia Helix", "Voz del cliente"):
         assert causal_detail in web
+    for removed_detail in ("Ficha cuantitativa", "Heat map", "Changepoints + lag", "Lag en días"):
+        assert removed_detail not in web
     for navigation in ("Anterior", "Ver siguiente", "scenarioIndex", "data-scenario-step"):
         assert navigation in web
     assert "rows(cards).map" not in web
 
 
-def test_public_webapp_has_no_filter_controls_and_admin_is_explicit() -> None:
+def test_public_webapp_has_static_comment_filters_and_admin_is_explicit() -> None:
     web = (ROOT / "webapp" / "apps-script" / "App.html").read_text(encoding="utf-8")
     assert "data-filter" not in web
-    assert "static-channel" not in web
-    assert "static-group" not in web
+    assert "comments-channel" in web
+    assert "comments-group" in web
+    assert "comments-dimension" in web
     assert "activity-days" in web  # El único selector pertenece a la administración.
     assert "Newsletter" in web
     assert "Telemetría" in web
@@ -68,22 +64,19 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
     for payload_field in (
         "historical.note",
         "daily_explanation_bullets",
-        "overview.insight_bullets",
+        "topic.insights",
         "comparison.summary",
         "narrative.metrics",
         "situation.metadata",
         "situation.note",
         "entity.kpis",
-        "heatmap_figure",
-        "changepoints_figure",
-        "lag_figure",
-        "deep.topic_filter",
-        "deep.kpis",
+        "situation.associations",
+        "situation.evidence",
     ):
         assert payload_field in web
 
     assert "data-scenario-detail" in web
-    assert "data-deep-detail" in web
+    assert "data-deep-detail" not in web
     assert "data-evidence-view" in web
 
 

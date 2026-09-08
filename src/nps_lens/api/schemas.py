@@ -161,7 +161,6 @@ class LinkingResponse(BaseModel):
     situation: dict[str, Any] = Field(default_factory=dict)
     entity_summary: dict[str, Any] = Field(default_factory=dict)
     scenarios: dict[str, Any] = Field(default_factory=dict)
-    deep_dive: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaxonomyGenerateRequest(BaseModel):
