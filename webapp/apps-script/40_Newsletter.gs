@@ -69,7 +69,7 @@ function getNewsletterWorkspace() {
 
 function _newsletterSubject_(publication) {
   const monthNames = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  return 'NPS y causalidad con incidencias - ' + publication.buug + ' ' + publication.n1 +
+  return 'NPS e incidencias relacionadas - ' + publication.buug + ' ' + publication.n1 +
     ' - ' + publication.year + ' ' + (monthNames[publication.month] || publication.month) + ' - ' + publication.causalMethodLabel;
 }
 

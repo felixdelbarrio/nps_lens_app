@@ -175,18 +175,17 @@
   }
   function data(view) {
     const source = datasets[view] || {};
-    const cacheKey=view==='helix'?view:`${view}|${state.scoreChannel}|${state.npsGroup}`;
+    const cacheKey=view;
     if(source.deferred&&!datasetCache[cacheKey])setTimeout(()=>loadStaticDataset(view,cacheKey),0);
     const visible=datasetCache[cacheKey]||source;
     const title=view==='nps'?'Base NPS':'Base Helix';
     return hero(title,'Vista tabular del mismo dataset persistido que soporta el análisis local.',{eyebrow:'Datos',filters:view==='nps'})+`<section class="surface-card stack-panel"><div class="table-meta"><span>Filas: <strong>${esc(format(visible.total_rows??rows(visible.rows).length))}</strong></span><span>Columnas: <strong>${esc(rows(visible.columns).length)}</strong></span></div>${visible.error?`<p class="error">${esc(visible.error)}</p>`:source.deferred&&!datasetCache[cacheKey]?'<div class="status">Cargando datos del ámbito…</div>':table(visible.rows,500)}</section>`;
   }
-  async function loadStaticDataset(view,cacheKey){try{datasetCache[cacheKey]=await rpc('getPublishedDataset',[view,publication.scope?.key||viewer.scopeKey,state.scoreChannel,state.npsGroup]);if(state.area==='data'&&state.section===view)render();}catch(error){datasetCache[cacheKey]={rows:[],columns:[],total_rows:0,error:error.message};if(state.area==='data'&&state.section===view)render();}}
-  function localPublishedDataset(kind,scoreChannel,npsGroup){
+  async function loadStaticDataset(view,cacheKey){try{datasetCache[cacheKey]=await rpc('getPublishedDataset',[view,publication.scope?.key||viewer.scopeKey]);if(state.area==='data'&&state.section===view)render();}catch(error){datasetCache[cacheKey]={rows:[],columns:[],total_rows:0,error:error.message};if(state.area==='data'&&state.section===view)render();}}
+  function localPublishedDataset(kind){
     const source=publication.snapshots?.data?.datasets?.[kind];
     if(!source)return {dataset_kind:kind,total_rows:0,columns:[],rows:[]};
-    const normalize=value=>String(value||'todos').trim().toLowerCase().replace(/^detractores$/,'detractor').replace(/^promotores$/,'promotor').replace(/^neutros$/,'pasivo');
-    const page=kind==='helix'?source.page:source.pages?.[`${normalize(scoreChannel)}|${normalize(npsGroup)}`];
+    const page=source.page;
     return {dataset_kind:kind,total_rows:page?.total_rows||0,columns:source.columns||[],rows:page?.rows||[]};
   }
   const localActivity = {generatedAt:new Date().toISOString(),periodDays:30,summary:{events:18,performanceVersion:'2.3',performanceEvents:18,historicalEvents:0,users:4,sessions:6,errors:0,serverP95Ms:184,renderP95Ms:9},users:[{email:'administrador@bbva.com',events:9},{email:'usuario@bbva.com',events:5}],actions:[{name:'view',events:13},{name:'app_enter',events:4},{name:'download_diagnostic',events:1}],screens:[{name:'insights',events:12},{name:'data',events:4},{name:'settings',events:2}],slowCalls:[{operation:'getActivityReport',duration_ms:184,status:'ok'}],events:[]};
@@ -196,8 +195,8 @@
       if (viewer.local) {
         if (name === 'getActivityReport') return resolve(localActivity);
         if (name === 'recordActivityEvents') return resolve({accepted:args[0]?.length || 0});
-        if (name === 'getPublishedDataset') return resolve(localPublishedDataset(args[0],args[2],args[3]));
-        if (name === 'getNewsletterWorkspace') return resolve({subject:'NPS y causalidad con incidencias - BBVA México ENTERPRISE WEB - 2026 Marzo - Journeys de detracción',scope:publication.scope||{key:'local'},activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}],sender:{ready:true,name:'NPS Lens',effective:'nps-lens.group@bbva.com'}});
+        if (name === 'getPublishedDataset') return resolve(localPublishedDataset(args[0]));
+        if (name === 'getNewsletterWorkspace') return resolve({subject:'NPS e incidencias relacionadas - BBVA México ENTERPRISE WEB - 2026 Marzo - Journeys de detracción',scope:publication.scope||{key:'local'},activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}],sender:{ready:true,name:'NPS Lens',effective:'nps-lens.group@bbva.com'}});
         if (name === 'getPublicationSettings') return resolve({id:'local-preview',name:'Vista previa local',url:''});
         if (name === 'getEvolutionNpsSettings') return resolve({visible:true});
         if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope' || name === 'saveEvolutionNpsSettings') return resolve({visible:true});

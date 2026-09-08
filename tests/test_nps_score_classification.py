@@ -102,11 +102,13 @@ def test_historical_manual_groups_do_not_reach_snapshot(tmp_path: Path) -> None:
         dataset_kind="nps", context=context, nps_group="Todos", score_channel="Todos"
     )
     snapshot = build_static_data_snapshot(nps, {"columns": [], "rows": []})
-    pages = snapshot["datasets"]["nps"]["pages"]
-    assert pages["todos|detractor"]["total_rows"] == 7
-    assert pages["todos|pasivo"]["total_rows"] == 2
-    assert pages["todos|promotor"]["total_rows"] == 2
-    assert {row["NPS Group"] for row in pages["todos|todos"]["rows"]} == {
+    page = snapshot["datasets"]["nps"]["page"]
+    assert page["total_rows"] == 11
+    groups = [row["NPS Group"] for row in page["rows"]]
+    assert groups.count("DETRACTOR") == 7
+    assert groups.count("PASIVO") == 2
+    assert groups.count("PROMOTOR") == 2
+    assert {row["NPS Group"] for row in page["rows"]} == {
         "DETRACTOR",
         "PASIVO",
         "PROMOTOR",

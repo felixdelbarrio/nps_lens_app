@@ -1721,7 +1721,7 @@ export function App() {
             <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Banca de Empresas e Instituciones · NPS y causalidad operativa.
+              Banca de Empresas e Instituciones · NPS e incidencias relacionadas.
             </p>
           </div>
 

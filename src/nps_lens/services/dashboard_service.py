@@ -88,6 +88,7 @@ from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.platform.downloads import persist_download
 from nps_lens.platform.publication import (
+    DATA_PAGE_SIZE,
     PUBLICATION_SCHEMA_VERSION,
     PublicationArtifact,
     build_publication_archive,
@@ -1749,7 +1750,7 @@ class DashboardService:
                 touchpoint_source=active_touchpoint_source,
                 report_dimension_analysis=report_dimension_analysis,
             )
-            row_limit = 50_000
+            row_limit = DATA_PAGE_SIZE
             nps_data = self.dataset_rows(
                 dataset_kind="nps",
                 context=context,
@@ -1817,18 +1818,6 @@ class DashboardService:
                 },
                 "snapshots": {
                     "data": data_snapshot,
-                    "taxonomy": self.taxonomy.snapshot(
-                        context,
-                        self._load_helix_df(context),
-                        {
-                            **self.settings.ui_defaults(),
-                            "pop_year": pop_year,
-                            "pop_month": pop_month,
-                            "min_similarity": min_similarity,
-                            "max_days_apart": max_days_apart,
-                            "touchpoint_source": active_touchpoint_source,
-                        },
-                    ),
                 },
                 "manifest": {
                     "generated_at": generated_at,

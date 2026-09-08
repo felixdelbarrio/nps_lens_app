@@ -13,4 +13,10 @@ Las acciones de **Newsletter**, **Importar** y **Configuración** solo se muestr
 
 El snapshot Web fija el canal `Web`. El enlace de presentación de la newsletter es estable y resuelve en cada acceso la variante definida por el control global **Evolución NPS**.
 
+El contrato de publicación `3.0` incluye las pantallas ya calculadas y una sola página
+acotada de NPS y Helix para las vistas de datos. Las taxonomías, modelos y corpus de
+restauración permanecen en el snapshot taxonómico local independiente y no se incluyen
+en el ZIP de la WebApp. El generador limita además `publication.json` a 20 MB antes de
+crear el archivo, por debajo del límite de contenido descomprimido de Apps Script.
+
 En local: `make WebApp` abre la última edición disponible en Descargas en `http://127.0.0.1:8625`.

@@ -110,7 +110,7 @@ class EquivalenceGroupRequest(BaseModel):
 
 
 class EquivalenceRegistryRequest(BaseModel):
-    schema_version: str = "2.0"
+    schema_version: str = "3.0"
     dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 

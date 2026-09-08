@@ -32,7 +32,9 @@ SOURCE_AND_ACTIVE o ALL_AVAILABLE. El snapshot incluye registros, asignaciones,
 equivalencias y configuración, con checksum. La restauración usa asignaciones guardadas,
 sin entrenar ni requerir el modelo serializado; mantiene un estado separado del corpus local.
 Volver a datos locales recupera ese corpus. Exportación y restauración tienen límite de 30 MB.
-La publicación conserva los campos analíticos que consume la WebApp y añade la taxonomía.
+La publicación conserva únicamente los campos analíticos que consume la WebApp. El
+snapshot taxonómico se exporta y restaura por separado para no trasladar corpus ni
+modelos a la publicación estática.
 
 ## Histórico
 

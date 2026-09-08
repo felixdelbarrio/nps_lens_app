@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import html
 import json
-import unicodedata
 from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 MAX_PUBLICATION_BYTES = 30 * 1024 * 1024
-PUBLICATION_SCHEMA_VERSION = "2.0"
+MAX_PUBLICATION_JSON_BYTES = 20 * 1024 * 1024
+PUBLICATION_SCHEMA_VERSION = "3.0"
 DATA_PAGE_SIZE = 500
 DATA_VISIBLE_COLUMNS = 14
 
@@ -23,20 +23,16 @@ class PublicationArtifact:
     saved_path: str = ""
 
 
-def _filter_key(value: object) -> str:
-    key = unicodedata.normalize("NFKD", str(value or "todos").strip().casefold())
-    key = "".join(character for character in key if not unicodedata.combining(character))
-    return {"detractores": "detractor", "promotores": "promotor", "neutros": "pasivo"}.get(
-        key, key or "todos"
-    )
-
-
 def _dataset_page(
-    rows: list[dict[str, object]], columns: list[str], *, page_size: int
+    rows: list[dict[str, object]],
+    columns: list[str],
+    *,
+    page_size: int,
+    total_rows: int,
 ) -> dict[str, object]:
     visible = columns[:DATA_VISIBLE_COLUMNS]
     return {
-        "total_rows": len(rows),
+        "total_rows": total_rows,
         "rows": [{column: row.get(column) for column in visible} for row in rows[:page_size]],
     }
 
@@ -49,39 +45,38 @@ def build_static_data_snapshot(
 ) -> dict[str, object]:
     """Materializa localmente las páginas inmutables que consumirá la WebApp."""
 
-    def source(value: dict[str, object]) -> tuple[list[str], list[dict[str, object]]]:
+    def source(value: dict[str, object]) -> tuple[list[str], list[dict[str, object]], int]:
         columns = [str(column) for column in value.get("columns", [])]
         rows = [row for row in value.get("rows", []) if isinstance(row, dict)]
-        return columns, rows
+        total_rows = int(value.get("total_rows", len(rows)) or 0)
+        return columns, rows, max(total_rows, len(rows))
 
-    nps_columns, nps_rows = source(nps)
-    helix_columns, helix_rows = source(helix)
-    channels = list(dict.fromkeys(["todos", *(_filter_key(row.get("Canal")) for row in nps_rows)]))
-    groups = list(
-        dict.fromkeys(["todos", *(_filter_key(row.get("NPS Group")) for row in nps_rows)])
-    )
-    pages = {
-        f"{channel}|{group}": _dataset_page(
-            [
-                row
-                for row in nps_rows
-                if (channel == "todos" or _filter_key(row.get("Canal")) == channel)
-                and (group == "todos" or _filter_key(row.get("NPS Group")) == group)
-            ],
-            nps_columns,
-            page_size=page_size,
-        )
-        for channel in channels
-        for group in groups
-    }
+    nps_columns, nps_rows, nps_total = source(nps)
+    helix_columns, helix_rows, helix_total = source(helix)
+    nps_visible_columns = nps_columns[:DATA_VISIBLE_COLUMNS]
+    helix_visible_columns = helix_columns[:DATA_VISIBLE_COLUMNS]
     return {
         "schema_version": PUBLICATION_SCHEMA_VERSION,
         "datasets": {
-            "nps": {"columns": nps_columns, "total_rows": len(nps_rows), "pages": pages},
+            "nps": {
+                "columns": nps_visible_columns,
+                "total_rows": nps_total,
+                "page": _dataset_page(
+                    nps_rows,
+                    nps_visible_columns,
+                    page_size=page_size,
+                    total_rows=nps_total,
+                ),
+            },
             "helix": {
-                "columns": helix_columns,
-                "total_rows": len(helix_rows),
-                "page": _dataset_page(helix_rows, helix_columns, page_size=page_size),
+                "columns": helix_visible_columns,
+                "total_rows": helix_total,
+                "page": _dataset_page(
+                    helix_rows,
+                    helix_visible_columns,
+                    page_size=page_size,
+                    total_rows=helix_total,
+                ),
             },
         },
     }
@@ -112,7 +107,7 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
             or "Consulta la edición actualizada y su presentación ejecutiva."
         )
     )
-    scenario_title = html.escape(str(scenario.get("title") or "Sin escenario causal prioritario"))
+    scenario_title = html.escape(str(scenario.get("title") or "Sin evidencia vinculada"))
     metrics = "".join(
         '<td width="33.33%" style="padding:14px 12px;border-top:3px solid #5ac4ff;'
         'background:#fff"><div style="font-size:11px;letter-spacing:.6px;text-transform:'
@@ -129,11 +124,11 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 10px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:100%;background:#fff">
 <tr><td style="background:#071b9c;color:#fff;padding:34px 38px">
 <div style="font-size:14px;letter-spacing:.4px">BBVA Banca de Empresas e Instituciones · {context}</div>
-<h1 style="margin:48px 0 4px;font:700 44px Georgia,serif;line-height:1.02">Análisis NPS<br>térmico y causal</h1></td></tr>
+<h1 style="margin:48px 0 4px;font:700 44px Georgia,serif;line-height:1.02">Análisis NPS<br>e incidencias</h1></td></tr>
 <tr><td style="padding:32px 38px 18px"><h2 style="margin:0;font:700 30px Georgia,serif;line-height:1.12">{headline}</h2><p style="font-size:16px;line-height:1.55;color:#30375f">{lead}</p>
 <table role="presentation" width="100%" cellspacing="10" style="margin:12px -10px 22px"><tr>{metrics}</tr></table>
 <div style="padding:18px 20px;background:#81c7f5">
-<div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase">Escenario causal prioritario</div>
+<div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase">Evidencia observada</div>
 <div style="margin-top:5px;font:700 20px Georgia,serif">{scenario_title}</div></div>
 <p style="margin:26px 0 8px"><a href="WEBAPP_URL" style="display:inline-block;background:#071b9c;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Abrir NPS Lens</a>
 <a href="{report_href}" style="display:inline-block;color:#071b9c;padding:14px 20px;font-weight:700">Abrir presentación ejecutiva</a></p></td></tr>
@@ -179,9 +174,10 @@ def build_publication_archive(
         isinstance(datasets.get(kind), dict) for kind in ("nps", "helix")
     ):
         raise ValueError("La publicación debe incluir el snapshot estático local de NPS y Helix.")
+    publication["snapshots"] = {"data": data}
     nps, helix = datasets["nps"], datasets["helix"]
     nps_total, helix_total = int(nps.get("total_rows", 0)), int(helix.get("total_rows", 0))
-    nps_included = len((nps.get("pages", {}).get("todos|todos", {}) or {}).get("rows", []))
+    nps_included = len((nps.get("page", {}) or {}).get("rows", []))
     helix_included = len((helix.get("page", {}) or {}).get("rows", []))
     manifest = publication.setdefault("manifest", {})
     if isinstance(manifest, dict):
@@ -195,6 +191,13 @@ def build_publication_archive(
                 "truncated": nps_included < nps_total or helix_included < helix_total,
             }
         )
+    publication_json_bytes = len(
+        json.dumps(publication, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    if publication_json_bytes > MAX_PUBLICATION_JSON_BYTES:
+        raise ValueError("El snapshot de publicación contiene más datos de los permitidos.")
+    if isinstance(manifest, dict):
+        manifest["publication_json_bytes"] = publication_json_bytes
     content = _archive(
         publication,
         report_name=report_name,
