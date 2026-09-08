@@ -369,7 +369,7 @@
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
   if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
-  window.addEventListener('error',event => queueActivity('client_error',event.message,'error'));
+  window.addEventListener('error',() => queueActivity('client_error','client_error','error'));
   window.addEventListener('pagehide',flushActivity);
   async function start(){
     if(viewer.shellDeferred){

@@ -145,7 +145,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             finally:
                 duration_ms, cpu_ms = timer.elapsed()
                 route_object = request.scope.get("route")
-                route = str(getattr(route_object, "path", request.url.path))
+                # Never retain user-controlled paths from unmatched requests.
+                route = str(getattr(route_object, "path", "<unmatched>"))
                 request.app.state.telemetry.record(
                     method=request.method,
                     route=route,

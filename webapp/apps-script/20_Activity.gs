@@ -3,6 +3,24 @@ const ACTIVITY_HEADERS = Object.freeze([
   'view', 'duration_ms', 'status', 'detail', 'version'
 ]);
 
+// Only operation identifiers belong in diagnostics, never exception messages.
+function _activityDetail_(event) {
+  const operations = [
+    'getActivityReport', 'getPublishedDataset', 'getPublishedShell',
+    'getEvolutionNpsSettings', 'saveEvolutionNpsSettings',
+    'getPublicationSettings', 'savePublicationFolder',
+    'getNewsletterWorkspace', 'saveNewsletterRecipient', 'selectPublicationScope',
+    'revalidateNewsletterSender', 'testNewsletter', 'sendNewsletter',
+    'importPublicationArchive'
+  ];
+  if (event.name === 'client_error') return 'client_error';
+  if (event.name === 'view') return 'render';
+  if (event.name === 'server_call' || event.name === 'snapshot_load') {
+    return operations.indexOf(event.detail) >= 0 ? event.detail : 'unknown_operation';
+  }
+  return '';
+}
+
 function recordActivityEvents(events) {
   const viewer = _viewer_();
   _assertViewer_(viewer);
@@ -16,7 +34,7 @@ function recordActivityEvents(events) {
     return [timestamp, viewer.email, _cleanText_(event.sessionId, 80),
     _cleanText_(event.name || 'view', 80), _cleanText_(event.area, 60), _cleanText_(event.section, 80),
     _cleanText_(event.view, 100), Math.max(0, Math.round(Number(event.durationMs) || 0)),
-    _cleanText_(event.status || 'ok', 30), _cleanText_(event.detail, 500), 'v' + NPS_LENS.version];
+    _cleanText_(event.status || 'ok', 30), _activityDetail_(event), 'v' + NPS_LENS.version];
   });
   const lock = LockService.getScriptLock();
   lock.waitLock(5000);

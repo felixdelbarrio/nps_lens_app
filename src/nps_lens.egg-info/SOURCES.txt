@@ -148,3 +148,4 @@ tests/test_ui_population.py
 tests/test_upload_service.py
 tests/test_webapp_parity.py
 tests/test_webapp_publication.py
+tests/test_webapp_telemetry_privacy.py
