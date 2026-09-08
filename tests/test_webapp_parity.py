@@ -35,6 +35,9 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     )
     assert "['opportunities'" not in web
     assert "Oportunidades priorizadas" not in web
+    assert "comments.gaps?.[state.scoreChannel]?.[state.gapDimension]" in web
+    assert "comments.gaps?.[state.scoreChannel]?.[state.npsGroup]" not in web
+    assert "view==='gaps'?'':`<label class=\"field\">Grupo score" in web
     assert "['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']" in web
     assert "readonlyField('Canal','Web')" in web
     for causal_detail in ("Evidencia Helix", "Voz del cliente"):

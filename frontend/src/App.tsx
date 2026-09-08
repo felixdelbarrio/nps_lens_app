@@ -939,7 +939,10 @@ export function App() {
     );
   }
 
-  function renderAnalysisFiltersContainer(showCausalMethodFilter: boolean) {
+  function renderAnalysisFiltersContainer(
+    showCausalMethodFilter: boolean,
+    showScoreGroup: boolean = true
+  ) {
     const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method fixed-causal-filters" : ""}`;
 
     return (
@@ -969,7 +972,7 @@ export function App() {
               ))}
             </select>
           </label>
-          {!showCausalMethodFilter ? (
+          {!showCausalMethodFilter && showScoreGroup ? (
             <label>
               <span>Grupo Score</span>
               <select
@@ -1141,7 +1144,7 @@ export function App() {
     const gapTitle = dashboard?.gaps.title || "Brechas NPS";
     const gapSubtitle =
       dashboard?.gaps.subtitle ||
-      "Las barras muestran cuánto se desvía el NPS de cada palanca respecto al NPS global del período.";
+      "Las barras muestran cuánto se desvía el NPS de cada segmento respecto al NPS global del canal y periodo activos.";
 
     return (
       <section className="surface-card stack-panel">
@@ -1151,7 +1154,7 @@ export function App() {
                 <h2>{gapTitle}</h2>
                 <p>{gapSubtitle}</p>
                 <p className="metric-note">
-                  NPS Global del período: {formatNumber(dashboard?.gaps.overall_nps)}
+                  NPS global del canal y periodo: {formatNumber(dashboard?.gaps.overall_nps)}
                 </p>
               </div>
               <label className="inline-field">
@@ -1422,7 +1425,7 @@ export function App() {
         {insightTab === "summary" ? renderSummarySection() : null}
         {insightTab === "nps-analysis" ? (
           <>
-            {renderAnalysisFiltersContainer(false)}
+            {renderAnalysisFiltersContainer(false, npsTab !== "gaps")}
             {renderNpsSection()}
           </>
         ) : null}

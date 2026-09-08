@@ -607,8 +607,7 @@ def build_period_kpis(
         base_label=previous_label,
         actual_label=context_label,
         note=(
-            "NPS Global del período: NPS Clásico agregado sobre todas las respuestas "
-            "del Period Container. Baseline usado para calcular la brecha de cada palanca."
+            "NPS clásico agregado sobre todas las respuestas del Period Container."
         ),
     )
     period_payload["temporal"] = temporal
@@ -626,7 +625,6 @@ def build_period_kpis(
             kpis=cumulative,
             note=cumulative_note,
         ),
-        "temporal": temporal,
         "period_aggregates": build_period_aggregates(history_df, pop_year, pop_month),
     }
 

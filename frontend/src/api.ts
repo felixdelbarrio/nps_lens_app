@@ -136,7 +136,6 @@ export type DashboardPayload = {
     historical?: ScopeKpiBlock;
     cumulative?: ScopeKpiBlock;
     period?: ScopeKpiBlock;
-    temporal?: ScopeKpiBlock;
     period_aggregates?: PeriodAggregate[];
   };
   comparison: {

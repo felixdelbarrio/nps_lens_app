@@ -115,7 +115,7 @@ function _encodedSnapshot_(fileId) {
   } catch (error) { cache.remove(key); }
   const blob = DriveApp.getFileById(fileId).getBlob(), bytes = blob.getBytes();
   const gzipBytes = bytes[0] === 31 && (bytes[1] === 139 || bytes[1] === -117)
-    ? bytes : Utilities.gzip(Utilities.newBlob(bytes, 'application/json')).getBytes();
+    ? bytes : Utilities.gzip(Utilities.newBlob(bytes, 'application/json', 'snapshot.json')).getBytes();
   const encoded = Utilities.base64EncodeWebSafe(gzipBytes);
   _cacheEncodedSnapshot_(fileId, encoded);
   return encoded;
@@ -123,7 +123,8 @@ function _encodedSnapshot_(fileId) {
 
 function _loadSnapshot_(fileId) {
   const bytes = Utilities.base64DecodeWebSafe(_encodedSnapshot_(fileId));
-  return JSON.parse(Utilities.ungzip(Utilities.newBlob(bytes)).getDataAsString('UTF-8'));
+  const gzipBlob = Utilities.newBlob(bytes, 'application/gzip', 'snapshot.json.gz');
+  return JSON.parse(Utilities.ungzip(gzipBlob).getDataAsString('UTF-8'));
 }
 
 function _publishedShell_(scopeKey) {

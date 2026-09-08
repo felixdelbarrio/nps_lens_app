@@ -15,7 +15,7 @@ from typing import Any, Callable, Optional, Sequence, cast
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.helix_operational_metrics import (
     HelixOperationalBenchmark,
     build_helix_operational_benchmark,
@@ -719,10 +719,15 @@ class DashboardService:
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
         scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
-        analysis_history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
-        analysis_history_df = filter_by_nps_group(analysis_history_df, resolved_group)
+        channel_history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
+        analysis_history_df = filter_by_nps_group(channel_history_df, resolved_group)
         analysis_current_df = self._apply_population_filters(
             analysis_history_df,
+            pop_year,
+            pop_month,
+        )
+        gap_current_df = self._apply_population_filters(
+            channel_history_df,
             pop_year,
             pop_month,
         )
@@ -767,7 +772,6 @@ class DashboardService:
 
         period_scope = cast(dict[str, Any], scope_kpis.get("period", {}))
         period_scope_kpis = cast(dict[str, Any], period_scope.get("kpis", {}))
-        period_temporal = cast(Optional[dict[str, object]], scope_kpis.get("temporal"))
         period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
         topics_df = self._topics_df(analysis_current_df)
@@ -810,31 +814,7 @@ class DashboardService:
                 "has_data": not delta_df.empty,
             }
 
-        filtered_scores = _numeric_series(analysis_current_df, "NPS", default=np.nan).dropna()
-        overall_nps = (
-            float((filtered_scores.ge(9).mean() - filtered_scores.le(6).mean()) * 100.0)
-            if not filtered_scores.empty
-            else None
-        )
-        gap_stats = pd.DataFrame(
-            [
-                stat.__dict__
-                for stat in driver_table(
-                    analysis_current_df,
-                    gap_dimension,
-                    overall_nps=overall_nps,
-                )
-            ]
-        )
-        if not gap_stats.empty:
-            gap_stats = gap_stats.sort_values(
-                ["gap_vs_overall", "n"], ascending=[True, False]
-            ).reset_index(drop=True)
-
-        nps_explanation_bullets = daily_nps_explanation(
-            scope_current_df,
-            temporal_kpis=period_temporal,
-        )
+        nps_explanation_bullets = daily_nps_explanation(period_scope)
 
         return {
             "context_label": context_label,
@@ -886,18 +866,7 @@ class DashboardService:
                     )
                 ),
             },
-            "gaps": {
-                "dimension": gap_dimension,
-                "overall_nps": overall_nps,
-                "title": "Brechas NPS",
-                "subtitle": (
-                    "Las barras muestran cuánto se desvía el NPS de cada palanca "
-                    "respecto al NPS global del período."
-                ),
-                "figure": self._serialize_figure(chart_driver_bar(gap_stats, theme)),
-                "table": self._serialize_rows(gap_stats.head(30)),
-                "has_data": not gap_stats.empty,
-            },
+            "gaps": self._build_gap_payload(gap_current_df, gap_dimension, theme),
             "controls": {
                 "dimensions": _DEFAULT_DIMENSIONS,
                 "cohort_rows": list(_COHORT_ROW_DIMENSIONS.keys()),
@@ -906,6 +875,37 @@ class DashboardService:
                 "min_n_cross": min_n_cross,
             },
             "empty_state": "",
+        }
+
+    def _build_gap_payload(
+        self,
+        current_df: pd.DataFrame,
+        dimension: str,
+        theme: Theme,
+    ) -> dict[str, object]:
+        overall_value = compute_nps_from_scores(current_df["NPS"])
+        overall_nps = float(overall_value) if np.isfinite(overall_value) else None
+        stats = pd.DataFrame(
+            [
+                item.__dict__
+                for item in driver_table(current_df, dimension, overall_nps=overall_nps)
+            ]
+        )
+        if not stats.empty:
+            stats = stats.sort_values(
+                ["gap_vs_overall", "n"], ascending=[True, False]
+            ).reset_index(drop=True)
+        return {
+            "dimension": dimension,
+            "overall_nps": overall_nps,
+            "title": "Brechas NPS",
+            "subtitle": (
+                "Desviación de cada segmento respecto al NPS global "
+                "del canal y periodo activos."
+            ),
+            "figure": self._serialize_figure(chart_driver_bar(stats, theme)),
+            "table": self._serialize_rows(stats.head(30)),
+            "has_data": not stats.empty,
         }
 
     def _build_comments_snapshot(
@@ -936,12 +936,17 @@ class DashboardService:
 
         topics: dict[str, dict[str, object]] = {}
         comparisons: dict[str, dict[str, dict[str, object]]] = {}
-        gaps: dict[str, dict[str, dict[str, object]]] = {}
+        gaps: dict[str, dict[str, object]] = {}
         for channel in channels:
             channel_history = self._apply_score_channel_filter(history_df, channel)
             topics[channel] = {}
             comparisons[channel] = {}
             gaps[channel] = {}
+            gap_current = self._apply_population_filters(channel_history, pop_year, pop_month)
+            for dimension in dimensions:
+                gaps[channel][dimension] = self._build_gap_payload(
+                    gap_current, dimension, theme
+                )
             for group in groups:
                 analysis_history = filter_by_nps_group(channel_history, group)
                 current = self._apply_population_filters(
@@ -958,15 +963,6 @@ class DashboardService:
                     "insights": explain_topics(topics_df, max_items=5),
                 }
                 comparisons[channel][group] = {}
-                gaps[channel][group] = {}
-                current_scores = _numeric_series(current, "NPS", default=np.nan).dropna()
-                overall_nps = (
-                    float(
-                        (current_scores.ge(9).mean() - current_scores.le(6).mean()) * 100.0
-                    )
-                    if not current_scores.empty
-                    else None
-                )
                 windows = default_windows(
                     analysis_history, pop_year=pop_year, pop_month=pop_month
                 )
@@ -996,26 +992,6 @@ class DashboardService:
                             "table": self._serialize_rows(delta_df.head(30)),
                         }
                     comparisons[channel][group][dimension] = comparison
-                    gap_df = pd.DataFrame(
-                        [
-                            item.__dict__
-                            for item in driver_table(
-                                current, dimension, overall_nps=overall_nps
-                            )
-                        ]
-                    )
-                    if not gap_df.empty:
-                        gap_df = gap_df.sort_values(
-                            ["gap_vs_overall", "n"], ascending=[True, False]
-                        ).reset_index(drop=True)
-                    gaps[channel][group][dimension] = {
-                        "dimension": dimension,
-                        "overall_nps": overall_nps,
-                        "title": "Brechas NPS",
-                        "subtitle": "Desviación de cada segmento respecto al NPS global del filtro activo.",
-                        "figure": self._serialize_figure(chart_driver_bar(gap_df, theme)),
-                        "table": self._serialize_rows(gap_df.head(30)),
-                    }
         return {
             "controls": {
                 "channels": channels,

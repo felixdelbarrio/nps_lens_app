@@ -95,6 +95,8 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "_publishedEdition_" not in publication
     assert "_loadSnapshot_" in publication
     assert "Utilities.gzip" in publication
+    assert "Utilities.newBlob(bytes, 'application/gzip', 'snapshot.json.gz')" in publication
+    assert "Utilities.ungzip(Utilities.newBlob(bytes))" not in publication
     assert "function _datasetSnapshot_" not in publication
     assert "edition.snapshots.data" in publication
     assert "_validateArchive_" in publication

@@ -288,6 +288,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert filtered_dashboard_response.status_code == 200
     filtered_dashboard_payload = filtered_dashboard_response.json()
     assert filtered_dashboard_payload["kpis"] == dashboard_payload["kpis"]
+    assert filtered_dashboard_payload["gaps"] == dashboard_payload["gaps"]
 
     data_response = client.get(
         "/api/dashboard/data/nps",
@@ -804,6 +805,10 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
             "channel": "Web",
             "group": "Detractores",
             "dimension": "Palanca",
+        }
+        assert set(publication["screens"]["comments"]["gaps"]["Web"]) == {
+            "Palanca",
+            "Subpalanca",
         }
         assert "comparison" not in publication["screens"]["dashboard"]
         assert "gaps" not in publication["screens"]["dashboard"]

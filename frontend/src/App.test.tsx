@@ -533,6 +533,11 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Oportunidades priorizadas" })).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("tab", { name: "Brechas NPS" }));
+    expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.getByRole("combobox", { name: "Dimensión" })).toHaveValue("Palanca");
+
     await user.selectOptions(screen.getByRole("combobox", { name: "Canal" }), "App");
     await waitFor(() =>
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
