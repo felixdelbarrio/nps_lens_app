@@ -2716,8 +2716,14 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
         if remaining:
             paragraph = tf.add_paragraph()
             prepare_paragraph(paragraph, size=size)
-            for index, record in enumerate(remaining):
-                if index:
+            line_length = 0
+            for record in remaining:
+                incident_length = len(record.incident_id) + (2 if line_length else 0)
+                if line_length and line_length + incident_length > 72:
+                    paragraph = tf.add_paragraph()
+                    prepare_paragraph(paragraph, size=size)
+                    line_length = 0
+                if line_length:
                     separator = paragraph.add_run()
                     separator.text = ", "
                     separator.font.name = "Lato"
@@ -2731,6 +2737,7 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
                 id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
                 if record.url:
                     id_run.hyperlink.address = record.url
+                line_length += incident_length
 
 
 def _scenario_comment_groups(row: pd.Series, fallback: list[str]) -> list[tuple[str, str, list[dict[str, object]]]]:
@@ -2764,6 +2771,7 @@ def _set_scenario_comment(shape: object, label: str, text: str, segments: object
     tf.clear()
     tf.word_wrap = True
     paragraph = tf.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.CENTER
     if label:
         run = paragraph.add_run()
         run.text = label
@@ -3088,9 +3096,9 @@ def _fill_template_deck(
         _set_template_text(
             slide.shapes[4],
             "NOTA MEDIA DEL TÓPICO",
-            size=10,
-            bold=True,
-            color=BBVA_COLORS["ink"],
+            size=12,
+            bold=False,
+            color=BBVA_COLORS["blue"],
             align=PP_ALIGN.CENTER,
         )
         _set_template_text(
@@ -3105,9 +3113,9 @@ def _fill_template_deck(
         _set_template_text(
             slide.shapes[7],
             "CONFIANZA",
-            size=10,
-            bold=True,
-            color=BBVA_COLORS["ink"],
+            size=12,
+            bold=False,
+            color=BBVA_COLORS["blue"],
             align=PP_ALIGN.CENTER,
         )
         _set_template_text(
@@ -3146,9 +3154,6 @@ def _fill_template_deck(
         if len(quote_shapes) == 1 and len(comments) >= 2:
             first_quote = quote_shapes[0]
             first_quote.left = Inches(3.55)
-            first_quote.top = Inches(1.10)
-            first_quote.width = Inches(5.83)
-            first_quote.height = Inches(0.47)
             second_quote = slide.shapes.add_shape(
                 MSO_AUTO_SHAPE_TYPE.RECTANGLE,
                 Inches(3.55),
@@ -3164,8 +3169,22 @@ def _fill_template_deck(
             second_quote.text_frame.margin_top = Inches(0.07)
             second_quote.text_frame.margin_bottom = Inches(0.05)
             quote_shapes.append(second_quote)
-            evidence_shape.top = Inches(2.39)
-            evidence_shape.height = Inches(2.26)
+        content_top = 1.08
+        for index, quote_shape in enumerate(quote_shapes):
+            _, comment_text, _ = comments[index] if index < len(comments) else ("", "", [])
+            estimated_lines = max(1, min(3, int(np.ceil(max(len(comment_text), 1) / 82))))
+            quote_shape.left = Inches(3.55)
+            quote_shape.top = Inches(content_top)
+            quote_shape.width = Inches(5.83)
+            quote_shape.height = Inches(0.34 + 0.19 * estimated_lines)
+            quote_shape.fill.solid()
+            quote_shape.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
+            quote_shape.line.fill.background()
+            content_top += 0.34 + 0.19 * estimated_lines + 0.08
+        evidence_shape.left = Inches(3.55)
+        evidence_shape.top = Inches(content_top + 0.03)
+        evidence_shape.width = Inches(5.83)
+        evidence_shape.height = Inches(max(1.15, 4.66 - content_top))
         for index, quote_shape in enumerate(quote_shapes):
             label, text, segments = comments[index] if index < len(comments) else ("", "", [])
             _set_scenario_comment(quote_shape, label, text, segments)

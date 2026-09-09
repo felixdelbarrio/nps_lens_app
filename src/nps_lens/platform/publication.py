@@ -84,55 +84,82 @@ def build_static_data_snapshot(
 
 
 def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
-    screens = publication.get("screens", {})
-    dashboard = screens.get("dashboard", {}) if isinstance(screens, dict) else {}
-    linking = screens.get("linking", {}) if isinstance(screens, dict) else {}
-    kpis = dashboard.get("kpis", {}) if isinstance(dashboard, dict) else {}
-    context = (
-        html.escape(str(dashboard.get("context_label", "Periodo actualizado")))
-        if isinstance(dashboard, dict)
-        else "Periodo actualizado"
-    )
-    scenario_block = linking.get("scenarios", {}) if isinstance(linking, dict) else {}
-    cards = scenario_block.get("cards", []) if isinstance(scenario_block, dict) else []
-    scenario = cards[0] if isinstance(cards, list) and cards and isinstance(cards[0], dict) else {}
-    situation = linking.get("situation", {}) if isinstance(linking, dict) else {}
-    narrative = situation.get("narrative", {}) if isinstance(situation, dict) else {}
-    headline = html.escape(
-        str(narrative.get("title") or "La señal del cliente, conectada con la operación")
-    )
-    lead = html.escape(
-        str(
-            scenario.get("statement")
-            or narrative.get("summary")
-            or "Consulta la edición actualizada y su presentación ejecutiva."
-        )
-    )
-    scenario_title = html.escape(str(scenario.get("title") or "Sin evidencia vinculada"))
+    model = publication.get("newsletter", {})
+    if not isinstance(model, dict):
+        model = {}
+    def esc(value: object) -> str:
+        return html.escape(str(value or ""))
+    scorecard = [item for item in model.get("scorecard", []) if isinstance(item, dict)]
+    insights = [item for item in model.get("insights", []) if isinstance(item, dict)]
+    focus = model.get("focus", {}) if isinstance(model.get("focus"), dict) else {}
+    focus_rows = [item for item in focus.get("rows", []) if isinstance(item, dict)]
+    connections = [item for item in model.get("connections", []) if isinstance(item, dict)]
+    quotes = [str(item) for item in model.get("quotes", []) if str(item).strip()]
+    signals = [item for item in model.get("signals", []) if isinstance(item, dict)]
     metrics = "".join(
-        '<td width="33.33%" style="padding:14px 12px;border-top:3px solid #5ac4ff;'
-        'background:#fff"><div style="font-size:11px;letter-spacing:.6px;text-transform:'
-        f'uppercase;color:#5b638a">{html.escape(label)}</div><div style="margin-top:5px;'
-        f'font:700 25px Georgia,serif;color:#071b9c">{html.escape(str(value))}</div></td>'
-        for label, value in (
-            ("Comentarios", kpis.get("samples", "n/d")),
-            ("NPS clásico", kpis.get("classic_nps", "n/d")),
-            ("Score medio", kpis.get("nps_average", "n/d")),
-        )
+        '<td width="20%" valign="top" style="padding:12px 10px;border-top:3px solid #85c8ff;background:#f7f8f8">'
+        f'<div style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#52627a">{esc(item.get("label"))}</div>'
+        f'<div style="margin-top:6px;font:700 23px Georgia,serif;color:#001391">{esc(item.get("value"))}</div>'
+        f'<div style="margin-top:5px;font-size:10px;color:#52627a">{esc(item.get("delta"))}</div></td>'
+        for item in scorecard
+    )
+    insight_html = "".join(
+        '<tr><td style="padding:15px 0;border-bottom:1px solid #d3d8e0">'
+        f'<div style="font:700 18px Georgia,serif;color:#070e46">{esc(item.get("title"))}</div>'
+        f'<div style="margin-top:5px;font-weight:700;color:#004481">{esc(item.get("evidence"))}</div>'
+        f'<div style="margin-top:4px;color:#30375f;line-height:1.5">{esc(item.get("meaning"))}</div></td></tr>'
+        for item in insights
+    )
+    focus_html = "".join(
+        '<tr><td style="padding:11px;border-bottom:1px solid #d3d8e0;font-weight:700">' + esc(item.get("label")) + '</td>'
+        '<td style="padding:11px;border-bottom:1px solid #d3d8e0">' + esc(item.get("nps")) + '</td>'
+        '<td style="padding:11px;border-bottom:1px solid #d3d8e0">' + esc(item.get("delta")) + '</td>'
+        '<td style="padding:11px;border-bottom:1px solid #d3d8e0">' + esc(item.get("detractors")) + '</td>'
+        '<td style="padding:11px;border-bottom:1px solid #d3d8e0">' + esc(item.get("score")) + '</td>'
+        '<td style="padding:11px;border-bottom:1px solid #d3d8e0">' + esc(item.get("opinions")) + '</td></tr>'
+        for item in focus_rows
+    )
+    connection_html = "".join(
+        '<tr><td style="padding:18px 0;border-bottom:1px solid #d3d8e0">'
+        f'<div style="font:700 19px Georgia,serif;color:#070e46">{esc(item.get("topic"))}</div>'
+        f'<div style="margin:8px 0;color:#004481;font-weight:700">Cliente → tópico → {esc(item.get("semantic_links"))} vínculos semánticos → incidencias relacionadas</div>'
+        + "".join(f'<div style="padding:9px 12px;margin:6px 0;background:#eaf3fa;color:#30375f">“{esc(quote)}”</div>' for quote in list(item.get("comments", []))[:1])
+        + "".join(f'<div style="font-size:12px;color:#52627a;margin-top:5px"><b>{esc(incident.get("id"))}</b> · {esc(incident.get("summary"))}</div>' for incident in list(item.get("incidents", []))[:2] if isinstance(incident, dict))
+        + f'<div style="margin-top:8px;font-size:11px;color:#52627a">{esc(item.get("caveat"))}</div></td></tr>'
+        for item in connections
+    )
+    quotes_html = "".join(
+        f'<td width="50%" valign="top" style="padding:14px;background:#eaf3fa;border-left:3px solid #2dcccd;font:italic 16px Georgia,serif;color:#070e46">“{esc(quote)}”</td>'
+        for quote in quotes[:2]
+    )
+    signals_html = "".join(
+        f'<tr><td style="padding:10px 0;border-bottom:1px solid #d3d8e0"><b style="color:#070e46">{esc(item.get("label"))}</b><br><span style="color:#52627a">{esc(item.get("reason"))}</span></td></tr>'
+        for item in signals
     )
     report_href = html.escape(report_name, quote=True)
-    return f"""<!doctype html><html><body style="margin:0;background:#f4f5f6;font-family:Arial,sans-serif;color:#071b9c">
+    return f"""<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:Arial,sans-serif;color:#121f3f">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:24px 10px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:100%;background:#fff">
 <tr><td style="background:#071b9c;color:#fff;padding:34px 38px">
-<div style="font-size:14px;letter-spacing:.4px">BBVA Banca de Empresas e Instituciones · {context}</div>
-<h1 style="margin:48px 0 4px;font:700 44px Georgia,serif;line-height:1.02">Análisis NPS<br>e incidencias</h1></td></tr>
-<tr><td style="padding:32px 38px 18px"><h2 style="margin:0;font:700 30px Georgia,serif;line-height:1.12">{headline}</h2><p style="font-size:16px;line-height:1.55;color:#30375f">{lead}</p>
-<table role="presentation" width="100%" cellspacing="10" style="margin:12px -10px 22px"><tr>{metrics}</tr></table>
-<div style="padding:18px 20px;background:#81c7f5">
-<div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase">Evidencia observada</div>
-<div style="margin-top:5px;font:700 20px Georgia,serif">{scenario_title}</div></div>
-<p style="margin:26px 0 8px"><a href="WEBAPP_URL" style="display:inline-block;background:#071b9c;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Abrir NPS Lens</a>
-<a href="{report_href}" style="display:inline-block;color:#071b9c;padding:14px 20px;font-weight:700">Abrir presentación ejecutiva</a></p></td></tr>
+<div style="font-size:11px;letter-spacing:1px">{esc(model.get("brand") or "BBVA Banca de Empresas e Instituciones")}</div>
+<h1 style="margin:22px 0 5px;font:700 42px Georgia,serif">{esc(model.get("product") or "NPS Lens")}</h1>
+<div>{esc(model.get("promise") or "La voz del cliente conectada con la operación")}</div></td></tr>
+<tr><td style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">Lectura de 30 segundos · {esc(model.get("period") or "Periodo actualizado")}</div>
+<h2 style="margin:10px 0 0;font:700 31px Georgia,serif;line-height:1.12;color:#070e46">{esc(model.get("headline") or "La señal del cliente, conectada con la operación")}</h2>
+<p style="font-size:16px;line-height:1.55;color:#30375f">{esc(model.get("lead") or "Consulta la edición actualizada y su presentación ejecutiva.")}</p>
+<table role="presentation" width="100%" cellspacing="6" style="margin:14px -6px 22px"><tr>{metrics}</tr></table>
+<div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481;margin-top:30px">Lectura de 2 minutos</div>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:8px 0 4px">Lo que debes saber</h2><table role="presentation" width="100%">{insight_html}</table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 12px">Principal foco · {esc(focus.get("title") or "Experiencia digital")}</h2>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+<tr style="background:#070e46;color:#fff"><th style="padding:9px;text-align:left">Palanca</th><th>NPS actual</th><th>Δ base</th><th>Detractores</th><th>Score</th><th>Opiniones</th></tr>{focus_html}</table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">De la voz del cliente a la operación</h2>
+<p style="color:#52627a">Relaciones semánticas observadas en la presentación; no atribuyen causalidad.</p><table role="presentation" width="100%">{connection_html}</table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 12px">La voz del cliente</h2><table role="presentation" width="100%" cellspacing="8"><tr>{quotes_html}</tr></table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">Señales a vigilar</h2><table role="presentation" width="100%">{signals_html}</table>
+<div style="margin-top:30px;padding-top:22px;border-top:1px solid #d3d8e0">
+<div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">Nivel 3 · Profundidad</div>
+<p><a href="WEBAPP_URL" style="display:inline-block;background:#001391;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Explorar NPS Lens</a>
+<a href="{report_href}" title="Abrir presentación ejecutiva" style="display:inline-block;color:#001391;padding:14px 20px;font-weight:700">Ver análisis completo</a></p></div></td></tr>
 </table></td></tr></table></body></html>""".encode(
         "utf-8"
     )

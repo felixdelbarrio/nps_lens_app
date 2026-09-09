@@ -89,6 +89,7 @@ from nps_lens.platform.publication import (
 )
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.content_selectors import select_causal_scenarios
+from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analytics import (
     build_period_kpis,
@@ -1758,6 +1759,16 @@ class DashboardService:
                 if isinstance(dataset, dict)
             }
             generated_at = datetime.now(timezone.utc).isoformat()
+            newsletter_current = self._apply_population_filters(history_df, pop_year, pop_month)
+            newsletter_start, newsletter_end = self._period_bounds(newsletter_current)
+            newsletter = build_executive_newsletter(
+                current_df=newsletter_current,
+                period_kpis=cast(dict[str, object], dashboard.get("scope", {})),
+                linking=linking,
+                topic_channel=publish_channel,
+                period_start=newsletter_start,
+                period_end=newsletter_end,
+            )
             publication: dict[str, object] = {
                 "schema_version": PUBLICATION_SCHEMA_VERSION,
                 "generated_at": generated_at,
@@ -1786,6 +1797,7 @@ class DashboardService:
                     "default": {"score_channel": publish_channel, "nps_group": publish_group},
                     "immutable": True,
                 },
+                "newsletter": newsletter,
                 "screens": {
                     "dashboard": dashboard,
                     "comments": comments,
