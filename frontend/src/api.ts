@@ -138,20 +138,6 @@ export type DashboardPayload = {
     period?: ScopeKpiBlock;
     period_aggregates?: PeriodAggregate[];
   };
-  comparison: {
-    summary?: {
-      label_current: string;
-      label_baseline: string;
-      delta_nps: number;
-      delta_detr_pp: number;
-      n_current: number;
-      n_baseline: number;
-    };
-    dimension?: string;
-    figure?: PlotlyFigureSpec | null;
-    table?: Array<Record<string, unknown>>;
-    has_data?: boolean;
-  };
   cohorts: {
     row_dimension?: string;
     column_dimension?: string;
@@ -159,7 +145,10 @@ export type DashboardPayload = {
   };
   gaps: {
     dimension?: string;
-    overall_nps?: number;
+    base_nps?: number;
+    base_label?: string;
+    base_range?: { start?: string | null; end?: string | null };
+    gap_column_label?: string;
     title?: string;
     subtitle?: string;
     figure?: PlotlyFigureSpec | null;
@@ -256,7 +245,6 @@ export type DashboardQuery = {
   pop_month: string;
   nps_group: string;
   score_channel: string;
-  comparison_dimension: string;
   gap_dimension: string;
   cohort_row: string;
   cohort_col: string;

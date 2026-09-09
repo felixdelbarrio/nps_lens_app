@@ -22,7 +22,8 @@ describe("numberFormat", () => {
   it("does not mistake non-percent metrics for percentages", () => {
     expect(formatDisplayValue(28, "Nº detractores")).toBe("28");
     expect(formatDisplayValue(29.95659158491985, "nps")).toBe("30");
-    expect(formatDisplayValue(-97.79486970379659, "gap_vs_overall")).toBe("-97,8");
+    expect(formatDisplayValue(-97.79486970379659, "gap_vs_base")).toBe("-97,8");
+    expect(formatDisplayValue(0.2, "Confianza")).toBe("20,0%");
     expect(formatDisplayValue(0.6779040931692755, "similaridad")).toBe("0,7");
     expect(formatDisplayValue(12.3456, "difference_pp")).toBe("+12,3");
   });

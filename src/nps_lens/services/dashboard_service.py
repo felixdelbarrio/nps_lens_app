@@ -15,6 +15,10 @@ from typing import Any, Callable, Optional, Sequence, cast
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.channel_topic_scope import (
+    restrict_to_topics,
+    topics_observed_in_channel,
+)
 from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.helix_operational_metrics import (
     HelixOperationalBenchmark,
@@ -96,6 +100,7 @@ from nps_lens.services.analytics import (
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
+    PeriodWindow,
     default_windows,
     selected_month_label,
     slice_by_window,
@@ -108,11 +113,9 @@ from nps_lens.ui.charts import (
     chart_daily_volume,
     chart_daily_volume_mix_business,
     chart_driver_bar,
-    chart_driver_delta,
     chart_period_aggregates,
     chart_topic_bars,
 )
-from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.narratives import (
     build_executive_story,
     compare_periods,
@@ -655,7 +658,6 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        comparison_dimension: str = "Palanca",
         gap_dimension: str = "Palanca",
         cohort_row: str = "Palanca",
         cohort_col: str = "Canal",
@@ -671,7 +673,6 @@ class DashboardService:
             pop_month,
             nps_group,
             score_channel,
-            comparison_dimension,
             gap_dimension,
             cohort_row,
             cohort_col,
@@ -687,7 +688,6 @@ class DashboardService:
                 pop_month=pop_month,
                 nps_group=nps_group,
                 score_channel=score_channel,
-                comparison_dimension=comparison_dimension,
                 gap_dimension=gap_dimension,
                 cohort_row=cohort_row,
                 cohort_col=cohort_col,
@@ -705,7 +705,6 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        comparison_dimension: str = "Palanca",
         gap_dimension: str = "Palanca",
         cohort_row: str = "Palanca",
         cohort_col: str = "Canal",
@@ -723,11 +722,6 @@ class DashboardService:
         analysis_history_df = filter_by_nps_group(channel_history_df, resolved_group)
         analysis_current_df = self._apply_population_filters(
             analysis_history_df,
-            pop_year,
-            pop_month,
-        )
-        gap_current_df = self._apply_population_filters(
-            channel_history_df,
             pop_year,
             pop_month,
         )
@@ -764,7 +758,6 @@ class DashboardService:
                 },
                 "scope": scope_kpis,
                 "overview": {},
-                "comparison": {},
                 "cohorts": {},
                 "gaps": {},
                 "empty_state": "No hay datos cargados para el contexto y filtros seleccionados.",
@@ -781,38 +774,22 @@ class DashboardService:
             ).reset_index(drop=True)
         topics_bullets = explain_topics(topics_df, max_items=5)
 
-        comparison_payload: dict[str, object] = {}
-        comparison_story = None
-        delta_df = pd.DataFrame()
-        w_cur, w_base = default_windows(
-            analysis_history_df,
+        topic_keys = topics_observed_in_channel(
+            scope_current_df,
+            gap_dimension,
+            resolved_channel,
+        )
+        gap_current_df = restrict_to_topics(scope_current_df, gap_dimension, topic_keys)
+        _, gap_base_window = default_windows(
+            scope_history_df,
             pop_year=pop_year,
             pop_month=pop_month,
         )
-        if w_cur is not None and w_base is not None:
-            cur_window_df = slice_by_window(analysis_history_df, w_cur)
-            base_window_df = slice_by_window(analysis_history_df, w_base)
-            comparison_story = compare_periods(cur_window_df, base_window_df)
-            delta_df = get_changes_vs_historic(
-                cur_window_df,
-                base_window_df,
-                dimension=comparison_dimension,
-                min_n=min_n_cross,
-            )
-            comparison_payload = {
-                "summary": {
-                    "label_current": comparison_story.label_current,
-                    "label_baseline": comparison_story.label_baseline,
-                    "delta_nps": comparison_story.delta_nps,
-                    "delta_detr_pp": comparison_story.delta_detr_pp,
-                    "n_current": comparison_story.n_current,
-                    "n_baseline": comparison_story.n_baseline,
-                },
-                "dimension": comparison_dimension,
-                "figure": self._serialize_figure(chart_driver_delta(delta_df, theme)),
-                "table": self._serialize_rows(delta_df.head(30)),
-                "has_data": not delta_df.empty,
-            }
+        gap_base_df = (
+            slice_by_window(scope_history_df, gap_base_window)
+            if gap_base_window is not None
+            else scope_history_df.iloc[:0]
+        )
 
         nps_explanation_bullets = daily_nps_explanation(period_scope)
 
@@ -852,7 +829,6 @@ class DashboardService:
                 "daily_explanation_bullets": nps_explanation_bullets,
                 "insight_bullets": topics_bullets,
             },
-            "comparison": comparison_payload,
             "cohorts": {
                 "row_dimension": cohort_row,
                 "column_dimension": cohort_col,
@@ -866,7 +842,13 @@ class DashboardService:
                     )
                 ),
             },
-            "gaps": self._build_gap_payload(gap_current_df, gap_dimension, theme),
+            "gaps": self._build_gap_payload(
+                gap_current_df,
+                gap_base_df,
+                gap_dimension,
+                theme,
+                base_window=gap_base_window,
+            ),
             "controls": {
                 "dimensions": _DEFAULT_DIMENSIONS,
                 "cohort_rows": list(_COHORT_ROW_DIMENSIONS.keys()),
@@ -880,26 +862,50 @@ class DashboardService:
     def _build_gap_payload(
         self,
         current_df: pd.DataFrame,
+        base_df: pd.DataFrame,
         dimension: str,
         theme: Theme,
+        *,
+        base_window: PeriodWindow | None = None,
     ) -> dict[str, object]:
-        overall_value = compute_nps_from_scores(current_df["NPS"])
-        overall_nps = float(overall_value) if np.isfinite(overall_value) else None
+        base_value = compute_nps_from_scores(base_df["NPS"]) if not base_df.empty else float("nan")
+        base_nps = float(base_value) if np.isfinite(base_value) else None
+        base_label = selected_month_label(df=base_df).replace("periodo seleccionado", "sin histórico")
+        base_dates = pd.to_datetime(base_df.get("Fecha"), errors="coerce").dropna()
+        base_range = (
+            {
+                "start": base_dates.min().date().isoformat(),
+                "end": (
+                    base_window.end.isoformat()
+                    if base_window is not None
+                    else base_dates.max().date().isoformat()
+                ),
+            }
+            if not base_dates.empty
+            else {"start": None, "end": None}
+        )
         stats = pd.DataFrame(
-            [item.__dict__ for item in driver_table(current_df, dimension, overall_nps=overall_nps)]
+            [item.__dict__ for item in driver_table(current_df, dimension, base_nps=base_nps)]
+            if base_nps is not None
+            else []
         )
         if not stats.empty:
-            stats = stats.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).reset_index(
+            stats = stats.sort_values(["gap_vs_base", "n"], ascending=[True, False]).reset_index(
                 drop=True
             )
         return {
             "dimension": dimension,
-            "overall_nps": overall_nps,
+            "base_nps": base_nps,
+            "base_label": base_label,
+            "base_range": base_range,
+            "gap_column_label": f"Brecha vs Base [{base_label}]",
             "title": "Brechas NPS",
             "subtitle": (
-                "Desviación de cada segmento respecto al NPS global " "del canal y periodo activos."
+                "El canal selecciona tópicos; sus NPS y la base usan todas las opiniones."
             ),
-            "figure": self._serialize_figure(chart_driver_bar(stats, theme)),
+            "figure": self._serialize_figure(
+                chart_driver_bar(stats, theme, base_label=base_label)
+            ),
             "table": self._serialize_rows(stats.head(30)),
             "has_data": not stats.empty,
         }
@@ -910,7 +916,6 @@ class DashboardService:
         history_df: pd.DataFrame,
         pop_year: str,
         pop_month: str,
-        min_n_cross: int = 30,
         theme_mode: str = "light",
     ) -> dict[str, object]:
         """Materialize only the three comment views used by the static WebApp."""
@@ -928,16 +933,35 @@ class DashboardService:
             dimensions.insert(0, "Palanca")
 
         topics: dict[str, dict[str, object]] = {}
-        comparisons: dict[str, dict[str, dict[str, object]]] = {}
         gaps: dict[str, dict[str, object]] = {}
+        metric_current = self._apply_population_filters(history_df, pop_year, pop_month)
+        _, gap_base_window = default_windows(
+            history_df,
+            pop_year=pop_year,
+            pop_month=pop_month,
+        )
+        metric_base = (
+            slice_by_window(history_df, gap_base_window)
+            if gap_base_window is not None
+            else history_df.iloc[:0]
+        )
         for channel in channels:
             channel_history = self._apply_score_channel_filter(history_df, channel)
             topics[channel] = {}
-            comparisons[channel] = {}
             gaps[channel] = {}
-            gap_current = self._apply_population_filters(channel_history, pop_year, pop_month)
             for dimension in dimensions:
-                gaps[channel][dimension] = self._build_gap_payload(gap_current, dimension, theme)
+                topic_keys = topics_observed_in_channel(
+                    metric_current,
+                    dimension,
+                    channel,
+                )
+                gaps[channel][dimension] = self._build_gap_payload(
+                    restrict_to_topics(metric_current, dimension, topic_keys),
+                    metric_base,
+                    dimension,
+                    theme,
+                    base_window=gap_base_window,
+                )
             for group in groups:
                 analysis_history = filter_by_nps_group(channel_history, group)
                 current = self._apply_population_filters(analysis_history, pop_year, pop_month)
@@ -951,34 +975,6 @@ class DashboardService:
                     "rows": self._serialize_rows(topics_df),
                     "insights": explain_topics(topics_df, max_items=5),
                 }
-                comparisons[channel][group] = {}
-                windows = default_windows(analysis_history, pop_year=pop_year, pop_month=pop_month)
-                for dimension in dimensions:
-                    comparison: dict[str, object] = {}
-                    if windows[0] is not None and windows[1] is not None:
-                        current_window = slice_by_window(analysis_history, windows[0])
-                        baseline_window = slice_by_window(analysis_history, windows[1])
-                        story = compare_periods(current_window, baseline_window)
-                        delta_df = get_changes_vs_historic(
-                            current_window,
-                            baseline_window,
-                            dimension=dimension,
-                            min_n=min_n_cross,
-                        )
-                        comparison = {
-                            "summary": {
-                                "label_current": story.label_current,
-                                "label_baseline": story.label_baseline,
-                                "delta_nps": story.delta_nps,
-                                "delta_detr_pp": story.delta_detr_pp,
-                                "n_current": story.n_current,
-                                "n_baseline": story.n_baseline,
-                            },
-                            "dimension": dimension,
-                            "figure": self._serialize_figure(chart_driver_delta(delta_df, theme)),
-                            "table": self._serialize_rows(delta_df.head(30)),
-                        }
-                    comparisons[channel][group][dimension] = comparison
         return {
             "controls": {
                 "channels": channels,
@@ -991,7 +987,6 @@ class DashboardService:
                 },
             },
             "topics": topics,
-            "comparison": comparisons,
             "gaps": gaps,
         }
 
@@ -1553,17 +1548,16 @@ class DashboardService:
         scope_history_df = self._load_nps_df(context)
         if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
-        resolved_channel = self._resolve_score_channel(
+        topic_channel = self._resolve_score_channel(
             scope_history_df,
             score_channel or _PREFERRED_SCORE_CHANNEL,
         )
         resolved_group = self._resolve_nps_group(scope_history_df, nps_group or POP_ALL)
-        history_df = self._apply_score_channel_filter(scope_history_df, resolved_channel)
-        history_df = filter_by_nps_group(history_df, resolved_group)
-
-        scope_current_df = self._apply_population_filters(scope_history_df, pop_year, pop_month)
-        current_df = self._apply_population_filters(history_df, pop_year, pop_month)
-        descriptive_current_df = scope_current_df if not scope_current_df.empty else current_df
+        descriptive_current_df = self._apply_population_filters(
+            scope_history_df,
+            pop_year,
+            pop_month,
+        )
         if descriptive_current_df.empty:
             raise ValueError(
                 "El periodo filtrado no tiene respuestas NPS. Ajusta año o mes antes de generar la PPT."
@@ -1633,7 +1627,10 @@ class DashboardService:
                 overall_series = overall_daily if not overall_daily.empty else overall_weekly
                 rationale_df = cast(pd.DataFrame, causal["rationale_df"])
                 attribution_all_df = cast(pd.DataFrame, causal["chains"])
-                attribution_df = self._select_top_chain_rows(attribution_all_df)
+                attribution_df = select_causal_scenarios(
+                    attribution_all_df,
+                    max_rows=len(attribution_all_df),
+                )
                 mode_payload = cast(dict[str, object], causal["mode_payload"])
                 broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
                 executive_journey_catalog = cast(
@@ -1665,6 +1662,7 @@ class DashboardService:
             period_start=period_start,
             period_end=period_end,
             focus_name=focus_name,
+            topic_channel=topic_channel,
             overall_weekly=overall_series,
             rationale_df=rationale_df,
             story_md=business_story_md,
@@ -1744,7 +1742,6 @@ class DashboardService:
                 for key, value in dashboard_overview.items()
                 if key not in {"topics_figure", "topics_table", "insight_bullets"}
             }
-            dashboard.pop("comparison", None)
             dashboard.pop("gaps", None)
             linking = self.linking_dashboard(
                 context=context,
@@ -1869,10 +1866,22 @@ class DashboardService:
         summary = executive_summary(current_df)
         topics_df = self._topics_df(current_df)
         topics_bullets = explain_topics(topics_df, max_items=5)
+        _, base_window = default_windows(history_df, pop_year=pop_year, pop_month=pop_month)
+        base_df = slice_by_window(history_df, base_window) if base_window is not None else pd.DataFrame()
+        base_value = (
+            compute_nps_from_scores(base_df["NPS"])
+            if not base_df.empty
+            else float("nan")
+        )
         nps_gaps_df = pd.DataFrame(
             [
                 item.__dict__
-                for item in rank_nps_gaps(current_df, dimensions=["Palanca"], min_n=min_n)
+                for item in rank_nps_gaps(
+                    current_df,
+                    dimensions=["Palanca"],
+                    min_n=min_n,
+                    base_nps=float(base_value) if np.isfinite(base_value) else None,
+                )
             ]
         )
         nps_gap_bullets = explain_nps_gaps(nps_gaps_df, max_items=5)
@@ -1910,12 +1919,6 @@ class DashboardService:
         output = base_df.copy()
         output["date"] = pd.to_datetime(output["date"], errors="coerce").dt.normalize()
         return output.merge(daily_nps, on="date", how="left")
-
-    @staticmethod
-    def _select_top_chain_rows(attribution_df: pd.DataFrame) -> pd.DataFrame:
-        if attribution_df.empty:
-            return attribution_df
-        return select_causal_scenarios(attribution_df, max_rows=3)
 
     @staticmethod
     def _period_bounds(frame: pd.DataFrame) -> tuple[date, date]:
@@ -2154,6 +2157,7 @@ class DashboardService:
         ]
         if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
+        summary["avg_similarity"] = summary["avg_similarity"].map(format_percentage)
         return summary[columns].rename(
             columns={
                 "nps_topic": entity_name,
@@ -2162,7 +2166,7 @@ class DashboardService:
                 "linked_incidents": "Incidencias relacionadas",
                 "linked_comments": "Comentarios relacionados",
                 "linked_pairs": "Vínculos semánticos",
-                "avg_similarity": "Similitud media",
+                "avg_similarity": "Confianza",
                 "avg_nps": "Nota media (0–10)",
             }
         )
@@ -2233,8 +2237,8 @@ class DashboardService:
                             "value": str(int(row.get("linked_incidents", 0) or 0)),
                         },
                         {
-                            "label": "Similitud media",
-                            "value": format_metric(row.get("avg_similarity")),
+                            "label": "Confianza",
+                            "value": format_percentage(row.get("avg_similarity")),
                         },
                     ],
                     "flow_steps": [

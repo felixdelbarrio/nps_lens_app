@@ -45,7 +45,7 @@ class UploadAttempt:
 class SummarySnapshot:
     total_records: int
     date_range: dict[str, Optional[str]]
-    overall_nps: Optional[float]
+    classic_nps: Optional[float]
     promoter_rate: Optional[float]
     detractor_rate: Optional[float]
     uploads: int

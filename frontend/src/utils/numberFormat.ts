@@ -56,6 +56,8 @@ const PERCENT_TOKENS = [
   "ratio",
   "rate",
   "focus",
+  "confidence",
+  "confianza",
   "detractor",
   "promoter",
   "promotores",

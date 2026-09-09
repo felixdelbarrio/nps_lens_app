@@ -37,7 +37,7 @@ class UploadResponse(BaseModel):
 class SummaryResponse(BaseModel):
     total_records: int
     date_range: dict[str, Optional[str]]
-    overall_nps: Optional[float] = None
+    classic_nps: Optional[float] = None
     promoter_rate: Optional[float] = None
     detractor_rate: Optional[float] = None
     uploads: int
@@ -142,7 +142,6 @@ class DashboardResponse(BaseModel):
     kpis: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
     overview: dict[str, Any] = Field(default_factory=dict)
-    comparison: dict[str, Any] = Field(default_factory=dict)
     cohorts: dict[str, Any] = Field(default_factory=dict)
     gaps: dict[str, Any] = Field(default_factory=dict)
     controls: dict[str, Any] = Field(default_factory=dict)

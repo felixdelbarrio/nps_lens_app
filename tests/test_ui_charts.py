@@ -9,12 +9,12 @@ from nps_lens.ui.theme import get_theme
 def test_driver_gap_chart_makes_zero_gaps_explicit() -> None:
     frame = pd.DataFrame(
         [
-            {"value": "Uso", "n": 49, "nps": -100.0, "gap_vs_overall": 0.0},
+            {"value": "Uso", "n": 49, "nps": -100.0, "gap_vs_base": 0.0},
             {
                 "value": "Funcionamiento continuo",
                 "n": 63,
                 "nps": -100.0,
-                "gap_vs_overall": 0.0,
+                "gap_vs_base": 0.0,
             },
         ]
     )

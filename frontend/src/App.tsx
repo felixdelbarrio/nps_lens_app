@@ -99,7 +99,6 @@ const SUMMARY_TABS = [
 
 const NPS_TABS = [
   { id: "topics", label: "Qué dicen los clientes" },
-  { id: "comparison", label: "Cambios respecto al histórico" },
   { id: "gaps", label: "Brechas NPS" }
 ];
 
@@ -232,7 +231,6 @@ export function App() {
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
   const [reportDimensionAnalysis, setReportDimensionAnalysis] = useState<"palanca" | "subpalanca">("palanca");
   const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
-  const [comparisonDimension, setComparisonDimension] = useState("Palanca");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [cohortRow, setCohortRow] = useState("Palanca");
   const [cohortCol, setCohortCol] = useState("Canal");
@@ -360,7 +358,6 @@ export function App() {
       pop_month: popMonth,
       nps_group: npsGroup,
       score_channel: scoreChannel,
-      comparison_dimension: comparisonDimension,
       gap_dimension: gapDimension,
       cohort_row: cohortRow,
       cohort_col: cohortCol,
@@ -371,7 +368,6 @@ export function App() {
     [
       cohortCol,
       cohortRow,
-      comparisonDimension,
       gapDimension,
       minN,
       minNCross,
@@ -1034,56 +1030,6 @@ export function App() {
     );
   }
 
-  function renderComparisonPanel() {
-    const comparisonRows = (dashboard?.comparison.table || []).map((row) => ({
-      Valor: row.value ?? "",
-      "Delta NPS Clásico": row.delta_nps ?? "",
-      "Score actual": row.nps_current ?? "",
-      "Score base": row.nps_baseline ?? "",
-      "n actual": row.n_current ?? "",
-      "n base": row.n_baseline ?? ""
-    }));
-
-    return (
-      <section className="surface-card stack-panel">
-            <div className="section-heading section-heading-inline">
-              <div>
-                <p className="eyebrow">Comparativa</p>
-                <h2>{dashboard?.comparison.summary?.label_current || "Sin base comparativa"}</h2>
-              </div>
-              <label className="inline-field">
-                <span>Dimensión</span>
-                <select
-                  disabled={actionsDisabled}
-                  onChange={(event) => setComparisonDimension(event.target.value)}
-                  value={comparisonDimension}
-                >
-                  {(dashboard?.controls.dimensions || []).map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="delta-strip">
-              <span>Delta NPS Clásico: {formatNumber(dashboard?.comparison.summary?.delta_nps, { signed: true })}</span>
-              <span>
-                Δ detractores: {formatNumber(dashboard?.comparison.summary?.delta_detr_pp, { signed: true })} pp
-              </span>
-              <span>Base actual: {formatNumber(dashboard?.comparison.summary?.n_current, { fallback: "0" })}</span>
-              <span>Base histórica: {formatNumber(dashboard?.comparison.summary?.n_baseline, { fallback: "0" })}</span>
-            </div>
-            <PlotFigure
-              emptyMessage="No hay suficiente histórico para comparar el periodo actual con la base."
-              figure={dashboard?.comparison.figure}
-              testId="comparison-figure"
-            />
-            <RecordTable emptyMessage="No hay base comparativa disponible." rows={comparisonRows} />
-      </section>
-    );
-  }
-
   function renderCohortsPanel() {
     return (
       <section className="surface-card stack-panel">
@@ -1133,18 +1079,19 @@ export function App() {
   }
 
   function renderGapsPanel() {
+    const gapColumnLabel = dashboard?.gaps.gap_column_label || "Brecha vs Base";
     const gapRows = (dashboard?.gaps.table || []).map((row) => ({
       Valor: row.value ?? "",
-      n: row.n ?? "",
+      Opiniones: row.n ?? "",
       "NPS Clásico": row.nps ?? "",
-      "Nº detractores": row.detractors ?? "",
+      "Opiniones detractoras": row.detractors ?? "",
       "Peso en la muestra": row.sample_share == null ? "" : formatPercentage(Number(row.sample_share)),
-      "Brecha vs Global": row.gap_vs_overall ?? ""
+      [gapColumnLabel]: row.gap_vs_base ?? ""
     }));
     const gapTitle = dashboard?.gaps.title || "Brechas NPS";
     const gapSubtitle =
       dashboard?.gaps.subtitle ||
-      "Las barras muestran cuánto se desvía el NPS de cada segmento respecto al NPS global del canal y periodo activos.";
+      "Las barras comparan cada segmento con el NPS clásico acumulado anterior al periodo activo.";
 
     return (
       <section className="surface-card stack-panel">
@@ -1154,7 +1101,10 @@ export function App() {
                 <h2>{gapTitle}</h2>
                 <p>{gapSubtitle}</p>
                 <p className="metric-note">
-                  NPS global del canal y periodo: {formatNumber(dashboard?.gaps.overall_nps)}
+                  NPS clásico base: {formatNumber(dashboard?.gaps.base_nps)}
+                  {dashboard?.gaps.base_range?.start && dashboard?.gaps.base_range?.end
+                    ? ` (${formatDateLabel(dashboard.gaps.base_range.start)} - ${formatDateLabel(dashboard.gaps.base_range.end)})`
+                    : ""}
                 </p>
               </div>
               <label className="inline-field">
@@ -1359,9 +1309,7 @@ export function App() {
     const content =
       npsTab === "topics"
         ? renderTopicsPanel()
-        : npsTab === "comparison"
-          ? renderComparisonPanel()
-          : renderGapsPanel();
+        : renderGapsPanel();
     return (
       <>
         <NavigationTabs

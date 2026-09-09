@@ -345,7 +345,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Similitud media", "value": "0.82"},
+            {"label": "Confianza", "value": "82%"},
             {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
@@ -376,15 +376,15 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("NPS : Comentarios" in t for t in cover_texts)
     assert any("Método de agrupación:" in t for t in cover_texts)
     assert any("NPS" in t for t in texts)
-    assert any("todo el histórico" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
     assert any("detractores hacen visible" in t for t in texts)
-    assert any("lidera el deterioro frente a la base" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("concentra el mayor dolor en la Web" in t for t in texts)
+    assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Evidencia para el tópico NPS: Acceso > Login" in t for t in texts)
+    assert any("Acceso / Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -487,11 +487,11 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Evidencia para el tópico NPS: Acceso bloqueado" in t for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
-def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_deck() -> None:
+def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck() -> None:
     payload = _sample_payload()
     base = payload["attribution"].iloc[0].to_dict()
     rows = [
@@ -569,6 +569,17 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             ],
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
+        {
+            **base,
+            "nps_topic": "Firma digital interrumpida",
+            "touchpoint": "Firma / validación",
+            "palanca": "Operativa",
+            "subpalanca": "Firma digital",
+            "linked_incidents": 1,
+            "linked_comments": 1,
+            "linked_pairs": 1,
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
     ]
     attribution = pd.DataFrame(rows)
 
@@ -605,9 +616,9 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 9
+    assert out.slide_count == 10
     compact_prs = Presentation(BytesIO(out.compact_content))
-    assert len(compact_prs.slides) == 7
+    assert len(compact_prs.slides) == 8
     compact_texts = [
         paragraph.text or ""
         for slide in compact_prs.slides
@@ -616,11 +627,12 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
     assert any(
-        "Evidencia para el tópico NPS: Operativa crítica fallida" in t for t in compact_texts
+        t == "Operativa crítica fallida" for t in compact_texts
     )
-    assert any("Evidencia para el tópico NPS: Operativa crítica fallida" in t for t in texts)
-    assert any("Evidencia para el tópico NPS: Acceso bloqueado" in t for t in texts)
-    assert any("Evidencia para el tópico NPS: Rendimiento degradado" in t for t in texts)
+    assert any(t == "Operativa crítica fallida" for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
+    assert any(t == "Rendimiento degradado" for t in texts)
+    assert any(t == "Firma digital interrumpida" for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
     slide_9_texts = [
         paragraph.text or ""
@@ -692,7 +704,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Evidencia para el tópico NPS: Acceso / Login" in t for t in texts)
+    assert any(t == "Acceso / Login" for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -771,6 +783,39 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["comments"] == period_kpis["period"]["kpis"]["comments"]
     assert overview["classic_nps"] == period_kpis["period"]["kpis"]["classic_nps"]
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
+
+
+def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
+    current = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [0, 10, 0],
+        }
+    )
+    baseline = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [10, 10, 10],
+        }
+    )
+
+    view = executive_ppt._build_dimension_view_model(
+        dimension="Palanca",
+        selected_raw=executive_ppt._coerce_nps_records(current),
+        current_source_period=current,
+        baseline_source_period=baseline,
+        topic_channel="Web",
+    )
+
+    assert view.topic_table_df["value"].tolist() == ["Acceso"]
+    assert view.topic_table_df.iloc[0]["n"] == 2
+    assert view.topic_table_df.iloc[0]["nps"] == 5.0
+    assert view.change_table_df.iloc[0]["n_current"] == 2
+    assert view.change_table_df.iloc[0]["nps_current"] == 0.0
 
 
 def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
@@ -895,7 +940,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
     assert len(prs.slides) == 6
     assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
@@ -966,7 +1011,7 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
     assert any("detractores hacen visible" in t for t in texts)
 
 

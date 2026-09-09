@@ -15,7 +15,6 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
         "Brechas NPS",
         "Comparativas cruzadas",
         "Qué dicen los clientes",
-        "Cambios respecto al histórico",
     ]
     for label in shared_views:
         assert label.casefold() in local.casefold()
@@ -23,16 +22,12 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     summary_block = local[local.index("const SUMMARY_TABS") : local.index("const NPS_TABS")]
     comments_block = local[local.index("const NPS_TABS") : local.index("const DATA_TABS")]
     assert summary_block.index('{ id: "volume-mix"') < summary_block.index('{ id: "cohorts"')
-    assert comments_block.index('{ id: "topics"') < comments_block.index('{ id: "comparison"')
-    assert comments_block.index('{ id: "comparison"') < comments_block.index('{ id: "gaps"')
+    assert comments_block.index('{ id: "topics"') < comments_block.index('{ id: "gaps"')
+    assert '{ id: "comparison"' not in comments_block
     assert 'id: "cohorts"' not in comments_block
     assert "opportunities" not in comments_block
-    assert web.index("['topics','Qué dicen los clientes']") < web.index(
-        "['comparison','Cambios respecto al histórico']"
-    )
-    assert web.index("['comparison','Cambios respecto al histórico']") < web.index(
-        "['gaps','Brechas NPS']"
-    )
+    assert web.index("['topics','Qué dicen los clientes']") < web.index("['gaps','Brechas NPS']")
+    assert "['comparison'" not in web
     assert "['opportunities'" not in web
     assert "Oportunidades priorizadas" not in web
     assert "comments.gaps?.[state.scoreChannel]?.[state.gapDimension]" in web
@@ -68,7 +63,6 @@ def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None
         "historical.note",
         "daily_explanation_bullets",
         "topic.insights",
-        "comparison.summary",
         "narrative.metrics",
         "situation.metadata",
         "situation.note",

@@ -13,13 +13,19 @@ def rank_nps_gaps(
     dimensions: Sequence[str],
     survey_score_col: str = "NPS",
     min_n: int = 200,
+    *,
+    base_nps: float | None = None,
 ) -> list[DriverStat]:
-    """Observed negative gaps, ordered by gap, responses, then label; no uplift estimate."""
-    overall = compute_nps_from_scores(df[survey_score_col])
+    """Observed negative gaps against the supplied classic-NPS base."""
+    reference = (
+        float(base_nps)
+        if base_nps is not None
+        else compute_nps_from_scores(df[survey_score_col])
+    )
     rows = [
         row
         for dimension in dimensions
-        for row in driver_table(df, dimension, survey_score_col, overall_nps=overall)
-        if row.n >= min_n and row.gap_vs_overall < 0 and clean_label(row.value)
+        for row in driver_table(df, dimension, survey_score_col, base_nps=reference)
+        if row.n >= min_n and row.gap_vs_base < 0 and clean_label(row.value)
     ]
-    return sorted(rows, key=lambda row: (row.gap_vs_overall, -row.n, row.dimension, row.value))
+    return sorted(rows, key=lambda row: (row.gap_vs_base, -row.n, row.dimension, row.value))

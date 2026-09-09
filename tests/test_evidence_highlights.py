@@ -88,6 +88,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
         "Incidencias relacionadas",
         "Comentarios relacionados",
         "Vínculos semánticos",
-        "Similitud media",
+        "Confianza",
         "Nota media (0–10)",
     ]

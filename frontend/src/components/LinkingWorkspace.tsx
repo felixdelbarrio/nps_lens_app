@@ -94,7 +94,7 @@ function renderVocCards(records: Array<Record<string, unknown>>) {
             <span className="evidence-pill">Score: {displayValue(record.nps, "Score")}</span>
             <span className="evidence-pill">Grupo: {asString(record.group, "-")}</span>
           </div>
-          <p>{asString(record.comment)}</p>
+          <p><EvidenceText text={asString(record.comment)} segments={record.comment_segments} /></p>
         </article>
       ))}
     </div>
@@ -200,7 +200,8 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     Grupo: asString(record.group),
     Palanca: asString(record.palanca),
     Subpalanca: asString(record.subpalanca),
-    Comentario: asString(record.comment)
+    Comentario: asString(record.comment),
+    Comentario__segments: record.comment_segments
   }));
 
   return (

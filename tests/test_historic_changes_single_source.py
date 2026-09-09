@@ -40,14 +40,12 @@ def test_ppt_dimension_changes_use_insights_single_source_dataset() -> None:
     )
     vm = _build_dimension_view_model(
         dimension="Palanca",
-        slide_number=5,
         selected_raw=current,
         current_source_period=current,
         baseline_source_period=baseline,
-        current_label="2026-03-01 -> 2026-03-01",
-        baseline_label="2026-02-01 -> 2026-02-01",
+        topic_channel="Web",
     )
-    ppt_df = vm.change_df.reset_index(drop=True)
+    ppt_df = vm.change_table_df.reset_index(drop=True)
     pd.testing.assert_frame_equal(
         ppt_df.loc[:, insights_df.columns],
         insights_df,

@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pptx import Presentation
 
+from nps_lens.analytics.drivers import compute_nps_from_scores
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
@@ -231,16 +232,18 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert {"confidence", "priority", "potential_uplift", "causal_score"}.isdisjoint(
         keys(dashboard_payload)
     )
+    assert "comparison" not in dashboard_payload
     for gap in dashboard_payload["gaps"]["table"]:
-        assert gap["gap_vs_overall"] == pytest.approx(
-            gap["nps"] - dashboard_payload["gaps"]["overall_nps"]
+        assert gap["gap_vs_base"] == pytest.approx(
+            gap["nps"] - dashboard_payload["gaps"]["base_nps"]
         )
         assert 0 <= gap["detractors"] <= gap["valid_n"] <= gap["n"]
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
     assert "Canal: Web" in dashboard_payload["context_pills"]
-    assert dashboard_payload["gaps"]["overall_nps"] is not None
+    assert dashboard_payload["gaps"]["base_nps"] is None
+    assert dashboard_payload["gaps"]["table"] == []
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
     assert dashboard_payload["scope"]["cumulative"]["note"].startswith(
         "KPIs agregados para el periodo del "
@@ -308,6 +311,47 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert data_payload["total_rows"] > 0
     assert "Browser" in data_payload["columns"]
     assert len(data_payload["rows"]) == 5
+
+
+def test_channel_only_selects_gap_topics_and_never_changes_nps_calculations(
+    tmp_path: Path,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_jan_feb(client)
+    _upload_nps_march(client)
+    params = {
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
+        "service_origin_n2": "",
+        "pop_year": "2026",
+        "pop_month": "03",
+        "nps_group": "Todos",
+        "score_channel": "Web",
+        "gap_dimension": "Palanca",
+    }
+
+    response = client.get("/api/dashboard/nps", params=params)
+    assert response.status_code == 200
+    payload = response.json()
+    unfiltered = client.get(
+        "/api/dashboard/nps",
+        params={**params, "score_channel": "Todos"},
+    ).json()
+    context = UploadContext("BBVA México", "Senda", "")
+    records = app.state.dashboard_service._load_nps_df(context)
+    current = app.state.dashboard_service._apply_population_filters(records, "2026", "03")
+
+    assert payload["kpis"] == unfiltered["kpis"]
+    assert payload["scope"] == unfiltered["scope"]
+    assert payload["gaps"]["base_nps"] == unfiltered["gaps"]["base_nps"]
+    spans_multiple_channels = False
+    for row in payload["gaps"]["table"]:
+        topic_population = current.loc[current["Palanca"].eq(row["value"])]
+        spans_multiple_channels |= topic_population["Canal"].nunique() > 1
+        assert row["n"] == len(topic_population)
+        assert row["nps"] == pytest.approx(compute_nps_from_scores(topic_population["NPS"]))
+    assert spans_multiple_channels
 
 
 def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
@@ -896,9 +940,9 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "marzo 2026" in slide_2_text.lower()
-    assert "2026-01" not in slide_2_text
-    assert "2026-02" not in slide_2_text
+    assert "nps clásico acumulado histórico" in slide_2_text.lower()
+    assert "2026-01-01" in slide_2_text
+    assert "2026-02-28" in slide_2_text
 
     all_texts: list[str] = []
     for slide in presentation.slides:
@@ -907,5 +951,8 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("lidera el deterioro frente a la base" in text for text in all_texts)
+    assert any(
+        "lidera el deterioro entre los tópicos observados en Web" in text
+        for text in all_texts
+    )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

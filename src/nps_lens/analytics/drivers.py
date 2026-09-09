@@ -14,7 +14,7 @@ class DriverStat:
     nps: float
     detractor_rate: float
     promoter_rate: float
-    gap_vs_overall: float
+    gap_vs_base: float
     detractors: int
     valid_n: int
     sample_share: float
@@ -81,13 +81,13 @@ def driver_table(
     dimension: str,
     survey_score_col: str = "NPS",
     *,
-    overall_nps: float | None = None,
+    base_nps: float | None = None,
 ) -> list[DriverStat]:
     if dimension not in df.columns:
         return []
-    overall = (
-        float(overall_nps)
-        if overall_nps is not None and np.isfinite(float(overall_nps))
+    reference = (
+        float(base_nps)
+        if base_nps is not None and np.isfinite(float(base_nps))
         else compute_nps_from_scores(df[survey_score_col])
     )
     grouped = grouped_driver_stats(df, dimension, survey_score_col=survey_score_col)
@@ -108,8 +108,8 @@ def driver_table(
                 nps=nps,
                 detractor_rate=detr,
                 promoter_rate=prom,
-                gap_vs_overall=float(nps - overall) if not np.isnan(nps) else float("nan"),
+                gap_vs_base=float(nps - reference) if not np.isnan(nps) else float("nan"),
             )
         )
-    out.sort(key=lambda x: (np.nan_to_num(x.gap_vs_overall, nan=-1e9), x.n), reverse=True)
+    out.sort(key=lambda x: (np.nan_to_num(x.gap_vs_base, nan=-1e9), x.n), reverse=True)
     return out

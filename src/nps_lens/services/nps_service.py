@@ -226,7 +226,7 @@ class NpsService:
         return {
             "total_records": snapshot.total_records,
             "date_range": snapshot.date_range,
-            "overall_nps": snapshot.overall_nps,
+            "classic_nps": snapshot.classic_nps,
             "promoter_rate": snapshot.promoter_rate,
             "detractor_rate": snapshot.detractor_rate,
             "uploads": snapshot.uploads,

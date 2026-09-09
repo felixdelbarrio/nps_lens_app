@@ -8,7 +8,7 @@ from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.ui.narratives import explain_nps_gaps
 
 
-def test_gaps_use_observed_counts_and_global_difference() -> None:
+def test_gaps_use_observed_counts_and_classic_nps_base() -> None:
     frame = pd.DataFrame(
         {
             "Palanca": ["A", "A", "B", "B", "B", "", None],
@@ -20,13 +20,13 @@ def test_gaps_use_observed_counts_and_global_difference() -> None:
     gap = rows[0]
     assert gap.value == "A"
     assert gap.nps == -50
-    assert gap.gap_vs_overall == pytest.approx(-50 - 100 / 3)
+    assert gap.gap_vs_base == pytest.approx(-50 - 100 / 3)
     assert gap.n == gap.valid_n == 2
     assert gap.detractors == 1
     assert gap.sample_share == pytest.approx(2 / 7)
     assert {"confidence", "priority", "potential_uplift"}.isdisjoint(asdict(gap))
     text = " ".join(explain_nps_gaps(pd.DataFrame([asdict(gap)]))).lower()
-    assert "diferencia frente al global" in text
+    assert "diferencia frente a la base" in text
     assert "1 detractores" in text
     assert not any(word in text for word in ["confianza", "estima", "recuperable", "potencial"])
 

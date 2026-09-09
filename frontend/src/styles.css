@@ -991,7 +991,7 @@ input:disabled {
 }
 
 .data-table td strong {
-  display: block;
+  display: inline;
   color: var(--color-text);
   font-weight: 500;
 }

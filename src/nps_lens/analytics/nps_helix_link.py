@@ -560,7 +560,7 @@ def weekly_aggregates(
     nps["is_focus"] = focus_mask(nps, focus_group=group)
 
     count_col = "ID" if "ID" in nps.columns else date_col_nps
-    overall_nps = (
+    overall_voc = (
         nps.groupby("week")
         .agg(
             responses=(count_col, "count"),
@@ -569,13 +569,13 @@ def weekly_aggregates(
         )
         .reset_index()
     )
-    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
+    overall_voc["focus_rate"] = overall_voc["focus_count"] / overall_voc["responses"].replace(
         {0: np.nan}
     )
 
     overall_helix = helix.groupby("week").agg(incidents=("Incident Number", "count")).reset_index()
     overall = (
-        pd.merge(overall_nps, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
+        pd.merge(overall_voc, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
     )
 
     # By topic (NPS topics)
@@ -644,7 +644,7 @@ def daily_aggregates(
     nps["is_focus"] = focus_mask(nps, focus_group=group)
 
     count_col = "ID" if "ID" in nps.columns else date_col_nps
-    overall_nps = (
+    overall_voc = (
         nps.groupby("date")
         .agg(
             responses=(count_col, "count"),
@@ -653,12 +653,12 @@ def daily_aggregates(
         )
         .reset_index()
     )
-    overall_nps["focus_rate"] = overall_nps["focus_count"] / overall_nps["responses"].replace(
+    overall_voc["focus_rate"] = overall_voc["focus_count"] / overall_voc["responses"].replace(
         {0: np.nan}
     )
     overall_helix = helix.groupby("date").agg(incidents=("Incident Number", "count")).reset_index()
     overall = (
-        pd.merge(overall_nps, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
+        pd.merge(overall_voc, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
     )
 
     nps["nps_topic"] = build_nps_topic(nps)

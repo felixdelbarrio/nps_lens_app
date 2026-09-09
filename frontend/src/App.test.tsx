@@ -183,7 +183,6 @@ const dashboardPayload = {
       }
     }
   },
-  comparison: { has_data: false, table: [] },
   cohorts: {},
   gaps: { has_data: false, table: [] },
 
@@ -533,7 +532,6 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "Brechas NPS" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Comparativas cruzadas" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Qué dicen los clientes" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Cambios respecto al histórico" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Oportunidades priorizadas" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Brechas NPS" }));

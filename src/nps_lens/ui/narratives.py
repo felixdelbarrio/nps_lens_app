@@ -211,7 +211,7 @@ def explain_nps_gaps(gaps_df: pd.DataFrame, max_items: int = 5) -> list[str]:
         return ["No se observan brechas negativas con el mínimo de respuestas seleccionado."]
     return [
         f"**{row['dimension']}={row['value']}**: NPS {format_metric(row['nps'])}, "
-        f"diferencia frente al global **{format_metric(row['gap_vs_overall'], signed=True)} puntos**, "
+        f"diferencia frente a la base **{format_metric(row['gap_vs_base'], signed=True)} puntos**, "
         f"{format_volume(row['n'])} respuestas ({format_percentage(row['sample_share'])} de la muestra), "
         f"{format_volume(row['detractors'])} detractores."
         for _, row in gaps_df.head(max_items).iterrows()

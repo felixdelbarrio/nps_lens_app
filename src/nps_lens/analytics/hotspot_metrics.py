@@ -470,12 +470,12 @@ def select_best_business_axis_for_hotspots(
         stats = pd.DataFrame([s.__dict__ for s in driver_table(nps_df, axis)])
         if stats.empty:
             continue
-        stats["gap_vs_overall"] = pd.to_numeric(stats.get("gap_vs_overall"), errors="coerce")
+        stats["gap_vs_base"] = pd.to_numeric(stats.get("gap_vs_base"), errors="coerce")
         stats["n"] = pd.to_numeric(stats.get("n"), errors="coerce")
-        red = stats[(stats["gap_vs_overall"] < 0.0) & (stats["n"] >= int(min_n))].copy()
+        red = stats[(stats["gap_vs_base"] < 0.0) & (stats["n"] >= int(min_n))].copy()
         if red.empty:
             continue
-        red = red.sort_values(["gap_vs_overall"], ascending=True)
+        red = red.sort_values(["gap_vs_base"], ascending=True)
         labels = red["value"].astype(str).tolist()
         red_labels[axis] = labels
         label_hits[axis] = {str(lbl): 0 for lbl in labels}

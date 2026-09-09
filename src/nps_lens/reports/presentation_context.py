@@ -13,17 +13,14 @@ class CausalEvidenceRecord:
     incident_id: str
     summary: str
     url: str = ""
+    segments: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
 class DimensionViewModel:
-    dimension: str
-    slide_number: int
-    change_df: pd.DataFrame
     change_table_df: pd.DataFrame
     change_figure: Optional[go.Figure]
-    web_heatmap_figure: Optional[go.Figure]
-    web_table_df: pd.DataFrame
+    topic_table_df: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -58,17 +55,11 @@ class PresentationContext:
     period_start: date
     period_end: date
     period_label: str
-    period_days: int
-    focus_name: str
+    topic_channel: str
     overview: dict[str, object]
     period_kpis: dict[str, object]
-    story_md: str
-    selected_raw: pd.DataFrame
-    daily_mix: pd.DataFrame
-    daily_signals: pd.DataFrame
     overview_figure: Optional[go.Figure]
     text_topics_df: pd.DataFrame
-    text_topic_figure: Optional[go.Figure]
     current_label: str
     baseline_label: str
     dimensions: dict[str, DimensionViewModel]

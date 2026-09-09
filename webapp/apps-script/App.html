@@ -15,7 +15,7 @@
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/(^|\s)\p{L}/gu, char => char.toLocaleUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']];
-  const npsViews = [['topics','Qué dicen los clientes'],['comparison','Cambios respecto al histórico'],['gaps','Brechas NPS']];
+  const npsViews = [['topics','Qué dicen los clientes'],['gaps','Brechas NPS']];
   const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen de evidencia'],['scenarios','Análisis de escenarios de evidencia']];
   const settingsViews = [['evolution','Evolución NPS'],['telemetry','Telemetría'],['adoption','Adopción'],['publication','Publicación']];
   let linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : fallbackLinkingViews;
@@ -24,7 +24,7 @@
     {id:'insights',label:'Insights',sections:insightSections},
     {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}
   ];
-  const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,evidenceTopic:'',journeyTopic:'',scenarioDetail:'helix',evidenceView:'table',adminRoute:'',settingsView:'evolution',scoreChannel:'Web',npsGroup:'Detractores',comparisonDimension:'Palanca',gapDimension:'Palanca',started:performance.now()};
+  const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,evidenceTopic:'',journeyTopic:'',scenarioDetail:'helix',evidenceView:'table',adminRoute:'',settingsView:'evolution',scoreChannel:'Web',npsGroup:'Detractores',gapDimension:'Palanca',started:performance.now()};
   const scopeCatalog = rows(viewer.publicationCatalog);
   const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
   const activityQueue = [];
@@ -140,15 +140,14 @@
   }
   function npsAnalysis(view) {
     const controls=comments.controls||{}, channels=rows(controls.channels), groups=rows(controls.groups), dimensions=rows(controls.dimensions);
-    const dimension=view==='comparison'?state.comparisonDimension:state.gapDimension;
-    const selectors=`<div class="toolbar snapshot-filters"><label class="field">Canal<select id="comments-channel">${channels.map(value=>`<option ${value===state.scoreChannel?'selected':''}>${esc(value)}</option>`).join('')}</select></label>${view==='gaps'?'':`<label class="field">Grupo score<select id="comments-group">${groups.map(value=>`<option ${value===state.npsGroup?'selected':''}>${esc(value)}</option>`).join('')}</select></label>`}${view==='topics'?'':`<label class="field">Dimensión<select id="comments-dimension">${dimensions.map(value=>`<option ${value===dimension?'selected':''}>${esc(value)}</option>`).join('')}</select></label>`}</div>`;
+    const selectors=`<div class="toolbar snapshot-filters"><label class="field">Canal<select id="comments-channel">${channels.map(value=>`<option ${value===state.scoreChannel?'selected':''}>${esc(value)}</option>`).join('')}</select></label>${view==='gaps'?'':`<label class="field">Grupo score<select id="comments-group">${groups.map(value=>`<option ${value===state.npsGroup?'selected':''}>${esc(value)}</option>`).join('')}</select></label>`}${view==='topics'?'':`<label class="field">Dimensión<select id="comments-dimension">${dimensions.map(value=>`<option ${value===state.gapDimension?'selected':''}>${esc(value)}</option>`).join('')}</select></label>`}</div>`;
     const tabs=contentTabs(npsViews)+selectors;
     const topic=comments.topics?.[state.scoreChannel]?.[state.npsGroup]||{};
     if (view === 'topics') { const topicRows=rows(topic.rows).map(row=>({Cluster:row.cluster_id,n:row.n,Términos:rows(row.top_terms).join(', '),Ejemplos:rows(row.examples).join(' · ')})); return tabs+`<section class="surface-card stack-panel">${figure(topic.figure,'topics-chart')}${table(topicRows,250,['Cluster','n','Términos','Ejemplos'])}${noteList(topic.insights)}</section>`; }
-    if (view === 'gaps') { const gaps=comments.gaps?.[state.scoreChannel]?.[state.gapDimension]||{}; return tabs+`<section class="surface-card stack-panel">${heading('Brechas',gaps.title||'Brechas NPS',gaps.subtitle)}<p class="metric-note">NPS global del canal y periodo: <strong>${esc(format(gaps.overall_nps))}</strong></p>${figure(gaps.figure,'gaps-chart')}${table(rows(gaps.table).map(row=>({Valor:row.value,n:row.n,'NPS Clásico':row.nps,'Nº detractores':row.detractors,'Peso en la muestra':row.sample_share==null?'—':format(row.sample_share*100)+'%','Brecha vs Global':row.gap_vs_overall})),250,['Valor','n','NPS Clásico','Nº detractores','Peso en la muestra','Brecha vs Global'])}</section>`; }
-    const comparison=comments.comparison?.[state.scoreChannel]?.[state.npsGroup]?.[state.comparisonDimension]||{}, summary=comparison.summary||{};
-    const comparisonRows=rows(comparison.table).map(row=>({Valor:row.value,'Delta NPS Clásico':row.delta_nps,'Score actual':row.nps_current,'Score base':row.nps_baseline,'n actual':row.n_current,'n base':row.n_baseline}));
-    return tabs+`<section class="surface-card stack-panel">${heading('Comparativa',summary.label_current||'Sin base comparativa','',readonlyField('Dimensión',comparison.dimension))}<div class="delta-strip"><span>Delta NPS Clásico: <strong>${esc(format(summary.delta_nps))}</strong></span><span>Δ detractores: <strong>${esc(format(summary.delta_detr_pp))} pp</strong></span><span>Base actual: <strong>${esc(format(summary.n_current))}</strong></span><span>Base histórica: <strong>${esc(format(summary.n_baseline))}</strong></span></div>${figure(comparison.figure,'comparison-chart')}${table(comparisonRows,250,['Valor','Delta NPS Clásico','Score actual','Score base','n actual','n base'])}</section>`;
+    const gaps=comments.gaps?.[state.scoreChannel]?.[state.gapDimension]||{}, gapLabel=gaps.gap_column_label||'Brecha vs Base';
+    const gapRows=rows(gaps.table).map(row=>({Valor:row.value,Opiniones:row.n,'NPS Clásico':row.nps,'Opiniones detractoras':row.detractors,'Peso en la muestra':row.sample_share==null?'—':format(row.sample_share*100)+'%',[gapLabel]:row.gap_vs_base}));
+    const range=gaps.base_range?.start&&gaps.base_range?.end?` (${esc(format(gaps.base_range.start))} - ${esc(format(gaps.base_range.end))})`:'';
+    return tabs+`<section class="surface-card stack-panel">${heading('Brechas',gaps.title||'Brechas NPS',gaps.subtitle)}<p class="metric-note">NPS clásico base: <strong>${esc(format(gaps.base_nps))}</strong>${range}</p>${figure(gaps.figure,'gaps-chart')}${table(gapRows,250,['Valor','Opiniones','NPS Clásico','Opiniones detractoras','Peso en la muestra',gapLabel])}</section>`;
   }
   function evidenceText(text, segments) {
     return Array.isArray(segments) && segments.length ? segments.map(segment => segment.bold ? `<strong>${esc(segment.text)}</strong>` : esc(segment.text)).join('') : esc(text);
@@ -156,7 +155,7 @@
   function topicFilter(id, topics, value) {
     return `<label class="field">NPS topic<select id="${id}"><option value="">Todos</option>${topics.map(topic=>`<option value="${esc(topic)}" ${topic===value?'selected':''}>${esc(topic)}</option>`).join('')}</select></label>`;
   }
-  function scenarioEvidence(records,kind){if(state.evidenceView==='table'){if(kind==='helix')return table(rows(records).map(row=>({ID:row.incident_id,ID__href:row.url||row.incident_id__href,'Evidencia Helix':row.summary,'Evidencia Helix__segments':row.summary_segments})),50,['ID','Evidencia Helix']);return table(rows(records).map(row=>({ID:row.comment_id,Fecha:row.date,Score:row.nps,Grupo:row.group,Palanca:row.palanca,Subpalanca:row.subpalanca,Comentario:row.comment})),50,['ID','Fecha','Score','Grupo','Palanca','Subpalanca','Comentario']);}return `<div class="evidence-card-grid">${rows(records).map(row=>`<article class="evidence-card"><div class="evidence-pill-row"><span class="evidence-pill">${esc(kind==='helix'?(row.incident_id||'INC'):`ID: ${row.comment_id||'-'}`)}</span>${kind==='voc'?`<span class="evidence-pill">Fecha: ${esc(format(row.date))}</span><span class="evidence-pill">Score: ${esc(format(row.nps))}</span>`:''}</div><p>${evidenceText(row.summary||row.comment||'',row.summary_segments)}</p></article>`).join('')||'<div class="empty">Sin evidencia visible.</div>'}</div>`;}
+  function scenarioEvidence(records,kind){if(state.evidenceView==='table'){if(kind==='helix')return table(rows(records).map(row=>({ID:row.incident_id,ID__href:row.url||row.incident_id__href,'Evidencia Helix':row.summary,'Evidencia Helix__segments':row.summary_segments})),50,['ID','Evidencia Helix']);return table(rows(records).map(row=>({ID:row.comment_id,Fecha:row.date,Score:row.nps,Grupo:row.group,Palanca:row.palanca,Subpalanca:row.subpalanca,Comentario:row.comment,Comentario__segments:row.comment_segments})),50,['ID','Fecha','Score','Grupo','Palanca','Subpalanca','Comentario']);}return `<div class="evidence-card-grid">${rows(records).map(row=>`<article class="evidence-card"><div class="evidence-pill-row"><span class="evidence-pill">${esc(kind==='helix'?(row.incident_id||'INC'):`ID: ${row.comment_id||'-'}`)}</span>${kind==='voc'?`<span class="evidence-pill">Fecha: ${esc(format(row.date))}</span><span class="evidence-pill">Score: ${esc(format(row.nps))}</span>`:''}</div><p>${evidenceText(row.summary||row.comment||'',kind==='helix'?row.summary_segments:row.comment_segments)}</p></article>`).join('')||'<div class="empty">Sin evidencia visible.</div>'}</div>`;}
   function scenarioCard(card,index,total) {
     if (!card) return '<div class="empty">No hay evidencia vinculada en esta edición.</div>';
     const title=card.title||card.anchor_topic||`Escenario ${index+1}`;
@@ -313,7 +312,7 @@
     for(const [id,key] of [['evidence-topic','evidenceTopic'],['journey-topic','journeyTopic']])if($(id))$(id).onchange=event=>{state[key]=event.target.value;render();};
     if($('comments-channel'))$('comments-channel').onchange=event=>{state.scoreChannel=event.target.value;render();};
     if($('comments-group'))$('comments-group').onchange=event=>{state.npsGroup=event.target.value;render();};
-    if($('comments-dimension'))$('comments-dimension').onchange=event=>{if(state.view==='comparison')state.comparisonDimension=event.target.value;else state.gapDimension=event.target.value;render();};
+    if($('comments-dimension'))$('comments-dimension').onchange=event=>{state.gapDimension=event.target.value;render();};
     document.querySelectorAll('[data-evidence-view]').forEach(button=>button.onclick=()=>{state.evidenceView=button.dataset.evidenceView;render();});
     if($('causal-method'))$('causal-method').onchange=event=>{location.href=location.pathname+'?scope='+encodeURIComponent(event.target.value)+location.hash;};
     document.querySelectorAll('[data-scenario-step]').forEach(button=>button.onclick=()=>{const total=rows(linking.scenarios?.cards).length;if(total>1){state.scenarioIndex=(state.scenarioIndex+Number(button.dataset.scenarioStep)+total)%total;render();$('active-scenario')?.focus({preventScroll:true});queueActivity('scenario_changed',String(state.scenarioIndex+1));}});
@@ -354,7 +353,7 @@
     $('screen-title').textContent = section[1];
     document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active',button.dataset.area === area.id));
     $('secondary-nav').innerHTML = area.sections.map(([id,name]) => `<button class="tab ${id === state.section ? 'active' : ''}" data-section="${esc(id)}">${esc(name)}</button>`).join('');
-    document.querySelectorAll('[data-section]').forEach(button => { button.onclick = () => { state.section = button.dataset.section; state.view = detailViews(state.section)[0]?.[0] || state.section; if(state.section==='nps-analysis'){state.scoreChannel='Web';state.npsGroup='Detractores';state.comparisonDimension='Palanca';state.gapDimension='Palanca';} render(); }; });
+    document.querySelectorAll('[data-section]').forEach(button => { button.onclick = () => { state.section = button.dataset.section; state.view = detailViews(state.section)[0]?.[0] || state.section; if(state.section==='nps-analysis'){state.scoreChannel='Web';state.npsGroup='Detractores';state.gapDimension='Palanca';} render(); }; });
     let html = '';
     if (state.area === 'insights' && state.section === 'summary') html = summary(state.view);
     else if (state.area === 'insights' && state.section === 'nps-analysis') html = npsAnalysis(state.view);
@@ -373,7 +372,7 @@
   if(hash[0]==='admin' && viewer.isAdmin && ['newsletter','import','settings'].includes(hash[1])){state.adminRoute=hash[1];state.settingsView=['evolution','telemetry','adoption','publication'].includes(hash[2])?hash[2]:'evolution';}
   const hashArea = areas.find(area => area.id === hash[0]);
   if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
-  if(state.section==='nps-analysis'){state.scoreChannel='Web';state.npsGroup='Detractores';state.comparisonDimension='Palanca';state.gapDimension='Palanca';}
+  if(state.section==='nps-analysis'){state.scoreChannel='Web';state.npsGroup='Detractores';state.gapDimension='Palanca';}
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.service_origin_n1,filters.service_origin_n2,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
   if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}

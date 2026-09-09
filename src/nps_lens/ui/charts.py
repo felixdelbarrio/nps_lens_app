@@ -779,10 +779,10 @@ def chart_daily_volume(
     return apply_plotly_template(fig, theme)
 
 
-def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
-    """Bar chart for driver gaps vs overall.
+def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12, *, base_label: str = "base"):
+    """Bar chart for driver gaps vs the classic-NPS base.
 
-    Requires 'gap_vs_overall' column in driver_df.
+    Requires 'gap_vs_base' column in driver_df.
     """
     if driver_df.empty:
         return None
@@ -790,38 +790,38 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     import plotly.express as px  # lazy import for faster cold-start
 
     d = driver_df.copy()
-    if "gap_vs_overall" not in d.columns:
-        raise ValueError("driver_df must include gap_vs_overall")
-    d = d.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(top_k).copy()
+    if "gap_vs_base" not in d.columns:
+        raise ValueError("driver_df must include gap_vs_base")
+    d = d.sort_values(["gap_vs_base", "n"], ascending=[True, False]).head(top_k).copy()
     plot_df = d.iloc[::-1].copy()
-    gap_values = pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").fillna(0.0)
-    plot_df["gap_vs_overall"] = gap_values
+    gap_values = pd.to_numeric(plot_df["gap_vs_base"], errors="coerce").fillna(0.0)
+    plot_df["gap_vs_base"] = gap_values
     plot_df["gap_direction"] = np.where(
         gap_values < 0.0,
-        "por debajo del promedio global",
-        "por encima del promedio global",
+        "por debajo de la base",
+        "por encima de la base",
     )
     plot_df["abs_gap"] = gap_values.abs()
     fig = px.bar(
         plot_df,
-        x="gap_vs_overall",
+        x="gap_vs_base",
         y="value",
         orientation="h",
-        custom_data=["n", "nps", "gap_vs_overall", "abs_gap", "gap_direction"],
+        custom_data=["n", "nps", "gap_vs_base", "abs_gap", "gap_direction"],
     )
     fig.update_traces(
-        marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]),
+        marker_color=_diverging_colors(theme, plot_df["gap_vs_base"]),
         hovertemplate=(
             "%{y}<br>"
             "n: %{customdata[0]}<br>"
             "NPS Clásico: %{customdata[1]:.2f}<br>"
-            "Brecha vs Global: %{customdata[2]:.2f} pts<br>"
+            f"Brecha vs Base [{base_label}]: %{{customdata[2]:.2f}} pts<br>"
             "Esta palanca presenta un NPS %{customdata[3]:.2f} puntos "
             "%{customdata[4]}.<extra></extra>"
         ),
     )
     fig.update_layout(
-        xaxis_title="Brecha vs NPS Global (pts)",
+        xaxis_title=f"Brecha vs Base [{base_label}] (pts)",
         yaxis_title="",
         showlegend=False,
     )
@@ -842,7 +842,7 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
             text=["0 pts"] * len(zero_rows),
             textposition="middle right",
             textfont={"color": theme.text},
-            hovertemplate="%{y}<br>Brecha vs Global: 0 pts<extra></extra>",
+            hovertemplate=f"%{{y}}<br>Brecha vs Base [{base_label}]: 0 pts<extra></extra>",
             showlegend=False,
         )
     if len(zero_rows) == len(plot_df):
@@ -857,7 +857,7 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
             y=1.08,
             xref="paper",
             yref="paper",
-            text="Sin brechas: todos los segmentos coinciden con el NPS global del filtro activo.",
+            text=f"Sin brechas: todos los segmentos coinciden con la base de {base_label}.",
             showarrow=False,
             font={"color": theme.muted, "size": 12},
         )
@@ -961,12 +961,13 @@ def chart_causal_entity_bar(
 
     plot_df = tmp.iloc[::-1].copy()
     plot_df["entity_label"] = plot_df["entity_label"].astype(str)
+    plot_df["confidence_pct"] = plot_df["avg_similarity"] * 100.0
     fig = px.bar(
         plot_df,
         x="linked_pairs",
         y="entity_label",
         orientation="h",
-        color="avg_similarity",
+        color="confidence_pct",
         color_continuous_scale=_colorscale_rgy(theme),
         text="linked_pairs",
         hover_data={
@@ -975,7 +976,7 @@ def chart_causal_entity_bar(
             "subpalanca": True,
             "anchor_topic": True,
             "avg_nps": ":.2f",
-            "avg_similarity": ":.3f",
+            "confidence_pct": ":.1f",
         },
     )
     fig.update_traces(textposition="outside")
@@ -984,7 +985,7 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="Similitud media",
+                title="Confianza (%)",
                 tickfont=dict(size=10),
             )
         ),

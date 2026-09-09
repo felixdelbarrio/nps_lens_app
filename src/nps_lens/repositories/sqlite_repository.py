@@ -829,7 +829,7 @@ class SqliteNpsRepository:
             return SummarySnapshot(
                 total_records=0,
                 date_range={"min": None, "max": None},
-                overall_nps=None,
+                classic_nps=None,
                 promoter_rate=None,
                 detractor_rate=None,
                 uploads=len(uploads),
@@ -843,9 +843,9 @@ class SqliteNpsRepository:
         scores = pd.to_numeric(records["NPS"], errors="coerce").dropna()
         promoter_rate = float((scores >= 9).mean()) if not scores.empty else None
         detractor_rate = float((scores <= 6).mean()) if not scores.empty else None
-        overall_nps = None
+        classic_nps = None
         if promoter_rate is not None and detractor_rate is not None:
-            overall_nps = float((promoter_rate - detractor_rate) * 100.0)
+            classic_nps = float((promoter_rate - detractor_rate) * 100.0)
 
         top_drivers: dict[str, list[dict[str, Any]]] = {}
         for dimension in ["Palanca", "Subpalanca", "Canal"]:
@@ -863,7 +863,7 @@ class SqliteNpsRepository:
                     records["Fecha"].max().isoformat() if records["Fecha"].notna().any() else None
                 ),
             },
-            overall_nps=overall_nps,
+            classic_nps=classic_nps,
             promoter_rate=promoter_rate,
             detractor_rate=detractor_rate,
             uploads=len(uploads),

@@ -1787,11 +1787,17 @@ def build_incident_attribution_chains(
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
         highlights_by_incident: dict[str, set[str]] = {}
+        highlights_by_comment: dict[str, set[str]] = {}
         for incident_id, terms in zip(
             grp["incident_id"], grp.get("matched_terms", [[]] * len(grp))
         ):
             if isinstance(terms, (list, tuple)):
                 highlights_by_incident.setdefault(str(incident_id), set()).update(terms)
+        for comment_id, terms in zip(
+            grp["nps_id"], grp.get("matched_terms", [[]] * len(grp))
+        ):
+            if isinstance(terms, (list, tuple)):
+                highlights_by_comment.setdefault(str(comment_id), set()).update(terms)
         incident_records = [
             {
                 "incident_id": str(r.get("incident_id", "")).strip(),
@@ -1811,25 +1817,33 @@ def build_incident_attribution_chains(
             if str(rec.get("summary", "")).strip()
         ]
         comment_examples = [
-            f"NPS {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
+            f"Score {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
             for _, r in comment_ranked.iterrows()
             if str(r.get("comment_txt", "")).strip()
         ]
-        comment_records = [
-            {
+        comment_records = []
+        for _, r in comment_ranked.iterrows():
+            comment = " ".join(
+                str(r.get("comment_norm") or r.get("comment_txt") or "").split()
+            )
+            if not comment:
+                continue
+            comment_record = {
                 "comment_id": str(r.get("nps_id", "") or "").strip(),
                 "date": _format_nps_date(r.get("nps_date")),
                 "nps": _format_nps_score(r.get("nps_score")),
                 "group": r.get("nps_group", ""),
                 "palanca": str(r.get("palanca", "") or "").strip(),
                 "subpalanca": str(r.get("subpalanca", "") or "").strip(),
-                "comment": " ".join(
-                    str(r.get("comment_norm") or r.get("comment_txt") or "").split()
-                ),
+                "comment": comment,
             }
-            for _, r in comment_ranked.iterrows()
-            if str(r.get("comment_norm") or r.get("comment_txt") or "").strip()
-        ]
+            comment_segments = evidence_segments(
+                comment,
+                highlights_by_comment.get(str(r.get("nps_id", "")), set()),
+            )
+            if comment_segments:
+                comment_record["comment_segments"] = comment_segments
+            comment_records.append(comment_record)
         if not incident_records or not comment_records:
             continue
 

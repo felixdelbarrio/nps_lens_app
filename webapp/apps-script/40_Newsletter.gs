@@ -100,8 +100,8 @@ function _newsletterInsight_(edition) {
   const kpis = dashboard.kpis || {};
   const gaps = dashboard.gaps && dashboard.gaps.table || [];
   const row = gaps.length ? gaps[0] : null;
-  const gap = row && row.gap_vs_overall != null
-    ? String(row.value || '') + ': ' + Number(row.gap_vs_overall).toFixed(1) + ' puntos frente al NPS global (n=' + String(row.n || 0) + ')'
+  const gap = row && row.gap_vs_base != null
+    ? String(row.value || '') + ': ' + Number(row.gap_vs_base).toFixed(1) + ' puntos frente al NPS clásico base (n=' + String(row.n || 0) + ')'
     : '';
   return {context: _cleanText_(dashboard.context_label || 'Edición actualizada', 240),
     samples: kpis.samples == null ? 'n/d' : String(kpis.samples),
