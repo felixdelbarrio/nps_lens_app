@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from nps_lens.analytics.evidence_highlights import evidence_segments
 from nps_lens.analytics.nps_helix_link import (
     build_incident_display_text,
     build_incident_topic,
@@ -151,13 +152,11 @@ CHAIN_COLUMNS = [
     "avg_similarity",
     "avg_nps",
     "focus_rate_high_incidence",
-    "score_mean_difference",
     "incident_records",
     "incident_examples",
     "comment_examples",
     "comment_records",
     "chain_story",
-    "focus_rate_difference_pp",
     "incident_rate_per_100_responses",
     "incidents",
     "responses",
@@ -1787,11 +1786,21 @@ def build_incident_attribution_chains(
             ["nps_score", "similarity"], ascending=[True, False], na_position="last"
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
+        highlights_by_incident: dict[str, set[str]] = {}
+        for incident_id, terms in zip(
+            grp["incident_id"], grp.get("matched_terms", [[]] * len(grp))
+        ):
+            if isinstance(terms, (list, tuple)):
+                highlights_by_incident.setdefault(str(incident_id), set()).update(terms)
         incident_records = [
             {
                 "incident_id": str(r.get("incident_id", "")).strip(),
                 "summary": " ".join(str(r.get("incident_summary", "") or "").split()),
                 "url": str(r.get("incident_url", "") or "").strip(),
+                "summary_segments": evidence_segments(
+                    " ".join(str(r.get("incident_summary", "") or "").split()),
+                    highlights_by_incident.get(str(r.get("incident_id", "")), set()),
+                ),
             }
             for _, r in inc_ranked.iterrows()
             if str(r.get("incident_id", "")).strip()
@@ -1827,12 +1836,7 @@ def build_incident_attribution_chains(
         focus_rate_high_incidence = _safe_float(
             grp.get("focus_rate_high_incidence", pd.Series([np.nan])).max(), default=np.nan
         )
-        score_mean_difference = _safe_float(
-            grp.get("score_mean_difference", pd.Series([np.nan])).mean(), default=np.nan
-        )
-        focus_rate_difference_pp = _safe_float(
-            grp.get("focus_rate_difference_pp", pd.Series([np.nan])).max(), default=np.nan
-        )
+
         incident_rate_per_100_responses = _safe_float(
             grp.get("incident_rate_per_100_responses", pd.Series([np.nan])).max(),
             default=np.nan,
@@ -1916,13 +1920,11 @@ def build_incident_attribution_chains(
                 "avg_similarity": avg_similarity,
                 "avg_nps": avg_nps,
                 "focus_rate_high_incidence": focus_rate_high_incidence,
-                "score_mean_difference": score_mean_difference,
                 "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "comment_records": comment_records,
                 "chain_story": story,
-                "focus_rate_difference_pp": focus_rate_difference_pp,
                 "incident_rate_per_100_responses": incident_rate_per_100_responses,
                 "incidents": incidents_total,
                 "responses": responses_total,

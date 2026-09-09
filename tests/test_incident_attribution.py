@@ -129,8 +129,6 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 "nps_topic": "Acceso > Login",
                 "touchpoint": "Login",
                 "focus_rate_high_incidence": 0.47,
-                "score_mean_difference": -4.3,
-                "focus_rate_difference_pp": 29.0,
                 "incident_rate_per_100_responses": 8.5,
                 "incidents": 5,
                 "responses": 120,
@@ -746,8 +744,6 @@ def test_broken_journey_remap_reuses_detected_clusters_in_timeseries_and_chains(
         {
             "nps_topic": ["Acceso / Login", "Operativa / Pagos"],
             "focus_rate_high_incidence": [0.41, 0.34],
-            "score_mean_difference": [-4.1, -3.6],
-            "focus_rate_difference_pp": [22.0, 17.0],
             "incident_rate_per_100_responses": [8.0, 6.0],
             "incidents": [4, 3],
             "responses": [22, 20],

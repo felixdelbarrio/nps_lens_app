@@ -2425,11 +2425,6 @@ def _build_causal_scenarios(
                 BBVA_COLORS["sky"],
             ),
             (
-                "Diferencia nota media: incidencia alta vs baja",
-                _fmt_signed_or_nd(row.get("score_mean_difference", np.nan)),
-                BBVA_COLORS["orange"],
-            ),
-            (
                 "Similitud media",
                 _fmt_num_or_nd(row.get("avg_similarity", np.nan)),
                 BBVA_COLORS["blue"],

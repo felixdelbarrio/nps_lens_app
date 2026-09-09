@@ -304,21 +304,21 @@ def _cap_chain_evidence_rows(
             return values
         return values[:max_items]
 
-    def _normalize_records(value: object) -> list[dict[str, str]]:
+    def _normalize_records(value: object) -> list[dict[str, object]]:
         if isinstance(value, list):
             values = value
         elif value in (None, ""):
             values = []
         else:
             values = [value]
-        records: list[dict[str, str]] = []
+        records: list[dict[str, object]] = []
         for entry in values:
             if not isinstance(entry, dict):
                 continue
-            records.append({str(k): str(v or "").strip() for k, v in entry.items()})
+            records.append(dict(entry))
         return records
 
-    def _cap_records(values: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+    def _cap_records(values: list[dict[str, object]], limit: int) -> list[dict[str, object]]:
         try:
             max_items = int(limit)
         except Exception:
@@ -1394,7 +1394,48 @@ class DashboardService:
             if "nps_topic" in evidence_sorted_df.columns
             else evidence_sorted_df.head(100)
         )
+        evidence_visible_df = evidence_visible_df.reindex(
+            columns=[
+                "nps_topic",
+                "incident_id",
+                "incident_id__href",
+                "incident_summary",
+                "detractor_comment",
+                "Tasa foco",
+                "similarity",
+            ]
+        )
+        evidence_visible_df["Tasa foco"] = evidence_visible_df["Tasa foco"].map(format_percentage)
+        evidence_visible_df = evidence_visible_df.rename(
+            columns={
+                "nps_topic": "NPS Topic",
+                "incident_id": "Incident ID",
+                "incident_id__href": "Incident ID__href",
+                "incident_summary": "Incident Summary",
+                "detractor_comment": "Detractor Comment",
+                "Tasa foco": "Tasa Foco",
+                "similarity": "Similarity",
+            }
+        )
         evidence_rows = self._serialize_rows(evidence_visible_df)
+        topic_views = {}
+        if (
+            active_touchpoint_source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
+            and not entity_summary_chart_df.empty
+        ):
+            for topic, group in entity_summary_chart_df.groupby("anchor_topic", sort=True):
+                topic_figure = self._serialize_figure(
+                    chart_causal_entity_bar(
+                        group,
+                        theme=theme,
+                        entity_label=method_spec.entity_singular,
+                        top_k=10,
+                    )
+                )
+                if topic_figure:
+                    # Reuse the common theme instead of repeating it for each snapshot view.
+                    cast(dict[str, object], topic_figure["layout"]).pop("template", None)
+                    topic_views[str(topic)] = topic_figure
         return {
             "available": True,
             "context_pills": self._context_pills(
@@ -1485,6 +1526,7 @@ class DashboardService:
                 ),
                 "table_title": method_spec.table_title,
                 "table": self._serialize_rows(entity_summary_df),
+                "topic_figures": topic_views,
                 "empty_state": method_spec.table_empty_message,
             },
             "scenarios": {
@@ -2025,9 +2067,9 @@ class DashboardService:
 
         out = chain_df.copy()
         incident_records = out.get("incident_records", pd.Series([[]] * len(out), index=out.index))
-        normalized_records: list[list[dict[str, str]]] = []
+        normalized_records: list[list[dict[str, object]]] = []
         for value in incident_records.tolist():
-            records: list[dict[str, str]] = []
+            records: list[dict[str, object]] = []
             source_records = value if isinstance(value, list) else []
             for entry in source_records:
                 if not isinstance(entry, dict):
@@ -2046,8 +2088,7 @@ class DashboardService:
                     base_url=self._helix_base_url(),
                 )
                 records.append(
-                    {str(key): str(item or "").strip() for key, item in entry.items()}
-                    | {"url": resolved_url, "incident_id__href": resolved_url}
+                    dict(entry) | {"url": resolved_url, "incident_id__href": resolved_url}
                 )
             normalized_records.append(records)
         out["incident_records"] = normalized_records
@@ -2095,8 +2136,6 @@ class DashboardService:
         for column in (
             "avg_nps",
             "avg_similarity",
-            "focus_rate_difference_pp",
-            "score_mean_difference",
         ):
             summary[column] = _numeric_series(summary, column, default=np.nan).round(3)
         summary = summary.sort_values(
@@ -2112,9 +2151,9 @@ class DashboardService:
             "linked_pairs",
             "avg_similarity",
             "avg_nps",
-            "focus_rate_difference_pp",
-            "score_mean_difference",
         ]
+        if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
+            columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
         return summary[columns].rename(
             columns={
                 "nps_topic": entity_name,
@@ -2125,8 +2164,6 @@ class DashboardService:
                 "linked_pairs": "Vínculos semánticos",
                 "avg_similarity": "Similitud media",
                 "avg_nps": "Nota media (0–10)",
-                "focus_rate_difference_pp": "Diferencia tasa foco alta vs baja (pp)",
-                "score_mean_difference": "Diferencia nota media alta vs baja",
             }
         )
 
@@ -2161,6 +2198,20 @@ class DashboardService:
             card = self._serialize_rows(pd.DataFrame([row]))[0]
             card.update(
                 {
+                    "identity_rows": [
+                        {
+                            "label": "Tópico NPS ancla",
+                            "value": str(card.get("anchor_topic") or "n/d"),
+                        },
+                        {
+                            "label": "Organizaciones responsables observadas",
+                            "value": str(card.get("support_organizations") or "n/d"),
+                        },
+                        {
+                            "label": "Duración media histórica de resolución (semanas)",
+                            "value": format_metric(row.get("historical_resolution_weeks")),
+                        },
+                    ],
                     "rank": index,
                     "title": title,
                     "statement": (
@@ -2184,10 +2235,6 @@ class DashboardService:
                         {
                             "label": "Similitud media",
                             "value": format_metric(row.get("avg_similarity")),
-                        },
-                        {
-                            "label": "Diferencia nota media: incidencia alta vs baja",
-                            "value": format_metric(row.get("score_mean_difference"), signed=True),
                         },
                     ],
                     "flow_steps": [

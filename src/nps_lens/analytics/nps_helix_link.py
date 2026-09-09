@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from nps_lens.analytics.evidence_highlights import contributing_terms
 from nps_lens.analytics.linking_policy import (
     LINK_MAX_DAYS_APART,
     LINK_MIN_SIMILARITY,
@@ -248,6 +249,7 @@ class EvidenceLink:
     similarity: float
     nps_topic: str
     incident_topic: str
+    matched_terms: tuple[str, ...] = ()
 
 
 def _safe_id(series: pd.Series) -> pd.Series:
@@ -449,6 +451,9 @@ def link_incidents_to_nps_topics(
     char_nps_ev = char_nps[nps_pos]
     nps_ev = nps.iloc[nps_pos].copy()
 
+    word_features = word_vec.get_feature_names_out()
+    char_features = char_vec.get_feature_names_out()
+    incident_display = build_incident_display_text(helix).tolist()
     links: List[EvidenceLink] = []
     chunk = max(1, int(evidence_chunk_size))
     per_incident_k = max(1, int(top_k_per_incident))
@@ -500,6 +505,23 @@ def link_incidents_to_nps_topics(
                         similarity=s,
                         nps_topic=str(nps_row["nps_topic"]),
                         incident_topic=inc_topic,
+                        matched_terms=contributing_terms(
+                            incident_display[inc_row],
+                            set(
+                                word_features[
+                                    word_inc.getrow(inc_row)
+                                    .multiply(word_nps_ev.getrow(int(j)))
+                                    .indices
+                                ]
+                            ),
+                            set(
+                                char_features[
+                                    char_inc.getrow(inc_row)
+                                    .multiply(char_nps_ev.getrow(int(j)))
+                                    .indices
+                                ]
+                            ),
+                        ),
                     )
                 )
 

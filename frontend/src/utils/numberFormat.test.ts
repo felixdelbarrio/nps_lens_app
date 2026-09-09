@@ -24,7 +24,7 @@ describe("numberFormat", () => {
     expect(formatDisplayValue(29.95659158491985, "nps")).toBe("30");
     expect(formatDisplayValue(-97.79486970379659, "gap_vs_overall")).toBe("-97,8");
     expect(formatDisplayValue(0.6779040931692755, "similaridad")).toBe("0,7");
-    expect(formatDisplayValue(12.3456, "focus_rate_difference_pp")).toBe("+12,3");
+    expect(formatDisplayValue(12.3456, "difference_pp")).toBe("+12,3");
   });
 
   it("normalizes incoming strings that already contain a percent sign", () => {

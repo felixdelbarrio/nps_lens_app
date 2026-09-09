@@ -4,6 +4,7 @@ import type { LinkingPayload, PlotlyFigureSpec } from "../api";
 import { formatDisplayValue } from "../utils/numberFormat";
 import { NavigationTabs } from "./NavigationTabs";
 import { PlotFigure } from "./PlotFigure";
+import { EvidenceText } from "./EvidenceText";
 import { RecordTable } from "./RecordTable";
 
 type LinkingWorkspaceProps = {
@@ -45,10 +46,6 @@ function displayValue(value: unknown, label?: string) {
   return formatted || asString(value, "—");
 }
 
-function normalizeComparableValue(value: unknown) {
-  return asString(value).toLocaleLowerCase();
-}
-
 function linkedCountHeading(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -75,7 +72,7 @@ function renderHelixCards(records: Array<Record<string, unknown>>) {
             ) : (
               <span className="evidence-pill">{incidentId}</span>
             )}
-            <p>{asString(record.summary)}</p>
+            <p><EvidenceText text={asString(record.summary)} segments={record.summary_segments} /></p>
           </article>
         );
       })}
@@ -104,76 +101,15 @@ function renderVocCards(records: Array<Record<string, unknown>>) {
   );
 }
 
-function buildScenarioIdentityRows(
-  activeCard: Record<string, unknown>,
-  methodLabel: string,
-  methodValue: string
-): Array<{ label: string; value: string }> {
-  const rows: Array<{ label: string; value: string }> = [];
-  const seenValues = new Set<string>();
-  const appendRow = (label: string, value: unknown) => {
-    const text = asString(value);
-    const comparable = normalizeComparableValue(text);
-    if (!text || text === "n/d" || text === "—" || seenValues.has(comparable)) {
-      return;
-    }
-    rows.push({ label, value: text });
-    seenValues.add(comparable);
-  };
-
-  const title = asString(activeCard.title, "n/d");
-  const anchorTopic = asString(activeCard.anchor_topic);
-  const touchpoint = asString(activeCard.touchpoint);
-  const sourceServiceN2 = asString(activeCard.helix_source_service_n2);
-  const palanca = asString(activeCard.palanca);
-  const subpalanca = asString(activeCard.subpalanca);
-
-  appendRow(methodLabel || "Tópico observado", title);
-  if (anchorTopic && normalizeComparableValue(anchorTopic) !== normalizeComparableValue(title)) {
-    appendRow("Tópico NPS ancla", anchorTopic);
-  }
-
-  if (methodValue === "bbva_source_service_n2") {
-    if (sourceServiceN2 && normalizeComparableValue(sourceServiceN2) !== normalizeComparableValue(title)) {
-      appendRow("Source Service N2", sourceServiceN2);
-    }
-  } else {
-    appendRow(methodValue === "broken_journeys" ? "Touchpoint detectado" : "Touchpoint afectado", touchpoint);
-    if (methodValue !== "palanca_touchpoint") {
-      appendRow("Palanca", palanca);
-    }
-    if (methodValue !== "domain_touchpoint") {
-      appendRow("Subpalanca", subpalanca);
-    }
-    if (
-      sourceServiceN2 &&
-      methodValue === "executive_journeys" &&
-      normalizeComparableValue(sourceServiceN2) !== normalizeComparableValue(touchpoint)
-    ) {
-      appendRow("Source Service N2", sourceServiceN2);
-    }
-  }
-
-  appendRow("Organizaciones responsables observadas", asString(activeCard.support_organizations, "n/d"));
-  appendRow(
-    "Duración media histórica de resolución (semanas)",
-    displayValue(activeCard.historical_resolution_weeks, "duración histórica")
-  );
-  return rows;
-}
-
-function buildScenarioMetricRows(
-  spotlightMetrics: Array<Record<string, unknown>>
-): Array<Record<string, unknown>> {
-  const hiddenLabels = new Set([
-    "Palanca",
-    "Subpalanca",
-    "Touchpoint afectado",
-    "Touchpoint detectado",
-    "Source Service N2",
-    "Tópico NPS ancla",
-  ]);
-  return spotlightMetrics.filter((metric) => !hiddenLabels.has(asString(metric.label)));
+function TopicFilter({ topics, value, onChange }: {
+  topics: string[]; value: string; onChange: (value: string) => void;
+}) {
+  return <label className="field">NPS topic
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Todos</option>
+      {topics.map((topic) => <option key={topic} value={topic}>{topic}</option>)}
+    </select>
+  </label>;
 }
 
 export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspaceProps) {
@@ -201,6 +137,31 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const entitySummaryKpis = asRows(entitySummary.kpis);
   const entitySummaryRows = asRows(entitySummary.table);
   const situationEvidence = asRecord(situation.evidence);
+  const [evidenceTopic, setEvidenceTopic] = useState("");
+  const [journeyTopic, setJourneyTopic] = useState("");
+  const evidenceRows = useMemo(() => asRows(situationEvidence.rows), [situationEvidence.rows]);
+  const evidenceTopics = useMemo(
+    () => [...new Set(evidenceRows.map(row => asString(row["NPS Topic"])))].filter(Boolean).sort(),
+    [evidenceRows]
+  );
+  const topicFigures = asRecord(entitySummary.topic_figures);
+  const journeyTopics = Object.keys(topicFigures);
+  const selectedEvidenceTopic = evidenceTopics.includes(evidenceTopic) ? evidenceTopic : "";
+  const selectedJourneyTopic = journeyTopics.includes(journeyTopic) ? journeyTopic : "";
+  const visibleEvidence = useMemo(
+    () => selectedEvidenceTopic
+      ? evidenceRows.filter(row => row["NPS Topic"] === selectedEvidenceTopic)
+      : evidenceRows,
+    [evidenceRows, selectedEvidenceTopic]
+  );
+  const visibleJourneys = selectedJourneyTopic
+    ? entitySummaryRows.filter(row => row["Tópico NPS ancla"] === selectedJourneyTopic)
+    : entitySummaryRows;
+  const journeyFigure = useMemo(() => {
+    const base = asFigure(entitySummary.figure);
+    const selected = asFigure(asRecord(entitySummary.topic_figures)[selectedJourneyTopic]);
+    return selected && base ? { ...selected, layout: { ...base.layout, ...selected.layout } } : base;
+  }, [entitySummary.figure, entitySummary.topic_figures, selectedJourneyTopic]);
   const [activeChainIndex, setActiveChainIndex] = useState(0);
   const [scenarioDetailTab, setScenarioDetailTab] = useState("helix");
   const [scenarioEvidenceView, setScenarioEvidenceView] = useState<"table" | "cards">("table");
@@ -215,23 +176,22 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
     setActiveChainIndex(0);
   }, [scenarioCards.length, linking.focus_group, method.value]);
 
+  useEffect(() => {
+    setEvidenceTopic("");
+    setJourneyTopic("");
+  }, [linking]);
+
   const activeCard = scenarioCards[activeChainIndex] || null;
   const activeHelixRecords = asRows(activeCard?.incident_records);
   const activeVocRecords = asRows(activeCard?.comment_records);
   const spotlightMetrics = asRows(activeCard?.spotlight_metrics);
-  const scenarioMetricRows = useMemo(
-    () => buildScenarioMetricRows(spotlightMetrics),
-    [spotlightMetrics]
-  );
-  const scenarioIdentityRows = useMemo(
-    () => buildScenarioIdentityRows(activeCard || {}, asString(method.label), asString(method.value)),
-    [activeCard, method.label, method.value]
-  );
+  const scenarioIdentityRows = asRows(activeCard?.identity_rows);
 
   const evidenceHelixTable = activeHelixRecords.map((record) => ({
     ID: asString(record.incident_id),
     ID__href: incidentHref(record),
-    "Evidencia Helix": asString(record.summary)
+    "Evidencia Helix": asString(record.summary),
+    "Evidencia Helix__segments": record.summary_segments
   }));
   const evidenceVocTable = activeVocRecords.map((record) => ({
     ID: asString(record.comment_id),
@@ -302,9 +262,10 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
               <h3>{asString(situationEvidence.title, "Evidencias")}</h3>
               <p className="secondary-copy">{asString(situationEvidence.subtitle)}</p>
             </div></div>
+            <TopicFilter topics={evidenceTopics} value={selectedEvidenceTopic} onChange={setEvidenceTopic} />
             <RecordTable
               emptyMessage={asString(situationEvidence.empty_state, "No hay evidencias disponibles.")}
-              rows={asRows(situationEvidence.rows)}
+              rows={visibleEvidence}
             />
           </section>
         </div>
@@ -328,6 +289,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             ))}
           </div>
 
+          {asString(method.value) === "broken_journeys" ? <TopicFilter topics={journeyTopics} value={selectedJourneyTopic} onChange={setJourneyTopic} /> : null}
           <section className="linking-panel">
             <div className="section-heading">
               <div>
@@ -336,7 +298,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <PlotFigure
               emptyMessage={asString(entitySummary.empty_state, "No hay resumen de evidencia disponible.")}
-              figure={asFigure(entitySummary.figure)}
+              figure={journeyFigure}
               testId="linking-entity-summary-figure"
             />
           </section>
@@ -349,7 +311,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             </div>
             <RecordTable
               emptyMessage={asString(entitySummary.empty_state, "No hay detalle de evidencia disponible.")}
-              rows={entitySummaryRows}
+              rows={visibleJourneys}
             />
           </section>
         </div>
@@ -424,9 +386,9 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     <h4>Ficha descriptiva</h4>
                     <dl className="scenario-fact-list">
                       {scenarioIdentityRows.map((item) => (
-                        <div className="scenario-fact-row" key={item.label}>
-                          <dt>{item.label}</dt>
-                          <dd>{item.value}</dd>
+                        <div className="scenario-fact-row" key={asString(item.label)}>
+                          <dt>{asString(item.label)}</dt>
+                          <dd>{asString(item.value)}</dd>
                         </div>
                       ))}
                     </dl>
@@ -483,7 +445,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 </div>
 
                 <div className="spotlight-metrics spotlight-metrics-compact">
-                  {scenarioMetricRows.map((metric, index) => (
+                  {spotlightMetrics.map((metric, index) => (
                     <article className="spotlight-metric" key={`spotlight-metric-${index}`}>
                       <span>{asString(metric.label)}</span>
                       <strong>{displayValue(metric.value, asString(metric.label))}</strong>

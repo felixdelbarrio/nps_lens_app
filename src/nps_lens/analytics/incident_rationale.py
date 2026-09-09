@@ -18,10 +18,6 @@ RATIONALE_COLUMNS = [
     "high_incident_threshold",
     "focus_rate_low_incidence",
     "focus_rate_high_incidence",
-    "focus_rate_difference_pp",
-    "score_mean_low_incidence",
-    "score_mean_high_incidence",
-    "score_mean_difference",
 ]
 
 
@@ -58,7 +54,6 @@ def build_incident_nps_rationale(
     frame["responses"] = pd.to_numeric(frame["responses"], errors="coerce").fillna(0).clip(lower=0)
     frame["incidents"] = pd.to_numeric(frame["incidents"], errors="coerce").fillna(0).clip(lower=0)
     frame["focus_rate"] = pd.to_numeric(frame["focus_rate"], errors="coerce").clip(0, 1)
-    frame["nps_mean"] = pd.to_numeric(frame.get("nps_mean"), errors="coerce")
     frame = frame[frame["nps_topic"].ne("") & frame["responses"].gt(0)]
     rows: list[dict[str, Any]] = []
     for topic, group in frame.groupby("nps_topic", observed=True):
@@ -83,8 +78,6 @@ def build_incident_nps_rationale(
             continue
         focus_low = _weighted_mean(group.loc[low, "focus_rate"], group.loc[low, "responses"])
         focus_high = _weighted_mean(group.loc[high, "focus_rate"], group.loc[high, "responses"])
-        score_low = _weighted_mean(group.loc[low, "nps_mean"], group.loc[low, "responses"])
-        score_high = _weighted_mean(group.loc[high, "nps_mean"], group.loc[high, "responses"])
         incidents = int(group["incidents"].sum())
         rows.append(
             {
@@ -100,10 +93,6 @@ def build_incident_nps_rationale(
                 "high_incident_threshold": high_threshold,
                 "focus_rate_low_incidence": focus_low,
                 "focus_rate_high_incidence": focus_high,
-                "focus_rate_difference_pp": (focus_high - focus_low) * 100,
-                "score_mean_low_incidence": score_low,
-                "score_mean_high_incidence": score_high,
-                "score_mean_difference": score_high - score_low,
             }
         )
     if not rows:
@@ -111,8 +100,8 @@ def build_incident_nps_rationale(
     return (
         pd.DataFrame(rows)
         .sort_values(
-            ["incidents", "responses", "focus_rate_difference_pp", "nps_topic"],
-            ascending=[False, False, False, True],
+            ["incidents", "responses", "nps_topic"],
+            ascending=[False, False, True],
         )
         .reset_index(drop=True)[RATIONALE_COLUMNS]
     )

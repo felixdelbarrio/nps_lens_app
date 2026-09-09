@@ -147,3 +147,13 @@ classDiagram
 - Si faltan columnas mínimas: **ERROR** y no se persiste.
 - Si hay degradación recuperable: **WARN** (se persiste pero se informa).
 - Los issues se devuelven siempre al caller (UI/Batch) para trazabilidad.
+
+### Causalidad — contrato de publicación 4.0 (Iteración 20)
+
+- Evidencias publica seis columnas en el orden de presentación y el enlace auxiliar de `Incident ID`. `NPS Topic` filtra exclusivamente esa tabla, con `Todos` por defecto.
+- Journeys rotos publica seis columnas de detalle. `entity_summary.topic_figures` contiene los gráficos calculados localmente por tópico ancla, incluido el ranking de cada tópico antes de limitarlo a diez journeys. Las variantes reutilizan el tema de `entity_summary.figure`; el filtro no modifica los KPIs.
+- `scenarios.cards[].identity_rows` define los tres datos de la ficha; la duración se entrega formateada con dos decimales.
+- `incident_records[].summary_segments` contiene fragmentos de texto y un booleano `bold`. Se deriva localmente de las características TF-IDF de palabra y carácter que aportan a los enlaces aceptados, reutilizando las matrices dispersas. Se unen los términos de los enlaces de cada incidencia dentro de cada escenario. Los renderizadores escapan el texto y no calculan similitudes ni interpretan HTML.
+- Se eliminan las diferencias de nota y tasa foco entre incidencia alta/baja, sus cálculos y el KPI asociado, también en los informes.
+
+La WebApp actualizada requiere publicaciones 4.0: reiniciar el backend local, generar una nueva edición e importar el ZIP para reflejar estos cambios. No se convierten ni reescriben las publicaciones anteriores.

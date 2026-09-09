@@ -7,6 +7,8 @@ from nps_lens.analytics.incident_rationale import (
 )
 
 FORBIDDEN = {
+    "score_mean_difference",
+    "focus_rate_difference_pp",
     "confidence",
     "confidence_mean",
     "causal_score",
@@ -39,8 +41,6 @@ def test_rationale_contains_only_observed_or_reproducible_statistics() -> None:
     assert FORBIDDEN.isdisjoint(result.columns)
     pagos = result.set_index("nps_topic").loc["Pagos > SPEI"]
     assert pagos["focus_rate_high_incidence"] > pagos["focus_rate_low_incidence"]
-    assert pagos["focus_rate_difference_pp"] > 0
-    assert pagos["score_mean_difference"] < 0
     assert pagos["low_incident_weeks"] > 0 and pagos["high_incident_weeks"] > 0
 
 

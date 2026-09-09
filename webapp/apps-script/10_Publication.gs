@@ -57,8 +57,8 @@ function _publicationByKey_(scopeKey) {
 function _selectedPublication_() { return _publicationByKey_(_property_(NPS_LENS.selectedScopeProperty)); }
 
 function _validateEdition_(payload) {
-  if (!payload || payload.schema_version !== '3.0' || !payload.manifest || !payload.screens || !payload.scope) {
-    throw new Error('La edición no cumple el contrato NPS Lens 3.0 con ámbito inmutable.');
+  if (!payload || payload.schema_version !== '4.0' || !payload.manifest || !payload.screens || !payload.scope) {
+    throw new Error('La edición no cumple el contrato NPS Lens 4.0 con ámbito inmutable.');
   }
   ['dashboard', 'linking', 'data'].forEach(name => {
     if (!payload.screens[name] || typeof payload.screens[name] !== 'object') throw new Error('Falta la pantalla requerida: ' + name + '.');
@@ -73,7 +73,7 @@ function _validateArchive_(payload) {
   _validateEdition_(payload);
   const snapshot = payload.snapshots && payload.snapshots.data;
   const datasets = snapshot && snapshot.datasets;
-  if (!snapshot || snapshot.schema_version !== '3.0' || !datasets || !datasets.nps || !datasets.helix) {
+  if (!snapshot || snapshot.schema_version !== '4.0' || !datasets || !datasets.nps || !datasets.helix) {
     throw new Error('La edición no incluye los snapshots estáticos calculados por la aplicación local.');
   }
   if (!datasets.nps.page || !datasets.helix.page) {
@@ -129,7 +129,7 @@ function _loadSnapshot_(fileId) {
 
 function _publishedShell_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
-  if (!publication) return {schema_version:'3.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
+  if (!publication) return {schema_version:'4.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
   const fileId = _property_(_publicationShellProperty_(publication.scopeKey));
   if (!fileId) throw new Error('Esta edición debe volver a publicarse para aplicar la carga optimizada.');
   return _validateEdition_(_loadSnapshot_(fileId));

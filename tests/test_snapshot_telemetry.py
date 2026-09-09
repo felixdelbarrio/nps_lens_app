@@ -41,7 +41,7 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         page_size=20,
     )
     publication: dict[str, object] = {
-        "schema_version": "3.0",
+        "schema_version": "4.0",
         "screens": {
             "dashboard": {"kpis": {"samples": 800, "delta_nps": float("nan")}},
             "linking": {},

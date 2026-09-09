@@ -21,7 +21,7 @@ function doGet(event) {
       email:viewer.email,role:viewer.role,source:viewer.adminSource,configurationReady:viewer.configurationReady}};
   }
   const template = HtmlService.createTemplateFromFile('Index');
-  const bootstrap = {schema_version:'3.0',generated_at:publication ? publication.generatedAt : '',scope:{key:publication ? publication.scopeKey : ''},screens:{},static_views:{},filters:{}};
+  const bootstrap = {schema_version:'4.0',generated_at:publication ? publication.generatedAt : '',scope:{key:publication ? publication.scopeKey : ''},screens:{},static_views:{},filters:{}};
   template.publicationJson = JSON.stringify(bootstrap);
   template.viewerJson = JSON.stringify(viewer);
   template.adminBodyClass = viewer.isAdmin ? 'is-admin' : '';

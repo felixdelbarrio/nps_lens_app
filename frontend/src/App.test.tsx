@@ -308,8 +308,12 @@ const linkingPayloadAvailable = {
         linked_comments: 12,
         linked_pairs: 16,
         focus_rate_high_incidence: 0.6,
-        score_mean_difference: -0.0,
         support_organizations: "VoC + Analitica",
+        identity_rows: [
+          { label: "Tópico NPS ancla", value: "Pagos > Transferencias" },
+          { label: "Organizaciones responsables observadas", value: "VoC + Analitica" },
+          { label: "Duración media histórica de resolución (semanas)", value: "1,20" }
+        ],
         flow_steps: [
           "(12) Incidencias + comentarios",
           "Uso / Edo de Cuenta",
@@ -356,7 +360,6 @@ const linkingPayloadAvailable = {
         linked_comments: 10,
         linked_pairs: 14,
         focus_rate_high_incidence: 0.52,
-        score_mean_difference: -0.0,
         support_organizations: "Canal Digital",
         flow_steps: [
           "(8) Incidencias + comentarios",

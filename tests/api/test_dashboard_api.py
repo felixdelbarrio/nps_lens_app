@@ -498,16 +498,35 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert "associations" not in linking_payload["situation"]
     evidence_rows = linking_payload["situation"]["evidence"]["rows"]
     assert evidence_rows
-    assert {"Respuestas", "Tasa foco"}.issubset(evidence_rows[0])
-    assert len({row["nps_topic"] for row in evidence_rows}) <= 10
-    assert max(
-        sum(row["nps_topic"] == topic for row in evidence_rows)
-        for topic in {row["nps_topic"] for row in evidence_rows}
-    ) <= 10
+    assert list(evidence_rows[0]) == [
+        "NPS Topic",
+        "Incident ID",
+        "Incident ID__href",
+        "Incident Summary",
+        "Detractor Comment",
+        "Tasa Foco",
+        "Similarity",
+    ]
+    identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
+    assert [row["label"] for row in identity] == [
+        "Tópico NPS ancla",
+        "Organizaciones responsables observadas",
+        "Duración media histórica de resolución (semanas)",
+    ]
+    assert len({row["NPS Topic"] for row in evidence_rows}) <= 10
+    assert (
+        max(
+            sum(row["NPS Topic"] == topic for row in evidence_rows)
+            for topic in {row["NPS Topic"] for row in evidence_rows}
+        )
+        <= 10
+    )
     assert linking_payload["scenarios"]["cards"][0]["anchor_topic"]
     assert linking_payload["entity_summary"]["table"][0]["Tópico NPS ancla"]
     serialized_linking = json.dumps(linking_payload, ensure_ascii=False).casefold()
     for removed_field in (
+        "score_mean_difference",
+        "focus_rate_difference_pp",
         "confidence",
         "priority",
         "causal_score",
