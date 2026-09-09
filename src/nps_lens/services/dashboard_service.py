@@ -44,7 +44,6 @@ from nps_lens.analytics.linking_policy import (
     LINK_MAX_VISIBLE_COMMENTS,
     LINK_MAX_VISIBLE_INCIDENTS,
 )
-from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
     build_incident_display_text,
@@ -116,13 +115,7 @@ from nps_lens.ui.charts import (
     chart_period_aggregates,
     chart_topic_bars,
 )
-from nps_lens.ui.narratives import (
-    build_executive_story,
-    compare_periods,
-    executive_summary,
-    explain_nps_gaps,
-    explain_topics,
-)
+from nps_lens.ui.narratives import explain_topics
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL, population_date_window
 from nps_lens.ui.theme import Theme, get_theme
@@ -1539,7 +1532,6 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_n: int = 200,
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
         touchpoint_source: str = "",
@@ -1576,13 +1568,6 @@ class DashboardService:
             or "palanca"
         ).strip()
 
-        business_story_md = self._build_business_report_md(
-            current_df=descriptive_current_df,
-            history_df=scope_history_df,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            min_n=min_n,
-        )
         context_label = selected_month_label(
             pop_year=pop_year,
             pop_month=pop_month,
@@ -1597,12 +1582,9 @@ class DashboardService:
         )
 
         period_start, period_end = self._period_bounds(descriptive_current_df)
-        overall_series = pd.DataFrame()
-        rationale_df = pd.DataFrame()
         attribution_df = pd.DataFrame()
         attribution_all_df = pd.DataFrame()
         entity_summary_kpis: list[dict[str, str]] = []
-        executive_journey_catalog: list[dict[str, object]] = []
         broken_journeys_df = pd.DataFrame()
         include_causal_section = False
 
@@ -1617,15 +1599,6 @@ class DashboardService:
             )
             if bool(causal["ready"]):
                 focus_name = self._focus_name(str(causal["focus_group"]))
-                causal_nps_df = cast(pd.DataFrame, causal["nps_slice"])
-                core = cast(dict[str, object], causal["core"])
-                overall_daily = self._attach_daily_nps_mean(
-                    cast(pd.DataFrame, core["overall_daily"]),
-                    causal_nps_df,
-                )
-                overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
-                overall_series = overall_daily if not overall_daily.empty else overall_weekly
-                rationale_df = cast(pd.DataFrame, causal["rationale_df"])
                 attribution_all_df = cast(pd.DataFrame, causal["chains"])
                 attribution_df = select_causal_scenarios(
                     attribution_all_df,
@@ -1633,10 +1606,6 @@ class DashboardService:
                 )
                 mode_payload = cast(dict[str, object], causal["mode_payload"])
                 broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
-                executive_journey_catalog = cast(
-                    list[dict[str, object]],
-                    causal["executive_journey_catalog"],
-                )
                 entity_summary_kpis = self._build_entity_summary_kpis(
                     attribution_all_df,
                     touchpoint_source=active_touchpoint_source,
@@ -1644,8 +1613,6 @@ class DashboardService:
                 include_causal_section = not attribution_df.empty
         except Exception as exc:
             include_causal_section = False
-            overall_series = pd.DataFrame()
-            rationale_df = pd.DataFrame()
             attribution_df = pd.DataFrame()
             attribution_all_df = pd.DataFrame()
             entity_summary_kpis = []
@@ -1663,17 +1630,12 @@ class DashboardService:
             period_end=period_end,
             focus_name=focus_name,
             topic_channel=topic_channel,
-            overall_weekly=overall_series,
-            rationale_df=rationale_df,
-            story_md=business_story_md,
-            script_8slides_md="",
             attribution_df=attribution_df,
             selected_nps_df=descriptive_current_df,
             comparison_nps_df=scope_history_df,
             touchpoint_source=active_touchpoint_source,
             entity_summary_df=attribution_all_df,
             entity_summary_kpis=entity_summary_kpis,
-            executive_journey_catalog=executive_journey_catalog,
             broken_journeys_df=broken_journeys_df,
             report_dimension_analysis=resolved_report_dimension_analysis,
             period_kpis=period_kpis,
@@ -1759,7 +1721,6 @@ class DashboardService:
                 pop_month=pop_month,
                 nps_group=causal_group,
                 score_channel=causal_channel,
-                min_n=min_n,
                 min_similarity=min_similarity,
                 max_days_apart=max_days_apart,
                 touchpoint_source=active_touchpoint_source,
@@ -1853,72 +1814,6 @@ class DashboardService:
             )
             saved_path = self._persist_artifact(artifact.content, artifact.file_name)
             return replace(artifact, saved_path=str(saved_path))
-
-    def _build_business_report_md(
-        self,
-        *,
-        current_df: pd.DataFrame,
-        history_df: pd.DataFrame,
-        pop_year: str,
-        pop_month: str,
-        min_n: int,
-    ) -> str:
-        summary = executive_summary(current_df)
-        topics_df = self._topics_df(current_df)
-        topics_bullets = explain_topics(topics_df, max_items=5)
-        _, base_window = default_windows(history_df, pop_year=pop_year, pop_month=pop_month)
-        base_df = slice_by_window(history_df, base_window) if base_window is not None else pd.DataFrame()
-        base_value = (
-            compute_nps_from_scores(base_df["NPS"])
-            if not base_df.empty
-            else float("nan")
-        )
-        nps_gaps_df = pd.DataFrame(
-            [
-                item.__dict__
-                for item in rank_nps_gaps(
-                    current_df,
-                    dimensions=["Palanca"],
-                    min_n=min_n,
-                    base_nps=float(base_value) if np.isfinite(base_value) else None,
-                )
-            ]
-        )
-        nps_gap_bullets = explain_nps_gaps(nps_gaps_df, max_items=5)
-        comparison_story = None
-        w_cur, w_base = default_windows(history_df, pop_year=pop_year, pop_month=pop_month)
-        if w_cur is not None and w_base is not None:
-            comparison_story = compare_periods(
-                slice_by_window(history_df, w_cur),
-                slice_by_window(history_df, w_base),
-            )
-        return build_executive_story(
-            summary,
-            comparison=comparison_story,
-            top_nps_gaps=nps_gap_bullets,
-            top_topics=topics_bullets,
-        )
-
-    @staticmethod
-    def _attach_daily_nps_mean(base_df: pd.DataFrame, nps_df: pd.DataFrame) -> pd.DataFrame:
-        if base_df.empty or "date" not in base_df.columns:
-            return base_df
-        source = nps_df.copy()
-        if "Fecha" not in source.columns or "NPS" not in source.columns:
-            return base_df
-        source["Fecha"] = pd.to_datetime(source["Fecha"], errors="coerce")
-        source["NPS"] = pd.to_numeric(source["NPS"], errors="coerce")
-        source = source.dropna(subset=["Fecha"])
-        if source.empty:
-            return base_df
-        daily_nps = (
-            source.assign(date=lambda frame: frame["Fecha"].dt.normalize())
-            .groupby("date", as_index=False)
-            .agg(nps_mean=("NPS", "mean"))
-        )
-        output = base_df.copy()
-        output["date"] = pd.to_datetime(output["date"], errors="coerce").dt.normalize()
-        return output.merge(daily_nps, on="date", how="left")
 
     @staticmethod
     def _period_bounds(frame: pd.DataFrame) -> tuple[date, date]:

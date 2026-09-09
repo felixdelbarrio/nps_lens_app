@@ -2108,131 +2108,6 @@ def _chain_incident_records(value: object) -> list[dict[str, str]]:
     return out
 
 
-def _pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    lower_map = {str(c).strip().lower(): str(c) for c in df.columns}
-    for c in candidates:
-        hit = lower_map.get(str(c).strip().lower())
-        if hit:
-            return hit
-    return ""
-
-
-def _prepare_daily_signals(
-    overall: pd.DataFrame,
-    *,
-    period_start: Optional[date],
-    period_end: Optional[date],
-) -> tuple[pd.DataFrame, bool]:
-    """Normalize timeline to daily grain with NPS mean, detractor share and incidents."""
-    if overall is None or overall.empty:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    d = overall.copy()
-    time_col = "date" if "date" in d.columns else ("week" if "week" in d.columns else "")
-    if not time_col:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    d[time_col] = _coerce_datetime_series(d[time_col])
-    d = d.dropna(subset=[time_col]).copy()
-    if d.empty:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    if time_col == "week":
-        d["date"] = d[time_col].dt.normalize()
-    else:
-        d["date"] = d[time_col].dt.normalize()
-
-    inc_col = _pick_first_col(d, ["incidents", "incidencias", "incident_count"])
-    focus_col = _pick_first_col(d, ["focus_rate", "detractor_rate", "rate_detractors"])
-    nps_col = _pick_first_col(
-        d,
-        [
-            "nps_mean",
-            "nps_avg",
-            "nps_media",
-            "nps",
-            "nps_score",
-            "score_mean",
-            "nps_current",
-        ],
-    )
-    responses_col = _pick_first_col(d, ["responses", "respuestas", "n"])
-
-    d["incidents"] = pd.to_numeric(d.get(inc_col, 0.0), errors="coerce").fillna(0.0).clip(lower=0.0)
-    d["detractor_rate"] = (
-        pd.to_numeric(d.get(focus_col, np.nan), errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    )
-
-    nps_estimated = False
-    if nps_col:
-        d["nps_mean"] = pd.to_numeric(d[nps_col], errors="coerce")
-    else:
-        # Fallback when daily mean NPS is not available in aggregates.
-        d["nps_mean"] = (1.0 - d["detractor_rate"]) * 10.0
-        nps_estimated = True
-
-    if responses_col:
-        d["responses"] = (
-            pd.to_numeric(d[responses_col], errors="coerce").fillna(0.0).clip(lower=0.0)
-        )
-    else:
-        d["responses"] = 1.0
-
-    if period_start is not None:
-        d = d[d["date"] >= pd.Timestamp(period_start)]
-    if period_end is not None:
-        d = d[d["date"] <= pd.Timestamp(period_end)]
-    if d.empty:
-        return (
-            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
-            nps_estimated,
-        )
-
-    d["_w"] = np.maximum(pd.to_numeric(d["responses"], errors="coerce").fillna(0.0), 1.0)
-    d["_nps_w"] = pd.to_numeric(d["nps_mean"], errors="coerce").fillna(0.0) * d["_w"]
-    d["_det_w"] = pd.to_numeric(d["detractor_rate"], errors="coerce").fillna(0.0) * d["_w"]
-    agg = (
-        d.groupby("date", as_index=False)
-        .agg(
-            incidents=("incidents", "sum"),
-            responses=("responses", "sum"),
-            _w=("_w", "sum"),
-            _nps_w=("_nps_w", "sum"),
-            _det_w=("_det_w", "sum"),
-        )
-        .sort_values("date")
-    )
-    agg["nps_mean"] = agg["_nps_w"] / agg["_w"].replace({0.0: np.nan})
-    agg["detractor_rate"] = agg["_det_w"] / agg["_w"].replace({0.0: np.nan})
-    agg = agg.drop(columns=["_w", "_nps_w", "_det_w"])
-
-    start_d = pd.Timestamp(period_start) if period_start is not None else agg["date"].min()
-    end_d = pd.Timestamp(period_end) if period_end is not None else agg["date"].max()
-    if pd.isna(start_d) or pd.isna(end_d) or start_d > end_d:
-        return (
-            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
-            nps_estimated,
-        )
-
-    idx = pd.date_range(start=start_d.normalize(), end=end_d.normalize(), freq="D")
-    out = agg.set_index("date").reindex(idx).rename_axis("date").reset_index()
-    out["incidents"] = pd.to_numeric(out["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
-
-    for c in ["nps_mean", "detractor_rate"]:
-        vals = pd.to_numeric(out[c], errors="coerce")
-        if int(vals.notna().sum()) >= 2:
-            vals = vals.interpolate(limit_direction="both")
-        elif int(vals.notna().sum()) == 1:
-            vals = vals.fillna(float(vals.dropna().iloc[0]))
-        else:
-            vals = vals.fillna(0.0)
-        out[c] = vals
-
-    out["nps_mean"] = out["nps_mean"].clip(0.0, 10.0)
-    out["detractor_rate"] = out["detractor_rate"].clip(0.0, 1.0)
-    return out[["date", "nps_mean", "detractor_rate", "incidents"]].copy(), nps_estimated
-
-
 def _build_dimension_view_model(
     *,
     dimension: str,
@@ -3063,6 +2938,7 @@ def _fill_template_deck(
     pain = prs.slides[5]
     pain_rows = list(view.topic_table_df.head(4).itertuples())
     leader_name = str(getattr(pain_rows[0], "value", "Sin señal")) if pain_rows else "Sin señal"
+    _set_template_text(pain.shapes[1], "Volumen de opiniones", size=11, color=BBVA_COLORS["ink"])
     _set_template_text(
         pain.shapes[0],
         f"{leader_name} concentra el mayor dolor entre los tópicos observados en {topic_channel}",
@@ -3243,46 +3119,18 @@ def generate_business_review_ppt(
     period_end: date,
     focus_name: str,
     topic_channel: str = "Web",
-    overall_weekly: pd.DataFrame,
-    rationale_df: pd.DataFrame,
-    story_md: str,
-    script_8slides_md: str,
     attribution_df: Optional[pd.DataFrame] = None,
-    ranking_df: Optional[pd.DataFrame] = None,
-    by_topic_daily: Optional[pd.DataFrame] = None,
-    lag_days_by_topic: Optional[pd.DataFrame] = None,
-    by_topic_weekly: Optional[pd.DataFrame] = None,
-    lag_weeks_by_topic: Optional[pd.DataFrame] = None,
     selected_nps_df: Optional[pd.DataFrame] = None,
     comparison_nps_df: Optional[pd.DataFrame] = None,
-    incident_evidence_df: Optional[pd.DataFrame] = None,
-    changepoints_by_topic: Optional[pd.DataFrame] = None,
-    incident_timeline_df: Optional[pd.DataFrame] = None,
-    hotspot_focus_note: str = "",
     touchpoint_source: str = "",
     entity_summary_df: Optional[pd.DataFrame] = None,
     entity_summary_kpis: Optional[list[dict[str, str]]] = None,
-    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     broken_journeys_df: Optional[pd.DataFrame] = None,
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
     include_causal_section: bool = True,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
-    del (
-        script_8slides_md,
-        incident_evidence_df,
-        incident_timeline_df,
-        hotspot_focus_note,
-        rationale_df,
-        ranking_df,
-        by_topic_daily,
-        lag_days_by_topic,
-        by_topic_weekly,
-        lag_weeks_by_topic,
-        changepoints_by_topic,
-        executive_journey_catalog,
-    )
     dimension_mode = str(report_dimension_analysis or "palanca").strip().lower()
     if dimension_mode not in {"palanca", "subpalanca"}:
         dimension_mode = "palanca"
@@ -3302,8 +3150,6 @@ def generate_business_review_ppt(
         period_end=period_end,
         focus_name=focus_name,
         topic_channel=topic_channel,
-        overall_weekly=overall_weekly,
-        story_md=story_md,
         attribution_df=attribution_df,
         selected_nps_df=selected_nps_df,
         comparison_nps_df=comparison_nps_df,

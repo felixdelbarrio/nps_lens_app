@@ -299,26 +299,6 @@ def _assert_no_shape_overflow(prs: Presentation) -> None:
 
 def test_generate_business_review_ppt_builds_new_story() -> None:
     payload = _sample_payload()
-    business_story = """# Informe de negocio — NPS Lens
-
-## 1) Qué está pasando
-- Muestras: 36,872 · Score medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
-- Zona de fricción: Agregar funcionalidad · Zona fuerte: FAN
-
-## 2) Cambio vs base de comparación
-- Periodo actual: Mes actual (Febrero 2026 · 2026-02-01 → 2026-02-22) (n=20,791)
-- Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
-- Variación: Delta NPS Clásico -0.18 · Δ detractores +2.5 pp
-
-## 3) Brechas NPS observadas
-- Funcionamiento Continuo presenta una brecha de -4,2 puntos frente al total.
-
-## 4) Qué están diciendo (temas de texto)
-- Tema #1: fallas de continuidad, caídas y lentitud en procesos críticos.
-
-## 5) Evidencia disponible
-- Revisar las series observadas, los vínculos semánticos y los casos asociados.
-"""
 
     out = generate_business_review_ppt(
         service_origin="BBVA México",
@@ -327,20 +307,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md=business_story,
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source="domain_touchpoint",
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
@@ -421,12 +390,7 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
     )
@@ -457,18 +421,9 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
@@ -590,12 +545,7 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
         period_start=date(2026, 3, 1),
         period_end=date(2026, 3, 29),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -674,18 +624,9 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
@@ -916,20 +857,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"].head(0),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=pd.DataFrame(),
-        lag_days_by_topic=pd.DataFrame(),
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=pd.DataFrame(),
-        changepoints_by_topic=pd.DataFrame(),
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -955,10 +885,6 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=pd.DataFrame(),
-        rationale_df=pd.DataFrame(),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
@@ -978,8 +904,7 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
     assert not any("evidencia disponible no permite afirmar causalidad" in t for t in texts)
 
 
-def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_raw_nps() -> None:
-    payload = _sample_payload()
+def test_generate_business_review_ppt_handles_missing_raw_nps() -> None:
     out = generate_business_review_ppt(
         service_origin="BBVA México",
         service_origin_n1="Empresas Mobile",
@@ -987,20 +912,9 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=pd.DataFrame(),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=None,
         comparison_nps_df=None,
-        lag_days_by_topic=None,
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=None,
-        changepoints_by_topic=None,
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -1015,7 +929,7 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
     assert any("detractores hacen visible" in t for t in texts)
 
 
-def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() -> None:
+def test_text_topic_selector_limits_table_rows() -> None:
     topics = pd.DataFrame(
         {
             "cluster_id": [1, 2, 3, 4, 5],
@@ -1027,10 +941,6 @@ def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() 
             "example_txt": ["ejemplo"] * 5,
         }
     )
-
-    fig = executive_ppt._build_text_topic_figure(topics)
-    assert fig is not None
-    assert len(fig.data[0].x) == 5
 
     selected = executive_ppt.select_text_clusters(topics, max_clusters=3)
     assert selected["cluster_id"].tolist() == [1, 2, 3]

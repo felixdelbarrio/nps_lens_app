@@ -758,7 +758,6 @@ export function App() {
         pop_month: popMonth,
         nps_group: LINKING_NPS_GROUP,
         score_channel: LINKING_SCORE_CHANNEL,
-        min_n: minN,
         min_similarity: minSimilarity,
         max_days_apart: maxDaysApart,
         touchpoint_source: touchpointSource,

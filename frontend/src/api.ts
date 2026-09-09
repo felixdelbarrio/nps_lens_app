@@ -608,7 +608,6 @@ export function downloadExecutiveReport(params: {
   pop_month: string;
   nps_group: string;
   score_channel: string;
-  min_n: number;
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;

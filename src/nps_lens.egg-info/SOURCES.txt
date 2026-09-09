@@ -15,6 +15,7 @@ src/nps_lens.egg-info/top_level.txt
 src/nps_lens/analytics/__init__.py
 src/nps_lens/analytics/causal.py
 src/nps_lens/analytics/changepoints.py
+src/nps_lens/analytics/channel_topic_scope.py
 src/nps_lens/analytics/drivers.py
 src/nps_lens/analytics/evidence_highlights.py
 src/nps_lens/analytics/helix_operational_metrics.py
@@ -108,6 +109,7 @@ src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
+tests/test_channel_topic_scope.py
 tests/test_config_env.py
 tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
