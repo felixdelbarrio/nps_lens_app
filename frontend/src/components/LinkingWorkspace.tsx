@@ -15,7 +15,7 @@ type LinkingWorkspaceProps = {
 
 const SCENARIO_DETAIL_TABS = [
   { id: "helix", label: "Evidencia Helix" },
-  { id: "voc", label: "Voz del cliente" }
+  { id: "voc", label: "Comentarios" }
 ];
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -486,7 +486,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     item.id === "helix"
                       ? `Evidencia Helix (${activeHelixRecords.length})`
                       : item.id === "voc"
-                        ? `Voz del cliente (${activeVocRecords.length})`
+                        ? `Comentarios (${activeVocRecords.length})`
                         : item.label
                 }))}
                 onChange={setScenarioDetailTab}

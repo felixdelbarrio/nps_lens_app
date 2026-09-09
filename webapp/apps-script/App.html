@@ -123,6 +123,7 @@
   }
   function noteList(items, empty='') { const values=rows(items); return values.length?`<article class="note-card"><ul class="plain-list">${values.map(item=>`<li>${richText(item)}</li>`).join('')}</ul></article>`:(empty?`<article class="note-card"><p class="secondary-copy">${esc(empty)}</p></article>`:''); }
   function heading(eyebrow,title,copy,controls='') { return `<div class="section-heading section-heading-inline"><div>${eyebrow?`<p class="eyebrow">${esc(eyebrow)}</p>`:''}<h3>${esc(title)}</h3>${copy?`<p class="secondary-copy">${esc(copy)}</p>`:''}</div>${controls}</div>`; }
+  function compactPeriodLabel(label) { return String(label||'Periodo').replace(/\b\d{2}(\d{2})\b/g,'$1'); }
   function readonlyField(name,value){return `<div class="readonly-field"><span>${esc(name)}</span><strong>${esc(value||'—')}</strong></div>`;}
   function summary(view) {
     const overview = dashboard.overview || {};
@@ -132,7 +133,7 @@
     if (view === 'period-aggregates') {
       const historical=dashboard.scope?.historical;
       const period = dashboard.scope?.period;
-      return tabs+`<section class="surface-card stack-panel">${historical?heading('',historical.label,historical.note)+kpiCards(historical,dashboard.kpis,false):''}${heading('',period?.label||dashboard.context_label||'Periodo seleccionado','')}${kpiCards(period,dashboard.kpis)}${figure(overview.period_aggregates_figure,'period-chart')}</section>`;
+      return tabs+`<section class="surface-card stack-panel">${historical?heading('',historical.label,historical.note)+kpiCards(historical,dashboard.kpis,false):''}${heading('',period?.label||dashboard.context_label||'Periodo seleccionado',period?.note||'')}${kpiCards(period,dashboard.kpis)}${figure(overview.period_aggregates_figure,'period-chart')}</section>`;
     }
     if (view === 'daily') return tabs+`<section class="surface-card stack-panel">${figure(overview.daily_kpis_figure,'daily-kpis')}${figure(overview.daily_mix_figure,'daily-mix')}${noteList(overview.daily_explanation_bullets)}</section>`;
     if (view === 'volume-mix') return tabs+`<section class="surface-card">${figure(overview.daily_volume_mix_figure,'volume-chart')}</section>`;
@@ -144,10 +145,10 @@
     const tabs=contentTabs(npsViews)+selectors;
     const topic=comments.topics?.[state.scoreChannel]?.[state.npsGroup]||{};
     if (view === 'topics') { const topicRows=rows(topic.rows).map(row=>({Cluster:row.cluster_id,n:row.n,Términos:rows(row.top_terms).join(', '),Ejemplos:rows(row.examples).join(' · ')})); return tabs+`<section class="surface-card stack-panel">${figure(topic.figure,'topics-chart')}${table(topicRows,250,['Cluster','n','Términos','Ejemplos'])}${noteList(topic.insights)}</section>`; }
-    const gaps=comments.gaps?.[state.scoreChannel]?.[state.gapDimension]||{}, gapLabel=gaps.gap_column_label||'Brecha vs Base';
-    const gapRows=rows(gaps.table).map(row=>({Valor:row.value,Opiniones:row.n,'NPS Clásico':row.nps,'Opiniones detractoras':row.detractors,'Peso en la muestra':row.sample_share==null?'—':format(row.sample_share*100)+'%',[gapLabel]:row.gap_vs_base}));
+    const gaps=comments.gaps?.[state.scoreChannel]?.[state.gapDimension]||{}, gapLabel=gaps.gap_column_label||'Brecha vs Base', periodLabel=compactPeriodLabel(dashboard.context_label);
+    const gapRows=rows(gaps.table).map(row=>({Valor:row.value,'Peso en la muestra':row.sample_share==null?'—':format(row.sample_share*100)+'%',[`Total opiniones [${periodLabel}]`]:row.n,[`Opiniones detractoras [${periodLabel}]`]:row.detractors,[`% promotor [${periodLabel}]`]:row.promoter_rate==null?'—':format(row.promoter_rate*100)+'%',[`% detractor [${periodLabel}]`]:row.detractor_rate==null?'—':format(row.detractor_rate*100)+'%',[`NPS Clásico [${periodLabel}]`]:row.nps,[gapLabel]:row.gap_vs_base}));
     const range=gaps.base_range?.start&&gaps.base_range?.end?` (${esc(format(gaps.base_range.start))} - ${esc(format(gaps.base_range.end))})`:'';
-    return tabs+`<section class="surface-card stack-panel">${heading('Brechas',gaps.title||'Brechas NPS',gaps.subtitle)}<p class="metric-note">NPS clásico base: <strong>${esc(format(gaps.base_nps))}</strong>${range}</p>${figure(gaps.figure,'gaps-chart')}${table(gapRows,250,['Valor','Opiniones','NPS Clásico','Opiniones detractoras','Peso en la muestra',gapLabel])}</section>`;
+    return tabs+`<section class="surface-card stack-panel">${heading('Brechas',gaps.title||'Brechas NPS',gaps.subtitle)}<p class="metric-note">NPS clásico base: <strong>${esc(format(gaps.base_nps))}</strong>${range}</p>${figure(gaps.figure,'gaps-chart')}${table(gapRows,250,['Valor','Peso en la muestra',`Total opiniones [${periodLabel}]`,`Opiniones detractoras [${periodLabel}]`,`% promotor [${periodLabel}]`,`% detractor [${periodLabel}]`,`NPS Clásico [${periodLabel}]`,gapLabel])}</section>`;
   }
   function evidenceText(text, segments) {
     return Array.isArray(segments) && segments.length ? segments.map(segment => segment.bold ? `<strong>${esc(segment.text)}</strong>` : esc(segment.text)).join('') : esc(text);
@@ -161,7 +162,7 @@
     const title=card.title||card.anchor_topic||`Escenario ${index+1}`;
     const story=card.statement||card.chain_story||card.rationale||card.summary||'';
     const helix=rows(card.incident_records), voc=rows(card.comment_records);
-    const details=[['helix',`Evidencia Helix (${helix.length})`],['voc',`Voz del cliente (${voc.length})`]];
+    const details=[['helix',`Evidencia Helix (${helix.length})`],['voc',`Comentarios (${voc.length})`]];
     const detail=state.scenarioDetail==='voc'?scenarioEvidence(voc,'voc'):scenarioEvidence(helix,'helix');
     return `<article class="surface-card scenario" id="active-scenario" tabindex="-1" aria-label="Escenario de evidencia ${index+1} de ${total}"><header class="scenario-head"><div><p class="eyebrow">Evidencia observada</p><h3>${esc(title)}</h3><p class="scenario-story">${esc(story)}</p></div><span class="scenario-rank" aria-label="Posición ${esc(card.rank||index+1)}">#${esc(card.rank||index+1)}</span></header><div class="scenario-flow">${rows(card.flow_steps).map(step=>`<span>${esc(step)}</span>`).join('')}</div><div class="scenario-overview-grid"><article class="scenario-fact-sheet"><h4>Ficha descriptiva</h4><dl>${rows(card.identity_rows).map(item=>`<div><dt>${esc(item.label)}</dt><dd>${esc(item.value)}</dd></div>`).join('')}</dl></article><div class="scenario-evidence-stack"><article class="scenario-fact-sheet"><h4>${helix.length} incidencias enlazadas</h4><div class="evidence-pill-row">${helix.slice(0,6).map(row=>{const href=row.url||row.incident_id__href;return href?`<a class="evidence-pill" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(row.incident_id||'INC')}</a>`:`<span class="evidence-pill">${esc(row.incident_id||'INC')}</span>`;}).join('')}</div></article><article class="scenario-fact-sheet"><h4>${voc.length} comentarios enlazados</h4><div class="evidence-pill-row">${voc.slice(0,6).map(row=>`<span class="evidence-pill">${esc(row.comment_id||'VOC')}</span>`).join('')}</div></article></div></div><div class="scenario-grid">${rows(card.spotlight_metrics).map(item=>`<div class="fact"><span>${esc(item.label||'Indicador')}</span><strong>${esc(format(item.value))}</strong></div>`).join('')}</div><div class="evidence-toolbar"><div class="segmented"><button data-evidence-view="table" class="${state.evidenceView==='table'?'active':''}">Tabla</button><button data-evidence-view="cards" class="${state.evidenceView==='cards'?'active':''}">Cards</button></div><span><strong>${helix.length}</strong> evidencias Helix visibles · <strong>${voc.length}</strong> comentarios VoC visibles</span></div>${contentTabs(details,state.scenarioDetail,'scenario-detail')}${detail}</article>`;
   }

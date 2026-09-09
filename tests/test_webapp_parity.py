@@ -35,8 +35,18 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     assert "view==='gaps'?'':`<label class=\"field\">Grupo score" in web
     assert "['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']" in web
     assert "readonlyField('Canal','Web')" in web
-    for causal_detail in ("Evidencia Helix", "Voz del cliente"):
+    for causal_detail in ("Evidencia Helix", "Comentarios"):
         assert causal_detail in web
+    assert "Voz del cliente (" not in web
+    for gap_column in (
+        "Peso en la muestra",
+        "Total opiniones [",
+        "Opiniones detractoras [",
+        "% promotor [",
+        "% detractor [",
+        "NPS Clásico [",
+    ):
+        assert gap_column in web
     for removed_detail in ("Ficha cuantitativa", "Heat map", "Changepoints + lag", "Lag en días"):
         assert removed_detail not in web
     for navigation in ("Anterior", "Ver siguiente", "scenarioIndex", "data-scenario-step"):

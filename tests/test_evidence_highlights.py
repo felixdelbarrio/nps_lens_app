@@ -19,6 +19,9 @@ def test_segments_preserve_unicode_punctuation_and_untrusted_markup():
 def test_contributors_use_only_nonzero_shared_features_and_skip_stopwords():
     assert contributing_terms("La conexión falla", {"la", "conexion"}, set()) == ("conexion",)
     assert contributing_terms("Pagos pendientes", set(), {"pago"}) == ("pagos",)
+    assert contributing_terms("Jorge García reporta transferencia", {"transferencia"}, {"cia"}) == (
+        "transferencia",
+    )
     assert contributing_terms("Sin coincidencia", set(), set()) == ()
 
 

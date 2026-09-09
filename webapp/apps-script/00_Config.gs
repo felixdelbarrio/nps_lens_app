@@ -1,5 +1,5 @@
 const NPS_LENS = Object.freeze({
-  version: '2.9.10',
+  version: '2.9.12',
   domain: 'bbva.com',
   initialAdmin: 'felix.delbarrio@bbva.com',
   newsletterFrom: 'nps-lens.group@bbva.com',

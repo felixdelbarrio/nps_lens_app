@@ -942,7 +942,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
 
     assert "nps clásico acumulado histórico" in slide_2_text.lower()
     assert "2026-01-01" in slide_2_text
-    assert "2026-02-28" in slide_2_text
+    assert "terminó en Febrero" in slide_2_text
 
     all_texts: list[str] = []
     for slide in presentation.slides:

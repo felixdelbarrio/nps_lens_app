@@ -151,7 +151,7 @@ const dashboardPayload = {
     },
     historical: {
       label: "Febrero 2026",
-      note: "KPIs agregados del periodo anterior disponible.",
+      note: "KPIs agregados del período anterior (01/02/2026 a 28/02/2026)",
       kpis: {
         samples: 36872,
         nps_average: 4.7,
@@ -164,6 +164,7 @@ const dashboardPayload = {
     },
     period: {
       label: "Marzo 2026",
+      note: "KPIs agregados del período (01/03/2026 a 31/03/2026)",
       kpis: {
         samples: 26618,
         nps_average: 4.2,
@@ -184,7 +185,22 @@ const dashboardPayload = {
     }
   },
   cohorts: {},
-  gaps: { has_data: false, table: [] },
+  gaps: {
+    has_data: true,
+    gap_column_label: "Brecha vs Base [Febrero 2026]",
+    table: [
+      {
+        value: "Acceso",
+        n: 120,
+        detractors: 48,
+        sample_share: 0.25,
+        promoter_rate: 0.2,
+        detractor_rate: 0.4,
+        nps: -20,
+        gap_vs_base: -14
+      }
+    ]
+  },
 
   controls: {
     dimensions: ["Palanca", "Subpalanca", "Canal", "UsuarioDecisión"],
@@ -538,6 +554,18 @@ describe("App", () => {
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
     expect(screen.getByRole("combobox", { name: "Dimensión" })).toHaveValue("Palanca");
+    for (const column of [
+      "Peso en la muestra",
+      "Total opiniones [Marzo 26]",
+      "Opiniones detractoras [Marzo 26]",
+      "% promotor [Marzo 26]",
+      "% detractor [Marzo 26]",
+      "NPS Clásico [Marzo 26]",
+      "Brecha vs Base [Febrero 2026]"
+    ]) {
+      expect(screen.getByRole("columnheader", { name: column })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("cell", { name: "48" })).toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Canal" }), "App");
     await waitFor(() =>

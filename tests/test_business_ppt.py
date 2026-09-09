@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 from pptx import Presentation
+from pptx.enum.text import PP_ALIGN
 
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -346,7 +347,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("Método de agrupación:" in t for t in cover_texts)
     assert any("NPS" in t for t in texts)
     assert any("acumulado histórico" in t for t in texts)
-    assert any("detractores hacen visible" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
+    assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
     assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
     assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
@@ -374,6 +376,45 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
+    change_tables = [shape.table for shape in prs.slides[4].shapes if getattr(shape, "has_table", False)]
+    assert len(change_tables) == 1
+    assert len(change_tables[0].rows) == 1 + len(
+        executive_ppt.select_negative_delta_rows(
+            executive_ppt._build_presentation_context(
+                service_origin="BBVA México",
+                service_origin_n1="Empresas Mobile",
+                service_origin_n2="",
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 31),
+                focus_name="detractores",
+                topic_channel="Web",
+                attribution_df=payload["attribution"],
+                selected_nps_df=payload["selected_nps"],
+                comparison_nps_df=payload["comparison_nps"],
+                touchpoint_source="domain_touchpoint",
+                entity_summary_df=payload["attribution"],
+                entity_summary_kpis=[],
+                broken_journeys_df=None,
+            ).dimensions["Palanca"].change_table_df,
+            max_rows=4,
+        )
+    )
+    causal_slide = prs.slides[6]
+    assert causal_slide.shapes[4].text == "NOTA MEDIA DEL TÓPICO"
+    assert causal_slide.shapes[7].text == "CONFIANZA"
+    assert causal_slide.shapes[2].text == ""
+    assert causal_slide.shapes[5].text == ""
+    evidence_paragraphs = [
+        paragraph
+        for shape in causal_slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+        if "INC" in paragraph.text
+    ]
+    assert any("INC00040, INC00041" in paragraph.text for paragraph in evidence_paragraphs)
+    assert not any("INC..." in paragraph.text for paragraph in evidence_paragraphs)
+    assert all(paragraph.alignment == PP_ALIGN.LEFT for paragraph in evidence_paragraphs)
+    assert all(paragraph._p.get_or_add_pPr().get("marL") for paragraph in evidence_paragraphs)
     assert out.compact_file_name.endswith("-sin-evolucion-nps.pptx")
     assert len(Presentation(BytesIO(out.compact_content)).slides) == out.slide_count - 2
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
@@ -692,6 +733,7 @@ def test_overview_figure_uses_full_history_and_highlights_requested_period() -> 
         for value in (list(trace.x) if trace.x is not None else [])
     ]
     assert min(all_dates) == pd.Timestamp("2025-11-01")
+    assert list(figure.data[0].y) == [100.0, -100.0, 0.0]
     assert any(
         pd.Timestamp(shape.x0) == pd.Timestamp("2026-01-01")
         and pd.Timestamp(shape.x1) == pd.Timestamp("2026-01-31")
@@ -724,6 +766,21 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["comments"] == period_kpis["period"]["kpis"]["comments"]
     assert overview["classic_nps"] == period_kpis["period"]["kpis"]["classic_nps"]
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
+
+
+def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None:
+    current = pd.DataFrame(
+        {
+            "Canal": ["Web"] * 9,
+            "Subpalanca": ["Falla"] * 3 + ["Login"] * 2 + ["Fácil"] * 3 + ["Seguro"],
+            "NPS": [4, 5, 6, 0, 10, 9, 9, 10, 10],
+        }
+    )
+
+    overview = executive_ppt._period_overview(current, topic_channel="Web")
+
+    assert overview["pain_point"] == "Falla"
+    assert overview["strength_point"] == "Fácil"
 
 
 def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
@@ -926,7 +983,7 @@ def test_generate_business_review_ppt_handles_missing_raw_nps() -> None:
                     texts.append(paragraph.text or "")
 
     assert any("acumulado histórico" in t for t in texts)
-    assert any("detractores hacen visible" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
 
 
 def test_text_topic_selector_limits_table_rows() -> None:

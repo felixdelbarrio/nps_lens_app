@@ -42,7 +42,7 @@ const FIXED_TWO_DECIMAL_FORMATTER = new Intl.NumberFormat(LOCALE, {
 const PERCENT_COLUMN_PATTERN =
   /%|percent|percentage|porcentaje|share|ratio|rate/i;
 const NON_PERCENT_COLUMN_PATTERN =
-  /\bpp\b|por 100|per 100|score|similaridad|cohesi|corr|lag|pts?\b/i;
+  /\bpp\b|por 100|per 100|score|similaridad|cohesi|corr|lag|pts?\b|opiniones detractoras|total opiniones/i;
 const SIGNED_COLUMN_PATTERN = /\bgap\b|brecha|diferencia|difference/i;
 const PLAIN_NUMERIC_PATTERN = /^[+-]?\d+(?:[.,]\d+)?$/;
 const PERCENT_VALUE_PATTERN = /^([+-]?\d+(?:[.,]\d+)?)\s*%$/;

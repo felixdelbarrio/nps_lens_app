@@ -46,12 +46,14 @@ def test_period_kpis_use_official_temporal_taxonomy_and_aggregated_period_nps() 
 
     historical = scope["historical"]
     assert historical["label"] == "Febrero 2026"
+    assert historical["note"] == "KPIs agregados del período anterior (01/02/2026 a 28/02/2026)"
     assert historical["kpis"]["samples"] == 2
     assert historical["kpis"]["classic_nps"] == 0.0
     assert historical["deltas"] is None
     assert historical["show_deltas"] is False
 
     period = scope["period"]
+    assert period["note"] == "KPIs agregados del período (01/03/2026 a 31/03/2026)"
     assert period["kpis"]["comments"] == 3
     assert period["kpis"]["nps_average"] == 5.0
     assert period["kpis"]["classic_nps"] == 0.0

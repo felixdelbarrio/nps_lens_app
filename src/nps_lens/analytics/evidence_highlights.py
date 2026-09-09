@@ -22,12 +22,16 @@ def contributing_terms(
         word = strip_accents_unicode(match.group().lower())
         if len(word) < 3 or word in _STOPWORDS:
             continue
-        padded = f" {word} "
-        if word in word_features or any(
-            padded[start : start + size] in char_features
-            for size in (3, 4, 5)
-            for start in range(max(0, len(padded) - size + 1))
-        ):
+        morphological_char_match = any(
+            len(feature.strip()) >= 4
+            and (
+                word == feature.strip()
+                or (word.startswith(feature.strip()) and len(word) - len(feature.strip()) <= 2)
+                or (feature.strip().startswith(word) and len(feature.strip()) - len(word) <= 2)
+            )
+            for feature in char_features
+        )
+        if word in word_features or morphological_char_match:
             terms.add(word)
     return tuple(sorted(terms))
 

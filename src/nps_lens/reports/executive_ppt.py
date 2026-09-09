@@ -304,6 +304,14 @@ def _month_label_es(d: date) -> str:
     return f"{months.get(int(d.month), 'mes')} {int(d.year)}"
 
 
+def _long_date_es(value: object) -> str:
+    timestamp = _coerce_datetime_scalar(value)
+    if pd.isna(timestamp):
+        return _safe_date(value)
+    month = _month_label_es(timestamp).split()[0].title()
+    return f"{timestamp.day} de {month} de {timestamp.year}"
+
+
 def _comment_column(df: pd.DataFrame) -> str:
     for candidate in ["Comment", "Comentario", "comment", "comentario"]:
         if candidate in df.columns:
@@ -457,8 +465,8 @@ def _period_overview(
         else compute_score_kpis(current_nps_df)
     )
     temporal_kpis = (
-        period_kpis.get("temporal", {})
-        if isinstance(period_kpis, dict) and isinstance(period_kpis.get("temporal"), dict)
+        period_block.get("temporal", {})
+        if isinstance(period_block.get("temporal"), dict)
         else build_period_boundary_kpis(current_nps_df)
     )
     temporal_base = temporal_kpis.get("base_kpis", {})
@@ -503,14 +511,16 @@ def _period_overview(
             driver_view[driver_col] = driver_view[driver_col].astype(str).str.strip()
             driver_view = driver_view[driver_view[driver_col] != ""]
             if not driver_view.empty:
-                ranking = (
-                    driver_view.groupby(driver_col, dropna=False)
-                    .agg(nps_mean=("NPS", "mean"), n=("NPS", "size"))
-                    .sort_values(["nps_mean", "n"], ascending=[True, False])
-                )
-                if not ranking.empty:
-                    pain_point = str(ranking.index[0])
-                    strength_point = str(ranking.index[-1])
+                detractor_counts = driver_view.loc[
+                    driver_view["NPS"].le(6), driver_col
+                ].value_counts()
+                promoter_counts = driver_view.loc[
+                    driver_view["NPS"].ge(9), driver_col
+                ].value_counts()
+                if not detractor_counts.empty:
+                    pain_point = str(detractor_counts.index[0])
+                if not promoter_counts.empty:
+                    strength_point = str(promoter_counts.index[0])
     return {
         "comments": _safe_int(
             aggregate_payload.get("comments", aggregate_kpis.comments), default=0
@@ -693,8 +703,6 @@ def _build_overview_figure(
             .agg(n=("NPS", "size"), det=("det", "sum"), pas=("pas", "sum"), pro=("pro", "sum"))
             .sort_values("day")
         )
-        for column in ("n", "det", "pas", "pro"):
-            full_metrics[column] = full_metrics[column].cumsum()
         total = full_metrics["n"].replace({0: np.nan})
         full_metrics["det_pct"] = full_metrics["det"] / total * 100.0
         full_metrics["pas_pct"] = full_metrics["pas"] / total * 100.0
@@ -2199,7 +2207,7 @@ def _build_causal_scenarios(
                 url=record.get("url", ""),
                 segments=(record.get("summary_segments") or []),
             )
-            for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
+            for record in helix_records
         ]
         helix_lines = [
             _clean_evidence_excerpt(
@@ -2264,10 +2272,12 @@ def _build_presentation_context(
         )
     if selected_raw.empty:
         selected_raw = current_period.copy()
+    selected_raw = selected_raw.loc[
+        selected_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
+    ].copy()
     if selected_raw.empty:
-        selected_raw = compare_raw[
-            (compare_raw["date"] >= pd.Timestamp(period_start))
-            & (compare_raw["date"] <= pd.Timestamp(period_end))
+        selected_raw = compare_raw.loc[
+            compare_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
         ].copy()
 
     kpi_history_df = (
@@ -2275,7 +2285,7 @@ def _build_presentation_context(
         if comparison_nps_df is not None
         else selected_nps_df if selected_nps_df is not None else pd.DataFrame()
     )
-    kpi_current_df = selected_nps_df if selected_nps_df is not None else current_period
+    kpi_current_df = current_source_period if not current_source_period.empty else selected_raw
     resolved_period_kpis = period_kpis or build_period_kpis(
         history_df=kpi_history_df,
         current_df=kpi_current_df,
@@ -2433,6 +2443,28 @@ def _set_template_text(
         run.font.bold = bold
     if color:
         run.font.color.rgb = _rgb(color)
+
+
+def _set_template_messages(shape: object, messages: list[str], *, size: float) -> None:
+    tf = shape.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    for index, message in enumerate(messages):
+        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.space_after = Pt(12)
+        properties = paragraph._p.get_or_add_pPr()
+        for child in list(properties):
+            if child.tag.rsplit("}", 1)[-1] in {"buAutoNum", "buBlip", "buChar", "buNone"}:
+                properties.remove(child)
+        properties.insert(0, OxmlElement("a:buNone"))
+        properties.set("marL", "0")
+        properties.set("indent", "0")
+        run = paragraph.add_run()
+        run.text = message
+        run.font.name = "Source Serif 4"
+        run.font.size = Pt(size)
+        run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
 
 
 def _set_template_table(table: object, rows: list[list[str]]) -> None:
@@ -2622,7 +2654,7 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
 
 
 def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None:
-    records = scenario.helix_evidence_records[: EDITORIAL_LIMITS.max_helix_evidence]
+    records = scenario.helix_evidence_records
     fallback = scenario.helix_evidence_lines[: EDITORIAL_LIMITS.max_helix_evidence]
     tf = shape.text_frame
     tf.clear()
@@ -2630,26 +2662,32 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
     entries = records or [CausalEvidenceRecord("", line, "") for line in fallback]
     if not entries:
         entries = [CausalEvidenceRecord("", "Sin evidencia Helix vinculada en el periodo.", "")]
-    total_incidents = _safe_int(scenario.row.get("linked_incidents", len(entries)), len(entries))
-    visible_entries = list(entries[: EDITORIAL_LIMITS.max_helix_evidence])
-    has_overflow = total_incidents > len(visible_entries)
-    if has_overflow and visible_entries:
-        visible_entries[-1] = CausalEvidenceRecord("INC...", "", "")
-    for index, record in enumerate(visible_entries):
-        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+    max_entries = EDITORIAL_LIMITS.max_helix_evidence
+    has_overflow = len(entries) > max_entries
+    detailed_entries = list(entries[: max_entries - 1] if has_overflow else entries[:max_entries])
+
+    def prepare_paragraph(paragraph: object, *, size: float) -> None:
         paragraph_properties = paragraph._p.get_or_add_pPr()
         for child in list(paragraph_properties):
             if child.tag.rsplit("}", 1)[-1] in {"buAutoNum", "buBlip", "buChar", "buNone"}:
                 paragraph_properties.remove(child)
         paragraph_properties.insert(0, OxmlElement("a:buNone"))
+        paragraph_properties.set("marL", str(int(Pt(14))))
+        paragraph_properties.set("indent", str(-int(Pt(10))))
         paragraph.level = 0
+        paragraph.alignment = PP_ALIGN.LEFT
         paragraph.space_after = Pt(5)
-        size = 11 if len(visible_entries) <= 2 else 9.5
         bullet_run = paragraph.add_run()
         bullet_run.text = "• "
         bullet_run.font.name = "Lato"
         bullet_run.font.size = Pt(size)
         bullet_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    visible_count = len(detailed_entries) + (1 if has_overflow else 0)
+    size = 11 if visible_count <= 2 else 9.5
+    for index, record in enumerate(detailed_entries):
+        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        prepare_paragraph(paragraph, size=size)
         if record.incident_id:
             id_run = paragraph.add_run()
             id_run.text = record.incident_id
@@ -2672,6 +2710,27 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
                 size=size,
                 color=BBVA_COLORS["ink"],
             )
+
+    if has_overflow:
+        remaining = [record for record in entries[len(detailed_entries) :] if record.incident_id]
+        if remaining:
+            paragraph = tf.add_paragraph()
+            prepare_paragraph(paragraph, size=size)
+            for index, record in enumerate(remaining):
+                if index:
+                    separator = paragraph.add_run()
+                    separator.text = ", "
+                    separator.font.name = "Lato"
+                    separator.font.size = Pt(size)
+                    separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                id_run = paragraph.add_run()
+                id_run.text = record.incident_id
+                id_run.font.name = "Lato"
+                id_run.font.size = Pt(size)
+                id_run.font.bold = True
+                id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                if record.url:
+                    id_run.hyperlink.address = record.url
 
 
 def _scenario_comment_groups(row: pd.Series, fallback: list[str]) -> list[tuple[str, str, list[dict[str, object]]]]:
@@ -2780,13 +2839,13 @@ def _fill_template_deck(
     _set_template_table(comparison.shapes[6].table, _template_period_rows(context))
     _set_template_text(
         comparison.shapes[8],
-        f"Entre los tópicos observados en {topic_channel}, la mayor fricción se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
+        f"Entre los tópicos observados en {topic_channel}, la mayor fricción por volumen detractor se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
         size=13,
         color=BBVA_COLORS["ink"],
     )
     _set_template_text(
         comparison.shapes[12],
-        f"Entre los tópicos observados en {topic_channel}, la mejor experiencia se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
+        f"Entre los tópicos observados en {topic_channel}, la mejor señal por volumen promotor se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
         size=13,
         color=BBVA_COLORS["ink"],
     )
@@ -2796,7 +2855,8 @@ def _fill_template_deck(
     comparison.shapes[12].height = Inches(1.24)
     _set_template_text(
         comparison.shapes[3],
-        f"El NPS clásico varía {_fmt_signed_or_nd(delta)} puntos y el peso detractor "
+        f"La experiencia de cliente {'mejora' if delta > 0 else 'empeora' if delta < 0 else 'se mantiene'}: "
+        f"el NPS clásico mensual varía {_fmt_signed_or_nd(delta)} pts y el peso detractor "
         f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.",
         size=11.5,
         bold=True,
@@ -2816,19 +2876,20 @@ def _fill_template_deck(
     )
     _set_template_text(
         history.shapes[2],
-        f"NPS clásico acumulado y distribución por grupo\nPeriodo {context.period_label} resaltado",
+        f"NPS clásico diario y distribución por grupo\nPeriodo {context.period_label} resaltado",
         size=12,
         bold=True,
         color="FFFFFF",
         font="Source Serif 4",
     )
-    bullets = (
-        f"La base acumulada ({context.overview.get('base_start') or 'sin fecha'} a {context.overview.get('base_end') or 'sin fecha'}) alcanza un NPS clásico de {_fmt_num_or_nd(context.overview.get('base_classic_nps'))}.\n\n"
-        f"El acumulado hasta {_safe_date(context.period_end)} alcanza {_fmt_num_or_nd(context.overview.get('cumulative_classic_nps'))}.\n\n"
-        f"Los detractores hacen visible la fricción: su peso pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}."
-    )
-    _set_template_text(
-        history.shapes[3], bullets, size=11.5, color=BBVA_COLORS["ink"], font="Source Serif 4"
+    _set_template_messages(
+        history.shapes[3],
+        [
+            f"El NPS clásico histórico terminó en {base_month} en {_fmt_num_or_nd(context.overview.get('base_classic_nps'))}.",
+            f"A {_long_date_es(context.period_end)} alcanza {_fmt_num_or_nd(context.overview.get('cumulative_classic_nps'))}.",
+            f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}.",
+        ],
+        size=11.5,
     )
     _set_template_text(
         history.shapes[4],
@@ -2918,7 +2979,6 @@ def _fill_template_deck(
         color="FFFFFF",
         font="Source Serif 4",
     )
-    _set_template_table(change.shapes[7].table, change_rows)
     _set_template_text(
         change.shapes[6],
         f"{worst[0]} presenta el mayor Delta NPS Clásico ({worst[1]} puntos).",
@@ -2933,6 +2993,12 @@ def _fill_template_deck(
         8,
         view.change_figure,
         empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
+    )
+    _replace_template_table(
+        change,
+        7,
+        change_rows,
+        column_widths=[1.00, 0.64, 0.63, 0.70, 0.70, 0.70],
     )
 
     pain = prs.slides[5]
@@ -3020,7 +3086,7 @@ def _fill_template_deck(
             slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT
         )
         _set_template_text(
-            slide.shapes[2],
+            slide.shapes[4],
             "NOTA MEDIA DEL TÓPICO",
             size=10,
             bold=True,
@@ -3036,9 +3102,8 @@ def _fill_template_deck(
             font="Source Serif 4",
             align=PP_ALIGN.CENTER,
         )
-        _set_template_text(slide.shapes[4], "")
         _set_template_text(
-            slide.shapes[5],
+            slide.shapes[7],
             "CONFIANZA",
             size=10,
             bold=True,
@@ -3054,7 +3119,6 @@ def _fill_template_deck(
             font="Source Serif 4",
             align=PP_ALIGN.CENTER,
         )
-        _set_template_text(slide.shapes[7], "")
         slide.shapes[9].left = Inches(0.38)
         slide.shapes[9].top = Inches(4.90)
         slide.shapes[9].width = Inches(9.37)

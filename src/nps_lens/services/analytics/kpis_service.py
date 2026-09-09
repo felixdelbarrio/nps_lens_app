@@ -562,6 +562,25 @@ def _previous_period_label(
     return "periodo anterior"
 
 
+def _available_date_range_note(frame: pd.DataFrame, *, prefix: str) -> str:
+    dates = _coerce_dates(frame).dropna()
+    if dates.empty:
+        return f"{prefix}; no hay fechas suficientes para mostrar el rango."
+    return f"{prefix} ({dates.min():%d/%m/%Y} a {dates.max():%d/%m/%Y})"
+
+
+def _bounded_date_range_note(
+    frame: pd.DataFrame,
+    *,
+    prefix: str,
+    start: Optional[pd.Timestamp],
+    end: Optional[pd.Timestamp],
+) -> str:
+    if frame.empty or start is None or end is None:
+        return _available_date_range_note(frame, prefix=prefix)
+    return f"{prefix} ({pd.Timestamp(start):%d/%m/%Y} a {pd.Timestamp(end):%d/%m/%Y})"
+
+
 def build_period_kpis(
     *,
     history_df: pd.DataFrame,
@@ -606,9 +625,7 @@ def build_period_kpis(
         baseline=baseline,
         base_label=previous_label,
         actual_label=context_label,
-        note=(
-            "NPS clásico agregado sobre todas las respuestas del Period Container."
-        ),
+        note=_available_date_range_note(current_df, prefix="KPIs agregados del período"),
     )
     period_payload["temporal"] = temporal
     return {
@@ -616,7 +633,12 @@ def build_period_kpis(
             label=previous_label,
             period_type="historical_previous",
             kpis=baseline,
-            note="KPIs agregados del periodo anterior disponible.",
+            note=_bounded_date_range_note(
+                baseline_df,
+                prefix="KPIs agregados del período anterior",
+                start=previous_start,
+                end=previous_end,
+            ),
         ),
         "period": period_payload,
         "cumulative": _kpi_payload(

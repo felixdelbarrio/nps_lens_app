@@ -195,6 +195,10 @@ function formatMonthOptionLabel(month: string) {
   return MONTH_LABELS_ES[month] || month;
 }
 
+function compactPeriodLabel(label: string) {
+  return label.replace(/\b\d{2}(\d{2})\b/g, "$1");
+}
+
 type KpiPayload = DashboardPayload["kpis"];
 type KpiKind = "metric" | "percentage" | "volume";
 
@@ -1079,12 +1083,15 @@ export function App() {
 
   function renderGapsPanel() {
     const gapColumnLabel = dashboard?.gaps.gap_column_label || "Brecha vs Base";
+    const periodLabel = compactPeriodLabel(dashboard?.context_label || "Periodo");
     const gapRows = (dashboard?.gaps.table || []).map((row) => ({
       Valor: row.value ?? "",
-      Opiniones: row.n ?? "",
-      "NPS Clásico": row.nps ?? "",
-      "Opiniones detractoras": row.detractors ?? "",
       "Peso en la muestra": row.sample_share == null ? "" : formatPercentage(Number(row.sample_share)),
+      [`Total opiniones [${periodLabel}]`]: row.n ?? "",
+      [`Opiniones detractoras [${periodLabel}]`]: row.detractors ?? "",
+      [`% promotor [${periodLabel}]`]: row.promoter_rate == null ? "" : formatPercentage(Number(row.promoter_rate)),
+      [`% detractor [${periodLabel}]`]: row.detractor_rate == null ? "" : formatPercentage(Number(row.detractor_rate)),
+      [`NPS Clásico [${periodLabel}]`]: row.nps ?? "",
       [gapColumnLabel]: row.gap_vs_base ?? ""
     }));
     const gapTitle = dashboard?.gaps.title || "Brechas NPS";
@@ -1247,6 +1254,9 @@ export function App() {
           <div className="section-heading section-heading-inline scope-period-heading">
             <div>
               <h3>{dashboard?.scope?.period?.label || dashboard?.context_label || "Periodo seleccionado"}</h3>
+              {dashboard?.scope?.period?.note ? (
+                <p className="secondary-copy">{dashboard.scope.period.note}</p>
+              ) : null}
             </div>
           </div>
           {renderKpiGrid(dashboard?.scope?.period, dashboard?.kpis)}
