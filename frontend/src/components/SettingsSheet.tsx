@@ -6,11 +6,15 @@ import { Icon } from "./Icon";
 import { NavigationTabs } from "./NavigationTabs";
 import { ServiceOriginMaintenance } from "./ServiceOriginMaintenance";
 import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
+import { SnapshotSettings } from "./TaxonomyStudio";
+import type { TaxonomyContext } from "../api";
 import { TelemetryPanel } from "./TelemetryPanel";
 
-export type SettingsTab = "appearance" | "ingestion" | "advanced" | "maintenance" | "equivalences" | "telemetry";
+export type SettingsTab = "appearance" | "ingestion" | "advanced" | "maintenance" | "equivalences" | "telemetry" | "snapshots";
 
 type SettingsSheetProps = {
+  taxonomyContext?: TaxonomyContext;
+  onTaxonomyChange?: () => Promise<void>;
   open: boolean;
   activeTab: SettingsTab;
   onTabChange: (value: SettingsTab) => void;
@@ -44,11 +48,14 @@ const SETTINGS_TABS = [
   { id: "ingestion", label: "Reglas de ingesta" },
   { id: "advanced", label: "Ajustes avanzados" },
   { id: "equivalences", label: "Equivalencias" },
+  { id: "snapshots", label: "Snapshots" },
   { id: "telemetry", label: "Telemetría" },
   { id: "maintenance", label: "Mantenimiento Service Origin" }
 ] as const;
 
 export function SettingsSheet({
+  taxonomyContext = {},
+  onTaxonomyChange = async () => {},
   open,
   activeTab,
   onTabChange,
@@ -357,9 +364,11 @@ export function SettingsSheet({
                 Decide qué nombre verá el cliente y agrupa debajo todas las formas equivalentes de escribirlo.
               </p>
             </div></div>
-            <EquivalenceMaintenance disabled={actionsDisabled} />
+            <EquivalenceMaintenance disabled={actionsDisabled} context={taxonomyContext} onChange={onTaxonomyChange} />
           </section>
         ) : null}
+
+        {activeTab === "snapshots" ? <SnapshotSettings context={taxonomyContext} onChange={onTaxonomyChange} disabled={actionsDisabled} /> : null}
 
         {activeTab === "telemetry" ? (
           <section className="settings-group">

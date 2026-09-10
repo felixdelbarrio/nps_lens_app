@@ -10,21 +10,21 @@ import pandas as pd
 from nps_lens import PIPELINE_VERSION
 from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.core.store import DatasetContext
-from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.record_identity import business_keys, hash_rows
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.09.07.score-groups"
+PARSER_VERSION = "2026.09.07.taxonomy"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
     "NPS",
     "Canal",
-    "Palanca",
-    "Subpalanca",
 ]
 
 NPS_THERMAL_OPTIONAL = [
+    "Palanca",
+    "Subpalanca",
     "ID",
     "Comment",
     "UsuarioDecisión",
@@ -137,19 +137,7 @@ def _split_csvish(value: object) -> list[str]:
 
 
 def _normalize_comment(value: object) -> str:
-    return _coerce_string(value)
-
-
-def _vectorized_hash(frame: pd.DataFrame, columns: list[str], prefix: str = "") -> pd.Series:
-    """Hash normalized rows in native pandas code instead of Python per-row callbacks."""
-    stable = frame.reindex(columns=columns).copy()
-    for column in stable.columns:
-        if pd.api.types.is_datetime64_any_dtype(stable[column]):
-            stable[column] = stable[column].dt.strftime("%Y-%m-%dT%H:%M:%S.%f").fillna("")
-        else:
-            stable[column] = stable[column].astype("string").fillna("")
-    hashes = pd.util.hash_pandas_object(stable, index=False, categorize=True)
-    return hashes.map(lambda value: prefix + format(int(value), "016x"))
+    return "" if _is_missing(value) else str(value)
 
 
 def _infer_context(
@@ -215,9 +203,7 @@ def read_nps_thermal_excel(
     service_origin_n1: Optional[str] = None,
     service_origin_n2: Optional[str] = None,
     sheet_name: Optional[Union[str, int]] = None,
-    equivalences: Optional[EquivalenceRegistry] = None,
 ) -> IngestResult:
-    registry = equivalences or EquivalenceRegistry.default()
     sheet: Union[str, int] = sheet_name if sheet_name is not None and sheet_name != "" else 0
     df = pd.read_excel(path, sheet_name=sheet, engine="openpyxl", dtype=object)
     if isinstance(df, dict):
@@ -312,6 +298,7 @@ def read_nps_thermal_excel(
         )
 
     work = df.copy()
+    work["_source_row_number"] = work.index + 2
     work = _filter_context(work, "service_origin", str(service_origin), issues)
     work = _filter_context(work, "service_origin_n1", str(service_origin_n1), issues)
     work["service_origin"] = str(service_origin)
@@ -335,6 +322,13 @@ def read_nps_thermal_excel(
         if column not in work.columns:
             work[column] = ""
 
+    for column, source in [
+        ("Canal", "source_channel"),
+        ("Palanca", "source_lever"),
+        ("Subpalanca", "source_sublever"),
+    ]:
+        work[source] = work[column].map(_normalize_comment)
+
     for column in [
         "ID",
         "Comment",
@@ -350,13 +344,6 @@ def read_nps_thermal_excel(
     ]:
         work[column] = work[column].apply(
             _normalize_comment if column == "Comment" else _coerce_string
-        )
-
-    raw_dimensions = {column: work[column].copy() for column in ["Canal", "Palanca", "Subpalanca"]}
-    for column in ["Canal", "Palanca", "Subpalanca"]:
-        work[column] = registry.normalize_series(column, work[column])
-        work[f"_{column.casefold()}_key"] = work[column].map(
-            lambda value, dimension=column: registry.key(dimension, value)
         )
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
@@ -407,41 +394,7 @@ def read_nps_thermal_excel(
             },
         )
 
-    collision_report = {
-        dimension: registry.collision_report(dimension, values.tolist())
-        for dimension, values in raw_dimensions.items()
-    }
-    collision_report = {key: value for key, value in collision_report.items() if value}
-    if collision_report:
-        issues.append(
-            ValidationIssue(
-                level="INFO",
-                code="equivalent_labels_merged",
-                message="Se unificaron etiquetas equivalentes antes de calcular agregados y cruces.",
-                details={"dimensions": collision_report},
-            )
-        )
-
-    work["_source_row_number"] = work.index.to_series().add(2).astype(int)
-    has_external_id = work["ID"].astype(str).str.strip().ne("")
-    work["_business_key"] = ""
-    work.loc[has_external_id, "_business_key"] = "id:" + work.loc[has_external_id, "ID"]
-    fallback_columns = [
-        "Fecha",
-        "NPS",
-        "Comment",
-        "UsuarioDecisión",
-        "Canal",
-        "Palanca",
-        "Subpalanca",
-        "service_origin",
-        "service_origin_n1",
-        "service_origin_n2",
-    ]
-    if (~has_external_id).any():
-        work.loc[~has_external_id, "_business_key"] = _vectorized_hash(
-            work.loc[~has_external_id], fallback_columns, prefix="fp:"
-        )
+    work["_business_key"] = business_keys(work)
     fingerprint_columns = [
         "ID",
         "Fecha",
@@ -459,7 +412,7 @@ def read_nps_thermal_excel(
         "service_origin_n2",
         *extra_columns,
     ]
-    work["_record_fingerprint"] = _vectorized_hash(work, fingerprint_columns)
+    work["_record_fingerprint"] = hash_rows(work, fingerprint_columns)
     duplicate_rows_in_file = int(work.duplicated(subset=["_business_key"], keep="last").sum())
     if duplicate_rows_in_file:
         issues.append(
@@ -483,6 +436,17 @@ def read_nps_thermal_excel(
             )
         )
 
+    from nps_lens.analytics.taxonomy import detect_taxonomy
+
+    detection = detect_taxonomy(work)
+    issues.append(
+        ValidationIssue(
+            level="INFO",
+            code="taxonomy_detected",
+            message="Taxonomía detectada: " + detection["state"],
+            details=detection,
+        )
+    )
     return IngestResult(
         df=work.reset_index(drop=True),
         issues=issues,
@@ -490,12 +454,11 @@ def read_nps_thermal_excel(
         meta={
             "parser_version": PARSER_VERSION,
             "pipeline_version": PIPELINE_VERSION,
+            "taxonomy": detection,
             "raw_rows": raw_rows,
             "normalized_rows": int(len(work)),
             "duplicate_rows_in_file": duplicate_rows_in_file,
             "extra_columns": extra_columns,
             "missing_optional_columns": missing_optional_columns,
-            "equivalence_schema_version": registry.to_dict()["schema_version"],
-            "equivalent_labels_merged": collision_report,
         },
     )

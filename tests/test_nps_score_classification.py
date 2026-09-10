@@ -95,21 +95,20 @@ def test_historical_manual_groups_do_not_reach_snapshot(tmp_path: Path) -> None:
         stored = connection.execute("SELECT nps_group FROM records ORDER BY nps_score").fetchall()
         assert [row[0] for row in stored] == ["DETRACTOR"] * 7 + ["PASIVO"] * 2 + ["PROMOTOR"] * 2
         connection.execute("UPDATE records SET nps_group = 'MANUAL ERROR'")
-    registry = EquivalenceRegistry.from_dict(
-        {"dimensions": {"NPS Group": [{"canonical": "MANUAL ERROR", "aliases": ["PASIVO"]}]}}
-    )
-    assert "NPS Group" not in registry.to_dict()["dimensions"]
-    repository.canonicalize_records(registry)
+    with pytest.raises(ValueError, match="Dimensión"):
+        EquivalenceRegistry.from_dict({"dimensions": {"NPS Group": []}})
     dashboard = DashboardService(repository=repository, settings=settings)
     nps = dashboard.dataset_rows(
         dataset_kind="nps", context=context, nps_group="Todos", score_channel="Todos"
     )
     snapshot = build_static_data_snapshot(nps, {"columns": [], "rows": []})
-    pages = snapshot["datasets"]["nps"]["pages"]
-    assert pages["todos|detractor"]["total_rows"] == 7
-    assert pages["todos|pasivo"]["total_rows"] == 2
-    assert pages["todos|promotor"]["total_rows"] == 2
-    assert {row["NPS Group"] for row in pages["todos|todos"]["rows"]} == {
+    page = snapshot["datasets"]["nps"]["page"]
+    assert page["total_rows"] == 11
+    groups = [row["NPS Group"] for row in page["rows"]]
+    assert groups.count("DETRACTOR") == 7
+    assert groups.count("PASIVO") == 2
+    assert groups.count("PROMOTOR") == 2
+    assert {row["NPS Group"] for row in page["rows"]} == {
         "DETRACTOR",
         "PASIVO",
         "PROMOTOR",

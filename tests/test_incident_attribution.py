@@ -128,21 +128,12 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
             {
                 "nps_topic": "Acceso > Login",
                 "touchpoint": "Login",
-                "priority": 0.91,
-                "confidence": 0.82,
-                "causal_score": 0.86,
-                "focus_probability_with_incident": 0.47,
-                "nps_delta_expected": -4.3,
-                "total_nps_impact": 1.7,
-                "nps_points_at_risk": 1.7,
-                "nps_points_recoverable": 1.1,
-                "delta_focus_rate_pp": 29.0,
+                "focus_rate_high_incidence": 0.47,
                 "incident_rate_per_100_responses": 8.5,
                 "incidents": 5,
                 "responses": 120,
-                "action_lane": "Fix estructural",
-                "owner_role": "Producto + Tecnologia",
-                "eta_weeks": 6,
+                "support_organizations": "Producto + Tecnologia",
+                "historical_resolution_weeks": 6,
             }
         ]
     )
@@ -181,8 +172,7 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "2 comentarios VoC" in out.iloc[0]["chain_story"]
     assert "subpalanca Login" in out.iloc[0]["chain_story"]
-    assert out.iloc[0]["action_lane"] == "Fix estructural"
-    assert out.iloc[0]["owner_role"] == "Producto + Tecnologia"
+    assert out.iloc[0]["support_organizations"] == "Producto + Tecnologia"
 
 
 def test_build_incident_attribution_chains_can_use_bbva_source_service_n2_as_touchpoint() -> None:
@@ -289,14 +279,12 @@ def test_executive_journey_catalog_can_be_saved_and_reloaded(tmp_path) -> None:
                 "id": "",
                 "title": "Firma bloqueada",
                 "what_occurs": "No se puede firmar una operación",
-                "expected_evidence": "Comentarios de firma + incidencias de firma",
-                "impact_label": "Alto",
+                "evidence_pattern": "Comentarios de firma + incidencias de firma",
                 "touchpoint": "Firma",
                 "palanca": "Operativa",
                 "subpalanca": "Firma",
                 "route": "Operativa -> firma -> error -> detracción",
                 "cx_readout": "Bloquea la operativa crítica.",
-                "confidence_label": "Alto",
                 "keywords": "firma, token, bloqueo",
             }
         ],
@@ -388,28 +376,24 @@ def test_executive_journey_catalog_load_handles_missing_invalid_and_table_render
                 "id": "dup",
                 "title": "Acceso roto",
                 "what_occurs": "No se puede acceder",
-                "expected_evidence": "Login",
-                "impact_label": "Alto",
+                "evidence_pattern": "Login",
                 "touchpoint": "Login",
                 "palanca": "Acceso",
                 "subpalanca": "Login",
                 "route": "Acceso -> login -> error",
                 "cx_readout": "Bloquea acceso",
-                "confidence_label": "Alto",
                 "keywords": ["login", "acceso"],
             },
             {
                 "id": "dup",
                 "title": "Acceso roto 2",
                 "what_occurs": "No se puede acceder",
-                "expected_evidence": "OTP",
-                "impact_label": "Medio",
+                "evidence_pattern": "OTP",
                 "touchpoint": "Login",
                 "palanca": "Acceso",
                 "subpalanca": "OTP",
                 "route": "Acceso -> otp -> error",
                 "cx_readout": "Bloquea acceso",
-                "confidence_label": "Medio",
                 "keywords": "otp, acceso",
             },
         ],
@@ -467,14 +451,12 @@ def test_build_incident_attribution_chains_can_use_persisted_executive_catalog()
                 "id": "executive_signature_blocked",
                 "title": "Firma bloqueada",
                 "what_occurs": "No se puede firmar",
-                "expected_evidence": "Comentarios de firma + incidencias de token",
-                "impact_label": "Alto",
+                "evidence_pattern": "Comentarios de firma + incidencias de token",
                 "touchpoint": "Firma",
                 "palanca": "Operativa",
                 "subpalanca": "Firma",
                 "route": "Operativa -> firma -> token -> detracción",
                 "cx_readout": "Bloquea la operativa crítica.",
-                "confidence_label": "Alto",
                 "keywords": ["firma", "token", "operativa"],
             }
         ],
@@ -761,15 +743,7 @@ def test_broken_journey_remap_reuses_detected_clusters_in_timeseries_and_chains(
     rationale_df = pd.DataFrame(
         {
             "nps_topic": ["Acceso / Login", "Operativa / Pagos"],
-            "priority": [0.82, 0.74],
-            "confidence": [0.78, 0.70],
-            "causal_score": [0.81, 0.71],
-            "focus_probability_with_incident": [0.41, 0.34],
-            "nps_delta_expected": [-4.1, -3.6],
-            "total_nps_impact": [1.6, 1.1],
-            "nps_points_at_risk": [1.6, 1.1],
-            "nps_points_recoverable": [1.0, 0.7],
-            "delta_focus_rate_pp": [22.0, 17.0],
+            "focus_rate_high_incidence": [0.41, 0.34],
             "incident_rate_per_100_responses": [8.0, 6.0],
             "incidents": [4, 3],
             "responses": [22, 20],

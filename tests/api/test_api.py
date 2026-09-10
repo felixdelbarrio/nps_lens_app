@@ -28,6 +28,19 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
+def test_telemetry_excludes_unknown_paths_and_parameter_values(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    client.get("/api/unknown/confidential-customer?email=private@example.com")
+    client.get("/api/dashboard/data/confidential-dataset")
+    payload = app.state.telemetry.to_json_bytes()
+    assert b"confidential-customer" not in payload
+    assert b"private@example.com" not in payload
+    assert b"confidential-dataset" not in payload
+    assert b"<unmatched>" in payload
+    assert b"/api/dashboard/data/{dataset_kind}" in payload
+
+
 def test_api_uploads_and_returns_accumulative_summary(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
     march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
@@ -68,7 +81,7 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
         {
             "Fecha": ["2026-03-01"],
             "NPS": [2],
-            "Canal": ["Web"],
+            "Comment": ["Falta el canal"],
         }
     ).to_excel(invalid, index=False)
 

@@ -39,7 +39,7 @@ describe("artifact downloads", () => {
         })
       );
 
-      const savedPath = await requestArtifact({
+      const params: Record<string, string | number> = {
         service_origin: "BBVA México",
         service_origin_n1: "Senda",
         service_origin_n2: "",
@@ -47,12 +47,13 @@ describe("artifact downloads", () => {
         pop_month: "03",
         nps_group: "Detractores",
         score_channel: "Web",
-        min_n: 200,
         min_similarity: 0.15,
         max_days_apart: 90,
         touchpoint_source: "executive_journeys",
         report_dimension_analysis: "palanca"
-      });
+      };
+      if (endpoint.includes("publication")) params.min_n = 200;
+      const savedPath = await (requestArtifact as (params: Record<string, string | number>) => Promise<string>)(params);
       expect(String(fetchMock.mock.calls[0]?.[0])).toContain(endpoint);
       if (endpoint.includes("publication")) {
         expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("score_channel");

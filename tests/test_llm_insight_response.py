@@ -9,7 +9,6 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
         "insight_id": "bbva-be-2026w10-test-001",
         "title": "Un insight",
         "executive_summary": "Resumen",
-        "confidence": 1.7,  # should clamp to 1.0
         "severity": 9,  # should clamp to 5
         "journey_route": "palanca>sub",
         "segments_most_affected": ["seg1"],
@@ -22,7 +21,6 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
                     "qual": ["dato1"],
                 },
                 "assumptions": ["as1"],
-                "actions": [{"action": "Fix", "owner": "Tech", "eta": "2w"}],
                 "tests_or_checks": ["Validar muestra"],
             }
         ],
@@ -43,7 +41,6 @@ def test_validate_insight_response_ok_and_normalizes_ranges():
     assert ok
     assert errs == []
     assert norm is not None
-    assert norm["confidence"] == 1.0
     assert norm["severity"] == 5
     assert norm["root_causes"][0]["evidence"]["qual"] == ["dato1"]
     assert norm["tags"]["channel"] == "mobile"
@@ -62,7 +59,6 @@ def test_validate_insight_response_cleans_blank_route_and_text_fields():
         "insight_id": "  bbva-be-unknown-unknown-001  ",
         "title": "  Insight limpio  ",
         "executive_summary": "  Resumen limpio  ",
-        "confidence": "0.8",
         "severity": "4",
         "journey_route": " ",
         "segments_most_affected": [" segmento a ", "", "segmento b"],

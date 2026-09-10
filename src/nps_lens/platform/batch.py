@@ -9,7 +9,9 @@ import pandas as pd
 
 from nps_lens.application.service import AppService
 from nps_lens.core.store import DatasetContext, DatasetStore
-from nps_lens.ingest import read_incidents_csv, read_nps_thermal_excel, read_reviews_csv
+from nps_lens.ingest.incidents import read_incidents_csv
+from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
+from nps_lens.ingest.reviews import read_reviews_csv
 from nps_lens.llm.pack import build_insight_pack, export_pack
 from nps_lens.platform.artifacts import ensure_artifact_dirs, update_manifest, write_json_atomic
 
@@ -153,11 +155,11 @@ def run_platform_batch(
         except Exception as e:
             routes_out = {"error": str(e)}
 
-        # --- Build top-k packs (rank opportunities) ---
+        # --- Build top-k packs (rank nps_gaps) ---
         from nps_lens.analytics.causal import best_effort_ate_logit
-        from nps_lens.analytics.opportunities import rank_opportunities
+        from nps_lens.analytics.nps_gaps import rank_nps_gaps
 
-        opps = rank_opportunities(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
+        opps = rank_nps_gaps(nps_df, dimensions=list(spec.dimensions), min_n=int(spec.min_n))
         exported_packs: List[Dict[str, str]] = []
         for top in opps[: int(spec.top_k_packs)]:
             slice_df = nps_df.loc[nps_df[top.dimension].astype(str) == top.value].copy()
@@ -168,7 +170,7 @@ def run_platform_batch(
                 control_cols=["Canal", "Palanca", "Subpalanca"],
             )
             pack = build_insight_pack(
-                title=f"Oportunidad priorizada: {top.dimension}={top.value}",
+                title=f"Brecha NPS observada: {top.dimension}={top.value}",
                 context={**context, "driver_dim": top.dimension, "driver_val": top.value},
                 nps_slice=slice_df,
                 driver={"dimension": top.dimension, "value": top.value},

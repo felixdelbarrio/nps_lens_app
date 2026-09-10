@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 from urllib.parse import quote
 
+import pandas as pd
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from nps_lens.analytics.taxonomy import TaxonomyConfig
 from nps_lens.api.schemas import (
     ContextOptionsResponse,
     DashboardResponse,
@@ -21,11 +24,14 @@ from nps_lens.api.schemas import (
     PreferencesUpdateRequest,
     ServiceOriginHierarchyRequest,
     SummaryResponse,
+    TaxonomyGenerateRequest,
+    TaxonomySettingsRequest,
     UploadResponse,
 )
+from nps_lens.core.store import DatasetContext
 from nps_lens.core.telemetry import RequestTimer, TelemetryCollector
 from nps_lens.domain.models import UploadContext
-from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry
 from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
@@ -139,7 +145,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             finally:
                 duration_ms, cpu_ms = timer.elapsed()
                 route_object = request.scope.get("route")
-                route = str(getattr(route_object, "path", request.url.path))
+                # Never retain user-controlled paths from unmatched requests.
+                route = str(getattr(route_object, "path", "<unmatched>"))
                 request.app.state.telemetry.record(
                     method=request.method,
                     route=route,
@@ -308,6 +315,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ),
             sheet_name=sheet_name,
         )
+        if result["status"] == "completed" and dashboard_layer.taxonomy.state(
+            UploadContext(service_origin, service_origin_n1, service_origin_n2)
+        ).get("restored"):
+            dashboard_layer.taxonomy.resume_local(
+                UploadContext(service_origin, service_origin_n1, service_origin_n2)
+            )
         dashboard_layer.clear_caches()
         return result
 
@@ -451,29 +464,204 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         updated_dashboard_layer = request.app.state.dashboard_service
         return updated_dashboard_layer.context_options(updated_dashboard_layer.resolve_context())
 
+    def taxonomy_context(request: Request) -> UploadContext:
+        return _resolve_context(
+            cast(Settings, request.app.state.settings),
+            request.query_params.get("service_origin"),
+            request.query_params.get("service_origin_n1"),
+            request.query_params.get("service_origin_n2"),
+        )
+
     @app.get("/api/settings/equivalences")
-    def equivalences(request: Request) -> dict[str, object]:
+    def equivalences(
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    ) -> dict[str, object]:
         require_admin(request)
-        current_settings = cast(Settings, request.app.state.settings)
-        return EquivalenceRegistry.load(current_settings.equivalences_path).to_dict()
+        registry = EquivalenceRegistry.load(dashboard_layer.settings.equivalences_path)
+        context = taxonomy_context(request)
+        nps = dashboard_layer.taxonomy.source(context)
+        stored = dashboard_layer.helix_store.get(
+            DatasetContext(
+                context.service_origin, context.service_origin_n1, context.service_origin_n2
+            )
+        )
+        helix = dashboard_layer.helix_store.load_df(stored) if stored else pd.DataFrame()
+        statistics = {}
+        for scope in sorted(CATEGORICAL_DIMENSIONS):
+            domain, column = scope.split(".", 1)
+            frame = nps if domain == "nps" else helix
+            source_column = (
+                {
+                    "Canal": "source_channel",
+                    "Palanca": "source_lever",
+                    "Subpalanca": "source_sublever",
+                }.get(column, column)
+                if domain == "nps"
+                else column
+            )
+            values = (
+                frame[source_column] if source_column in frame else pd.Series([], dtype="string")
+            )
+            counts = values.astype("string").fillna("").value_counts()
+            groups = registry.to_dict()["dimensions"].get(scope, [])
+            statistics[scope] = {
+                "groups": [
+                    {
+                        "canonical": group["canonical"],
+                        "affected": int(
+                            counts.reindex([group["canonical"], *group["aliases"]], fill_value=0)
+                            .groupby(level=0)
+                            .first()
+                            .sum()
+                        ),
+                    }
+                    for group in groups
+                ],
+                "suggestions": registry.collision_report(scope, counts.index.tolist())[:50],
+            }
+        return {
+            **registry.to_dict(),
+            "available_dimensions": sorted(CATEGORICAL_DIMENSIONS),
+            "statistics": statistics,
+        }
 
     @app.put("/api/settings/equivalences")
     def update_equivalences(
         payload: EquivalenceRegistryRequest,
         request: Request,
-        service_layer: NpsService = Depends(get_service),
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, object]:
         require_admin(request)
-        current_settings = cast(Settings, request.app.state.settings)
         try:
             registry = EquivalenceRegistry.from_dict(payload.model_dump())
-            registry.save(current_settings.equivalences_path)
+            registry.save(dashboard_layer.settings.equivalences_path)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        updated_records = service_layer.repository.canonicalize_records(registry)
         dashboard_layer.clear_caches()
-        return {**registry.to_dict(), "updated_records": updated_records}
+        return equivalences(request, dashboard_layer)
+
+    @app.get("/api/taxonomy")
+    def taxonomy_studio(
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    ) -> dict[str, Any]:
+        return dashboard_layer.taxonomy.studio(taxonomy_context(request))
+
+    @app.get("/api/taxonomy/explore")
+    def taxonomy_explore(
+        request: Request,
+        mode: str,
+        offset: int = 0,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        try:
+            return dashboard_layer.taxonomy.explore(taxonomy_context(request), mode, max(offset, 0))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/api/taxonomy/compare")
+    def taxonomy_compare(
+        request: Request,
+        left: str,
+        right: str,
+        offset: int = 0,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        try:
+            return dashboard_layer.taxonomy.compare(
+                taxonomy_context(request), left, right, max(offset, 0)
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/taxonomy/generate")
+    def taxonomy_generate(
+        payload: TaxonomyGenerateRequest,
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        try:
+            with dashboard_layer._analytics_lock:
+                result = dashboard_layer.taxonomy.generate(
+                    taxonomy_context(request),
+                    payload.mode,
+                    TaxonomyConfig(**payload.config),
+                    payload.regenerate,
+                )
+                dashboard_layer.clear_caches()
+                return result
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.put("/api/taxonomy/settings")
+    def taxonomy_settings(
+        payload: TaxonomySettingsRequest,
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        try:
+            result = dashboard_layer.taxonomy.configure(
+                taxonomy_context(request), payload.model_dump(exclude_none=True)
+            )
+            dashboard_layer.clear_caches()
+            return result
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/api/taxonomy/snapshot")
+    def taxonomy_snapshot(
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    ) -> Response:
+        require_admin(request)
+        context = taxonomy_context(request)
+        try:
+            snapshot = dashboard_layer.taxonomy.snapshot(
+                context,
+                dashboard_layer._load_helix_df(context),
+                dashboard_layer.settings.ui_defaults(),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        content = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
+        if len(content) > 30 * 1024 * 1024:
+            raise HTTPException(
+                413, "El snapshot supera 30 MB; selecciona una política con menos lentes."
+            )
+        return Response(
+            content,
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="nps-lens-taxonomy.json"'},
+        )
+
+    @app.post("/api/taxonomy/restore")
+    def taxonomy_restore(
+        request: Request,
+        file: UploadFile = File(...),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        try:
+            content = file.file.read(30 * 1024 * 1024 + 1)
+            if len(content) > 30 * 1024 * 1024:
+                raise ValueError("El snapshot supera 30 MB.")
+            snapshot = json.loads(content)
+            context = taxonomy_context(request)
+            dashboard_layer.taxonomy.restore(context, snapshot)
+            dashboard_layer.clear_caches()
+            return dashboard_layer.taxonomy.studio(context)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/taxonomy/resume")
+    def taxonomy_resume(
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    ) -> dict[str, Any]:
+        require_admin(request)
+        context = taxonomy_context(request)
+        dashboard_layer.taxonomy.resume_local(context)
+        dashboard_layer.clear_caches()
+        return dashboard_layer.taxonomy.studio(context)
 
     @app.get("/api/dashboard/nps", response_model=DashboardResponse)
     def dashboard_nps(
@@ -485,9 +673,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pop_month: str = "Todos",
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        comparison_dimension: str = "Palanca",
         gap_dimension: str = "Palanca",
-        opportunity_dimension: str = "Palanca",
         cohort_row: str = "Palanca",
         cohort_col: str = "Canal",
         min_n: int = 200,
@@ -506,9 +692,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             pop_month=pop_month,
             nps_group=nps_group,
             score_channel=score_channel,
-            comparison_dimension=comparison_dimension,
             gap_dimension=gap_dimension,
-            opportunity_dimension=opportunity_dimension,
             cohort_row=cohort_row,
             cohort_col=cohort_col,
             min_n=min_n,
@@ -559,7 +743,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pop_month: str = "Todos",
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_n: int = 200,
         min_similarity: float = 0.15,
         max_days_apart: int = 90,
         touchpoint_source: str = "",
@@ -578,7 +761,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 pop_month=pop_month,
                 nps_group=nps_group,
                 score_channel=score_channel,
-                min_n=min_n,
                 min_similarity=min_similarity,
                 max_days_apart=max_days_apart,
                 touchpoint_source=touchpoint_source,

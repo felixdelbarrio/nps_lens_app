@@ -136,22 +136,7 @@ export type DashboardPayload = {
     historical?: ScopeKpiBlock;
     cumulative?: ScopeKpiBlock;
     period?: ScopeKpiBlock;
-    temporal?: ScopeKpiBlock;
     period_aggregates?: PeriodAggregate[];
-  };
-  comparison: {
-    summary?: {
-      label_current: string;
-      label_baseline: string;
-      delta_nps: number;
-      delta_detr_pp: number;
-      n_current: number;
-      n_baseline: number;
-    };
-    dimension?: string;
-    figure?: PlotlyFigureSpec | null;
-    table?: Array<Record<string, unknown>>;
-    has_data?: boolean;
   };
   cohorts: {
     row_dimension?: string;
@@ -160,18 +145,14 @@ export type DashboardPayload = {
   };
   gaps: {
     dimension?: string;
-    overall_nps?: number;
+    base_nps?: number;
+    base_label?: string;
+    base_range?: { start?: string | null; end?: string | null };
+    gap_column_label?: string;
     title?: string;
     subtitle?: string;
     figure?: PlotlyFigureSpec | null;
     table?: Array<Record<string, unknown>>;
-    has_data?: boolean;
-  };
-  opportunities: {
-    dimension?: string;
-    figure?: PlotlyFigureSpec | null;
-    table?: Array<Record<string, unknown>>;
-    bullets?: string[];
     has_data?: boolean;
   };
   controls: {
@@ -196,7 +177,6 @@ export type LinkingPayload = {
   situation?: Record<string, unknown>;
   entity_summary?: Record<string, unknown>;
   scenarios?: Record<string, unknown>;
-  deep_dive?: Record<string, unknown>;
 };
 
 export type DatasetTable = {
@@ -265,7 +245,6 @@ export type DashboardQuery = {
   pop_month: string;
   nps_group: string;
   score_channel: string;
-  comparison_dimension: string;
   gap_dimension: string;
   cohort_row: string;
   cohort_col: string;
@@ -289,7 +268,7 @@ export type PreferencesPayload = {
   touchpoint_source: string;
   min_similarity: number;
   max_days_apart: number;
-  min_n_opportunities: number;
+  min_n_nps_gaps: number;
   min_n_cross_comparisons: number;
 };
 
@@ -308,7 +287,8 @@ export type ReprocessSummary = {
 export type EquivalenceRegistryPayload = {
   schema_version: string;
   dimensions: Record<string, Array<{ canonical: string; aliases: string[] }>>;
-  updated_records?: number;
+  available_dimensions?: string[];
+  statistics?: Record<string, { groups: Array<{ canonical: string; affected: number }>; suggestions: Array<{ variants: string[] }> }>;
 };
 
 export type TelemetryPayload = {
@@ -552,15 +532,15 @@ export async function updateServiceOrigins(
   );
 }
 
-export async function fetchEquivalences(): Promise<EquivalenceRegistryPayload> {
-  return parseResponse<EquivalenceRegistryPayload>(await fetch("/api/settings/equivalences"));
+export async function fetchEquivalences(context: TaxonomyContext = {}): Promise<EquivalenceRegistryPayload> {
+  return parseResponse<EquivalenceRegistryPayload>(await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`));
 }
 
 export async function updateEquivalences(
-  payload: EquivalenceRegistryPayload
+  payload: EquivalenceRegistryPayload, context: TaxonomyContext = {}
 ): Promise<EquivalenceRegistryPayload> {
   return parseResponse<EquivalenceRegistryPayload>(
-    await fetch("/api/settings/equivalences", {
+    await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -628,11 +608,28 @@ export function downloadExecutiveReport(params: {
   pop_month: string;
   nps_group: string;
   score_channel: string;
-  min_n: number;
   min_similarity: number;
   max_days_apart: number;
   touchpoint_source: string;
   report_dimension_analysis: string;
 }) {
   return downloadArtifact("/api/dashboard/report/pptx", params, "reporte-ejecutivo.pptx");
+}
+
+export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "DISCOVERED";
+export type TaxonomyContext = Record<string, string>;
+export type TaxonomyStatus = {
+  detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number; originals_unavailable?: number };
+  active: TaxonomyMode;
+  requested_active: TaxonomyMode;
+  default: TaxonomyMode;
+  policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
+  restored: boolean;
+  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
+};
+export function taxonomyUrl(path: string, context: TaxonomyContext) {
+  return `/api/taxonomy${path}?${new URLSearchParams(context)}`;
+}
+export async function taxonomyRequest<T>(path: string, context: TaxonomyContext, init?: RequestInit): Promise<T> {
+  return parseResponse<T>(await fetch(taxonomyUrl(path, context), init));
 }

@@ -22,7 +22,7 @@ def latest_publication(search_dirs: list[Path]) -> Path | None:
 def load_publication(path: Path | None) -> dict[str, object]:
     if path is None:
         return {
-            "schema_version": "2.0",
+            "schema_version": "4.0",
             "generated_at": "",
             "screens": {"dashboard": {}, "linking": {}, "data": {}},
             "manifest": {"status": "La edición local todavía no se ha generado."},
@@ -66,15 +66,21 @@ def build_preview(
         "isAdmin": True,
         "local": True,
         "reportUrl": report_url,
-        "selectedScopeKey": str(payload.get("scope", {}).get("key", "local"))
-        if isinstance(payload.get("scope"), dict)
-        else "",
-        "publicationCatalog": [
-            {
-                "scopeKey": str(payload.get("scope", {}).get("key", "local")),
-                "label": str(payload.get("scope", {}).get("label", "Edición local")),
-            }
-        ] if isinstance(payload.get("scope"), dict) else [],
+        "selectedScopeKey": (
+            str(payload.get("scope", {}).get("key", "local"))
+            if isinstance(payload.get("scope"), dict)
+            else ""
+        ),
+        "publicationCatalog": (
+            [
+                {
+                    "scopeKey": str(payload.get("scope", {}).get("key", "local")),
+                    "label": str(payload.get("scope", {}).get("label", "Edición local")),
+                }
+            ]
+            if isinstance(payload.get("scope"), dict)
+            else []
+        ),
         "administration": {
             "version": "local",
             "generatedAt": str(payload.get("generated_at", "")),

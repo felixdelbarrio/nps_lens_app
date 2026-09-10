@@ -43,14 +43,6 @@ class TagsV1(BaseModel):
         return txt or "unknown"
 
 
-class ActionV1(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    action: str = ""
-    owner: str = ""
-    eta: str = ""
-
-
 class RootCauseV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -58,18 +50,12 @@ class RootCauseV1(BaseModel):
     why: str = ""
     evidence: EvidenceV1 = Field(default_factory=EvidenceV1)
     assumptions: List[str] = Field(default_factory=list)
-    actions: List[ActionV1] = Field(default_factory=list)
     tests_or_checks: List[str] = Field(default_factory=list)
 
     @field_validator("assumptions")
     @classmethod
     def _clean_assumptions(cls, v: List[str]) -> List[str]:
         return [str(item).strip() for item in v if str(item).strip()]
-
-    @field_validator("actions")
-    @classmethod
-    def _cap_actions(cls, v: List[ActionV1]) -> List[ActionV1]:
-        return v[:3]
 
     @field_validator("tests_or_checks")
     @classmethod
@@ -86,7 +72,6 @@ class InsightResponseV1(BaseModel):
     title: str
     executive_summary: str
 
-    confidence: float = 0.0
     severity: int = 1
 
     journey_route: str = "unknown"
@@ -103,15 +88,6 @@ class InsightResponseV1(BaseModel):
     @classmethod
     def _clean_required_text(cls, v: str) -> str:
         return str(v or "").strip()
-
-    @field_validator("confidence")
-    @classmethod
-    def _conf_range(cls, v: float) -> float:
-        try:
-            v = float(v)
-        except Exception:
-            return 0.0
-        return max(0.0, min(1.0, v))
 
     @field_validator("severity")
     @classmethod

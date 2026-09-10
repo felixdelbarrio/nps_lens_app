@@ -3,16 +3,20 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from hashlib import sha256
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from nps_lens.analytics.nps_helix_link import build_incident_display_text
+from nps_lens.analytics.evidence_highlights import evidence_segments
+from nps_lens.analytics.nps_helix_link import (
+    build_incident_display_text,
+    build_incident_topic,
+    build_nps_topic,
+)
 from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
@@ -27,8 +31,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_access_blocked",
         "title": "Acceso bloqueado",
         "what_occurs": "El cliente no puede acceder a la aplicación o portal",
-        "expected_evidence": "Comentarios sobre login + incidencias de autenticación",
-        "impact_label": "Muy alto",
+        "evidence_pattern": "Comentarios sobre login + incidencias de autenticación",
         "touchpoint": "Login / autenticación",
         "palanca": "Acceso",
         "subpalanca": "Bloqueo / OTP",
@@ -40,7 +43,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "Cuando el acceso falla, el cliente no puede iniciar su relación digital, "
             "generando detracción inmediata."
         ),
-        "confidence_label": "Alto",
         "keywords": (
             "acceso",
             "login",
@@ -59,8 +61,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_critical_operation_failed",
         "title": "Operativa crítica fallida",
         "what_occurs": "Transferencias, pagos o firma no se completan",
-        "expected_evidence": "Comentarios de operación fallida + incidencias transaccionales",
-        "impact_label": "Alto",
+        "evidence_pattern": "Comentarios de operación fallida + incidencias transaccionales",
         "touchpoint": "Transferencias / pagos / firma",
         "palanca": "Operativa",
         "subpalanca": "Error funcional / timeout",
@@ -72,7 +73,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "La incapacidad de completar operaciones financieras genera pérdida directa "
             "de confianza en el canal digital."
         ),
-        "confidence_label": "Alto",
         "keywords": (
             "transfer",
             "pago",
@@ -93,8 +93,7 @@ EXECUTIVE_JOURNEY_CATALOG = (
         "id": "executive_degraded_performance",
         "title": "Rendimiento degradado",
         "what_occurs": "Lentitud o cuelgues durante el uso",
-        "expected_evidence": "Comentarios de lentitud + incidencias de performance",
-        "impact_label": "Medio-alto",
+        "evidence_pattern": "Comentarios de lentitud + incidencias de performance",
         "touchpoint": "Lentitud / cuelgues",
         "palanca": "Uso recurrente",
         "subpalanca": "Degradación del servicio",
@@ -106,7 +105,6 @@ EXECUTIVE_JOURNEY_CATALOG = (
             "No siempre bloquea la operación, pero erosiona progresivamente la percepción "
             "de calidad del servicio."
         ),
-        "confidence_label": "Medio",
         "keywords": (
             "lento",
             "lenta",
@@ -131,14 +129,12 @@ EXECUTIVE_JOURNEY_EDITOR_COLUMNS = [
     "id",
     "title",
     "what_occurs",
-    "expected_evidence",
-    "impact_label",
+    "evidence_pattern",
     "touchpoint",
     "palanca",
     "subpalanca",
     "route",
     "cx_readout",
-    "confidence_label",
     "keywords",
 ]
 
@@ -155,32 +151,21 @@ CHAIN_COLUMNS = [
     "linked_pairs",
     "avg_similarity",
     "avg_nps",
-    "detractor_probability",
-    "nps_delta_expected",
-    "total_nps_impact",
-    "nps_points_at_risk",
-    "nps_points_recoverable",
-    "priority",
-    "confidence",
-    "causal_score",
+    "focus_rate_high_incidence",
     "incident_records",
     "incident_examples",
     "comment_examples",
     "comment_records",
     "chain_story",
-    "delta_focus_rate_pp",
     "incident_rate_per_100_responses",
     "incidents",
     "responses",
-    "action_lane",
-    "owner_role",
-    "eta_weeks",
+    "support_organizations",
+    "historical_resolution_weeks",
     "presentation_mode",
     "journey_route",
-    "journey_expected_evidence",
+    "journey_evidence_pattern",
     "journey_cx_readout",
-    "journey_impact_label",
-    "journey_confidence_label",
 ]
 
 
@@ -239,10 +224,8 @@ BROKEN_JOURNEY_COLUMNS = [
     "helix_source_service_n2",
     "journey_keywords",
     "journey_route",
-    "journey_expected_evidence",
+    "journey_evidence_pattern",
     "journey_cx_readout",
-    "journey_impact_label",
-    "journey_confidence_label",
     "linked_pairs",
     "linked_incidents",
     "linked_comments",
@@ -358,7 +341,7 @@ def _mode_text(series: pd.Series) -> str:
 def _dominant_non_generic(series: pd.Series) -> str:
     if series is None:
         return ""
-    txt = pd.Series(series).astype(str).fillna("").str.strip()
+    txt = pd.Series(series).fillna("").astype(str).str.strip()
     txt = txt[txt.ne("") & ~txt.map(_is_generic)]
     if txt.empty:
         return ""
@@ -366,12 +349,6 @@ def _dominant_non_generic(series: pd.Series) -> str:
     if not mode.empty:
         return str(mode.iloc[0]).strip()
     return str(txt.iloc[0]).strip()
-
-
-def _non_generic_nunique(series: pd.Series) -> int:
-    txt = pd.Series(series).astype(str).fillna("").str.strip()
-    txt = txt[txt.ne("") & ~txt.map(_is_generic)]
-    return int(txt.nunique())
 
 
 def _clip(value: object, max_len: int) -> str:
@@ -445,15 +422,12 @@ def _normalize_executive_journey_entry(
         "id": journey_id,
         "title": title or f"Journey {position + 1}",
         "what_occurs": " ".join(str(base.get("what_occurs") or "").split()).strip(),
-        "expected_evidence": " ".join(str(base.get("expected_evidence") or "").split()).strip(),
-        "impact_label": " ".join(str(base.get("impact_label") or "").split()).strip() or "Medio",
+        "evidence_pattern": " ".join(str(base.get("evidence_pattern") or "").split()).strip(),
         "touchpoint": touchpoint,
         "palanca": palanca,
         "subpalanca": subpalanca,
         "route": " ".join(str(base.get("route") or "").split()).strip(),
         "cx_readout": " ".join(str(base.get("cx_readout") or "").split()).strip(),
-        "confidence_label": " ".join(str(base.get("confidence_label") or "").split()).strip()
-        or "Medio",
         "keywords": keywords,
     }
 
@@ -581,22 +555,14 @@ def _slug(value: object, *, max_len: int = 36) -> str:
     return txt[:max_len].strip("-") or "unknown"
 
 
-def _broken_journey_cluster_count(n_rows: int, candidate_axes: int) -> int:
-    if n_rows <= 1:
-        return 1
-    if n_rows <= 4:
-        return min(2, n_rows)
-    heuristic = int(round(np.sqrt(float(n_rows))))
-    bounded_axes = max(1, min(int(candidate_axes), heuristic if heuristic > 0 else 1))
-    return max(2, min(8, min(n_rows, bounded_axes)))
-
-
 def _broken_journey_title_case(value: object) -> str:
     tokens = [part for part in re.split(r"[\s_/]+", str(value or "").strip()) if part]
     return " ".join(tok.capitalize() for tok in tokens[:3]).strip()
 
 
 def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Series) -> list[str]:
+    if matrix.shape[1] == 0:
+        return []
     feature_names = vectorizer.get_feature_names_out()
     if len(feature_names) == 0:
         return []
@@ -606,6 +572,8 @@ def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Serie
     order = np.argsort(weights)[::-1]
     out: list[str] = []
     for idx in order.tolist():
+        if weights[idx] <= 0:
+            break
         token = str(feature_names[idx]).strip().lower()
         if (
             not token
@@ -619,24 +587,6 @@ def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Serie
         if len(out) >= 5:
             break
     return out
-
-
-def _broken_journey_impact_label(linked_pairs: int, avg_nps: float) -> str:
-    if linked_pairs >= 10 or avg_nps <= 2.0:
-        return "Muy alto"
-    if linked_pairs >= 6 or avg_nps <= 4.0:
-        return "Alto"
-    if linked_pairs >= 3:
-        return "Medio"
-    return "Bajo"
-
-
-def _broken_journey_confidence_label(semantic_score: float, avg_similarity: float) -> str:
-    if semantic_score >= 0.72 and avg_similarity >= 0.85:
-        return "Alto"
-    if semantic_score >= 0.55 and avg_similarity >= 0.75:
-        return "Medio"
-    return "Bajo"
 
 
 def _touchpoint(
@@ -722,39 +672,31 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
         )
 
     df = nps_focus_df.copy()
-    df["nps_id"] = df.get("ID", df.index).astype(str).str.strip()
+    df["nps_id"] = df.get("ID", df.index).fillna("").astype(str).str.strip()
     df["nps_score"] = pd.to_numeric(df.get("NPS"), errors="coerce")
     comment_series = df.get("Comment")
     if comment_series is None:
         comment_series = df.get("Comentario", pd.Series([""] * len(df), index=df.index))
-    df["comment_txt"] = comment_series.astype(str).fillna("").str.strip()
+    df["comment_txt"] = comment_series.fillna("").astype(str).str.strip()
     comment_norm_series = df.get("_text_norm")
     if comment_norm_series is None:
         comment_norm_series = df["comment_txt"]
-    df["comment_norm"] = comment_norm_series.astype(str).fillna("").str.strip()
+    df["comment_norm"] = comment_norm_series.fillna("").astype(str).str.strip()
     df["nps_group"] = classify_nps_scores(df["nps_score"])
     df["palanca"] = (
         df.get("Palanca", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
     df["subpalanca"] = (
         df.get("Subpalanca", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
     df["nps_date"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
-    df["nps_topic"] = (
-        (
-            df["palanca"].fillna("").astype(str).str.strip()
-            + " > "
-            + df["subpalanca"].fillna("").astype(str).str.strip()
-        )
-        .str.replace(r"^>\s*", "", regex=True)
-        .str.replace(r"\s*>$", "", regex=True)
-    )
+    df["nps_topic"] = build_nps_topic(df)
     return df[
         [
             "nps_id",
@@ -785,10 +727,13 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
 
     df = helix_df.copy()
     df["incident_id"] = (
-        df.get("Incident Number", df.get("ID de la Incidencia", df.index)).astype(str).str.strip()
+        df.get("Incident Number", df.get("ID de la Incidencia", df.index))
+        .fillna("")
+        .astype(str)
+        .str.strip()
     )
     df["incident_date"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
-    df["incident_summary"] = build_incident_display_text(df).astype(str).fillna("").str.strip()
+    df["incident_summary"] = build_incident_display_text(df).fillna("").astype(str).str.strip()
     url_candidates = [
         "Incident URL",
         "Incident Link",
@@ -830,8 +775,8 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         else pd.Series([""] * len(df), index=df.index)
     )
     incident_url = (
-        incident_url.astype(str)
-        .fillna("")
+        incident_url.fillna("")
+        .astype(str)
         .str.strip()
         .where(
             incident_url.astype(str)
@@ -842,38 +787,13 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         )
     )
     df["incident_url"] = incident_url
-    tier1 = (
-        df.get("Product Categorization Tier 1", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
-    )
-    tier2 = (
-        df.get("Product Categorization Tier 2", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
-    )
-    tier3 = (
-        df.get("Product Categorization Tier 3", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .fillna("")
-        .str.strip()
-    )
     source_service_n2 = (
-        df.get("BBVA_SourceServiceN2", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
+        df.get("BBVA_SourceServiceN2", pd.Series("", index=df.index))
         .fillna("")
+        .astype(str)
         .str.strip()
     )
-    df["incident_topic"] = (tier1 + " > " + tier2 + " > " + tier3).str.replace(
-        r"\s*>\s*>\s*", " > ", regex=True
-    )
-    df["incident_topic"] = (
-        df["incident_topic"]
-        .str.replace(r"^>\s*", "", regex=True)
-        .str.replace(r"\s*>$", "", regex=True)
-    )
+    df["incident_topic"] = build_incident_topic(df)
     df["helix_source_service_n2"] = source_service_n2
     return df[
         [
@@ -903,10 +823,17 @@ def _prepare_enriched_links(
         return pd.DataFrame()
 
     links = links_df.copy()
-    links["incident_id"] = links.get("incident_id", "").astype(str).str.strip()
-    links["nps_id"] = links.get("nps_id", "").astype(str).str.strip()
+    links["incident_id"] = (
+        links.get("incident_id", pd.Series("", index=links.index))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    links["nps_id"] = (
+        links.get("nps_id", pd.Series("", index=links.index)).fillna("").astype(str).str.strip()
+    )
     links["similarity"] = pd.to_numeric(links.get("similarity"), errors="coerce").fillna(0.0)
-    links["nps_topic"] = links.get("nps_topic", "").astype(str).fillna("").str.strip()
+    links["nps_topic"] = links.get("nps_topic", "").fillna("").astype(str).str.strip()
     links = links[
         links["incident_id"].astype(str).str.strip().ne("")
         & links["nps_id"].astype(str).str.strip().ne("")
@@ -915,8 +842,20 @@ def _prepare_enriched_links(
         return pd.DataFrame()
 
     enriched = (
-        links.merge(nps_ref, on=["nps_id"], how="left", suffixes=("", "_nps"))
-        .merge(helix_ref, on=["incident_id"], how="left", suffixes=("", "_helix"))
+        links.merge(
+            nps_ref.drop_duplicates(),
+            on=["nps_id"],
+            how="inner",
+            suffixes=("", "_nps"),
+            validate="many_to_one",
+        )
+        .merge(
+            helix_ref.drop_duplicates(),
+            on=["incident_id"],
+            how="inner",
+            suffixes=("", "_helix"),
+            validate="many_to_one",
+        )
         .copy()
     )
     if enriched.empty:
@@ -931,24 +870,24 @@ def _prepare_enriched_links(
         .astype(str)
         .str.strip()
     )
-    enriched["comment_txt"] = enriched["comment_txt"].astype(str).fillna("").str.strip()
-    enriched["comment_norm"] = enriched["comment_norm"].astype(str).fillna("").str.strip()
-    enriched["incident_summary"] = enriched["incident_summary"].astype(str).fillna("").str.strip()
+    enriched["comment_txt"] = enriched["comment_txt"].fillna("").astype(str).str.strip()
+    enriched["comment_norm"] = enriched["comment_norm"].fillna("").astype(str).str.strip()
+    enriched["incident_summary"] = enriched["incident_summary"].fillna("").astype(str).str.strip()
     enriched["incident_topic"] = (
         enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index))
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
-    enriched["palanca"] = enriched["palanca"].astype(str).fillna("").str.strip()
-    enriched["subpalanca"] = enriched["subpalanca"].astype(str).fillna("").str.strip()
+    enriched["palanca"] = enriched["palanca"].fillna("").astype(str).str.strip()
+    enriched["subpalanca"] = enriched["subpalanca"].fillna("").astype(str).str.strip()
     enriched["helix_source_service_n2"] = (
         enriched.get(
             "helix_source_service_n2",
             pd.Series([""] * len(enriched), index=enriched.index),
         )
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
     enriched["touchpoint"] = [
@@ -1032,11 +971,11 @@ def _source_topics_for_group(grp: pd.DataFrame) -> list[str]:
 
 def _resolved_source_topic_series(frame: pd.DataFrame) -> pd.Series:
     source_topic = frame.get("source_nps_topic", pd.Series([""] * len(frame), index=frame.index))
-    resolved_source_topic = source_topic.astype(str).fillna("").str.strip()
+    resolved_source_topic = source_topic.fillna("").astype(str).str.strip()
     fallback_topic = (
         frame.get("nps_topic", pd.Series([""] * len(frame), index=frame.index))
-        .astype(str)
         .fillna("")
+        .astype(str)
         .str.strip()
     )
     return resolved_source_topic.where(resolved_source_topic.ne(""), fallback_topic)
@@ -1052,9 +991,7 @@ def _chain_story_for_source(
     helix_source_service_n2: str,
     journey_route: str,
     journey_cx_readout: str,
-    journey_expected_evidence: str,
-    journey_impact_label: str,
-    journey_confidence_label: str,
+    journey_evidence_pattern: str,
     incident_sample_count: int,
     incident_sample_label: str,
     comment_sample_count: int,
@@ -1065,17 +1002,15 @@ def _chain_story_for_source(
     if source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
         return (
             f"{journey_route}. {journey_cx_readout} "
-            f"Evidencia esperada: {journey_expected_evidence}. "
-            f"Impacto esperado en NPS: {journey_impact_label}. "
-            f"Nivel de confianza causal esperado: {journey_confidence_label}. "
-            f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
+            f"Patrón buscado en el catálogo: {journey_evidence_pattern}. "
+            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
             f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
         )
     if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
         return (
             f"{journey_route}. {journey_cx_readout} "
-            f"Keywords del cluster: {journey_expected_evidence}. "
-            f"En la ventana analizada se sostienen {incident_sample_count} incidencias Helix "
+            f"Keywords del cluster: {journey_evidence_pattern}. "
+            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
             f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
         )
     if source == TOUCHPOINT_SOURCE_PALANCA:
@@ -1105,7 +1040,12 @@ def build_broken_journey_catalog(
     nps_focus_df: Optional[pd.DataFrame],
     helix_df: Optional[pd.DataFrame],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Infer broken journeys from validated Helix↔VoC links with lightweight semantics."""
+    """Group validated links by the resolved taxonomy route, without forcing a cluster count.
+
+    Equivalences belong to the upstream taxonomy resolver. These identities deliberately
+    preserve its exact labels (including SOURCE and frozen lenses). Text similarity
+    describes cohesion, never splits a route or silently merges unrelated categories.
+    """
 
     enriched = _prepare_enriched_links(
         links_df,
@@ -1157,40 +1097,22 @@ def build_broken_journey_catalog(
     try:
         matrix = vectorizer.fit_transform(texts)
     except ValueError:
-        return _empty_broken_journey_df(), pd.DataFrame()
-    candidate_axes = max(
-        1,
-        _non_generic_nunique(enriched["subpalanca"]),
-        _non_generic_nunique(enriched["helix_source_service_n2"]),
-        _non_generic_nunique(enriched["palanca"]),
-    )
-    n_clusters = _broken_journey_cluster_count(len(enriched), int(candidate_axes))
-
-    if len(enriched) == 1 or n_clusters <= 1 or matrix.shape[0] <= 1:
-        labels = np.zeros(len(enriched), dtype=int)
-        semantic_score = np.ones(len(enriched), dtype=float)
-    else:
-        max_components = min(24, max(1, min(matrix.shape[0] - 1, matrix.shape[1] - 1)))
-        dense = (
-            TruncatedSVD(n_components=max_components, random_state=7).fit_transform(matrix)
-            if max_components >= 2
-            else matrix.toarray()
-        )
-        model = MiniBatchKMeans(
-            n_clusters=int(min(n_clusters, len(enriched))),
-            random_state=7,
-            n_init=10,
-            batch_size=min(64, len(enriched)),
-        )
-        labels = model.fit_predict(dense)
-        row_norm = np.linalg.norm(dense, axis=1)
-        centers = model.cluster_centers_[labels]
-        center_norm = np.linalg.norm(centers, axis=1)
-        denom = np.where((row_norm * center_norm) > 0, row_norm * center_norm, 1.0)
-        semantic_score = np.clip((dense * centers).sum(axis=1) / denom, 0.0, 1.0)
-
-    enriched["journey_cluster"] = labels.astype(int)
-    enriched["semantic_score"] = semantic_score.astype(float)
+        # Single-character labels may have no TF-IDF vocabulary; evidence still exists.
+        vectorizer = TfidfVectorizer(vocabulary={"__empty__": 0})
+        matrix = vectorizer.fit_transform([""] * len(enriched))
+    # A source route is atomic: detail and aggregate time series must share the
+    # same assignment. Sorted routes and content IDs are independent of row order,
+    # ranking, incident multiplicity and unrelated routes entering the window.
+    routes = list(zip(enriched["palanca"], enriched["subpalanca"]))
+    route_codes = {route: idx for idx, route in enumerate(sorted(set(routes)))}
+    enriched["journey_cluster"] = [route_codes[route] for route in routes]
+    enriched["semantic_score"] = 0.0
+    for positions in enriched.groupby("journey_cluster").indices.values():
+        subset = matrix[positions]
+        centroid = np.asarray(subset.mean(axis=0)).ravel()
+        norm = np.linalg.norm(centroid)
+        scores = np.asarray(subset @ centroid).ravel() / norm if norm else np.zeros(len(positions))
+        enriched.loc[enriched.index[positions], "semantic_score"] = np.clip(scores, 0, 1)
 
     cluster_rows: list[dict[str, object]] = []
     for cluster_id, grp in enriched.groupby("journey_cluster", dropna=False, observed=True):
@@ -1217,11 +1139,10 @@ def build_broken_journey_catalog(
         linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
         avg_similarity = _safe_float(grp["similarity"].mean(), default=0.0)
         avg_nps = _safe_float(
-            pd.to_numeric(grp["nps_score"], errors="coerce").mean(), default=np.nan
+            pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
+            default=np.nan,
         )
         semantic_cohesion = _safe_float(grp["semantic_score"].mean(), default=0.0)
-        impact_label = _broken_journey_impact_label(linked_pairs, avg_nps)
-        confidence_label = _broken_journey_confidence_label(semantic_cohesion, avg_similarity)
         keyword_text = ", ".join(_broken_journey_title_case(word) for word in keywords[:4])
         cluster_rows.append(
             {
@@ -1236,7 +1157,7 @@ def build_broken_journey_catalog(
                     f"Incidencia -> {touchpoint or 'touchpoint detectado'} -> "
                     f"{palanca or 'palanca'} / {subpalanca or 'señal semántica'} -> comentario VoC -> NPS"
                 ),
-                "journey_expected_evidence": (
+                "journey_evidence_pattern": (
                     f"Keywords semánticas: {keyword_text or 'n/d'}. "
                     f"Helix Source Service N2 dominante: {helix_source_n2 or 'n/d'}."
                 ),
@@ -1245,8 +1166,6 @@ def build_broken_journey_catalog(
                     f"predominan {palanca or 'sin palanca'} / {subpalanca or 'sin subpalanca'} "
                     f"y el Score medio asociado es {avg_nps:.2f}."
                 ),
-                "journey_impact_label": impact_label,
-                "journey_confidence_label": confidence_label,
                 "linked_pairs": linked_pairs,
                 "linked_incidents": linked_incidents,
                 "linked_comments": linked_comments,
@@ -1264,14 +1183,15 @@ def build_broken_journey_catalog(
         ["linked_pairs", "semantic_cohesion", "avg_similarity", "journey_label"],
         ascending=[False, False, False, True],
     ).reset_index(drop=True)
-    seen: dict[str, int] = {}
-    journey_ids: list[str] = []
-    for idx, row in catalog.iterrows():
-        base = _slug(row.get("journey_label"))
-        seen[base] = seen.get(base, 0) + 1
-        suffix = f"-{seen[base]:02d}" if seen[base] > 1 else ""
-        journey_ids.append(f"broken-journey-{idx + 1:02d}-{base}{suffix}")
-    catalog["journey_id"] = journey_ids
+    catalog["journey_id"] = [
+        "broken-journey-"
+        + sha256(
+            json.dumps(
+                sorted(route_codes)[int(row["journey_cluster"])], ensure_ascii=False
+            ).encode()
+        ).hexdigest()[:20]
+        for _, row in catalog.iterrows()
+    ]
     catalog = catalog[
         [
             "journey_cluster",
@@ -1283,10 +1203,8 @@ def build_broken_journey_catalog(
             "helix_source_service_n2",
             "journey_keywords",
             "journey_route",
-            "journey_expected_evidence",
+            "journey_evidence_pattern",
             "journey_cx_readout",
-            "journey_impact_label",
-            "journey_confidence_label",
             "linked_pairs",
             "linked_incidents",
             "linked_comments",
@@ -1297,8 +1215,10 @@ def build_broken_journey_catalog(
     ].copy()
 
     journey_links = enriched.merge(
-        catalog, on="journey_cluster", how="left", suffixes=("", "_journey")
+        catalog, on="journey_cluster", how="left", suffixes=("", "_journey"), validate="many_to_one"
     )
+    for column in ("touchpoint", "palanca", "subpalanca", "helix_source_service_n2"):
+        journey_links[column] = journey_links[column + "_journey"]
     return catalog[BROKEN_JOURNEY_COLUMNS].copy(), journey_links
 
 
@@ -1338,33 +1258,38 @@ def build_broken_journey_topic_map(journey_links_df: Optional[pd.DataFrame]) -> 
             ]
         )
 
-    grouped = (
-        df.groupby(
-            [
-                "source_nps_topic",
-                "journey_id",
-                "journey_label",
-                "touchpoint",
-                "palanca",
-                "subpalanca",
-            ],
-            dropna=False,
-            observed=True,
-        )
-        .agg(
-            linked_pairs=("incident_id", "count"),
-            avg_similarity=("similarity", "mean"),
-        )
-        .reset_index()
-        .sort_values(
-            ["source_nps_topic", "linked_pairs", "avg_similarity", "journey_label"],
-            ascending=[True, False, False, True],
-        )
-        .drop_duplicates(["source_nps_topic"])
+    return _select_topic_entities(
+        df, "journey_id", "journey_label", ["touchpoint", "palanca", "subpalanca"]
     )
-    return grouped[
-        ["source_nps_topic", "journey_id", "journey_label", "touchpoint", "palanca", "subpalanca"]
-    ].reset_index(drop=True)
+
+
+def _select_topic_entities(
+    frame: pd.DataFrame, id_column: str, label_column: str, metadata: list[str]
+) -> pd.DataFrame:
+    """Vote at entity level, not per metadata variant, and select deterministic metadata.
+
+    A topic has one owner because its preaggregated response counts cannot be
+    divided between entities without returning to individual survey records.
+    """
+    identity = ["source_nps_topic", id_column, label_column]
+    frame = frame.sort_values("similarity", ascending=False).drop_duplicates(
+        ["source_nps_topic", "incident_id", "nps_id"]
+    )
+    votes = (
+        frame.groupby(identity, dropna=False, observed=True)
+        .agg(linked_pairs=("incident_id", "size"), avg_similarity=("similarity", "mean"))
+        .reset_index()
+    )
+    winners = votes.sort_values(
+        ["source_nps_topic", "linked_pairs", "avg_similarity", label_column, id_column],
+        ascending=[True, False, False, True, True],
+    ).drop_duplicates("source_nps_topic")[identity]
+    details = (
+        frame.groupby(identity, dropna=False, observed=True)[metadata]
+        .agg(lambda values: _dominant_non_generic(values))
+        .reset_index()
+    )
+    return winners.merge(details, on=identity, validate="one_to_one").reset_index(drop=True)
 
 
 def build_causal_topic_map(
@@ -1474,47 +1399,17 @@ def build_causal_topic_map(
         if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
             enriched["touchpoint"] = enriched["helix_source_service_n2"].astype(str).str.strip()
 
-    mapping = (
-        enriched.assign(
-            similarity=pd.to_numeric(enriched.get("similarity"), errors="coerce").fillna(0.0)
-        )
-        .loc[
-            lambda frame: frame["source_nps_topic"].ne("")
-            & frame["entity_id"].astype(str).str.strip().ne("")
-            & frame["entity_label"].astype(str).str.strip().ne("")
-        ]
-        .groupby(
-            [
-                "source_nps_topic",
-                "entity_id",
-                "entity_label",
-                "touchpoint",
-                "palanca",
-                "subpalanca",
-                "helix_source_service_n2",
-            ],
-            dropna=False,
-            observed=True,
-        )
-        .agg(linked_pairs=("incident_id", "count"), avg_similarity=("similarity", "mean"))
-        .reset_index()
-        .sort_values(
-            ["source_nps_topic", "linked_pairs", "avg_similarity", "entity_label"],
-            ascending=[True, False, False, True],
-        )
-        .drop_duplicates(["source_nps_topic"])
+    enriched = enriched.loc[
+        enriched["source_nps_topic"].ne("")
+        & enriched["entity_id"].ne("")
+        & enriched["entity_label"].ne("")
+    ]
+    return _select_topic_entities(
+        enriched,
+        "entity_id",
+        "entity_label",
+        ["touchpoint", "palanca", "subpalanca", "helix_source_service_n2"],
     )
-    return mapping[
-        [
-            "source_nps_topic",
-            "entity_id",
-            "entity_label",
-            "touchpoint",
-            "palanca",
-            "subpalanca",
-            "helix_source_service_n2",
-        ]
-    ].reset_index(drop=True)
 
 
 def remap_links_to_causal_entities(
@@ -1527,7 +1422,13 @@ def remap_links_to_causal_entities(
     mapping["source_nps_topic"] = mapping["source_nps_topic"].astype(str).str.strip()
     out = links_df.copy()
     out["nps_topic"] = out.get("nps_topic", "").astype(str).str.strip()
-    out = out.merge(mapping, left_on="nps_topic", right_on="source_nps_topic", how="inner")
+    out = out.merge(
+        mapping,
+        left_on="nps_topic",
+        right_on="source_nps_topic",
+        how="inner",
+        validate="many_to_one",
+    )
     if out.empty:
         return out
     out["source_nps_topic"] = out["nps_topic"].astype(str).str.strip()
@@ -1547,7 +1448,13 @@ def remap_topic_timeseries_to_causal_entities(
     mapping = topic_map_df.copy()
     df["nps_topic"] = df.get("nps_topic", "").astype(str).str.strip()
     mapping["source_nps_topic"] = mapping["source_nps_topic"].astype(str).str.strip()
-    merged = df.merge(mapping, left_on="nps_topic", right_on="source_nps_topic", how="inner")
+    merged = df.merge(
+        mapping,
+        left_on="nps_topic",
+        right_on="source_nps_topic",
+        how="inner",
+        validate="many_to_one",
+    )
     if merged.empty:
         return pd.DataFrame(columns=list(by_topic_df.columns))
 
@@ -1557,6 +1464,7 @@ def remap_topic_timeseries_to_causal_entities(
     merged["incidents"] = pd.to_numeric(merged.get("incidents"), errors="coerce").fillna(0.0)
     merged["nps_mean"] = pd.to_numeric(merged.get("nps_mean"), errors="coerce")
     merged["nps_weighted_sum"] = merged["nps_mean"].fillna(0.0) * merged["responses"]
+    merged["scored_responses"] = merged["responses"].where(merged["nps_mean"].notna(), 0.0)
 
     time_col = "week" if "week" in merged.columns else ("date" if "date" in merged.columns else "")
     if not time_col:
@@ -1569,10 +1477,13 @@ def remap_topic_timeseries_to_causal_entities(
             focus_count=("focus_count", "sum"),
             incidents=("incidents", "sum"),
             nps_weighted_sum=("nps_weighted_sum", "sum"),
+            scored_responses=("scored_responses", "sum"),
         )
         .reset_index()
     )
-    grouped["nps_mean"] = grouped["nps_weighted_sum"] / grouped["responses"].replace({0: np.nan})
+    grouped["nps_mean"] = grouped["nps_weighted_sum"] / grouped["scored_responses"].replace(
+        {0: np.nan}
+    )
     grouped["focus_rate"] = grouped["focus_count"] / grouped["responses"].replace({0: np.nan})
     grouped["nps_topic"] = grouped["entity_label"].astype(str)
     keep_cols = [
@@ -1615,53 +1526,14 @@ def remap_links_to_journeys(
 def remap_topic_timeseries_to_journeys(
     by_topic_df: Optional[pd.DataFrame], journey_topic_map: Optional[pd.DataFrame]
 ) -> pd.DataFrame:
-    if by_topic_df is None or by_topic_df.empty:
-        return pd.DataFrame(columns=list((by_topic_df.columns if by_topic_df is not None else [])))
-    if journey_topic_map is None or journey_topic_map.empty:
-        return pd.DataFrame(columns=list(by_topic_df.columns))
-
-    df = by_topic_df.copy()
-    mapping = journey_topic_map.copy()
-    df["nps_topic"] = df.get("nps_topic", "").astype(str).str.strip()
-    mapping["source_nps_topic"] = mapping["source_nps_topic"].astype(str).str.strip()
-    merged = df.merge(mapping, left_on="nps_topic", right_on="source_nps_topic", how="inner")
-    if merged.empty:
-        return pd.DataFrame(columns=list(by_topic_df.columns))
-
-    merged["journey_label"] = merged["journey_label"].astype(str).str.strip()
-    merged["responses"] = pd.to_numeric(merged.get("responses"), errors="coerce").fillna(0.0)
-    merged["focus_count"] = pd.to_numeric(merged.get("focus_count"), errors="coerce").fillna(0.0)
-    merged["incidents"] = pd.to_numeric(merged.get("incidents"), errors="coerce").fillna(0.0)
-    merged["nps_mean"] = pd.to_numeric(merged.get("nps_mean"), errors="coerce")
-    merged["nps_weighted_sum"] = merged["nps_mean"].fillna(0.0) * merged["responses"]
-
-    time_col = "week" if "week" in merged.columns else ("date" if "date" in merged.columns else "")
-    if not time_col:
-        return pd.DataFrame(columns=list(by_topic_df.columns))
-
-    grouped = (
-        merged.groupby([time_col, "journey_label"], dropna=False, observed=True)
-        .agg(
-            responses=("responses", "sum"),
-            focus_count=("focus_count", "sum"),
-            incidents=("incidents", "sum"),
-            nps_weighted_sum=("nps_weighted_sum", "sum"),
+    mapping = (
+        journey_topic_map.rename(
+            columns={"journey_id": "entity_id", "journey_label": "entity_label"}
         )
-        .reset_index()
+        if journey_topic_map is not None
+        else None
     )
-    grouped["nps_mean"] = grouped["nps_weighted_sum"] / grouped["responses"].replace({0: np.nan})
-    grouped["focus_rate"] = grouped["focus_count"] / grouped["responses"].replace({0: np.nan})
-    grouped["nps_topic"] = grouped["journey_label"].astype(str)
-    keep_cols = [
-        time_col,
-        "nps_topic",
-        "responses",
-        "focus_count",
-        "nps_mean",
-        "focus_rate",
-        "incidents",
-    ]
-    return grouped[keep_cols].sort_values([time_col, "nps_topic"]).reset_index(drop=True)
+    return remap_topic_timeseries_to_causal_entities(by_topic_df, mapping)
 
 
 def build_incident_attribution_chains(
@@ -1716,10 +1588,8 @@ def build_incident_attribution_chains(
             "palanca",
             "subpalanca",
             "journey_route",
-            "journey_expected_evidence",
+            "journey_evidence_pattern",
             "journey_cx_readout",
-            "journey_impact_label",
-            "journey_confidence_label",
         ]
         journey_map = local_links[journey_cols].drop_duplicates(["incident_id", "nps_id"])
         enriched = enriched.drop(
@@ -1732,39 +1602,43 @@ def build_incident_attribution_chains(
         )
         if enriched.empty:
             return _empty_chain_df()
-        enriched["journey_touchpoint"] = enriched["touchpoint"].astype(str).fillna("").str.strip()
-        enriched["journey_palanca"] = enriched["palanca"].astype(str).fillna("").str.strip()
-        enriched["journey_subpalanca"] = enriched["subpalanca"].astype(str).fillna("").str.strip()
-        enriched["journey_title"] = enriched["journey_label"].astype(str).fillna("").str.strip()
+        enriched["journey_touchpoint"] = enriched["touchpoint"].fillna("").astype(str).str.strip()
+        enriched["journey_palanca"] = enriched["palanca"].fillna("").astype(str).str.strip()
+        enriched["journey_subpalanca"] = enriched["subpalanca"].fillna("").astype(str).str.strip()
+        enriched["journey_title"] = enriched["journey_label"].fillna("").astype(str).str.strip()
         enriched["touchpoint"] = enriched["journey_touchpoint"]
         enriched["palanca"] = enriched["journey_palanca"]
         enriched["subpalanca"] = enriched["journey_subpalanca"]
         enriched["nps_topic"] = enriched["journey_title"]
     if is_executive_mode:
         active_executive_catalog = executive_journey_catalog or _default_executive_journey_catalog()
-        journey_matches = [
-            _executive_journey_match(
-                nps_topic=source_topic,
-                touchpoint=tp,
-                palanca=pal,
-                subpalanca=sub,
-                incident_topic=inc_topic,
-                incident_summary=inc_summary,
-                comment_txt=comment,
-                catalog=active_executive_catalog,
-            )
-            for source_topic, tp, pal, sub, inc_topic, inc_summary, comment in zip(
-                enriched["source_nps_topic"],
-                enriched["touchpoint"],
-                enriched["palanca"],
-                enriched["subpalanca"],
-                enriched.get(
-                    "incident_topic", pd.Series([""] * len(enriched), index=enriched.index)
-                ),
-                enriched["incident_summary"],
-                enriched["comment_txt"],
-            )
-        ]
+        if "entity_id" in enriched:
+            by_id = {str(item["id"]): item for item in active_executive_catalog}
+            journey_matches = [by_id.get(str(value)) for value in enriched["entity_id"]]
+        else:
+            journey_matches = [
+                _executive_journey_match(
+                    nps_topic=source_topic,
+                    touchpoint=tp,
+                    palanca=pal,
+                    subpalanca=sub,
+                    incident_topic=inc_topic,
+                    incident_summary=inc_summary,
+                    comment_txt=comment,
+                    catalog=active_executive_catalog,
+                )
+                for source_topic, tp, pal, sub, inc_topic, inc_summary, comment in zip(
+                    enriched["source_nps_topic"],
+                    enriched["touchpoint"],
+                    enriched["palanca"],
+                    enriched["subpalanca"],
+                    enriched.get(
+                        "incident_topic", pd.Series([""] * len(enriched), index=enriched.index)
+                    ),
+                    enriched["incident_summary"],
+                    enriched["comment_txt"],
+                )
+            ]
         enriched["journey_id"] = [
             str(m.get("id", "")) if isinstance(m, dict) else "" for m in journey_matches
         ]
@@ -1783,25 +1657,19 @@ def build_incident_attribution_chains(
         enriched["journey_route"] = [
             str(m.get("route", "")) if isinstance(m, dict) else "" for m in journey_matches
         ]
-        enriched["journey_expected_evidence"] = [
-            str(m.get("expected_evidence", "")) if isinstance(m, dict) else ""
+        enriched["journey_evidence_pattern"] = [
+            str(m.get("evidence_pattern", "")) if isinstance(m, dict) else ""
             for m in journey_matches
         ]
         enriched["journey_cx_readout"] = [
             str(m.get("cx_readout", "")) if isinstance(m, dict) else "" for m in journey_matches
-        ]
-        enriched["journey_impact_label"] = [
-            str(m.get("impact_label", "")) if isinstance(m, dict) else "" for m in journey_matches
-        ]
-        enriched["journey_confidence_label"] = [
-            str(m.get("confidence_label", "")) if isinstance(m, dict) else ""
-            for m in journey_matches
         ]
         enriched["touchpoint"] = enriched["journey_touchpoint"].where(
             enriched["journey_touchpoint"].astype(str).str.strip().ne(""),
             enriched["touchpoint"],
         )
         enriched = enriched[enriched["journey_id"].astype(str).str.strip().ne("")].copy()
+        enriched["nps_topic"] = enriched["journey_title"]
 
     enriched = enriched[
         enriched["incident_id"].astype(str).str.strip().ne("")
@@ -1868,28 +1736,16 @@ def build_incident_attribution_chains(
                 and not grp["journey_route"].mode(dropna=True).empty
                 else ""
             )
-            journey_expected_evidence = (
-                str(grp["journey_expected_evidence"].mode(dropna=True).iloc[0])
-                if "journey_expected_evidence" in grp.columns
-                and not grp["journey_expected_evidence"].mode(dropna=True).empty
+            journey_evidence_pattern = (
+                str(grp["journey_evidence_pattern"].mode(dropna=True).iloc[0])
+                if "journey_evidence_pattern" in grp.columns
+                and not grp["journey_evidence_pattern"].mode(dropna=True).empty
                 else ""
             )
             journey_cx_readout = (
                 str(grp["journey_cx_readout"].mode(dropna=True).iloc[0])
                 if "journey_cx_readout" in grp.columns
                 and not grp["journey_cx_readout"].mode(dropna=True).empty
-                else ""
-            )
-            journey_impact_label = (
-                str(grp["journey_impact_label"].mode(dropna=True).iloc[0])
-                if "journey_impact_label" in grp.columns
-                and not grp["journey_impact_label"].mode(dropna=True).empty
-                else ""
-            )
-            journey_confidence_label = (
-                str(grp["journey_confidence_label"].mode(dropna=True).iloc[0])
-                if "journey_confidence_label" in grp.columns
-                and not grp["journey_confidence_label"].mode(dropna=True).empty
                 else ""
             )
         else:
@@ -1912,10 +1768,8 @@ def build_incident_attribution_chains(
                 else ""
             )
             journey_route = ""
-            journey_expected_evidence = ""
+            journey_evidence_pattern = ""
             journey_cx_readout = ""
-            journey_impact_label = ""
-            journey_confidence_label = ""
         if is_executive_mode or is_broken_mode:
             helix_source_service_n2 = (
                 str(grp["helix_source_service_n2"].mode(dropna=True).iloc[0])
@@ -1932,11 +1786,27 @@ def build_incident_attribution_chains(
             ["nps_score", "similarity"], ascending=[True, False], na_position="last"
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
+        highlights_by_incident: dict[str, set[str]] = {}
+        highlights_by_comment: dict[str, set[str]] = {}
+        for incident_id, terms in zip(
+            grp["incident_id"], grp.get("matched_terms", [[]] * len(grp))
+        ):
+            if isinstance(terms, (list, tuple)):
+                highlights_by_incident.setdefault(str(incident_id), set()).update(terms)
+        for comment_id, terms in zip(
+            grp["nps_id"], grp.get("matched_terms", [[]] * len(grp))
+        ):
+            if isinstance(terms, (list, tuple)):
+                highlights_by_comment.setdefault(str(comment_id), set()).update(terms)
         incident_records = [
             {
                 "incident_id": str(r.get("incident_id", "")).strip(),
                 "summary": " ".join(str(r.get("incident_summary", "") or "").split()),
                 "url": str(r.get("incident_url", "") or "").strip(),
+                "summary_segments": evidence_segments(
+                    " ".join(str(r.get("incident_summary", "") or "").split()),
+                    highlights_by_incident.get(str(r.get("incident_id", "")), set()),
+                ),
             }
             for _, r in inc_ranked.iterrows()
             if str(r.get("incident_id", "")).strip()
@@ -1947,48 +1817,47 @@ def build_incident_attribution_chains(
             if str(rec.get("summary", "")).strip()
         ]
         comment_examples = [
-            f"NPS {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
+            f"Score {int(_safe_float(r.get('nps_score', np.nan), default=0.0))}: {' '.join(str(r.get('comment_txt','') or '').split())}"
             for _, r in comment_ranked.iterrows()
             if str(r.get("comment_txt", "")).strip()
         ]
-        comment_records = [
-            {
+        comment_records = []
+        for _, r in comment_ranked.iterrows():
+            comment = " ".join(
+                str(r.get("comment_norm") or r.get("comment_txt") or "").split()
+            )
+            if not comment:
+                continue
+            comment_record = {
                 "comment_id": str(r.get("nps_id", "") or "").strip(),
                 "date": _format_nps_date(r.get("nps_date")),
                 "nps": _format_nps_score(r.get("nps_score")),
                 "group": r.get("nps_group", ""),
                 "palanca": str(r.get("palanca", "") or "").strip(),
                 "subpalanca": str(r.get("subpalanca", "") or "").strip(),
-                "comment": " ".join(
-                    str(r.get("comment_norm") or r.get("comment_txt") or "").split()
-                ),
+                "comment": comment,
             }
-            for _, r in comment_ranked.iterrows()
-            if str(r.get("comment_norm") or r.get("comment_txt") or "").strip()
-        ]
+            comment_segments = evidence_segments(
+                comment,
+                highlights_by_comment.get(str(r.get("nps_id", "")), set()),
+            )
+            if comment_segments:
+                comment_record["comment_segments"] = comment_segments
+            comment_records.append(comment_record)
         if not incident_records or not comment_records:
             continue
 
-        detractor_probability = _safe_float(
-            grp.get("focus_probability_with_incident", pd.Series([np.nan])).max(), default=np.nan
+        focus_rate_high_incidence = _safe_float(
+            grp.get("focus_rate_high_incidence", pd.Series([np.nan])).max(), default=np.nan
         )
-        nps_delta_expected = _safe_float(
-            grp.get("nps_delta_expected", pd.Series([np.nan])).mean(), default=np.nan
-        )
-        total_nps_impact = _safe_float(
-            grp.get("total_nps_impact", pd.Series([0.0])).max(), default=0.0
-        )
-        confidence = _safe_float(grp.get("confidence", pd.Series([0.0])).max(), default=0.0)
-        causal_score = _safe_float(grp.get("causal_score", pd.Series([0.0])).max(), default=0.0)
-        delta_focus_rate_pp = _safe_float(
-            grp.get("delta_focus_rate_pp", pd.Series([np.nan])).max(), default=np.nan
-        )
+
         incident_rate_per_100_responses = _safe_float(
             grp.get("incident_rate_per_100_responses", pd.Series([np.nan])).max(),
             default=np.nan,
         )
         avg_nps = _safe_float(
-            pd.to_numeric(grp.get("nps_score"), errors="coerce").mean(), default=np.nan
+            pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
+            default=np.nan,
         )
         avg_similarity = _safe_float(grp["similarity"].mean(), default=0.0)
         linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
@@ -2000,9 +1869,22 @@ def build_incident_attribution_chains(
         responses_total = _safe_float(
             grp.get("responses", pd.Series([np.nan])).max(), default=np.nan
         )
-        action_lane = _mode_text(grp.get("action_lane", pd.Series(dtype=object)))
-        owner_role = _mode_text(grp.get("owner_role", pd.Series(dtype=object)))
-        eta_weeks = _safe_float(grp.get("eta_weeks", pd.Series([np.nan])).max(), default=np.nan)
+        support_organizations = " · ".join(
+            sorted(
+                {
+                    str(value).strip()
+                    for value in grp.get("support_organizations", pd.Series(dtype=object)).dropna()
+                    if str(value).strip()
+                }
+            )
+        )
+        historical_resolution_weeks = _safe_float(
+            pd.to_numeric(
+                grp.get("historical_resolution_weeks", pd.Series(dtype=float)),
+                errors="coerce",
+            ).mean(),
+            default=np.nan,
+        )
 
         incident_ids = [
             str(rec.get("incident_id", "")).strip()
@@ -2030,9 +1912,7 @@ def build_incident_attribution_chains(
             helix_source_service_n2=helix_source_service_n2,
             journey_route=journey_route,
             journey_cx_readout=journey_cx_readout,
-            journey_expected_evidence=journey_expected_evidence,
-            journey_impact_label=journey_impact_label,
-            journey_confidence_label=journey_confidence_label,
+            journey_evidence_pattern=journey_evidence_pattern,
             incident_sample_count=incident_sample_count,
             incident_sample_label=incident_sample_label,
             comment_sample_count=comment_sample_count,
@@ -2053,40 +1933,25 @@ def build_incident_attribution_chains(
                 "linked_pairs": linked_pairs,
                 "avg_similarity": avg_similarity,
                 "avg_nps": avg_nps,
-                "detractor_probability": detractor_probability,
-                "nps_delta_expected": nps_delta_expected,
-                "total_nps_impact": total_nps_impact,
-                "nps_points_at_risk": _safe_float(
-                    grp.get("nps_points_at_risk", pd.Series([0.0])).max(), default=0.0
-                ),
-                "nps_points_recoverable": _safe_float(
-                    grp.get("nps_points_recoverable", pd.Series([0.0])).max(), default=0.0
-                ),
-                "priority": _safe_float(grp.get("priority", pd.Series([0.0])).max(), default=0.0),
-                "confidence": confidence,
-                "causal_score": causal_score,
+                "focus_rate_high_incidence": focus_rate_high_incidence,
                 "incident_records": incident_records,
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "comment_records": comment_records,
                 "chain_story": story,
-                "delta_focus_rate_pp": delta_focus_rate_pp,
                 "incident_rate_per_100_responses": incident_rate_per_100_responses,
                 "incidents": incidents_total,
                 "responses": responses_total,
-                "action_lane": action_lane,
-                "owner_role": owner_role,
-                "eta_weeks": eta_weeks,
+                "support_organizations": support_organizations,
+                "historical_resolution_weeks": historical_resolution_weeks,
                 "presentation_mode": (
                     str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
                     if (is_executive_mode or is_broken_mode)
                     else str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
                 ),
                 "journey_route": journey_route,
-                "journey_expected_evidence": journey_expected_evidence,
+                "journey_evidence_pattern": journey_evidence_pattern,
                 "journey_cx_readout": journey_cx_readout,
-                "journey_impact_label": journey_impact_label,
-                "journey_confidence_label": journey_confidence_label,
             }
         )
 
@@ -2095,8 +1960,8 @@ def build_incident_attribution_chains(
 
     out = pd.DataFrame(rows)
     out = out.sort_values(
-        ["priority", "linked_pairs", "causal_score", "total_nps_impact"],
-        ascending=[False, False, False, False],
+        ["linked_pairs", "linked_incidents", "linked_comments", "avg_similarity", "nps_topic"],
+        ascending=[False, False, False, False, True],
     ).reset_index(drop=True)
     if int(top_k) > 0:
         out = out.head(int(top_k)).reset_index(drop=True)

@@ -62,14 +62,14 @@ function getNewsletterWorkspace() {
     scope: publication,
     recipients: recipients.map(item => ({email: item.email, active: item.active})),
     activeCount: recipients.filter(item => item.active).length,
-    presentationUrl: _presentationEntryUrl_(publication.scopeKey),
+    presentationUrl: _reportUrl_(publication.scopeKey,_evolutionNpsVisible_()),
     sender: _newsletterSenderIdentity_(false)
   };
 }
 
 function _newsletterSubject_(publication) {
   const monthNames = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  return 'NPS y causalidad con incidencias - ' + publication.buug + ' ' + publication.n1 +
+  return 'NPS e incidencias relacionadas - ' + publication.buug + ' ' + publication.n1 +
     ' - ' + publication.year + ' ' + (monthNames[publication.month] || publication.month) + ' - ' + publication.causalMethodLabel;
 }
 
@@ -96,13 +96,11 @@ function saveNewsletterRecipient(payload) {
 }
 
 function _newsletterInsight_(edition) {
-  const dashboard = edition.screens && edition.screens.dashboard || {};
-  const kpis = dashboard.kpis || {};
-  const opportunities = dashboard.opportunities && dashboard.opportunities.table || [];
-  const opportunity = opportunities.length ? String(opportunities[0].opportunity || opportunities[0].topic || opportunities[0].name || '') : '';
-  return {context: _cleanText_(dashboard.context_label || 'Edición actualizada', 240),
-    samples: kpis.samples == null ? 'n/d' : String(kpis.samples),
-    nps: kpis.classic_nps == null ? 'n/d' : String(kpis.classic_nps), opportunity: _cleanText_(opportunity, 240)};
+  const insight = edition && edition.newsletter;
+  if (!insight || !Array.isArray(insight.scorecard) || !Array.isArray(insight.quotes) || !Array.isArray(insight.signals)) {
+    throw new Error('La edición no contiene el modelo editorial de newsletter. Genérala de nuevo desde NPS Lens.');
+  }
+  return insight;
 }
 
 function _newsletterEscape_(value) {
@@ -118,23 +116,32 @@ function _publishedNewsletterInsight_(scopeKey) {
   catch (error) { throw new Error('El insight de newsletter no es válido. Vuelve a importar el ámbito.'); }
 }
 
-function _newsletterHtml_(insight, reportUrl, scopeKey) {
-  const webUrl = ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey);
-  const opportunity = insight.opportunity ? '<div style="margin:20px 0;padding:18px;background:#EAF3FA;border-left:4px solid #2DCCCD"><b>Foco ejecutivo</b><br>' + _newsletterEscape_(insight.opportunity) + '</div>' : '';
-  return '<div style="font-family:Arial,sans-serif;color:#121F3F;max-width:680px;margin:auto;background:#F4F6F8">' +
-    '<div style="background:#070E46;color:#fff;padding:32px"><div style="font-size:12px;letter-spacing:1.2px">BBVA BANCA DE EMPRESAS E INSTITUCIONES</div><h1 style="margin:12px 0 4px">NPS Lens</h1><div>La voz del cliente conectada con la operación</div></div>' +
-    '<div style="padding:32px;background:#fff"><h2 style="font-family:Georgia,serif;color:#070E46">Una lectura preparada para decidir</h2><p>' + _newsletterEscape_(insight.context) + '</p>' +
-    '<div style="display:flex;gap:12px"><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>Muestras</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.samples) + '</b></div><div style="padding:14px;background:#F4F6F8;min-width:120px"><small>NPS clásico</small><br><b style="font-size:24px">' + _newsletterEscape_(insight.nps) + '</b></div></div>' + opportunity +
-    '<p><a href="' + webUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Abrir NPS Lens</a>' +
-    (reportUrl ? ' <a href="' + reportUrl + '" style="display:inline-block;color:#001391;padding:13px 18px;font-weight:bold">Abrir presentación en Google Slides</a>' : '') + '</p></div></div>';
+function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
+  const webUrl = ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey);
+  const e = _newsletterEscape_;
+  const scorecard = (insight.scorecard || []).map(item => '<td class="metric-cell" width="20%" valign="top" style="padding:12px 9px;border-top:3px solid #85C8FF;background:#F7F8F8;overflow-wrap:anywhere"><small style="color:#52627A;text-transform:uppercase">' + e(item.label) + '</small><br><b style="font:700 23px Georgia,serif;color:#001391">' + e(item.value) + '</b><br><small style="color:#52627A">' + e(item.delta) + '</small></td>').join('');
+  const quotes = (insight.quotes || []).slice(0,2).map(text => '<td class="quote-cell" width="50%" valign="top" style="padding:14px;background:#EAF3FA;border-left:3px solid #2DCCCD;font:italic 16px Georgia,serif;overflow-wrap:anywhere">“' + e(text) + '”</td>').join('');
+  const signals = (insight.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
+  const headline = showEvolutionNps ? '<h2 class="email-headline" style="font:700 31px Georgia,serif;color:#070E46;margin:10px 0">' + e(insight.headline) + '</h2><p style="line-height:1.55">' + e(insight.lead) + '</p>' : '';
+  const reportButton = reportUrl ? '<a href="' + reportUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Ver análisis completo</a> ' : '';
+  const mobileCss = '<style>body{margin:0!important;padding:0!important;width:100%!important;background:#F4F6F8}td,th,p,h1,h2,div,a{overflow-wrap:anywhere;word-break:normal}img{max-width:100%;height:auto}@media only screen and (max-width:600px){.email-shell-padding{padding:0!important}.email-card{width:100%!important;max-width:100%!important}.email-hero{padding:24px 20px!important}.email-body{padding:24px 18px!important}.email-title{font-size:34px!important;line-height:1.05!important}.email-headline{font-size:27px!important;line-height:1.12!important}.metric-table,.metric-table tbody,.metric-table tr,.quote-table,.quote-table tbody,.quote-table tr{display:block!important;width:100%!important;box-sizing:border-box!important}.metric-table,.quote-table{border-spacing:0 8px!important}.metric-cell,.quote-cell{display:block!important;width:auto!important;margin:0 0 8px!important}.email-actions a{display:block!important;margin:8px 0!important;text-align:center!important}.email-body>table{max-width:100%!important}}</style>';
+  return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + mobileCss + '</head><body><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F4F6F8"><tr><td class="email-shell-padding" align="center" style="padding:24px 10px"><table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff"><tr><td class="email-hero" style="background:#070E46;color:#fff;padding:34px 38px"><small style="letter-spacing:1px">' + e(insight.brand) + '</small><h1 class="email-title" style="font:700 42px Georgia,serif;margin:22px 0 5px">' + e(insight.product) + '</h1><div>' + e(insight.promise) + '</div></td></tr><tr><td class="email-body" style="padding:32px 38px">' +
+    '<small style="color:#004481;text-transform:uppercase">Lectura de 30 segundos · ' + e(insight.period) + '</small>' + headline + '<table class="metric-table" role="presentation" width="100%" cellspacing="6"><tr>' + scorecard + '</tr></table>' +
+    '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>' + quotes + '</tr></table>' +
+    '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">Señales a vigilar</h2><table role="presentation" width="100%">' + signals + '</table>' +
+    '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p></td></tr></table></td></tr></table></body></html>';
 }
 
-function _newsletterPlain_(insight, reportUrl, scopeKey) {
-  return ['BBVA Banca de Empresas e Instituciones', 'NPS Lens', '', insight.context,
-    'Muestras: ' + insight.samples, 'NPS clásico: ' + insight.nps,
-    insight.opportunity ? 'Foco ejecutivo: ' + insight.opportunity : '', '',
-    'Abrir NPS Lens: ' + ScriptApp.getService().getUrl() + '?scope=' + encodeURIComponent(scopeKey),
-    reportUrl ? 'Abrir presentación: ' + reportUrl : ''].filter(Boolean).join('\n');
+function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps) {
+  const lines = [insight.brand, insight.product, insight.promise, insight.period];
+  if (showEvolutionNps) lines.push('', insight.headline, insight.lead);
+  lines.push('', 'INDICADORES');
+  (insight.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
+  lines.push('', 'LA VOZ DEL CLIENTE'); (insight.quotes || []).slice(0,2).forEach(text => lines.push('• “' + text + '”'));
+  lines.push('', 'SEÑALES A VIGILAR'); (insight.signals || []).forEach(item => lines.push('• ' + item.label + ': ' + item.reason));
+  if (reportUrl) lines.push('Ver análisis completo: ' + reportUrl);
+  lines.push('Explorar NPS Lens: ' + ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey));
+  return lines.filter(value => value !== null && value !== undefined).join('\n');
 }
 
 function _newsletterEncodedHeader_(value) {
@@ -170,15 +177,16 @@ function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
 }
 
 function _sendNewsletterTo_(recipients, subject, publication) {
-  if (!_reportUrl_(publication.scopeKey)) throw new Error('Publica primero una edición con su presentación nativa.');
-  const reportUrl = _presentationEntryUrl_(publication.scopeKey);
+  const showEvolutionNps = _evolutionNpsVisible_();
+  const reportUrl = _reportUrl_(publication.scopeKey, showEvolutionNps);
+  if (!reportUrl) throw new Error('Publica primero una edición con su presentación nativa.');
   const sender = _newsletterSenderIdentity_(true);
   if (!sender.ready) throw new Error('El remitente corporativo ' + sender.requested +
     ' no está aceptado para ' + (sender.executor || 'el propietario del despliegue') +
     ' (' + sender.verificationStatus + '). ' + sender.message);
   const insight = _publishedNewsletterInsight_(publication.scopeKey);
-  const html = _newsletterHtml_(insight, reportUrl, publication.scopeKey);
-  const plain = _newsletterPlain_(insight, reportUrl, publication.scopeKey);
+  const html = _newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps);
+  const plain = _newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps);
   const messageIds = recipients.map(recipient => {
     const raw = _newsletterMimeMessage_(recipient, subject, html, plain, sender);
     const accepted = Gmail.Users.Messages.send({raw}, 'me');

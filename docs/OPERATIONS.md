@@ -5,8 +5,9 @@
 - Configuración → Telemetría exporta un JSON acotado a 2.000 eventos con latencia, CPU, RSS,
   estado HTTP y tamaño de respuesta. No registra consultas, cuerpos ni opiniones.
 - `GET /api/dashboard/publication.zip` genera la edición de datos, newsletter e informe
-  ejecutivo con su análisis causal. El ZIP nunca supera 30 MiB; cualquier reducción de
-  filas queda declarada en el manifiesto.
+  ejecutivo con el análisis NPS ↔ Helix ya calculado. El contrato `3.0` excluye corpus y
+  modelos taxonómicos, limita `publication.json` a 20 MiB y el ZIP a 30 MiB; cualquier
+  reducción de filas queda declarada en el manifiesto.
 - `GET /api/dashboard/report/pptx` y la newsletter comparten el mismo generador ejecutivo.
 - La vista compartida vive en `webapp/apps-script`: Apps Script limita el acceso al dominio,
   sirve la edición sin filtros y reserva publicación y telemetría a administradores.

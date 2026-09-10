@@ -37,7 +37,7 @@ DOTENV_TEST_KEYS = {
     "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "NPS_LENS_UI_MIN_SIMILARITY",
     "NPS_LENS_UI_MAX_DAYS_APART",
-    "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+    "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
     "NPS_LENS_UI_SCORE_CHANNEL",
     "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
@@ -137,7 +137,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     monkeypatch.setenv("NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS", "dimension")
     monkeypatch.setenv("NPS_LENS_UI_MIN_SIMILARITY", "2.0")
     monkeypatch.setenv("NPS_LENS_UI_MAX_DAYS_APART", "-5")
-    monkeypatch.setenv("NPS_LENS_UI_MIN_N_OPPORTUNITIES", "10")
+    monkeypatch.setenv("NPS_LENS_UI_MIN_N_NPS_GAPS", "10")
     monkeypatch.setenv("NPS_LENS_UI_MIN_N_CROSS_COMPARISONS", "500")
 
     s = Settings.from_env()
@@ -149,7 +149,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     assert s.default_report_dimension_analysis == "palanca"
     assert s.default_min_similarity == 1.0
     assert s.default_max_days_apart == 0
-    assert s.default_min_n_opportunities == 50
+    assert s.default_min_n_nps_gaps == 50
     assert s.default_min_n_cross_comparisons == 200
 
 

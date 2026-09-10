@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from nps_lens.analytics.text_mining import classify_tone, extract_topics
+from nps_lens.analytics.text_mining import classify_tone, summarize_taxonomy
 
 
 def test_classify_tone_rules() -> None:
@@ -11,7 +11,7 @@ def test_classify_tone_rules() -> None:
     assert "urgencia" in labels
 
 
-def test_extract_topics_smoke() -> None:
+def test_summarize_taxonomy_smoke() -> None:
     s = pd.Series(
         [
             "no puedo entrar error login",
@@ -23,6 +23,10 @@ def test_extract_topics_smoke() -> None:
         ]
         * 30
     )
-    topics = extract_topics(s, n_clusters=4)
+    topics = summarize_taxonomy(
+        pd.DataFrame(
+            {"Comment": s, "Palanca": ["Acceso"] * len(s), "Subpalanca": ["Login"] * len(s)}
+        )
+    )
     assert topics
     assert topics[0].n > 0

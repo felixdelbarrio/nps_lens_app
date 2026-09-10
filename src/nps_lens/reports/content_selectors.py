@@ -58,88 +58,61 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
 
 
 def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select the largest negative gaps against the overall NPS."""
+    """Select the largest negative gaps against the classic-NPS base."""
 
     if gap_df is None or gap_df.empty:
         return pd.DataFrame(columns=getattr(gap_df, "columns", []))
     work = gap_df.copy()
-    work["gap_vs_overall"] = _numeric_series(work, "gap_vs_overall")
+    work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
     work["n"] = _numeric_series(work, "n").fillna(0.0)
-    work = work.dropna(subset=["gap_vs_overall"])
+    work = work.dropna(subset=["gap_vs_base"])
     if work.empty:
         return work
-    negative = work[work["gap_vs_overall"] < 0].copy()
+    negative = work[work["gap_vs_base"] < 0].copy()
     if negative.empty:
         negative = work.copy()
     return (
-        negative.sort_values(["gap_vs_overall", "n", "value"], ascending=[True, False, True])
-        .head(max_rows)
-        .copy()
-    )
-
-
-def select_opportunities(opportunities_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select opportunities by impact, confidence and defendable volume."""
-
-    if opportunities_df is None or opportunities_df.empty:
-        return pd.DataFrame(columns=getattr(opportunities_df, "columns", []))
-    work = opportunities_df.copy()
-    work["potential_uplift"] = _numeric_series(work, "potential_uplift").fillna(0.0)
-    work["confidence"] = _numeric_series(work, "confidence").fillna(0.0)
-    work["n"] = _numeric_series(work, "n").fillna(0.0)
-    return (
-        work.sort_values(
-            ["potential_uplift", "confidence", "n", "value"], ascending=[False, False, False, True]
-        )
+        negative.sort_values(["gap_vs_base", "n", "value"], ascending=[True, False, True])
         .head(max_rows)
         .copy()
     )
 
 
 def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select committee-ready causal scenarios by priority and evidence quality."""
+    """Order evidence by transparent counts and semantic similarity."""
 
     if chain_df is None or chain_df.empty:
         return pd.DataFrame(columns=getattr(chain_df, "columns", []))
     work = chain_df.copy()
-    if "rank" in work.columns:
-        work["rank"] = _numeric_series(work, "rank")
-        ranked = work.dropna(subset=["rank"]).copy()
-        ranked = ranked[ranked["rank"] > 0].copy()
-        if not ranked.empty:
-            return ranked.sort_values(["rank"], ascending=[True]).head(max_rows).copy()
     for column in (
-        "detractor_probability",
-        "focus_probability_with_incident",
-        "total_nps_impact",
-        "nps_points_at_risk",
-        "nps_points_recoverable",
-        "priority",
-        "confidence",
-        "causal_score",
         "linked_pairs",
         "linked_incidents",
         "linked_comments",
+        "responses",
+        "avg_similarity",
     ):
         work[column] = _numeric_series(work, column).fillna(0.0)
+    label_column = next(
+        (column for column in ("nps_topic", "entity_label", "journey") if column in work),
+        None,
+    )
+    work["_scenario_label"] = (
+        work[label_column].astype(str) if label_column is not None else work.index.astype(str)
+    )
     return (
         work.sort_values(
             [
-                "detractor_probability",
-                "focus_probability_with_incident",
-                "total_nps_impact",
-                "nps_points_at_risk",
-                "nps_points_recoverable",
                 "linked_pairs",
                 "linked_incidents",
                 "linked_comments",
-                "confidence",
-                "causal_score",
-                "priority",
+                "responses",
+                "avg_similarity",
+                "_scenario_label",
             ],
-            ascending=[False, False, False, False, False, False, False, False, False, False, False],
+            ascending=[False, False, False, False, False, True],
         )
         .head(max_rows)
+        .drop(columns="_scenario_label")
         .copy()
     )
 

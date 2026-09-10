@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unicodedata
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import BytesIO
@@ -24,16 +25,19 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
+from nps_lens.analytics.channel_topic_scope import (
+    restrict_to_topics,
+    topics_observed_in_channel,
+)
 from nps_lens.analytics.drivers import driver_table
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
-from nps_lens.analytics.opportunities import rank_opportunities
-from nps_lens.analytics.text_mining import extract_topics
-from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
+from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.design.tokens import (
     DesignTokens,
     bbva_typography_tokens,
@@ -45,7 +49,6 @@ from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
     select_negative_delta_rows,
     select_nonzero_kpis,
-    select_opportunities,
     select_text_clusters,
 )
 from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
@@ -68,14 +71,10 @@ from nps_lens.services.analytics.kpis_service import (
 from nps_lens.ui.charts import (
     _compact_axis_label,
     chart_causal_entity_bar,
-    chart_cohort_heatmap,
     chart_daily_nps_committee_stack,
     chart_driver_delta,
-    chart_opportunities_bar,
-    chart_topic_bars,
 )
 from nps_lens.ui.historic_changes import get_changes_vs_historic
-from nps_lens.ui.narratives import explain_opportunities
 from nps_lens.ui.population import POP_ALL
 from nps_lens.ui.theme import get_theme
 
@@ -238,20 +237,6 @@ def _configure_text_frame(tf: object) -> None:
         tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
 
 
-def _focus_risk_label(focus_name: str) -> str:
-    focus = str(focus_name or "").strip().lower()
-    if focus in {"detractores", "detractor", "detraccion", "detracción"}:
-        return "detracción"
-    if focus in {"promotores", "promotor"}:
-        return "promoción"
-    return str(focus_name or "impacto").strip()
-
-
-def _focus_probability_label(focus_name: str) -> str:
-    focus_label = _focus_risk_label(focus_name)
-    return f"Prob. de {focus_label}"
-
-
 def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
     clean = " ".join(str(text or "").split())
     if not clean:
@@ -319,6 +304,14 @@ def _month_label_es(d: date) -> str:
     return f"{months.get(int(d.month), 'mes')} {int(d.year)}"
 
 
+def _long_date_es(value: object) -> str:
+    timestamp = _coerce_datetime_scalar(value)
+    if pd.isna(timestamp):
+        return _safe_date(value)
+    month = _month_label_es(timestamp).split()[0].title()
+    return f"{timestamp.day} de {month} de {timestamp.year}"
+
+
 def _comment_column(df: pd.DataFrame) -> str:
     for candidate in ["Comment", "Comentario", "comment", "comentario"]:
         if candidate in df.columns:
@@ -382,6 +375,7 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         "nps_topic",
         "Palanca",
         "Subpalanca",
+        "Canal",
         "band",
     ]
     if nps_df is None or nps_df.empty:
@@ -407,6 +401,7 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     out["Subpalanca"] = out.get("Subpalanca", pd.Series([""] * len(out), index=out.index)).map(
         _normalize_category_value
     )
+    out["Canal"] = out.get("Canal", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
     out["band"] = out["NPS"].map(_nps_band)
     out = out.dropna(subset=["date"]).copy()
     return out[cols].copy()
@@ -424,8 +419,6 @@ def _split_period_frames(
     end_ts = pd.Timestamp(period_end)
     current = nps_df[(nps_df["date"] >= start_ts) & (nps_df["date"] <= end_ts)].copy()
     baseline = nps_df[nps_df["date"] < start_ts].copy()
-    if baseline.empty:
-        baseline = nps_df[(nps_df["date"] < start_ts) | (nps_df["date"] > end_ts)].copy()
     return current, baseline
 
 
@@ -449,8 +442,6 @@ def _split_source_period_frames(
     end_ts = pd.Timestamp(period_end)
     current = out[(out["Fecha"] >= start_ts) & (out["Fecha"] <= end_ts)].copy()
     baseline = out[out["Fecha"] < start_ts].copy()
-    if baseline.empty:
-        baseline = out[(out["Fecha"] < start_ts) | (out["Fecha"] > end_ts)].copy()
     return current, baseline
 
 
@@ -458,6 +449,7 @@ def _period_overview(
     current_nps_df: pd.DataFrame,
     *,
     period_kpis: Optional[dict[str, object]] = None,
+    topic_channel: str = "Web",
 ) -> dict[str, object]:
     period_block = (
         period_kpis.get("period", {})
@@ -473,8 +465,8 @@ def _period_overview(
         else compute_score_kpis(current_nps_df)
     )
     temporal_kpis = (
-        period_kpis.get("temporal", {})
-        if isinstance(period_kpis, dict) and isinstance(period_kpis.get("temporal"), dict)
+        period_block.get("temporal", {})
+        if isinstance(period_block.get("temporal"), dict)
         else build_period_boundary_kpis(current_nps_df)
     )
     temporal_base = temporal_kpis.get("base_kpis", {})
@@ -506,25 +498,29 @@ def _period_overview(
     detractor_delta_payload = (
         temporal_deltas.get("detractor_rate", {}) if isinstance(temporal_deltas, dict) else {}
     )
-    driver_col = "Subpalanca" if current_nps_df.get("Subpalanca") is not None else "Palanca"
-    if driver_col not in current_nps_df.columns:
+    driver_col = "Subpalanca" if "Subpalanca" in current_nps_df.columns else "Palanca"
+    topic_keys = topics_observed_in_channel(current_nps_df, driver_col, topic_channel)
+    driver_source = restrict_to_topics(current_nps_df, driver_col, topic_keys)
+    if driver_col not in driver_source.columns:
         driver_col = "Palanca"
     pain_point = ""
     strength_point = ""
-    if driver_col in current_nps_df.columns and "NPS" in current_nps_df.columns:
-        driver_view = current_nps_df[[driver_col, "NPS"]].copy().dropna(subset=["NPS"])
+    if driver_col in driver_source.columns and "NPS" in driver_source.columns:
+        driver_view = driver_source[[driver_col, "NPS"]].copy().dropna(subset=["NPS"])
         if not driver_view.empty:
             driver_view[driver_col] = driver_view[driver_col].astype(str).str.strip()
             driver_view = driver_view[driver_view[driver_col] != ""]
             if not driver_view.empty:
-                ranking = (
-                    driver_view.groupby(driver_col, dropna=False)
-                    .agg(nps_mean=("NPS", "mean"), n=("NPS", "size"))
-                    .sort_values(["nps_mean", "n"], ascending=[True, False])
-                )
-                if not ranking.empty:
-                    pain_point = str(ranking.index[0])
-                    strength_point = str(ranking.index[-1])
+                detractor_counts = driver_view.loc[
+                    driver_view["NPS"].le(6), driver_col
+                ].value_counts()
+                promoter_counts = driver_view.loc[
+                    driver_view["NPS"].ge(9), driver_col
+                ].value_counts()
+                if not detractor_counts.empty:
+                    pain_point = str(detractor_counts.index[0])
+                if not promoter_counts.empty:
+                    strength_point = str(promoter_counts.index[0])
     return {
         "comments": _safe_int(
             aggregate_payload.get("comments", aggregate_kpis.comments), default=0
@@ -577,63 +573,6 @@ def _period_overview(
     }
 
 
-def _daily_metrics_for_ppt(nps_df: pd.DataFrame) -> pd.DataFrame:
-    if nps_df is None or nps_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "day",
-                "n",
-                "det_pct",
-                "pas_pct",
-                "pro_pct",
-                "classic_nps",
-                "detractor_rate",
-                "passive_rate",
-                "promoter_rate",
-                "nps_avg",
-            ]
-        )
-    date_col = "date" if "date" in nps_df.columns else "Fecha"
-    if date_col not in nps_df.columns or "NPS" not in nps_df.columns:
-        return pd.DataFrame()
-    return shared_daily_metrics(nps_df, days=None, date_col=date_col, score_col="NPS")
-
-
-def _daily_group_mix_from_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
-    if metrics is None or metrics.empty:
-        return pd.DataFrame()
-    required = {
-        "day",
-        "n",
-        "detractor_rate",
-        "passive_rate",
-        "promoter_rate",
-        "classic_nps",
-        "nps_avg",
-    }
-    if not required.issubset(set(metrics.columns)):
-        return pd.DataFrame()
-    out = metrics[
-        [
-            "day",
-            "n",
-            "detractor_rate",
-            "passive_rate",
-            "promoter_rate",
-            "classic_nps",
-            "nps_avg",
-        ]
-    ].copy()
-    return out.rename(
-        columns={
-            "day": "date",
-            "n": "responses",
-            "classic_nps": "nps_classic",
-            "nps_avg": "nps_mean",
-        }
-    )
-
-
 def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.DataFrame:
     cols = ["cluster_id", "n", "top_terms", "examples", "label", "top_terms_txt", "example_txt"]
     if (
@@ -648,7 +587,12 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
     if comments.empty:
         return pd.DataFrame(columns=cols)
 
-    topics = extract_topics(comments, n_clusters=max(int(top_k), 10))
+    topics = summarize_taxonomy(
+        current_nps_df.rename(
+            columns={"palanca": "Palanca", "subpalanca": "Subpalanca", "comment_txt": "Comment"}
+        ),
+        limit=top_k,
+    )
     if not topics:
         return pd.DataFrame(columns=cols)
 
@@ -733,34 +677,6 @@ def _driver_change_table(
     return merged[cols].sort_values(["delta_nps", "n_current"], ascending=[True, False])
 
 
-def _opportunities_table(
-    current_nps_df: pd.DataFrame,
-    *,
-    dimension: str = "Palanca",
-    min_n: int = 200,
-) -> pd.DataFrame:
-    cols = ["dimension", "value", "n", "current_nps", "potential_uplift", "confidence", "why"]
-    if current_nps_df is None or current_nps_df.empty:
-        return pd.DataFrame(columns=cols)
-    work = _normalize_presentation_categories(current_nps_df, columns=[dimension])
-    if "nps_topic" not in work.columns or work["nps_topic"].astype(str).str.strip().eq("").all():
-        work["nps_topic"] = build_nps_topic(work).astype(str).fillna("").str.strip()
-    dims = [str(dimension)] if str(dimension or "").strip() in work.columns else []
-    if not dims:
-        return pd.DataFrame(columns=cols)
-    work = work[work[dimension].astype(str).str.strip().ne("")].copy()
-    if work.empty:
-        return pd.DataFrame(columns=cols)
-    rows = rank_opportunities(
-        work,
-        dimensions=dims,
-        min_n=max(1, int(min_n)),
-    )
-    if not rows:
-        return pd.DataFrame(columns=cols)
-    return pd.DataFrame([row.__dict__ for row in rows])[cols]
-
-
 def _build_overview_figure(
     history_nps_df: Optional[pd.DataFrame],
     *,
@@ -769,9 +685,29 @@ def _build_overview_figure(
     metrics: Optional[pd.DataFrame] = None,
 ) -> Optional[go.Figure]:
     history = _coerce_nps_records(history_nps_df)
+    history = history.loc[history["date"].le(pd.Timestamp(period_end))].copy()
     if history.empty:
         return None
-    full_metrics = metrics if metrics is not None else _daily_metrics_for_ppt(history)
+    if metrics is not None:
+        full_metrics = metrics
+    else:
+        scored = history.dropna(subset=["date", "NPS"]).copy()
+        if scored.empty:
+            return None
+        scored["day"] = scored["date"].dt.normalize()
+        scored["det"] = scored["NPS"].le(6).astype(int)
+        scored["pas"] = scored["NPS"].between(7, 8).astype(int)
+        scored["pro"] = scored["NPS"].ge(9).astype(int)
+        full_metrics = (
+            scored.groupby("day", as_index=False)
+            .agg(n=("NPS", "size"), det=("det", "sum"), pas=("pas", "sum"), pro=("pro", "sum"))
+            .sort_values("day")
+        )
+        total = full_metrics["n"].replace({0: np.nan})
+        full_metrics["det_pct"] = full_metrics["det"] / total * 100.0
+        full_metrics["pas_pct"] = full_metrics["pas"] / total * 100.0
+        full_metrics["pro_pct"] = full_metrics["pro"] / total * 100.0
+        full_metrics["classic_nps"] = full_metrics["pro_pct"] - full_metrics["det_pct"]
     history_days = max(int((history["date"].max() - history["date"].min()).days) + 1, 1)
     fig = chart_daily_nps_committee_stack(
         history,
@@ -791,7 +727,7 @@ def _build_overview_figure(
         fillcolor=f"#{BBVA_COLORS['sky']}",
         opacity=0.12,
         line_width=0,
-        annotation_text="Periodo solicitado",
+        annotation_text="Periodo analizado",
         annotation_position="top left",
     )
     fig.update_xaxes(
@@ -803,39 +739,6 @@ def _build_overview_figure(
     )
     fig.update_yaxes(tickfont=dict(size=18), title_font=dict(size=18))
     return fig
-
-
-def _build_text_topic_figure(text_topics_df: pd.DataFrame) -> Optional[go.Figure]:
-    topic_fig = chart_topic_bars(
-        text_topics_df, get_theme("light"), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
-    )
-    if topic_fig is None or text_topics_df.empty:
-        return topic_fig
-    topic_rows = (
-        text_topics_df.sort_values("n", ascending=False)
-        .head(EDITORIAL_LIMITS.max_text_chart_clusters)
-        .copy()
-    )
-    topic_labels = []
-    for row in topic_rows.itertuples():
-        terms = [str(term).strip() for term in list(row.top_terms)[:2] if str(term).strip()]
-        topic_labels.append(_clip(f"#{int(row.cluster_id)} · {', '.join(terms)}", 24))
-    with contextlib.suppress(Exception):
-        topic_fig.data[0].y = topic_labels
-    counts = pd.to_numeric(text_topics_df.get("n"), errors="coerce").dropna()
-    xmax = float(counts.max()) if not counts.empty else 0.0
-    topic_fig.update_xaxes(
-        title_text="Comentarios",
-        nticks=5,
-        dtick=2000 if xmax >= 6000 else 1000 if xmax >= 2000 else None,
-        tickformat="~s",
-        tickfont=dict(size=20),
-        title_font=dict(size=20),
-    )
-    y_font = 26 if len(topic_rows) <= 5 else 22 if len(topic_rows) <= 8 else 19
-    topic_fig.update_yaxes(tickfont=dict(size=y_font), automargin=True)
-    topic_fig.update_layout(margin=dict(l=270, r=28, t=18, b=54), bargap=0.26)
-    return topic_fig
 
 
 def _build_driver_delta_figure(
@@ -897,76 +800,16 @@ def _build_driver_delta_figure(
     return fig
 
 
-def _build_web_heatmap_figure(source_df: pd.DataFrame, *, row_dim: str) -> Optional[go.Figure]:
-    required = {row_dim, "Canal", "NPS"}
-    if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
-        return None
-    chart_df = _normalize_presentation_categories(source_df, columns=[row_dim])
-    chart_df = chart_df.dropna(subset=[row_dim, "Canal", "NPS"]).copy()
-    if chart_df.empty:
-        return None
-    chart_df[row_dim] = chart_df[row_dim].astype(str).str.strip()
-    chart_df["Canal"] = chart_df["Canal"].astype(str).str.strip()
-    chart_df = chart_df[
-        chart_df[row_dim].ne("") & chart_df["Canal"].str.casefold().eq("web")
-    ].copy()
-    if chart_df.empty:
-        return None
-    fig = chart_cohort_heatmap(
-        chart_df, get_theme("light"), row_dim=row_dim, col_dim="Canal", min_n=1
-    )
-    if fig is None:
-        return None
-    row_stats = (
-        chart_df.groupby(row_dim, as_index=False)
-        .agg(n=("NPS", "size"), nps=("NPS", "mean"))
-        .sort_values(["nps", "n"], ascending=[True, False])
-        .head(EDITORIAL_LIMITS.max_web_rows)
-    )
-    labels = [
-        _compact_axis_label(value, width=24, max_lines=2, max_chars=44).replace("<br>", " ")
-        for value in row_stats[row_dim].astype(str).tolist()
-    ]
-    with contextlib.suppress(Exception):
-        fig.data[0].y = labels
-    fig.update_yaxes(
-        tickfont=dict(size=30 if len(labels) <= 5 else 26, family=BBVA_FONT_MEDIUM),
-        automargin=True,
-        title_text="",
-    )
-    fig.update_xaxes(
-        side="bottom", tickangle=0, tickfont=dict(size=22), automargin=True, title_text=""
-    )
-    fig.update_layout(margin=dict(l=390, r=116, t=18, b=54))
-    fig.update_coloraxes(
-        showscale=True,
-        colorbar=dict(
-            title="Score",
-            tickmode="array",
-            tickvals=[0, 2, 6, 8, 10],
-            len=0.74,
-            y=0.5,
-            thickness=14,
-        ),
-    )
-    return fig
-
-
-def _build_web_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd.DataFrame:
+def _build_topic_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd.DataFrame:
     cols = ["value", "n", "nps", "detractor_rate"]
-    required = {dimension, "Canal", "NPS"}
+    required = {dimension, "NPS"}
     if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
         return pd.DataFrame(columns=cols)
     work = _normalize_presentation_categories(source_df, columns=[dimension])
-    work = work.dropna(subset=[dimension, "Canal", "NPS"]).copy()
+    work = work.dropna(subset=[dimension, "NPS"]).copy()
     work[dimension] = work[dimension].astype(str).str.strip()
-    work["Canal"] = work["Canal"].astype(str).str.strip()
     work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
-    work = (
-        work[work[dimension].ne("") & work["Canal"].str.casefold().eq("web")]
-        .dropna(subset=["NPS"])
-        .copy()
-    )
+    work = work[work[dimension].ne("")].dropna(subset=["NPS"]).copy()
     if work.empty:
         return pd.DataFrame(columns=cols)
     out = (
@@ -983,61 +826,9 @@ def _build_web_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd
     )
     return (
         out.sort_values(["nps", "n"], ascending=[True, False])
-        .head(EDITORIAL_LIMITS.max_web_rows)[cols]
+        .head(EDITORIAL_LIMITS.max_topic_rows)[cols]
         .copy()
     )
-
-
-def _build_opportunity_figure(opp_df: pd.DataFrame) -> Optional[go.Figure]:
-    fig = chart_opportunities_bar(opp_df, get_theme("light"), top_k=max(len(opp_df), 1))
-    if fig is None or opp_df.empty:
-        return fig
-    plot_df = select_opportunities(opp_df, max_rows=EDITORIAL_LIMITS.max_opportunities)
-    label_count = len(plot_df)
-    label_lengths = (
-        plot_df["label"].astype(str).str.replace("<br>", " ", regex=False).str.len()
-        if "label" in plot_df.columns
-        else pd.Series(dtype=float)
-    )
-    max_len = int(label_lengths.max() or 0)
-    y_font_size = 30 if label_count <= 5 else 27 if label_count <= 7 else 24
-    left_margin = 340 if max_len >= 28 else 300 if max_len >= 22 else 255
-    uplift = pd.to_numeric(plot_df.get("potential_uplift"), errors="coerce")
-    text_values = [
-        _fmt_signed_or_nd(value, decimals=1) if np.isfinite(value) else ""
-        for value in uplift.tolist()
-    ]
-    with contextlib.suppress(Exception):
-        fig.data[0].text = text_values
-        fig.data[0].textposition = "outside"
-        fig.data[0].cliponaxis = False
-        fig.data[0].textfont.size = 20
-    fig.update_yaxes(
-        title_text="", tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM), automargin=True
-    )
-    fig.update_xaxes(
-        title_text="Impacto estimado", tickfont=dict(size=19), title_font=dict(size=20), nticks=5
-    )
-    fig.update_layout(margin=dict(l=left_margin, r=72, t=18, b=54), bargap=0.34)
-    return fig
-
-
-def _prepare_opportunity_chart_df(opportunities_df: pd.DataFrame) -> pd.DataFrame:
-    opp_chart_df = select_opportunities(
-        opportunities_df, max_rows=EDITORIAL_LIMITS.max_opportunities
-    )
-    if opp_chart_df.empty:
-        return opp_chart_df
-
-    def _opp_label(row: pd.Series) -> str:
-        value = str(row.get("value", "")).strip()
-        base = value
-        return _compact_axis_label(
-            base, width=22 if len(base) >= 22 else 18, max_lines=2, max_chars=38
-        )
-
-    opp_chart_df["label"] = opp_chart_df.apply(_opp_label, axis=1)
-    return opp_chart_df
 
 
 def _first_existing_series(df: pd.DataFrame, *columns: str) -> pd.Series:
@@ -1063,7 +854,7 @@ def _build_journey_table(
         "links",
         "comments",
         "nps",
-        "confidence",
+        "similarity",
     ]
     if (
         str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
@@ -1071,11 +862,11 @@ def _build_journey_table(
         and not broken_journeys_df.empty
     ):
         source = broken_journeys_df.copy()
-        source["priority_sort"] = pd.to_numeric(
+        source["links_sort"] = pd.to_numeric(
             source.get("linked_pairs"),
             errors="coerce",
         ).fillna(0.0)
-        source["confidence_sort"] = pd.to_numeric(
+        source["similarity_sort"] = pd.to_numeric(
             source.get("semantic_cohesion"),
             errors="coerce",
         ).fillna(0.0)
@@ -1085,7 +876,7 @@ def _build_journey_table(
         ).fillna(10.0)
         out = (
             source.sort_values(
-                ["priority_sort", "confidence_sort", "nps_sort"],
+                ["links_sort", "similarity_sort", "nps_sort"],
                 ascending=[False, False, True],
             )
             .head(EDITORIAL_LIMITS.max_journey_rows)
@@ -1117,8 +908,8 @@ def _build_journey_table(
                 .fillna(0)
                 .astype(int),
                 "nps": pd.to_numeric(_first_existing_series(out, "avg_nps"), errors="coerce"),
-                "confidence": pd.to_numeric(
-                    _first_existing_series(out, "semantic_cohesion"),
+                "similarity": pd.to_numeric(
+                    _first_existing_series(out, "avg_similarity"),
                     errors="coerce",
                 ).fillna(0.0),
             }
@@ -1164,8 +955,8 @@ def _build_journey_table(
             .fillna(0)
             .astype(int),
             "nps": pd.to_numeric(_first_existing_series(source, "avg_nps"), errors="coerce"),
-            "confidence": pd.to_numeric(
-                _first_existing_series(source, "confidence"),
+            "similarity": pd.to_numeric(
+                _first_existing_series(source, "avg_similarity"),
                 errors="coerce",
             ).fillna(0.0),
         }
@@ -1212,7 +1003,7 @@ def _build_journey_summary_figure(
         automargin=True,
     )
     fig.update_xaxes(
-        title_text="Links validados Helix↔VoC",
+        title_text="Vínculos semánticos Helix↔VoC",
         tickfont=dict(size=17),
         title_font=dict(size=18),
         nticks=6,
@@ -1221,7 +1012,7 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="NPS en riesgo", side="right", font=dict(size=15)),
+            title=dict(text="Confianza", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -2325,141 +2116,19 @@ def _chain_incident_records(value: object) -> list[dict[str, str]]:
     return out
 
 
-def _pick_first_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    lower_map = {str(c).strip().lower(): str(c) for c in df.columns}
-    for c in candidates:
-        hit = lower_map.get(str(c).strip().lower())
-        if hit:
-            return hit
-    return ""
-
-
-def _prepare_daily_signals(
-    overall: pd.DataFrame,
-    *,
-    period_start: Optional[date],
-    period_end: Optional[date],
-) -> tuple[pd.DataFrame, bool]:
-    """Normalize timeline to daily grain with NPS mean, detractor share and incidents."""
-    if overall is None or overall.empty:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    d = overall.copy()
-    time_col = "date" if "date" in d.columns else ("week" if "week" in d.columns else "")
-    if not time_col:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    d[time_col] = _coerce_datetime_series(d[time_col])
-    d = d.dropna(subset=[time_col]).copy()
-    if d.empty:
-        return pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]), False
-
-    if time_col == "week":
-        d["date"] = d[time_col].dt.normalize()
-    else:
-        d["date"] = d[time_col].dt.normalize()
-
-    inc_col = _pick_first_col(d, ["incidents", "incidencias", "incident_count"])
-    focus_col = _pick_first_col(d, ["focus_rate", "detractor_rate", "rate_detractors"])
-    nps_col = _pick_first_col(
-        d,
-        [
-            "nps_mean",
-            "nps_avg",
-            "nps_media",
-            "nps",
-            "nps_score",
-            "score_mean",
-            "nps_current",
-        ],
-    )
-    responses_col = _pick_first_col(d, ["responses", "respuestas", "n"])
-
-    d["incidents"] = pd.to_numeric(d.get(inc_col, 0.0), errors="coerce").fillna(0.0).clip(lower=0.0)
-    d["detractor_rate"] = (
-        pd.to_numeric(d.get(focus_col, np.nan), errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    )
-
-    nps_estimated = False
-    if nps_col:
-        d["nps_mean"] = pd.to_numeric(d[nps_col], errors="coerce")
-    else:
-        # Fallback when daily mean NPS is not available in aggregates.
-        d["nps_mean"] = (1.0 - d["detractor_rate"]) * 10.0
-        nps_estimated = True
-
-    if responses_col:
-        d["responses"] = (
-            pd.to_numeric(d[responses_col], errors="coerce").fillna(0.0).clip(lower=0.0)
-        )
-    else:
-        d["responses"] = 1.0
-
-    if period_start is not None:
-        d = d[d["date"] >= pd.Timestamp(period_start)]
-    if period_end is not None:
-        d = d[d["date"] <= pd.Timestamp(period_end)]
-    if d.empty:
-        return (
-            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
-            nps_estimated,
-        )
-
-    d["_w"] = np.maximum(pd.to_numeric(d["responses"], errors="coerce").fillna(0.0), 1.0)
-    d["_nps_w"] = pd.to_numeric(d["nps_mean"], errors="coerce").fillna(0.0) * d["_w"]
-    d["_det_w"] = pd.to_numeric(d["detractor_rate"], errors="coerce").fillna(0.0) * d["_w"]
-    agg = (
-        d.groupby("date", as_index=False)
-        .agg(
-            incidents=("incidents", "sum"),
-            responses=("responses", "sum"),
-            _w=("_w", "sum"),
-            _nps_w=("_nps_w", "sum"),
-            _det_w=("_det_w", "sum"),
-        )
-        .sort_values("date")
-    )
-    agg["nps_mean"] = agg["_nps_w"] / agg["_w"].replace({0.0: np.nan})
-    agg["detractor_rate"] = agg["_det_w"] / agg["_w"].replace({0.0: np.nan})
-    agg = agg.drop(columns=["_w", "_nps_w", "_det_w"])
-
-    start_d = pd.Timestamp(period_start) if period_start is not None else agg["date"].min()
-    end_d = pd.Timestamp(period_end) if period_end is not None else agg["date"].max()
-    if pd.isna(start_d) or pd.isna(end_d) or start_d > end_d:
-        return (
-            pd.DataFrame(columns=["date", "nps_mean", "detractor_rate", "incidents"]),
-            nps_estimated,
-        )
-
-    idx = pd.date_range(start=start_d.normalize(), end=end_d.normalize(), freq="D")
-    out = agg.set_index("date").reindex(idx).rename_axis("date").reset_index()
-    out["incidents"] = pd.to_numeric(out["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
-
-    for c in ["nps_mean", "detractor_rate"]:
-        vals = pd.to_numeric(out[c], errors="coerce")
-        if int(vals.notna().sum()) >= 2:
-            vals = vals.interpolate(limit_direction="both")
-        elif int(vals.notna().sum()) == 1:
-            vals = vals.fillna(float(vals.dropna().iloc[0]))
-        else:
-            vals = vals.fillna(0.0)
-        out[c] = vals
-
-    out["nps_mean"] = out["nps_mean"].clip(0.0, 10.0)
-    out["detractor_rate"] = out["detractor_rate"].clip(0.0, 1.0)
-    return out[["date", "nps_mean", "detractor_rate", "incidents"]].copy(), nps_estimated
-
-
 def _build_dimension_view_model(
     *,
     dimension: str,
-    slide_number: int,
     selected_raw: pd.DataFrame,
     current_source_period: pd.DataFrame,
     baseline_source_period: pd.DataFrame,
-    current_label: str,
-    baseline_label: str,
+    topic_channel: str,
 ) -> DimensionViewModel:
+    topic_source = current_source_period if not current_source_period.empty else selected_raw
+    topic_keys = topics_observed_in_channel(topic_source, dimension, topic_channel)
+    selected_raw = restrict_to_topics(selected_raw, dimension, topic_keys)
+    current_source_period = restrict_to_topics(current_source_period, dimension, topic_keys)
+    baseline_source_period = restrict_to_topics(baseline_source_period, dimension, topic_keys)
     delta_df = get_changes_vs_historic(
         current_source_period,
         baseline_source_period,
@@ -2480,26 +2149,11 @@ def _build_dimension_view_model(
         delta_df,
         panel_height_in=2.58,
     )
-    source_for_web = current_source_period if not current_source_period.empty else selected_raw
-    web_table = _build_web_dimension_table(source_for_web, dimension=dimension)
-    opportunities_min_n = max(20, min(200, int(max(len(selected_raw), 1) * 0.02)))
-    opportunities = _opportunities_table(
-        selected_raw, dimension=dimension, min_n=opportunities_min_n
-    )
-    opportunities = _prepare_opportunity_chart_df(opportunities)
+    metric_source = current_source_period if not current_source_period.empty else selected_raw
     return DimensionViewModel(
-        dimension=dimension,
-        slide_number=slide_number,
-        change_df=delta_df,
         change_table_df=change_table,
         change_figure=change_figure,
-        web_heatmap_figure=_build_web_heatmap_figure(source_for_web, row_dim=dimension),
-        web_table_df=web_table,
-        opportunities_df=opportunities,
-        opportunities_figure=_build_opportunity_figure(opportunities),
-        opportunity_bullets=explain_opportunities(
-            opportunities, max_items=EDITORIAL_LIMITS.max_opportunity_bullets
-        ),
+        topic_table_df=_build_topic_dimension_table(metric_source, dimension=dimension),
     )
 
 
@@ -2509,28 +2163,27 @@ def _build_causal_scenarios(
     focus_name: str,
 ) -> list[CausalScenarioViewModel]:
     scenarios: list[CausalScenarioViewModel] = []
-    selected = select_causal_scenarios(chains, max_rows=EDITORIAL_LIMITS.max_causal_scenarios)
+    selected = select_causal_scenarios(chains, max_rows=len(chains))
     for idx, (_, row) in enumerate(selected.iterrows(), start=1):
         raw_kpis = [
             (
-                _focus_probability_label(focus_name),
-                _fmt_pct_or_nd(row.get("detractor_probability", np.nan)),
+                f"% {focus_name} en incidencia alta",
+                _fmt_pct_or_nd(row.get("focus_rate_high_incidence", np.nan)),
                 BBVA_COLORS["red"],
             ),
-            ("Confianza", _fmt_num_or_nd(row.get("confidence", np.nan)), BBVA_COLORS["green"]),
             (
-                "Vínculos validados",
+                "Nota media del tópico",
+                _fmt_num_or_nd(row.get("avg_nps", np.nan)),
+                BBVA_COLORS["green"],
+            ),
+            (
+                "Vínculos semánticos",
                 str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
                 BBVA_COLORS["sky"],
             ),
             (
-                "Cambio esperado en NPS Clásico",
-                _fmt_signed_or_nd(row.get("nps_delta_expected", np.nan)),
-                BBVA_COLORS["orange"],
-            ),
-            (
-                "Impacto total",
-                f"{_fmt_num_or_nd(row.get('total_nps_impact', np.nan))} pts",
+                "Confianza",
+                _fmt_pct_or_nd(row.get("avg_similarity", np.nan), decimals=0),
                 BBVA_COLORS["blue"],
             ),
         ]
@@ -2552,8 +2205,9 @@ def _build_causal_scenarios(
                 incident_id=record.get("incident_id", ""),
                 summary=_clean_evidence_excerpt(record.get("summary", ""), max_len=170),
                 url=record.get("url", ""),
+                segments=(record.get("summary_segments") or []),
             )
-            for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
+            for record in helix_records
         ]
         helix_lines = [
             _clean_evidence_excerpt(
@@ -2587,8 +2241,7 @@ def _build_presentation_context(
     period_start: date,
     period_end: date,
     focus_name: str,
-    overall_weekly: pd.DataFrame,
-    story_md: str,
+    topic_channel: str,
     attribution_df: Optional[pd.DataFrame],
     selected_nps_df: Optional[pd.DataFrame],
     comparison_nps_df: Optional[pd.DataFrame],
@@ -2599,7 +2252,6 @@ def _build_presentation_context(
     period_kpis: Optional[dict[str, object]] = None,
 ) -> PresentationContext:
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
-    period_days = (pd.Timestamp(period_end) - pd.Timestamp(period_start)).days + 1
     selected_raw = _coerce_nps_records(selected_nps_df)
     compare_raw = _coerce_nps_records(comparison_nps_df)
     current_period, baseline_period = _split_period_frames(
@@ -2620,32 +2272,20 @@ def _build_presentation_context(
         )
     if selected_raw.empty:
         selected_raw = current_period.copy()
+    selected_raw = selected_raw.loc[
+        selected_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
+    ].copy()
     if selected_raw.empty:
-        selected_raw = compare_raw[
-            (compare_raw["date"] >= pd.Timestamp(period_start))
-            & (compare_raw["date"] <= pd.Timestamp(period_end))
+        selected_raw = compare_raw.loc[
+            compare_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
         ].copy()
-
-    daily_signals, _ = _prepare_daily_signals(
-        overall_weekly,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    selected_daily_metrics = _daily_metrics_for_ppt(selected_raw)
-    daily_mix = _daily_group_mix_from_metrics(selected_daily_metrics)
-    if daily_mix.empty and not daily_signals.empty:
-        daily_mix = daily_signals[["date", "nps_mean", "detractor_rate"]].copy()
-        daily_mix["responses"] = 0.0
-        daily_mix["passive_rate"] = (1.0 - daily_mix["detractor_rate"]).clip(lower=0.0)
-        daily_mix["promoter_rate"] = 0.0
-        daily_mix["nps_classic"] = (1.0 - daily_mix["detractor_rate"] * 2.0) * 100.0
 
     kpi_history_df = (
         comparison_nps_df
         if comparison_nps_df is not None
         else selected_nps_df if selected_nps_df is not None else pd.DataFrame()
     )
-    kpi_current_df = selected_nps_df if selected_nps_df is not None else current_period
+    kpi_current_df = current_source_period if not current_source_period.empty else selected_raw
     resolved_period_kpis = period_kpis or build_period_kpis(
         history_df=kpi_history_df,
         current_df=kpi_current_df,
@@ -2655,40 +2295,77 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
     )
-    overview = _period_overview(selected_raw, period_kpis=resolved_period_kpis)
+    channel_key = str(topic_channel or "").strip().casefold()
+    channel_values = selected_raw["Canal"].fillna("").astype(str).str.strip()
+    channel_selected = (
+        selected_raw
+        if channel_key in {"", "all", "todos"} or not channel_values.ne("").any()
+        else selected_raw.loc[channel_values.str.casefold().eq(channel_key)]
+    )
+    overview = _period_overview(
+        selected_raw,
+        period_kpis=resolved_period_kpis,
+        topic_channel=topic_channel,
+    )
+    base_kpis = compute_score_kpis(baseline_source_period)
+    cumulative_kpis = compute_score_kpis(
+        pd.concat([baseline_source_period, current_source_period], ignore_index=True)
+    )
+    base_dates = (
+        pd.to_datetime(baseline_source_period["Fecha"], errors="coerce").dropna()
+        if "Fecha" in baseline_source_period.columns
+        else pd.Series(dtype="datetime64[ns]")
+    )
+    overview.update(
+        {
+            "base_classic_nps": base_kpis.classic_nps,
+            "cumulative_classic_nps": cumulative_kpis.classic_nps,
+            "cumulative_classic_delta": (
+                float(cumulative_kpis.classic_nps - base_kpis.classic_nps)
+                if cumulative_kpis.classic_nps is not None and base_kpis.classic_nps is not None
+                else float("nan")
+            ),
+            "base_start": base_dates.min().date().isoformat() if not base_dates.empty else "",
+            "base_end": (
+                (pd.Timestamp(period_start) - pd.Timedelta(days=1)).date().isoformat()
+                if not base_dates.empty
+                else ""
+            ),
+        }
+    )
     detractor_raw = (
-        selected_raw[selected_raw["band"].astype(str).str.casefold().eq("detractor")].copy()
-        if "band" in selected_raw.columns
-        else selected_raw.copy()
+        channel_selected[
+            channel_selected["band"].astype(str).str.casefold().eq("detractor")
+        ].copy()
+        if "band" in channel_selected.columns
+        else channel_selected.copy()
     )
     text_topics = _text_topics_table(detractor_raw, top_k=EDITORIAL_LIMITS.max_text_chart_clusters)
-    current_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
-    baseline_label = (
-        f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
-        if not baseline_period.empty
-        else "sin base histórica"
-    )
+    if not text_topics.empty:
+        text_topics = text_topics.loc[
+            ~text_topics["top_terms"].map(
+                lambda values: any(
+                    " ".join(str(value).casefold().split()) == "sin comentarios"
+                    for value in list(values or [])
+                )
+            )
+        ].reset_index(drop=True)
     dimensions = {
         "Palanca": _build_dimension_view_model(
             dimension="Palanca",
-            slide_number=5,
             selected_raw=selected_raw,
             current_source_period=current_source_period,
             baseline_source_period=baseline_source_period,
-            current_label=current_label,
-            baseline_label=baseline_label,
+            topic_channel=topic_channel,
         ),
         "Subpalanca": _build_dimension_view_model(
             dimension="Subpalanca",
-            slide_number=6,
             selected_raw=selected_raw,
             current_source_period=current_source_period,
             baseline_source_period=baseline_source_period,
-            current_label=current_label,
-            baseline_label=baseline_label,
+            topic_channel=topic_channel,
         ),
     }
-    del current_label, baseline_label
 
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
     causal_entity_summary = (
@@ -2719,21 +2396,17 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
         period_label=period_label,
-        period_days=period_days,
-        focus_name=focus_name,
+        topic_channel=topic_channel,
         overview=overview,
         period_kpis=resolved_period_kpis,
-        story_md=story_md,
-        selected_raw=selected_raw,
-        daily_mix=daily_mix,
-        daily_signals=daily_signals,
         overview_figure=_build_overview_figure(
-            comparison_nps_df if comparison_nps_df is not None else selected_nps_df,
+            comparison_nps_df
+            if comparison_nps_df is not None and not comparison_nps_df.empty
+            else selected_nps_df,
             period_start=period_start,
             period_end=period_end,
         ),
         text_topics_df=text_topics,
-        text_topic_figure=_build_text_topic_figure(text_topics),
         current_label=f"{_safe_date(period_start)} -> {_safe_date(period_end)}",
         baseline_label=(
             f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
@@ -2772,6 +2445,28 @@ def _set_template_text(
         run.font.color.rgb = _rgb(color)
 
 
+def _set_template_messages(shape: object, messages: list[str], *, size: float) -> None:
+    tf = shape.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    for index, message in enumerate(messages):
+        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.space_after = Pt(12)
+        properties = paragraph._p.get_or_add_pPr()
+        for child in list(properties):
+            if child.tag.rsplit("}", 1)[-1] in {"buAutoNum", "buBlip", "buChar", "buNone"}:
+                properties.remove(child)
+        properties.insert(0, OxmlElement("a:buNone"))
+        properties.set("marL", "0")
+        properties.set("indent", "0")
+        run = paragraph.add_run()
+        run.text = message
+        run.font.name = "Source Serif 4"
+        run.font.size = Pt(size)
+        run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+
 def _set_template_table(table: object, rows: list[list[str]]) -> None:
     for row_index, table_row in enumerate(table.rows):
         table_row.height = Inches(0.42 if row_index == 0 else 0.40)
@@ -2789,6 +2484,108 @@ def _set_template_table(table: object, rows: list[list[str]]) -> None:
                     run.font.size = Pt(8.4 if row_index == 0 else 8.2)
                     run.font.bold = row_index == 0
                     run.font.color.rgb = _rgb("FFFFFF" if row_index == 0 else BBVA_COLORS["ink"])
+
+
+def _replace_template_table(
+    slide: object,
+    shape_index: int,
+    rows: list[list[str]],
+    *,
+    column_widths: list[float],
+) -> object:
+    shape = slide.shapes[shape_index]
+    left, top, height = shape.left, shape.top, shape.height
+    width = sum((column.width for column in shape.table.columns), 0) if shape.has_table else shape.width
+    shape._element.getparent().remove(shape._element)
+    table = slide.shapes.add_table(len(rows), len(column_widths), left, top, width, height).table
+    for column, width_in in zip(table.columns, column_widths):
+        column.width = Inches(width_in)
+    for row_index, row in enumerate(table.rows):
+        for cell in row.cells:
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = _rgb(
+                BBVA_COLORS["blue"] if row_index == 0 else "FFFFFF"
+            )
+    _set_template_table(table, rows)
+    return table
+
+
+def _set_template_labeled_value(
+    shape: object,
+    label: str,
+    value: str,
+    *,
+    size: float = 10.5,
+    color: str = "666666",
+) -> None:
+    tf = shape.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    paragraph = tf.paragraphs[0]
+    label_run = paragraph.add_run()
+    label_run.text = f"{label}\n"
+    label_run.font.name = "Lato"
+    label_run.font.size = Pt(size)
+    label_run.font.color.rgb = _rgb(color)
+    value_run = paragraph.add_run()
+    value_run.text = value
+    value_run.font.name = "Lato"
+    value_run.font.size = Pt(size)
+    value_run.font.bold = True
+    value_run.font.color.rgb = _rgb(color)
+
+
+def _add_highlighted_runs(
+    paragraph: object,
+    text: str,
+    segments: object,
+    *,
+    size: float,
+    color: str,
+) -> None:
+    terms = {
+        str(segment.get("text", "")).strip().casefold()
+        for segment in (segments if isinstance(segments, list) else [])
+        if isinstance(segment, dict) and segment.get("bold") and str(segment.get("text", "")).strip()
+    }
+    pattern = (
+        re.compile("(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")", re.IGNORECASE)
+        if terms
+        else None
+    )
+    parts = pattern.split(text) if pattern else [text]
+    for part in parts:
+        if not part:
+            continue
+        run = paragraph.add_run()
+        run.text = part
+        run.font.name = "Lato"
+        run.font.size = Pt(size)
+        run.font.bold = part.casefold() in terms
+        run.font.color.rgb = _rgb(color)
+
+
+def _duplicate_slide(prs: Presentation, source_index: int) -> object:
+    source = prs.slides[source_index]
+    target = prs.slides.add_slide(source.slide_layout)
+    for shape in list(target.shapes):
+        shape._element.getparent().remove(shape._element)
+    source_bg = getattr(source.element.cSld, "bg", None)
+    target_bg = getattr(target.element.cSld, "bg", None)
+    if target_bg is not None:
+        target.element.cSld.remove(target_bg)
+    if source_bg is not None:
+        target.element.cSld.insert(0, deepcopy(source_bg))
+    for shape in source.shapes:
+        target.shapes._spTree.insert_element_before(deepcopy(shape.element), "p:extLst")
+    return target
+
+
+def _move_slide(prs: Presentation, source_index: int, target_index: int) -> None:
+    slide_ids = prs.slides._sldIdLst
+    slide_id = slide_ids[source_index]
+    slide_ids.remove(slide_id)
+    slide_ids.insert(target_index, slide_id)
 
 
 def _replace_template_picture(
@@ -2838,9 +2635,9 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
     specs = (
         ("COMENTARIOS", "comments"),
         ("SCORE MEDIO", "nps_average"),
-        ("NPS CLÁSICO", "classic_nps"),
-        ("DETRACTORES", "detractor_rate"),
         ("PROMOTORES", "promoter_rate"),
+        ("DETRACTORES", "detractor_rate"),
+        ("NPS CLÁSICO MENSUAL", "classic_nps"),
     )
     rows = [["Indicador", _clip(base_label, 24), _clip(actual_label, 24), "Variación"]]
     for label, key in specs:
@@ -2857,28 +2654,137 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
 
 
 def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None:
-    records = scenario.helix_evidence_records[: EDITORIAL_LIMITS.max_helix_evidence]
+    records = scenario.helix_evidence_records
     fallback = scenario.helix_evidence_lines[: EDITORIAL_LIMITS.max_helix_evidence]
     tf = shape.text_frame
     tf.clear()
     tf.word_wrap = True
     entries = records or [CausalEvidenceRecord("", line, "") for line in fallback]
     if not entries:
-        entries = [CausalEvidenceRecord("", "Sin evidencia Helix defendible en el periodo.", "")]
-    for index, record in enumerate(entries):
-        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        entries = [CausalEvidenceRecord("", "Sin evidencia Helix vinculada en el periodo.", "")]
+    max_entries = EDITORIAL_LIMITS.max_helix_evidence
+    has_overflow = len(entries) > max_entries
+    detailed_entries = list(entries[: max_entries - 1] if has_overflow else entries[:max_entries])
+
+    def prepare_paragraph(paragraph: object, *, size: float) -> None:
+        paragraph_properties = paragraph._p.get_or_add_pPr()
+        for child in list(paragraph_properties):
+            if child.tag.rsplit("}", 1)[-1] in {"buAutoNum", "buBlip", "buChar", "buNone"}:
+                paragraph_properties.remove(child)
+        paragraph_properties.insert(0, OxmlElement("a:buNone"))
+        paragraph_properties.set("marL", str(int(Pt(14))))
+        paragraph_properties.set("indent", str(-int(Pt(10))))
         paragraph.level = 0
+        paragraph.alignment = PP_ALIGN.LEFT
         paragraph.space_after = Pt(5)
+        bullet_run = paragraph.add_run()
+        bullet_run.text = "• "
+        bullet_run.font.name = "Lato"
+        bullet_run.font.size = Pt(size)
+        bullet_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+
+    visible_count = len(detailed_entries) + (1 if has_overflow else 0)
+    size = 11 if visible_count <= 2 else 9.5
+    for index, record in enumerate(detailed_entries):
+        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
+        prepare_paragraph(paragraph, size=size)
+        if record.incident_id:
+            id_run = paragraph.add_run()
+            id_run.text = record.incident_id
+            id_run.font.name = "Lato"
+            id_run.font.size = Pt(size)
+            id_run.font.bold = True
+            id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+            if record.url:
+                id_run.hyperlink.address = record.url
+        if record.summary:
+            separator = paragraph.add_run()
+            separator.text = ": "
+            separator.font.name = "Lato"
+            separator.font.size = Pt(size)
+            separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+            _add_highlighted_runs(
+                paragraph,
+                _clip(record.summary, 165),
+                record.segments,
+                size=size,
+                color=BBVA_COLORS["ink"],
+            )
+
+    if has_overflow:
+        remaining = [record for record in entries[len(detailed_entries) :] if record.incident_id]
+        if remaining:
+            paragraph = tf.add_paragraph()
+            prepare_paragraph(paragraph, size=size)
+            line_length = 0
+            for record in remaining:
+                incident_length = len(record.incident_id) + (2 if line_length else 0)
+                if line_length and line_length + incident_length > 72:
+                    paragraph = tf.add_paragraph()
+                    prepare_paragraph(paragraph, size=size)
+                    line_length = 0
+                if line_length:
+                    separator = paragraph.add_run()
+                    separator.text = ", "
+                    separator.font.name = "Lato"
+                    separator.font.size = Pt(size)
+                    separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                id_run = paragraph.add_run()
+                id_run.text = record.incident_id
+                id_run.font.name = "Lato"
+                id_run.font.size = Pt(size)
+                id_run.font.bold = True
+                id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                if record.url:
+                    id_run.hyperlink.address = record.url
+                line_length += incident_length
+
+
+def _scenario_comment_groups(row: pd.Series, fallback: list[str]) -> list[tuple[str, str, list[dict[str, object]]]]:
+    records = row.get("comment_records")
+    source = records if isinstance(records, list) else []
+    grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
+    for record in source:
+        if not isinstance(record, dict):
+            continue
+        score = str(record.get("nps", "n/d") or "n/d")
+        grouped.setdefault(score, []).append(record)
+    output: list[tuple[str, str, list[dict[str, object]]]] = []
+    for score, score_records in grouped.items():
+        comments = [str(record.get("comment", "")).strip() for record in score_records]
+        comments = [comment for comment in comments if comment]
+        segments = [
+            segment
+            for record in score_records
+            for segment in (record.get("comment_segments") or [])
+            if isinstance(segment, dict)
+        ]
+        if comments:
+            output.append((f"Score {score}: ", "; ".join(comments), segments))
+    if output:
+        return output[:2]
+    return [("", line.replace("NPS ", "Score "), []) for line in fallback[:2]]
+
+
+def _set_scenario_comment(shape: object, label: str, text: str, segments: object) -> None:
+    tf = shape.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    paragraph = tf.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.CENTER
+    if label:
         run = paragraph.add_run()
-        prefix = f"Evidencia {index + 1} · "
-        identifier = f"{record.incident_id}: " if record.incident_id else ""
-        run.text = f"{prefix}{identifier}{_clip(record.summary, 165)}"
+        run.text = label
         run.font.name = "Lato"
-        run.font.size = Pt(11 if len(entries) <= 2 else 9.5)
-        run.font.bold = True
+        run.font.size = Pt(11)
         run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-        if record.url:
-            run.hyperlink.address = record.url
+    _add_highlighted_runs(
+        paragraph,
+        _clip(text, 205),
+        segments,
+        size=11,
+        color=BBVA_COLORS["ink"],
+    )
 
 
 def _fill_template_deck(
@@ -2893,13 +2799,15 @@ def _fill_template_deck(
 
     dimension = "Subpalanca" if dimension_mode == "subpalanca" else "Palanca"
     view = context.dimensions[dimension]
+    topic_channel = context.topic_channel or "Todos"
     month = _month_label_es(context.period_end).title()
+    base_month = _month_label_es(context.period_start - pd.Timedelta(days=1)).title()
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
     _set_template_text(
         cover.shapes[0],
-        "NPS : Comentarios\ny causalidad",
+        "NPS : Comentarios\ne incidencias",
         size=38,
         bold=True,
         color="FFFFFF",
@@ -2912,7 +2820,7 @@ def _fill_template_deck(
     )
     _set_template_text(
         cover.shapes[1],
-        f"{scope} · {context.period_label} · Método causal: "
+        f"{scope} · {context.period_label} · Método de agrupación: "
         f"{method.label if include_causal_section else 'No aplicado (sin evidencia Helix)'}",
         size=12,
         color="FFFFFF",
@@ -2920,10 +2828,9 @@ def _fill_template_deck(
 
     comparison = prs.slides[1]
     delta = _safe_float(context.overview.get("classic_delta"), default=float("nan"))
-    direction = "mejora" if np.isfinite(delta) and delta >= 0 else "empeora"
     _set_template_text(
         comparison.shapes[4],
-        f"{month} suma señal de cliente y la experiencia {direction}",
+        f"Evolución del NPS clásico mensual ({_safe_date(context.period_start)} a {_safe_date(context.period_end)})",
         size=25,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2931,7 +2838,7 @@ def _fill_template_deck(
     )
     _set_template_text(
         comparison.shapes[2],
-        f"Comparativa de indicadores\nBase histórica frente a {month.lower()}",
+        f"Comparativa de indicadores\n{base_month} frente a {month}",
         size=12,
         bold=True,
         color="FFFFFF",
@@ -2940,13 +2847,13 @@ def _fill_template_deck(
     _set_template_table(comparison.shapes[6].table, _template_period_rows(context))
     _set_template_text(
         comparison.shapes[8],
-        f"La mayor fricción del periodo se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
+        f"Entre los tópicos observados en {topic_channel}, la mayor fricción por volumen detractor se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
         size=13,
         color=BBVA_COLORS["ink"],
     )
     _set_template_text(
         comparison.shapes[12],
-        f"La mejor señal de experiencia se observa en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
+        f"Entre los tópicos observados en {topic_channel}, la mejor señal por volumen promotor se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
         size=13,
         color=BBVA_COLORS["ink"],
     )
@@ -2956,7 +2863,8 @@ def _fill_template_deck(
     comparison.shapes[12].height = Inches(1.24)
     _set_template_text(
         comparison.shapes[3],
-        f"El NPS clásico varía {_fmt_signed_or_nd(delta)} puntos y el peso detractor "
+        f"La experiencia de cliente {'mejora' if delta > 0 else 'empeora' if delta < 0 else 'se mantiene'}: "
+        f"el NPS clásico mensual varía {_fmt_signed_or_nd(delta)} pts y el peso detractor "
         f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.",
         size=11.5,
         bold=True,
@@ -2968,32 +2876,32 @@ def _fill_template_deck(
     history = prs.slides[2]
     _set_template_text(
         history.shapes[5],
-        "El NPS clásico explica el periodo dentro de todo el histórico",
-        size=25,
+        f"Evolución del NPS clásico acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
+        size=22,
         bold=True,
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
     )
     _set_template_text(
         history.shapes[2],
-        f"NPS clásico y distribución por grupo\nHistórico completo · periodo {context.period_label} resaltado",
+        f"NPS clásico diario y distribución por grupo\nPeriodo {context.period_label} resaltado",
         size=12,
         bold=True,
         color="FFFFFF",
         font="Source Serif 4",
     )
-    bullets = (
-        f"El periodo arranca con NPS clásico {_fmt_num_or_nd(context.overview.get('start_classic'))} y termina en {_fmt_num_or_nd(context.overview.get('end_classic'))}.\n\n"
-        f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}.\n\n"
-        "NPS Clásico = % Promotores - % Detractores.\n\n"
-        "La curva conserva todo el histórico; el mensaje se limita al periodo solicitado."
-    )
-    _set_template_text(
-        history.shapes[3], bullets, size=11.5, color=BBVA_COLORS["ink"], font="Source Serif 4"
+    _set_template_messages(
+        history.shapes[3],
+        [
+            f"El NPS clásico histórico terminó en {base_month} en {_fmt_num_or_nd(context.overview.get('base_classic_nps'))}.",
+            f"A {_long_date_es(context.period_end)} alcanza {_fmt_num_or_nd(context.overview.get('cumulative_classic_nps'))}.",
+            f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}.",
+        ],
+        size=11.5,
     )
     _set_template_text(
         history.shapes[4],
-        f"Durante {context.period_label}, el NPS clásico varía {_fmt_signed_or_nd(delta)} puntos.",
+        f"El NPS clásico acumulado varía {_fmt_signed_or_nd(context.overview.get('cumulative_classic_delta'))} puntos frente a la base de {base_month}.",
         size=11.5,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3006,33 +2914,41 @@ def _fill_template_deck(
         context.overview_figure,
         empty_note="Sin histórico suficiente para construir la curva.",
     )
+    history.shapes[-1].left = Inches(3.35)
+    history.shapes[-1].top = Inches(1.82)
+    history.shapes[-1].width = Inches(6.05)
+    history.shapes[-1].height = Inches(2.92)
 
     topics = prs.slides[3]
     _set_template_text(
         topics.shapes[4],
-        "Los detractores hacen visible dónde se rompe la experiencia",
-        size=25,
+        f"Principales comentarios de los detractores del mes ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}) en el canal {topic_channel}",
+        size=22,
         bold=True,
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
     )
-    topic_rows = [["Tema", "Top terms", "Ejemplo 1", "Ejemplo 2"]]
-    selected_topics = select_text_clusters(context.text_topics_df, max_clusters=3)
+    topic_rows = [["Comentarios", "Top terms", "Ejemplos"]]
+    selected_topics = select_text_clusters(context.text_topics_df, max_clusters=5)
     for row in selected_topics.itertuples():
-        examples = [str(value) for value in list(getattr(row, "examples", []))[:2]]
+        examples = [str(value) for value in list(getattr(row, "examples", []))[:3]]
         topic_rows.append(
             [
-                str(getattr(row, "cluster_id", "")),
-                _clip(getattr(row, "top_terms_txt", ""), 58),
-                _clip(examples[0] if examples else "", 64),
-                _clip(examples[1] if len(examples) > 1 else "", 64),
+                _fmt_count_or_nd(getattr(row, "n", 0)),
+                _clip(getattr(row, "top_terms_txt", ""), 62),
+                _clip(" · ".join(examples) if examples else "Sin comentarios", 210),
             ]
         )
-    _set_template_table(topics.shapes[6].table, topic_rows)
+    _replace_template_table(
+        topics,
+        6,
+        topic_rows,
+        column_widths=[1.0, 2.45, 5.11],
+    )
     leader = topic_rows[1][1] if len(topic_rows) > 1 else "sin señal textual suficiente"
     _set_template_text(
         topics.shapes[3],
-        f"La escucha detractora concentra su señal principal en {leader}.",
+        f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}.",
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3056,8 +2972,8 @@ def _fill_template_deck(
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
     _set_template_text(
         change.shapes[0],
-        f"{worst[0]} lidera el deterioro frente a la base",
-        size=25,
+        f"{worst[0]} lidera el deterioro entre los tópicos observados en {topic_channel} en {month}, frente a la base de {base_month}",
+        size=21,
         bold=True,
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
@@ -3071,7 +2987,6 @@ def _fill_template_deck(
         color="FFFFFF",
         font="Source Serif 4",
     )
-    _set_template_table(change.shapes[7].table, change_rows)
     _set_template_text(
         change.shapes[6],
         f"{worst[0]} presenta el mayor Delta NPS Clásico ({worst[1]} puntos).",
@@ -3087,13 +3002,20 @@ def _fill_template_deck(
         view.change_figure,
         empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
     )
+    _replace_template_table(
+        change,
+        7,
+        change_rows,
+        column_widths=[1.00, 0.64, 0.63, 0.70, 0.70, 0.70],
+    )
 
     pain = prs.slides[5]
-    pain_rows = list(view.web_table_df.head(4).itertuples())
+    pain_rows = list(view.topic_table_df.head(4).itertuples())
     leader_name = str(getattr(pain_rows[0], "value", "Sin señal")) if pain_rows else "Sin señal"
+    _set_template_text(pain.shapes[1], "Volumen de opiniones", size=11, color=BBVA_COLORS["ink"])
     _set_template_text(
         pain.shapes[0],
-        f"{leader_name} concentra el mayor dolor en la Web",
+        f"{leader_name} concentra el mayor dolor entre los tópicos observados en {topic_channel}",
         size=25,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3109,45 +3031,30 @@ def _fill_template_deck(
         del offset
         _set_template_text(
             pain.shapes[header_index],
-            _clip(getattr(row, "value", "Sin datos") if row else "Sin datos", 28),
+            _clip(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios", 28),
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],
             align=PP_ALIGN.CENTER,
         )
-        _set_template_text(
+        _set_template_labeled_value(
             pain.shapes[volume_index],
-            (
-                f"{_fmt_count_or_nd(getattr(row, 'n', 0))} comentarios\ndentro del periodo analizado"
-                if row
-                else "Sin comentarios"
-            ),
-            size=10.5,
-            color="666666",
+            "Opiniones totales:",
+            _fmt_count_or_nd(getattr(row, "n", 0)) if row else "Sin comentarios",
         )
-        _set_template_text(
+        _set_template_labeled_value(
             pain.shapes[score_index],
-            (
-                f"Score del canal Web:\n{_fmt_num_or_nd(getattr(row, 'nps', np.nan), decimals=1)}"
-                if row
-                else "Score del canal Web:\nn/d"
-            ),
-            size=10.5,
-            color="666666",
+            "Score total:",
+            _fmt_num_or_nd(getattr(row, "nps", np.nan), decimals=1) if row else "n/d",
         )
-        _set_template_text(
+        _set_template_labeled_value(
             pain.shapes[detractor_index],
-            (
-                f"Detractores del periodo:\n{_fmt_pct_or_nd(getattr(row, 'detractor_rate', np.nan))}"
-                if row
-                else "Detractores del periodo:\nn/d"
-            ),
-            size=10.5,
-            color="666666",
+            "Detractores del periodo:",
+            _fmt_pct_or_nd(getattr(row, "detractor_rate", np.nan)) if row else "n/d",
         )
     _set_template_text(
         pain.shapes[7],
-        f"{leader_name} combina la señal Web más crítica del periodo.",
+        f"{leader_name} presenta la señal más crítica entre los tópicos observados en {topic_channel}.",
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3155,16 +3062,23 @@ def _fill_template_deck(
         align=PP_ALIGN.CENTER,
     )
 
-    scenarios = context.causal.scenarios[:3] if include_causal_section else []
+    scenarios = context.causal.scenarios if include_causal_section else []
+    while len(prs.slides) < 6 + len(scenarios):
+        # The first causal slide is the canonical scenario layout. Later
+        # template slides may use alternate masters, so extending from the
+        # first one keeps every generated scenario visually consistent.
+        _duplicate_slide(prs, 6)
     keep_slides = 6 + len(scenarios)
     while len(prs.slides) > keep_slides:
         _remove_slide(prs, len(prs.slides) - 1)
     for offset, scenario in enumerate(scenarios):
         slide = prs.slides[6 + offset]
         row = scenario.row
-        title = str(row.get("nps_topic") or f"Escenario causal {offset + 1}")
+        title = str(row.get("nps_topic") or f"Escenario de evidencia {offset + 1}").replace(
+            " > ", " / "
+        )
         title_shape = slide.shapes[1]
-        full_title = f"Causalidad en tópico NPS ancla: {title}"
+        full_title = title
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
         title_shape.height = Inches(0.78)
         title_size = 22 if len(full_title) < 49 else 18 if len(full_title) < 65 else 16
@@ -3180,26 +3094,48 @@ def _fill_template_deck(
             slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT
         )
         _set_template_text(
+            slide.shapes[4],
+            "NOTA MEDIA DEL TÓPICO",
+            size=12,
+            bold=False,
+            color=BBVA_COLORS["blue"],
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
             slide.shapes[3],
-            _fmt_pct_or_nd(row.get("detractor_probability")),
+            _fmt_num_or_nd(row.get("avg_nps")),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
+            align=PP_ALIGN.CENTER,
+        )
+        _set_template_text(
+            slide.shapes[7],
+            "CONFIANZA",
+            size=12,
+            bold=False,
+            color=BBVA_COLORS["blue"],
             align=PP_ALIGN.CENTER,
         )
         _set_template_text(
             slide.shapes[6],
-            _fmt_num_or_nd(row.get("confidence")),
+            _fmt_pct_or_nd(row.get("avg_similarity"), decimals=0),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
             align=PP_ALIGN.CENTER,
         )
+        slide.shapes[9].left = Inches(0.38)
+        slide.shapes[9].top = Inches(4.90)
+        slide.shapes[9].width = Inches(9.37)
+        slide.shapes[9].height = Inches(0.48)
+        slide.shapes[9].fill.solid()
+        slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS VALIDADOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
+            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3209,15 +3145,15 @@ def _fill_template_deck(
         content_shapes = [
             shape for shape in list(slide.shapes)[10:] if getattr(shape, "has_text_frame", False)
         ]
-        comments = scenario.comment_lines[:2] or ["Sin comentario VoC defendible en el periodo."]
+        comments = _scenario_comment_groups(
+            row,
+            scenario.comment_lines or ["Sin comentario VoC vinculado en el periodo."],
+        )
         evidence_shape = content_shapes[-1]
         quote_shapes = content_shapes[:-1]
         if len(quote_shapes) == 1 and len(comments) >= 2:
             first_quote = quote_shapes[0]
             first_quote.left = Inches(3.55)
-            first_quote.top = Inches(1.10)
-            first_quote.width = Inches(5.83)
-            first_quote.height = Inches(0.47)
             second_quote = slide.shapes.add_shape(
                 MSO_AUTO_SHAPE_TYPE.RECTANGLE,
                 Inches(3.55),
@@ -3233,17 +3169,28 @@ def _fill_template_deck(
             second_quote.text_frame.margin_top = Inches(0.07)
             second_quote.text_frame.margin_bottom = Inches(0.05)
             quote_shapes.append(second_quote)
-            evidence_shape.top = Inches(2.39)
-            evidence_shape.height = Inches(2.26)
+        content_top = 1.08
         for index, quote_shape in enumerate(quote_shapes):
-            _set_template_text(
-                quote_shape,
-                comments[index] if index < len(comments) else "",
-                size=11,
-                bold=False,
-                color=BBVA_COLORS["ink"],
-            )
+            _, comment_text, _ = comments[index] if index < len(comments) else ("", "", [])
+            estimated_lines = max(1, min(3, int(np.ceil(max(len(comment_text), 1) / 82))))
+            quote_shape.left = Inches(3.55)
+            quote_shape.top = Inches(content_top)
+            quote_shape.width = Inches(5.83)
+            quote_shape.height = Inches(0.34 + 0.19 * estimated_lines)
+            quote_shape.fill.solid()
+            quote_shape.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
+            quote_shape.line.fill.background()
+            content_top += 0.34 + 0.19 * estimated_lines + 0.08
+        evidence_shape.left = Inches(3.55)
+        evidence_shape.top = Inches(content_top + 0.03)
+        evidence_shape.width = Inches(5.83)
+        evidence_shape.height = Inches(max(1.15, 4.66 - content_top))
+        for index, quote_shape in enumerate(quote_shapes):
+            label, text, segments = comments[index] if index < len(comments) else ("", "", [])
+            _set_scenario_comment(quote_shape, label, text, segments)
         _scenario_evidence(evidence_shape, scenario)
+
+    _move_slide(prs, 2, 1)
 
 
 def generate_business_review_ppt(
@@ -3254,46 +3201,19 @@ def generate_business_review_ppt(
     period_start: date,
     period_end: date,
     focus_name: str,
-    overall_weekly: pd.DataFrame,
-    rationale_df: pd.DataFrame,
-    story_md: str,
-    script_8slides_md: str,
+    topic_channel: str = "Web",
     attribution_df: Optional[pd.DataFrame] = None,
-    ranking_df: Optional[pd.DataFrame] = None,
-    by_topic_daily: Optional[pd.DataFrame] = None,
-    lag_days_by_topic: Optional[pd.DataFrame] = None,
-    by_topic_weekly: Optional[pd.DataFrame] = None,
-    lag_weeks_by_topic: Optional[pd.DataFrame] = None,
     selected_nps_df: Optional[pd.DataFrame] = None,
     comparison_nps_df: Optional[pd.DataFrame] = None,
-    incident_evidence_df: Optional[pd.DataFrame] = None,
-    changepoints_by_topic: Optional[pd.DataFrame] = None,
-    incident_timeline_df: Optional[pd.DataFrame] = None,
-    hotspot_focus_note: str = "",
     touchpoint_source: str = "",
     entity_summary_df: Optional[pd.DataFrame] = None,
     entity_summary_kpis: Optional[list[dict[str, str]]] = None,
-    executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     broken_journeys_df: Optional[pd.DataFrame] = None,
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
     include_causal_section: bool = True,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
-    del (
-        script_8slides_md,
-        incident_evidence_df,
-        incident_timeline_df,
-        hotspot_focus_note,
-        rationale_df,
-        ranking_df,
-        by_topic_daily,
-        lag_days_by_topic,
-        by_topic_weekly,
-        lag_weeks_by_topic,
-        changepoints_by_topic,
-        executive_journey_catalog,
-    )
     dimension_mode = str(report_dimension_analysis or "palanca").strip().lower()
     if dimension_mode not in {"palanca", "subpalanca"}:
         dimension_mode = "palanca"
@@ -3301,8 +3221,8 @@ def generate_business_review_ppt(
     if not REPORT_TEMPLATE.exists():
         raise FileNotFoundError(f"No se encuentra la plantilla ejecutiva: {REPORT_TEMPLATE}")
     prs = Presentation(str(REPORT_TEMPLATE))
-    prs.core_properties.subject = "NPS Lens · comentarios y causalidad"
-    prs.core_properties.keywords = f"BBVA,NPS,causalidad,{REPORT_DESIGN_VERSION}"
+    prs.core_properties.subject = "NPS Lens · comentarios e incidencias"
+    prs.core_properties.keywords = f"BBVA,NPS,incidencias,{REPORT_DESIGN_VERSION}"
     prs.core_properties.comments = f"NPS Lens report design: {REPORT_DESIGN_VERSION}"
 
     context = _build_presentation_context(
@@ -3312,8 +3232,7 @@ def generate_business_review_ppt(
         period_start=period_start,
         period_end=period_end,
         focus_name=focus_name,
-        overall_weekly=overall_weekly,
-        story_md=story_md,
+        topic_channel=topic_channel,
         attribution_df=attribution_df,
         selected_nps_df=selected_nps_df,
         comparison_nps_df=comparison_nps_df,
@@ -3333,7 +3252,7 @@ def generate_business_review_ppt(
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = (
-        f"nps-comentarios-causalidad-{_slug(service_origin)}-"
+        f"nps-comentarios-incidencias-{_slug(service_origin)}-"
         f"{_slug(service_origin_n1)}-{stamp}.pptx"
     )
 

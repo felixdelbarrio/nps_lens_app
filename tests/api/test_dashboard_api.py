@@ -7,9 +7,11 @@ from typing import Callable
 from zipfile import ZipFile
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 from pptx import Presentation
 
+from nps_lens.analytics.drivers import compute_nps_from_scores
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
@@ -218,16 +220,30 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     )
     assert dashboard_response.status_code == 200
     dashboard_payload = dashboard_response.json()
+    assert "opportunities" not in dashboard_payload
+
+    def keys(value):
+        if isinstance(value, dict):
+            return set(value).union(*(keys(item) for item in value.values()))
+        if isinstance(value, list):
+            return set().union(*(keys(item) for item in value))
+        return set()
+
+    assert {"confidence", "priority", "potential_uplift", "causal_score"}.isdisjoint(
+        keys(dashboard_payload)
+    )
+    assert "comparison" not in dashboard_payload
+    for gap in dashboard_payload["gaps"]["table"]:
+        assert gap["gap_vs_base"] == pytest.approx(
+            gap["nps"] - dashboard_payload["gaps"]["base_nps"]
+        )
+        assert 0 <= gap["detractors"] <= gap["valid_n"] <= gap["n"]
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
-    assert (
-        abs(
-            dashboard_payload["gaps"]["overall_nps"]
-            - dashboard_payload["scope"]["period"]["kpis"]["classic_nps"]
-        )
-        < 1e-9
-    )
+    assert "Canal: Web" in dashboard_payload["context_pills"]
+    assert dashboard_payload["gaps"]["base_nps"] is None
+    assert dashboard_payload["gaps"]["table"] == []
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
     assert dashboard_payload["scope"]["cumulative"]["note"].startswith(
         "KPIs agregados para el periodo del "
@@ -241,12 +257,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     )
     assert dashboard_payload["overview"]["daily_volume_mix_figure"] is not None
     assert dashboard_payload["overview"]["topics_table"] is not None
-    assert dashboard_payload["controls"]["dimensions"] == [
-        "Palanca",
-        "Subpalanca",
-        "Canal",
-        "UsuarioDecisión",
-    ]
+    assert dashboard_payload["controls"]["dimensions"] == ["Palanca", "Subpalanca"]
     assert "report_markdown" not in dashboard_payload
 
     records = app.state.repository.load_records_df(
@@ -280,6 +291,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert filtered_dashboard_response.status_code == 200
     filtered_dashboard_payload = filtered_dashboard_response.json()
     assert filtered_dashboard_payload["kpis"] == dashboard_payload["kpis"]
+    assert filtered_dashboard_payload["gaps"] == dashboard_payload["gaps"]
 
     data_response = client.get(
         "/api/dashboard/data/nps",
@@ -299,6 +311,47 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert data_payload["total_rows"] > 0
     assert "Browser" in data_payload["columns"]
     assert len(data_payload["rows"]) == 5
+
+
+def test_channel_only_selects_gap_topics_and_never_changes_nps_calculations(
+    tmp_path: Path,
+) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    _upload_nps_jan_feb(client)
+    _upload_nps_march(client)
+    params = {
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
+        "service_origin_n2": "",
+        "pop_year": "2026",
+        "pop_month": "03",
+        "nps_group": "Todos",
+        "score_channel": "Web",
+        "gap_dimension": "Palanca",
+    }
+
+    response = client.get("/api/dashboard/nps", params=params)
+    assert response.status_code == 200
+    payload = response.json()
+    unfiltered = client.get(
+        "/api/dashboard/nps",
+        params={**params, "score_channel": "Todos"},
+    ).json()
+    context = UploadContext("BBVA México", "Senda", "")
+    records = app.state.dashboard_service._load_nps_df(context)
+    current = app.state.dashboard_service._apply_population_filters(records, "2026", "03")
+
+    assert payload["kpis"] == unfiltered["kpis"]
+    assert payload["scope"] == unfiltered["scope"]
+    assert payload["gaps"]["base_nps"] == unfiltered["gaps"]["base_nps"]
+    spans_multiple_channels = False
+    for row in payload["gaps"]["table"]:
+        topic_population = current.loc[current["Palanca"].eq(row["value"])]
+        spans_multiple_channels |= topic_population["Canal"].nunique() > 1
+        assert row["n"] == len(topic_population)
+        assert row["nps"] == pytest.approx(compute_nps_from_scores(topic_population["NPS"]))
+    assert spans_multiple_channels
 
 
 def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
@@ -484,21 +537,50 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
     assert "scenarios" in linking_payload
-    assert "deep_dive" in linking_payload
-    assert linking_payload["navigation"][3]["label"] == "Análisis de Tópicos de NPS afectados"
-    assert linking_payload["deep_dive"]["title"] == "Análisis de Tópicos de NPS afectados"
-    assert linking_payload["deep_dive"]["topic_filter"]["default"] == "Todos"
-    assert isinstance(linking_payload["deep_dive"]["topic_filter"]["options"], list)
-    assert linking_payload["deep_dive"]["topic_filter"]["options"][0]["value"] == "Todos"
-    assert linking_payload["deep_dive"]["ranking"]["rows"]
-    assert linking_payload["deep_dive"]["evidence"]["rows"]
-    assert linking_payload["deep_dive"]["trending"]["figure"] is not None
+    assert "deep_dive" not in linking_payload
+    assert len(linking_payload["navigation"]) == 3
+    assert "associations" not in linking_payload["situation"]
+    evidence_rows = linking_payload["situation"]["evidence"]["rows"]
+    assert evidence_rows
+    assert list(evidence_rows[0]) == [
+        "NPS Topic",
+        "Incident ID",
+        "Incident ID__href",
+        "Incident Summary",
+        "Detractor Comment",
+        "Tasa Foco",
+        "Similarity",
+    ]
+    identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
+    assert [row["label"] for row in identity] == [
+        "Tópico NPS ancla",
+        "Organizaciones responsables observadas",
+        "Duración media histórica de resolución (semanas)",
+    ]
+    assert len({row["NPS Topic"] for row in evidence_rows}) <= 10
+    assert (
+        max(
+            sum(row["NPS Topic"] == topic for row in evidence_rows)
+            for topic in {row["NPS Topic"] for row in evidence_rows}
+        )
+        <= 10
+    )
     assert linking_payload["scenarios"]["cards"][0]["anchor_topic"]
     assert linking_payload["entity_summary"]["table"][0]["Tópico NPS ancla"]
-    assert [tab["label"] for tab in linking_payload["deep_dive"]["tabs"]] == [
-        "Ranking de hipótesis",
-        "Evidence wall",
-    ]
+    serialized_linking = json.dumps(linking_payload, ensure_ascii=False).casefold()
+    for removed_field in (
+        "score_mean_difference",
+        "focus_rate_difference_pp",
+        "confidence",
+        "priority",
+        "causal_score",
+        "potential_uplift",
+        "nps_points_at_risk",
+        "nps_points_recoverable",
+        "total_nps_impact",
+        "action_lane",
+    ):
+        assert f'"{removed_field}"' not in serialized_linking
 
 
 def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(
@@ -712,8 +794,6 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         return {
             "available": True,
             "kpis": {
-                "nps_points_at_risk": 2.1,
-                "nps_points_recoverable": 1.3,
                 "top3_incident_share": 0.7,
                 "median_lag_weeks": 1.0,
             },
@@ -727,7 +807,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
                         "rank": 1,
                         "nps_topic": "Acceso bloqueado",
                         "linked_pairs": 4,
-                        "detractor_probability": 0.6,
+                        "focus_rate_high_incidence": 0.6,
                     }
                 ]
             },
@@ -782,10 +862,26 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
             "default": {"nps_group": "Promotores", "score_channel": "Web"},
             "immutable": True,
         }
+        assert "comments" in publication["screens"]
+        comment_controls = publication["screens"]["comments"]["controls"]
+        assert comment_controls["defaults"] == {
+            "channel": "Web",
+            "group": "Detractores",
+            "dimension": "Palanca",
+        }
+        assert set(publication["screens"]["comments"]["gaps"]["Web"]) == {
+            "Palanca",
+            "Subpalanca",
+        }
+        assert "comparison" not in publication["screens"]["dashboard"]
+        assert "gaps" not in publication["screens"]["dashboard"]
+        assert "topics_table" not in publication["screens"]["dashboard"]["overview"]
+        assert "deep_dive" not in publication["screens"]["linking"]
         assert publication["filters"]["causal_nps_group"] == "Todos"
         assert publication["manifest"]["report_without_evolution"] == (
             "informe-ejecutivo-sin-evolucion-nps.pptx"
         )
+        assert "equivalence_registry" not in publication["manifest"]
     assert client.get("/api/dashboard/report/exclusive.pptx").status_code == 404
 
 
@@ -844,9 +940,9 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "marzo 2026" in slide_2_text.lower()
-    assert "2026-01" not in slide_2_text
-    assert "2026-02" not in slide_2_text
+    assert "nps clásico acumulado histórico" in slide_2_text.lower()
+    assert "2026-01-01" in slide_2_text
+    assert "terminó en Febrero" in slide_2_text
 
     all_texts: list[str] = []
     for slide in presentation.slides:
@@ -855,5 +951,8 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any("lidera el deterioro frente a la base" in text for text in all_texts)
+    assert any(
+        "lidera el deterioro entre los tópicos observados en Web" in text
+        for text in all_texts
+    )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

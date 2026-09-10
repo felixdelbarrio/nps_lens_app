@@ -57,8 +57,8 @@ function _publicationByKey_(scopeKey) {
 function _selectedPublication_() { return _publicationByKey_(_property_(NPS_LENS.selectedScopeProperty)); }
 
 function _validateEdition_(payload) {
-  if (!payload || payload.schema_version !== '2.0' || !payload.manifest || !payload.screens || !payload.scope) {
-    throw new Error('La edición no cumple el contrato NPS Lens 2.0 con ámbito inmutable.');
+  if (!payload || payload.schema_version !== '4.0' || !payload.manifest || !payload.screens || !payload.scope) {
+    throw new Error('La edición no cumple el contrato NPS Lens 4.0 con ámbito inmutable.');
   }
   ['dashboard', 'linking', 'data'].forEach(name => {
     if (!payload.screens[name] || typeof payload.screens[name] !== 'object') throw new Error('Falta la pantalla requerida: ' + name + '.');
@@ -73,10 +73,10 @@ function _validateArchive_(payload) {
   _validateEdition_(payload);
   const snapshot = payload.snapshots && payload.snapshots.data;
   const datasets = snapshot && snapshot.datasets;
-  if (!snapshot || snapshot.schema_version !== '2.0' || !datasets || !datasets.nps || !datasets.helix) {
+  if (!snapshot || snapshot.schema_version !== '4.0' || !datasets || !datasets.nps || !datasets.helix) {
     throw new Error('La edición no incluye los snapshots estáticos calculados por la aplicación local.');
   }
-  if (!datasets.nps.pages || !datasets.nps.pages['todos|todos'] || !datasets.helix.page) {
+  if (!datasets.nps.page || !datasets.helix.page) {
     throw new Error('Los snapshots estáticos están incompletos.');
   }
   return payload;
@@ -115,7 +115,7 @@ function _encodedSnapshot_(fileId) {
   } catch (error) { cache.remove(key); }
   const blob = DriveApp.getFileById(fileId).getBlob(), bytes = blob.getBytes();
   const gzipBytes = bytes[0] === 31 && (bytes[1] === 139 || bytes[1] === -117)
-    ? bytes : Utilities.gzip(Utilities.newBlob(bytes, 'application/json')).getBytes();
+    ? bytes : Utilities.gzip(Utilities.newBlob(bytes, 'application/json', 'snapshot.json')).getBytes();
   const encoded = Utilities.base64EncodeWebSafe(gzipBytes);
   _cacheEncodedSnapshot_(fileId, encoded);
   return encoded;
@@ -123,17 +123,13 @@ function _encodedSnapshot_(fileId) {
 
 function _loadSnapshot_(fileId) {
   const bytes = Utilities.base64DecodeWebSafe(_encodedSnapshot_(fileId));
-  return JSON.parse(Utilities.ungzip(Utilities.newBlob(bytes)).getDataAsString('UTF-8'));
-}
-
-function _normalizedDatasetFilter_(value) {
-  return String(value || 'todos').trim().toLowerCase()
-    .replace(/^detractores$/, 'detractor').replace(/^promotores$/, 'promotor').replace(/^neutros$/, 'pasivo');
+  const gzipBlob = Utilities.newBlob(bytes, 'application/gzip', 'snapshot.json.gz');
+  return JSON.parse(Utilities.ungzip(gzipBlob).getDataAsString('UTF-8'));
 }
 
 function _publishedShell_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
-  if (!publication) return {schema_version:'2.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
+  if (!publication) return {schema_version:'4.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
   const fileId = _property_(_publicationShellProperty_(publication.scopeKey));
   if (!fileId) throw new Error('Esta edición debe volver a publicarse para aplicar la carga optimizada.');
   return _validateEdition_(_loadSnapshot_(fileId));
@@ -183,10 +179,11 @@ function _publicationFolder_() {
 }
 
 function _publicationCatalog_() {
+  const showEvolutionNps = _evolutionNpsVisible_();
   return _publicationRows_().map(item => ({
     scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.buug,item.n1,item.year,item.month,item.causalMethodLabel].join(' · '),
     buug:item.buug,n1:item.n1,n2:item.n2,year:item.year,month:item.month,causalMethod:item.causalMethod,
-    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_presentationEntryUrl_(item.scopeKey)
+    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_reportUrl_(item.scopeKey,showEvolutionNps)
   }));
 }
 
@@ -264,15 +261,10 @@ function importPublicationArchive(form) {
   return _administration_({scopeKey:edition.scope.key,generatedAt:edition.generated_at,slidesFileId}, viewer);
 }
 
-function _reportUrl_(scopeKey) {
+function _reportUrl_(scopeKey, showEvolutionNps) {
   const publication = _publicationByKey_(scopeKey);
   if (!publication) return '';
   const compactId = _property_(_compactSlidesProperty_(publication.scopeKey));
-  const slidesId = _evolutionNpsVisible_() ? publication.slidesFileId : compactId;
+  const slidesId = showEvolutionNps ? publication.slidesFileId : compactId;
   return slidesId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(slidesId) + '/edit' : '';
-}
-
-function _presentationEntryUrl_(scopeKey) {
-  const base = ScriptApp.getService().getUrl();
-  return base ? base + '?presentation=1&scope=' + encodeURIComponent(String(scopeKey || '')) : '';
 }

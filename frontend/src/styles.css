@@ -991,7 +991,7 @@ input:disabled {
 }
 
 .data-table td strong {
-  display: block;
+  display: inline;
   color: var(--color-text);
   font-weight: 500;
 }
@@ -1677,3 +1677,11 @@ input:disabled {
     padding-bottom: 2px;
   }
 }
+
+.taxonomy-studio { display: grid; gap: 1.25rem; }
+.taxonomy-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+.taxonomy-cards article { display: flex; flex-direction: column; gap: .6rem; }
+.taxonomy-cards .inline-actions { flex-wrap: wrap; margin-top: auto; }
+.taxonomy-exploration { min-width: 0; display: grid; gap: 1rem; }
+.taxonomy-exploration .table-scroll { overflow: auto; max-height: 65vh; }
+.taxonomy-exploration td { vertical-align: top; min-width: 7rem; }

@@ -60,31 +60,6 @@ class AppService:
     # Use-cases
     # ----------------------------
 
-    def topics(
-        self,
-        texts: pd.Series,
-        *,
-        n_clusters: int = 8,
-        max_features: int = 4000,
-        dataset_sig: Optional[str] = None,
-    ) -> Any:
-        """Topic extraction (cached)."""
-        from nps_lens.analytics.text_mining import extract_topics
-
-        ds_sig = dataset_sig or f"texts:{hash(texts.head(1024).to_list())}|n={len(texts)}"
-        params = {"n_clusters": int(n_clusters), "max_features": int(max_features)}
-
-        out, _hit = self.cached(
-            namespace="topics",
-            dataset_sig=ds_sig,
-            params=params,
-            compute=lambda: extract_topics(
-                texts, n_clusters=int(n_clusters), max_features=int(max_features)
-            ),
-            meta={"n_texts": int(len(texts))},
-        )
-        return out
-
     def routes(
         self,
         df: pd.DataFrame,

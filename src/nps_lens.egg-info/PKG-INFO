@@ -156,9 +156,8 @@ La experiencia operativa se organiza así:
 - **SERVICE CONTAINER**: contexto de servicio (`BUUG`, `N1`, `N2`).
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
 - **Evolución NPS**: KPIs, evolución temporal y comparativas cruzadas afectados por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
-- **Comentarios**: filtros sincronizados de `Canal` y `Grupo Score`; contiene comentarios, cambios históricos, brechas y oportunidades priorizadas.
-- **Causalidad**: conecta incidencias Helix y comentarios NPS mediante el método causal seleccionado.
-- **Causalidad**: fija `Canal=Web`, oculta `Grupo Score` y usa el método causal configurado.
+- **Comentarios**: filtros sincronizados de `Canal` y `Grupo Score`; contiene comentarios, cambios históricos y brechas.
+- **Causalidad**: conecta incidencias Helix y comentarios NPS mediante el método causal configurado; fija `Canal=Web` y oculta `Grupo Score`.
 - **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
 
 Semántica:

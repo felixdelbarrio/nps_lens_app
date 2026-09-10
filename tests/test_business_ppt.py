@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 from pptx import Presentation
+from pptx.enum.text import PP_ALIGN
 
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -26,7 +27,6 @@ from nps_lens.settings import Settings
 from nps_lens.ui.charts import (
     chart_daily_kpis,
     chart_daily_mix_business,
-    chart_incident_risk_recovery,
 )
 from nps_lens.ui.theme import get_theme
 
@@ -76,40 +76,19 @@ def _sample_payload() -> dict:
             {
                 "nps_topic": "Pagos > SPEI",
                 "touchpoint": "Pagos",
-                "priority": 0.91,
-                "confidence": 0.80,
-                "focus_probability_with_incident": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.9,
-                "causal_score": 0.84,
-                "nps_points_at_risk": 1.9,
-                "nps_points_recoverable": 1.2,
+                "focus_rate_high_incidence": 0.47,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Acceso > Login",
                 "touchpoint": "Acceso",
-                "priority": 0.79,
-                "confidence": 0.71,
-                "focus_probability_with_incident": 0.39,
-                "nps_delta_expected": -3.6,
-                "total_nps_impact": 1.1,
-                "causal_score": 0.77,
-                "nps_points_at_risk": 1.1,
-                "nps_points_recoverable": 0.7,
+                "focus_rate_high_incidence": 0.39,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Tarjetas > Bloqueo",
                 "touchpoint": "Tarjetas",
-                "priority": 0.68,
-                "confidence": 0.64,
-                "focus_probability_with_incident": 0.31,
-                "nps_delta_expected": -2.8,
-                "total_nps_impact": 0.9,
-                "causal_score": 0.66,
-                "nps_points_at_risk": 0.9,
-                "nps_points_recoverable": 0.5,
+                "focus_rate_high_incidence": 0.31,
                 "best_lag_weeks": 2.0,
             },
         ]
@@ -164,21 +143,12 @@ def _sample_payload() -> dict:
                 "linked_pairs": 5,
                 "avg_similarity": 0.89,
                 "avg_nps": 1.5,
-                "detractor_probability": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.7,
-                "nps_points_at_risk": 1.7,
-                "nps_points_recoverable": 1.1,
-                "priority": 0.91,
-                "confidence": 0.82,
-                "causal_score": 0.86,
-                "delta_focus_rate_pp": 29.0,
+                "focus_rate_high_incidence": 0.47,
                 "incident_rate_per_100_responses": 8.5,
                 "incidents": 5,
                 "responses": 120,
-                "action_lane": "Fix estructural",
-                "owner_role": "Producto + Tecnologia",
-                "eta_weeks": 6.0,
+                "support_organizations": "Producto + Tecnologia",
+                "historical_resolution_weeks": 6.0,
                 "incident_records": [
                     {
                         "incident_id": "INC00001",
@@ -330,26 +300,6 @@ def _assert_no_shape_overflow(prs: Presentation) -> None:
 
 def test_generate_business_review_ppt_builds_new_story() -> None:
     payload = _sample_payload()
-    business_story = """# Informe de negocio — NPS Lens
-
-## 1) Qué está pasando
-- Muestras: 36,872 · Score medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
-- Zona de fricción: Agregar funcionalidad · Zona fuerte: FAN
-
-## 2) Cambio vs base de comparación
-- Periodo actual: Mes actual (Febrero 2026 · 2026-02-01 → 2026-02-22) (n=20,791)
-- Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
-- Variación: Delta NPS Clásico -0.18 · Δ detractores +2.5 pp
-
-## 3) Dónde atacar primero (oportunidades)
-- Si mejoramos Palanca=Funcionamiento Continuo, el modelo estima un potencial de +57.2 puntos.
-
-## 4) Qué están diciendo (temas de texto)
-- Tema #1: fallas de continuidad, caídas y lentitud en procesos críticos.
-
-## 5) Próximos pasos recomendados
-- Validar releases, alinear owners y aterrizar quick wins del mes.
-"""
 
     out = generate_business_review_ppt(
         service_origin="BBVA México",
@@ -358,26 +308,15 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md=business_story,
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source="domain_touchpoint",
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Confianza media", "value": "0.82"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Confianza", "value": "82%"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
 
@@ -386,7 +325,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
-    assert out.file_name.startswith("nps-comentarios-causalidad-")
+    assert out.file_name.startswith("nps-comentarios-incidencias-")
     assert "thermal-causality-v3" in (prs.core_properties.keywords or "")
     assert len(prs.slides) == out.slide_count
     _assert_no_shape_overflow(prs)
@@ -405,17 +344,18 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 cover_texts.append(paragraph.text or "")
 
     assert any("NPS : Comentarios" in t for t in cover_texts)
-    assert any("Método causal:" in t for t in cover_texts)
+    assert any("Método de agrupación:" in t for t in cover_texts)
     assert any("NPS" in t for t in texts)
-    assert any("todo el histórico" in t for t in texts)
-    assert any("detractores hacen visible" in t for t in texts)
-    assert any("lidera el deterioro frente a la base" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
+    assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("concentra el mayor dolor en la Web" in t for t in texts)
+    assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Acceso > Login" in t for t in texts)
+    assert any("Acceso / Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -436,6 +376,45 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
+    change_tables = [shape.table for shape in prs.slides[4].shapes if getattr(shape, "has_table", False)]
+    assert len(change_tables) == 1
+    assert len(change_tables[0].rows) == 1 + len(
+        executive_ppt.select_negative_delta_rows(
+            executive_ppt._build_presentation_context(
+                service_origin="BBVA México",
+                service_origin_n1="Empresas Mobile",
+                service_origin_n2="",
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 31),
+                focus_name="detractores",
+                topic_channel="Web",
+                attribution_df=payload["attribution"],
+                selected_nps_df=payload["selected_nps"],
+                comparison_nps_df=payload["comparison_nps"],
+                touchpoint_source="domain_touchpoint",
+                entity_summary_df=payload["attribution"],
+                entity_summary_kpis=[],
+                broken_journeys_df=None,
+            ).dimensions["Palanca"].change_table_df,
+            max_rows=4,
+        )
+    )
+    causal_slide = prs.slides[6]
+    assert causal_slide.shapes[4].text == "NOTA MEDIA DEL TÓPICO"
+    assert causal_slide.shapes[7].text == "CONFIANZA"
+    assert causal_slide.shapes[2].text == ""
+    assert causal_slide.shapes[5].text == ""
+    evidence_paragraphs = [
+        paragraph
+        for shape in causal_slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+        if "INC" in paragraph.text
+    ]
+    assert any("INC00040, INC00041" in paragraph.text for paragraph in evidence_paragraphs)
+    assert not any("INC..." in paragraph.text for paragraph in evidence_paragraphs)
+    assert all(paragraph.alignment == PP_ALIGN.LEFT for paragraph in evidence_paragraphs)
+    assert all(paragraph._p.get_or_add_pPr().get("marL") for paragraph in evidence_paragraphs)
     assert out.compact_file_name.endswith("-sin-evolucion-nps.pptx")
     assert len(Presentation(BytesIO(out.compact_content)).slides) == out.slide_count - 2
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
@@ -452,12 +431,7 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
     )
@@ -476,10 +450,9 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
     attribution.loc[:, "touchpoint"] = ["Login / autenticación"]
     attribution.loc[:, "palanca"] = ["Acceso"]
     attribution.loc[:, "subpalanca"] = ["Bloqueo / OTP"]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Comentarios sobre login + incidencias de autenticación"
     ]
-    attribution.loc[:, "journey_impact_label"] = ["Muy alto"]
     attribution.loc[:, "presentation_mode"] = [TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS]
 
     out = generate_business_review_ppt(
@@ -489,24 +462,15 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "1"},
             {"label": "Touchpoints cubiertos", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -519,11 +483,11 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
-def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_deck() -> None:
+def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck() -> None:
     payload = _sample_payload()
     base = payload["attribution"].iloc[0].to_dict()
     rows = [
@@ -536,9 +500,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 5,
             "linked_comments": 3,
             "linked_pairs": 5,
-            "detractor_probability": 0.13,
-            "confidence": 0.20,
-            "priority": 0.91,
+            "focus_rate_high_incidence": 0.13,
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
         {
@@ -550,9 +512,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 8,
             "linked_comments": 5,
             "linked_pairs": 10,
-            "detractor_probability": 0.45,
-            "confidence": 0.15,
-            "priority": 0.62,
+            "focus_rate_high_incidence": 0.45,
             "incident_records": [
                 {
                     "incident_id": "INC000104256298",
@@ -590,9 +550,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             "linked_incidents": 2,
             "linked_comments": 2,
             "linked_pairs": 2,
-            "detractor_probability": float("nan"),
-            "confidence": 0.0,
-            "priority": 0.10,
+            "focus_rate_high_incidence": float("nan"),
             "incident_records": [
                 {
                     "incident_id": "",
@@ -607,6 +565,17 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
             ],
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
+        {
+            **base,
+            "nps_topic": "Firma digital interrumpida",
+            "touchpoint": "Firma / validación",
+            "palanca": "Operativa",
+            "subpalanca": "Firma digital",
+            "linked_incidents": 1,
+            "linked_comments": 1,
+            "linked_pairs": 1,
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
     ]
     attribution = pd.DataFrame(rows)
 
@@ -617,12 +586,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         period_start=date(2026, 3, 1),
         period_end=date(2026, 3, 29),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -630,7 +594,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "3"},
             {"label": "Touchpoints cubiertos", "value": "3"},
-            {"label": "Links validados", "value": "17"},
+            {"label": "Vínculos semánticos", "value": "17"},
         ],
     )
 
@@ -643,9 +607,9 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 9
+    assert out.slide_count == 10
     compact_prs = Presentation(BytesIO(out.compact_content))
-    assert len(compact_prs.slides) == 7
+    assert len(compact_prs.slides) == 8
     compact_texts = [
         paragraph.text or ""
         for slide in compact_prs.slides
@@ -654,11 +618,12 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
         for paragraph in shape.text_frame.paragraphs
     ]
     assert any(
-        "Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in compact_texts
+        t == "Operativa crítica fallida" for t in compact_texts
     )
-    assert any("Causalidad en tópico NPS ancla: Operativa crítica fallida" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Acceso bloqueado" in t for t in texts)
-    assert any("Causalidad en tópico NPS ancla: Rendimiento degradado" in t for t in texts)
+    assert any(t == "Operativa crítica fallida" for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
+    assert any(t == "Rendimiento degradado" for t in texts)
+    assert any(t == "Firma digital interrumpida" for t in texts)
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
     slide_9_texts = [
         paragraph.text or ""
@@ -668,7 +633,7 @@ def test_generate_business_review_ppt_keeps_three_causal_scenarios_in_compact_de
     ]
     assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
-    assert any("VÍNCULOS VALIDADOS" in t for t in texts)
+    assert any("VÍNCULOS SEMÁNTICOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
@@ -687,7 +652,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
     attribution.loc[:, "journey_route"] = [
         "Incidencia -> Login -> Acceso / Login -> comentario VoC -> NPS"
     ]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Keywords semánticas: Login, Otp. Helix Source Service N2 dominante: Auth."
     ]
     attribution.loc[:, "journey_cx_readout"] = ["5 links Helix↔VoC convergen en este journey roto."]
@@ -700,24 +665,15 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
             {"label": "Journeys rotos", "value": "1"},
             {"label": "Touchpoints detectados", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -730,7 +686,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("Causalidad en tópico NPS ancla: Acceso / Login" in t for t in texts)
+    assert any(t == "Acceso / Login" for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -777,6 +733,7 @@ def test_overview_figure_uses_full_history_and_highlights_requested_period() -> 
         for value in (list(trace.x) if trace.x is not None else [])
     ]
     assert min(all_dates) == pd.Timestamp("2025-11-01")
+    assert list(figure.data[0].y) == [100.0, -100.0, 0.0]
     assert any(
         pd.Timestamp(shape.x0) == pd.Timestamp("2026-01-01")
         and pd.Timestamp(shape.x1) == pd.Timestamp("2026-01-31")
@@ -809,6 +766,54 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["comments"] == period_kpis["period"]["kpis"]["comments"]
     assert overview["classic_nps"] == period_kpis["period"]["kpis"]["classic_nps"]
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
+
+
+def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None:
+    current = pd.DataFrame(
+        {
+            "Canal": ["Web"] * 9,
+            "Subpalanca": ["Falla"] * 3 + ["Login"] * 2 + ["Fácil"] * 3 + ["Seguro"],
+            "NPS": [4, 5, 6, 0, 10, 9, 9, 10, 10],
+        }
+    )
+
+    overview = executive_ppt._period_overview(current, topic_channel="Web")
+
+    assert overview["pain_point"] == "Falla"
+    assert overview["strength_point"] == "Fácil"
+
+
+def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
+    current = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [0, 10, 0],
+        }
+    )
+    baseline = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [10, 10, 10],
+        }
+    )
+
+    view = executive_ppt._build_dimension_view_model(
+        dimension="Palanca",
+        selected_raw=executive_ppt._coerce_nps_records(current),
+        current_source_period=current,
+        baseline_source_period=baseline,
+        topic_channel="Web",
+    )
+
+    assert view.topic_table_df["value"].tolist() == ["Acceso"]
+    assert view.topic_table_df.iloc[0]["n"] == 2
+    assert view.topic_table_df.iloc[0]["nps"] == 5.0
+    assert view.change_table_df.iloc[0]["n_current"] == 2
+    assert view.change_table_df.iloc[0]["nps_current"] == 0.0
 
 
 def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
@@ -849,18 +854,14 @@ def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> N
             [
                 {
                     "nps_topic": "Acceso bloqueado",
-                    "priority": 0.91,
-                    "confidence": 0.20,
-                    "detractor_probability": 0.13,
+                    "focus_rate_high_incidence": 0.13,
                     "linked_pairs": 5,
                     "linked_incidents": 5,
                     "linked_comments": 3,
                 },
                 {
                     "nps_topic": "Operativa crítica fallida",
-                    "priority": 0.62,
-                    "confidence": 0.15,
-                    "detractor_probability": 0.45,
+                    "focus_rate_high_incidence": 0.45,
                     "linked_pairs": 10,
                     "linked_incidents": 8,
                     "linked_comments": 5,
@@ -913,20 +914,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"].head(0),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=pd.DataFrame(),
-        lag_days_by_topic=pd.DataFrame(),
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=pd.DataFrame(),
-        changepoints_by_topic=pd.DataFrame(),
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -937,7 +927,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
     assert len(prs.slides) == 6
     assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
@@ -952,10 +942,6 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=pd.DataFrame(),
-        rationale_df=pd.DataFrame(),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
@@ -975,8 +961,7 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
     assert not any("evidencia disponible no permite afirmar causalidad" in t for t in texts)
 
 
-def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_raw_nps() -> None:
-    payload = _sample_payload()
+def test_generate_business_review_ppt_handles_missing_raw_nps() -> None:
     out = generate_business_review_ppt(
         service_origin="BBVA México",
         service_origin_n1="Empresas Mobile",
@@ -984,20 +969,9 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=pd.DataFrame(),
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=None,
         comparison_nps_df=None,
-        lag_days_by_topic=None,
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        incident_evidence_df=None,
-        changepoints_by_topic=None,
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -1008,11 +982,11 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("todo el histórico" in t for t in texts)
-    assert any("detractores hacen visible" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
 
 
-def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() -> None:
+def test_text_topic_selector_limits_table_rows() -> None:
     topics = pd.DataFrame(
         {
             "cluster_id": [1, 2, 3, 4, 5],
@@ -1024,10 +998,6 @@ def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() 
             "example_txt": ["ejemplo"] * 5,
         }
     )
-
-    fig = executive_ppt._build_text_topic_figure(topics)
-    assert fig is not None
-    assert len(fig.data[0].x) == 5
 
     selected = executive_ppt.select_text_clusters(topics, max_clusters=3)
     assert selected["cluster_id"].tolist() == [1, 2, 3]
@@ -1068,23 +1038,6 @@ def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Pa
     assert record["incident_id__href"] == record["url"]
 
 
-def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
-    rationale = pd.DataFrame(
-        {
-            "nps_topic": ["Pagos / Transferencias / No funciona bien / Error intermitente"],
-            "nps_points_at_risk": [0.74],
-            "nps_points_recoverable": [0.15],
-            "priority": [0.82],
-        }
-    )
-
-    fig = chart_incident_risk_recovery(rationale, get_theme("light"), top_k=1)
-    assert fig is not None
-    assert "<br>" in str(fig.data[0]["y"][0]) or "…" in str(fig.data[0]["y"][0])
-    assert fig.data[0]["cliponaxis"] is False
-    assert fig.data[1]["cliponaxis"] is False
-
-
 def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
@@ -1114,8 +1067,6 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
                 "linked_pairs": 16,
                 "linked_comments": 13,
                 "avg_nps": 2.0,
-                "confidence": 0.38,
-                "priority": 0.5,
             }
         ]
     )
@@ -1129,4 +1080,4 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "journey"] == "Operativa crítica fallida"
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
-    assert {"touchpoint", "subpalanca", "links", "confidence"}.issubset(table.columns)
+    assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)

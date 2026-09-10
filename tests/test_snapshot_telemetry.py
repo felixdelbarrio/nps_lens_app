@@ -41,15 +41,21 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         page_size=20,
     )
     publication: dict[str, object] = {
-        "schema_version": "2.0",
+        "schema_version": "4.0",
         "screens": {
-            "dashboard": {"kpis": {"samples": 800}},
+            "dashboard": {"kpis": {"samples": 800, "delta_nps": float("nan")}},
             "linking": {},
             "data": {"nps": {"deferred": True}, "helix": {"deferred": True}},
         },
-        "snapshots": {"data": snapshot},
+        "snapshots": {
+            "data": snapshot,
+            "taxonomy": {"records": "unused" * 300_000},
+        },
         "manifest": {},
     }
+    assert set(snapshot["datasets"]["nps"]) == {"columns", "total_rows", "page"}
+    assert len(snapshot["datasets"]["nps"]["columns"]) <= 14
+    assert len(snapshot["datasets"]["helix"]["columns"]) <= 14
     artifact = build_publication_archive(
         publication,
         report_name="informe.pptx",
@@ -67,7 +73,13 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
             "informe.pptx",
             "informe-sin-evolucion-nps.pptx",
         }
-        contract = json.loads(archive.read("publication.json"))
+        publication_json = archive.read("publication.json")
+        assert b"NaN" not in publication_json
+        assert b"Infinity" not in publication_json
+        contract = json.loads(publication_json)
+        assert contract["screens"]["dashboard"]["kpis"]["delta_nps"] is None
+        assert set(contract["snapshots"]) == {"data"}
         assert contract["manifest"]["size_budget_bytes"] == 25_000
+        assert contract["manifest"]["publication_json_bytes"] < 100_000
         assert contract["manifest"]["truncated"] is True
         assert b"Banca de Empresas e Instituciones" in archive.read("newsletter.html")

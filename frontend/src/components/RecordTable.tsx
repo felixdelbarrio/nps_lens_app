@@ -1,3 +1,4 @@
+import { EvidenceText } from "./EvidenceText";
 import { formatDisplayValue } from "../utils/numberFormat";
 
 type RecordTableProps = {
@@ -13,7 +14,7 @@ export function RecordTable({ rows, emptyMessage, testId, columns: providedColum
   }
 
   const columns = (providedColumns?.length ? providedColumns : Object.keys(rows[0] || {})).filter(
-    (column) => !column.endsWith("__href") && !column.endsWith("__hyperlink")
+    (column) => !column.endsWith("__href") && !column.endsWith("__hyperlink") && !column.endsWith("__segments")
   );
 
   function renderCell(row: Record<string, unknown>, column: string, rowIndex: number) {
@@ -21,7 +22,7 @@ export function RecordTable({ rows, emptyMessage, testId, columns: providedColum
     const href = typeof hrefCandidate === "string" ? hrefCandidate.trim() : "";
     const label = formatDisplayValue(row[column], column);
     if (!href || !label) {
-      return label;
+      return <EvidenceText text={label} segments={row[`${column}__segments`]} />;
     }
     return (
       <a
