@@ -89,7 +89,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.9.16'" in config
+    assert "version: '2.9.17'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
@@ -142,6 +142,11 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "Promise.all([rpc('getNewsletter" not in app
     assert "saveEvolutionNpsSettings" in app
     assert "importPublicationArchive','ok'" in app
+    assert "beginPublicationUpload" in publication
+    assert "appendPublicationUploadChunk" in publication
+    assert "commitPublicationUpload" in publication
+    assert "bytesToBase64" in app
+    assert "importPublicationArchive(form)" not in app
     assert "['publication','Publicación']" in app
     assert "function getPublicationSettings" in publication
     assert "_cacheKey_" in publication and "_cacheKey_" in activity and "_cacheKey_" in newsletter
