@@ -6,6 +6,7 @@ WebApp estática en Google Apps Script. Publica el snapshot generado por la apli
 2. Con la cuenta administradora inicial, selecciona y ejecuta `setupNpsLensWebApp` sin parámetros desde el editor. La instalación reutiliza la hoja configurada o crea **NPS Lens · Administración**, registra al ejecutor autorizado y muestra sus enlaces en el registro de ejecución. También admite parámetros explícitos para instalaciones avanzadas.
 3. Despliega como WebApp para usuarios del dominio.
 4. Entra como administrador y utiliza **Importar** para validar el ZIP generado en **Ingesta → Publicación Web** de la aplicación local. La WebApp exige las variantes completa y sin Evolución NPS, valida el límite de 30 MB y genera ambas presentaciones nativas de Google Slides antes de activar la edición.
+   La transferencia del ZIP se realiza en bloques pequeños desde el navegador y se recompone temporalmente en Drive antes de validarlo. Esto evita el canal especial de subida de formularios de `google.script.run`, que puede fallar antes de ejecutar la función de servidor con el mensaje genérico `Form upload failed. Please try again.`.
 
 El HTML inicial solo contiene el contexto de acceso. El shell analítico y las tablas de datos se guardan comprimidos, se recuperan bajo demanda y se cachean por edición. La WebApp no recalcula dashboards ni causalidad; `snapshot_load` mide el tiempo completo de recuperación y descompresión en el navegador.
 
