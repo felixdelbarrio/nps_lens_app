@@ -14,16 +14,18 @@ describe("numberFormat", () => {
   });
 
   it("detects percent-like columns centrally", () => {
-    expect(formatDisplayValue(0.5795254182580882, "detractor_probability")).toBe("58,0%");
+    expect(formatDisplayValue(0.5795254182580882, "focus_rate_high_incidence")).toBe("58,0%");
     expect(formatDisplayValue(0.1524, "average_focus_rate")).toBe("15,2%");
     expect(formatDisplayValue(0.22, "% promotores")).toBe("22,0%");
   });
 
   it("does not mistake non-percent metrics for percentages", () => {
-    expect(formatDisplayValue(29.95659158491985, "potential_uplift")).toBe("30");
-    expect(formatDisplayValue(-97.79486970379659, "gap_vs_overall")).toBe("-97,8");
-    expect(formatDisplayValue(0.6779040931692755, "confidence")).toBe("0,7");
-    expect(formatDisplayValue(12.3456, "delta_focus_rate_pp")).toBe("12,3");
+    expect(formatDisplayValue(28, "Nº detractores")).toBe("28");
+    expect(formatDisplayValue(29.95659158491985, "nps")).toBe("30");
+    expect(formatDisplayValue(-97.79486970379659, "gap_vs_base")).toBe("-97,8");
+    expect(formatDisplayValue(0.2, "Confianza")).toBe("20,0%");
+    expect(formatDisplayValue(0.6779040931692755, "similaridad")).toBe("0,7");
+    expect(formatDisplayValue(12.3456, "difference_pp")).toBe("+12,3");
   });
 
   it("normalizes incoming strings that already contain a percent sign", () => {

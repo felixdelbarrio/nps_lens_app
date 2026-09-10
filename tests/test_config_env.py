@@ -37,7 +37,7 @@ DOTENV_TEST_KEYS = {
     "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "NPS_LENS_UI_MIN_SIMILARITY",
     "NPS_LENS_UI_MAX_DAYS_APART",
-    "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+    "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
     "NPS_LENS_UI_SCORE_CHANNEL",
     "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
@@ -74,8 +74,8 @@ def test_settings_reads_context_values_from_env(monkeypatch):
 
     s = Settings.from_env()
 
-    assert s.service_origin_values == ["BBVA México", "BBVA España"]
-    assert s.service_origin_n1_map["BBVA México"] == ["Senda", "Helix"]
+    assert s.allowed_service_origins == ["BBVA México", "BBVA España"]
+    assert s.allowed_service_origin_n1["BBVA México"] == ["Senda", "Helix"]
     assert s.service_origin_n2_values == ["SN2A", "SN2B"]
     assert s.default_min_n_cross_comparisons == 40
     assert s.default_downloads_path.endswith("Downloads")
@@ -89,7 +89,7 @@ def test_settings_accepts_compact_n1_format(monkeypatch):
     monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N2", raising=False)
 
     s = Settings.from_env()
-    assert s.service_origin_n1_map["BBVA México"] == ["Senda", "Helix"]
+    assert s.allowed_service_origin_n1["BBVA México"] == ["Senda", "Helix"]
 
 
 def test_settings_uses_safe_defaults_when_context_env_missing(monkeypatch):
@@ -97,8 +97,8 @@ def test_settings_uses_safe_defaults_when_context_env_missing(monkeypatch):
 
     s = Settings.from_env()
 
-    assert "BBVA México" in s.service_origin_values
-    assert s.service_origin_n1_map["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
+    assert "BBVA México" in s.allowed_service_origins
+    assert s.allowed_service_origin_n1["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
     assert s.default_service_origin == "BBVA México"
     assert s.default_service_origin_n1 == "ENTERPRISE WEB"
 
@@ -110,7 +110,7 @@ def test_settings_repairs_missing_n1_map_from_defaults(monkeypatch):
 
     s = Settings.from_env()
 
-    assert s.service_origin_n1_map["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
+    assert s.allowed_service_origin_n1["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
 
 
 def test_settings_repairs_incomplete_n1_map_from_defaults(monkeypatch):
@@ -119,8 +119,8 @@ def test_settings_repairs_incomplete_n1_map_from_defaults(monkeypatch):
 
     s = Settings.from_env()
 
-    assert s.service_origin_n1_map["BBVA México"] == ["Senda"]
-    assert s.service_origin_n1_map["BBVA España"] == [
+    assert s.allowed_service_origin_n1["BBVA México"] == ["Senda"]
+    assert s.allowed_service_origin_n1["BBVA España"] == [
         "ENTERPRISE MOBILE CHANNEL",
         "ENTERPRISES CHANNEL",
     ]
@@ -137,7 +137,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     monkeypatch.setenv("NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS", "dimension")
     monkeypatch.setenv("NPS_LENS_UI_MIN_SIMILARITY", "2.0")
     monkeypatch.setenv("NPS_LENS_UI_MAX_DAYS_APART", "-5")
-    monkeypatch.setenv("NPS_LENS_UI_MIN_N_OPPORTUNITIES", "10")
+    monkeypatch.setenv("NPS_LENS_UI_MIN_N_NPS_GAPS", "10")
     monkeypatch.setenv("NPS_LENS_UI_MIN_N_CROSS_COMPARISONS", "500")
 
     s = Settings.from_env()
@@ -149,7 +149,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     assert s.default_report_dimension_analysis == "palanca"
     assert s.default_min_similarity == 1.0
     assert s.default_max_days_apart == 0
-    assert s.default_min_n_opportunities == 50
+    assert s.default_min_n_nps_gaps == 50
     assert s.default_min_n_cross_comparisons == 200
 
 
@@ -187,7 +187,7 @@ def test_settings_parsers_ignore_invalid_and_blank_mapping_entries(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", '{"unexpected": "object"}')
 
     s = Settings.from_env()
-    assert s.service_origin_n1_map == {"MX": ["Senda", "Helix"]}
+    assert s.allowed_service_origin_n1 == {"MX": ["Senda", "Helix"]}
     assert s.service_origin_n2_values == ['{"unexpected": "object"}']
 
 
@@ -256,7 +256,7 @@ def test_missing_dotenv_example_does_not_block_startup(monkeypatch, tmp_path: Pa
     assert loaded_path == dotenv_path
     assert dotenv_path.exists()
     assert settings.default_service_origin == "BBVA México"
-    assert settings.service_origin_n1_map["BBVA México"]
+    assert settings.allowed_service_origin_n1["BBVA México"]
 
 
 def test_frozen_runtime_bootstraps_dotenv_in_user_app_home(monkeypatch, tmp_path: Path) -> None:
@@ -287,4 +287,4 @@ def test_frozen_runtime_bootstraps_dotenv_in_user_app_home(monkeypatch, tmp_path
     assert loaded_path == fake_home / ".nps-lens" / ".env"
     assert loaded_path.exists()
     assert settings.dotenv_path == loaded_path
-    assert settings.service_origin_n1_map == {"BBVA México": ["ENTERPRISE WEB"]}
+    assert settings.allowed_service_origin_n1 == {"BBVA México": ["ENTERPRISE WEB"]}

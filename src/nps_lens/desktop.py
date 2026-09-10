@@ -19,6 +19,7 @@ from typing import Any, Optional
 import uvicorn
 
 from nps_lens.logging import setup_logging
+from nps_lens.platform.resources import resource_root
 
 DEFAULT_PORT = 8617
 STARTUP_TIMEOUT_SECONDS = 90
@@ -48,22 +49,14 @@ def _normalize_working_directory_for_frozen() -> None:
         pass
 
 
-def _resource_root() -> Path:
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return Path(str(meipass))
-    return Path(__file__).resolve().parents[2]
-
-
 def _frontend_dist_path() -> Path:
     env_dist = str(os.environ.get("NPS_LENS_FRONTEND_DIST_DIR", "")).strip()
     if env_dist:
         return Path(env_dist).expanduser().resolve()
 
     candidates = [
-        _resource_root() / "frontend" / "dist",
-        _resource_root() / "dist",
+        resource_root() / "frontend" / "dist",
+        resource_root() / "dist",
         Path.cwd() / "frontend" / "dist",
     ]
     for candidate in candidates:
@@ -77,11 +70,11 @@ def _logo_path() -> Optional[Path]:
     if env_icon:
         env_candidate = Path(env_icon).expanduser()
         if not env_candidate.is_absolute():
-            base = _resource_root() if getattr(sys, "frozen", False) else Path.cwd()
+            base = resource_root() if getattr(sys, "frozen", False) else Path.cwd()
             env_candidate = (base / env_candidate).resolve()
         if env_candidate.exists():
             return env_candidate
-    candidate = _resource_root() / "assets" / "logo.png"
+    candidate = resource_root() / "assets" / "logo.png"
     return candidate if candidate.exists() else None
 
 
@@ -307,6 +300,22 @@ class DesktopBridge:
             return None
         selected_path = Path(str(selection[0])).expanduser().resolve()
         return {"path": str(selected_path), "name": selected_path.name}
+
+    def reveal_file(self, file_path: str) -> bool:
+        target = Path(str(file_path)).expanduser().resolve()
+        if not target.is_file():
+            return False
+        if sys.platform == "darwin":
+            command = ["open", "-R", str(target)]
+        elif os.name == "nt":
+            command = ["explorer", "/select,", str(target)]
+        else:
+            command = ["xdg-open", str(target.parent)]
+        try:
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return False
+        return True
 
     def upload_nps_file(
         self,

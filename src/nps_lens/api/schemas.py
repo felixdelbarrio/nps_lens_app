@@ -37,7 +37,7 @@ class UploadResponse(BaseModel):
 class SummaryResponse(BaseModel):
     total_records: int
     date_range: dict[str, Optional[str]]
-    overall_nps: Optional[float] = None
+    classic_nps: Optional[float] = None
     promoter_rate: Optional[float] = None
     detractor_rate: Optional[float] = None
     uploads: int
@@ -87,10 +87,10 @@ class PreferencesResponse(BaseModel):
     downloads_path: str = ""
     helix_base_url: str = ""
     report_dimension_analysis: str = "palanca"
-    touchpoint_source: str = "palanca_touchpoint"
-    min_similarity: float = 0.25
-    max_days_apart: int = 10
-    min_n_opportunities: int = 200
+    touchpoint_source: str = "executive_journeys"
+    min_similarity: float = 0.15
+    max_days_apart: int = 90
+    min_n_nps_gaps: int = 200
     min_n_cross_comparisons: int = 30
 
 
@@ -110,7 +110,7 @@ class EquivalenceGroupRequest(BaseModel):
 
 
 class EquivalenceRegistryRequest(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: str = "3.0"
     dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 
@@ -142,10 +142,8 @@ class DashboardResponse(BaseModel):
     kpis: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
     overview: dict[str, Any] = Field(default_factory=dict)
-    comparison: dict[str, Any] = Field(default_factory=dict)
     cohorts: dict[str, Any] = Field(default_factory=dict)
     gaps: dict[str, Any] = Field(default_factory=dict)
-    opportunities: dict[str, Any] = Field(default_factory=dict)
     controls: dict[str, Any] = Field(default_factory=dict)
     empty_state: str = ""
 
@@ -162,4 +160,15 @@ class LinkingResponse(BaseModel):
     situation: dict[str, Any] = Field(default_factory=dict)
     entity_summary: dict[str, Any] = Field(default_factory=dict)
     scenarios: dict[str, Any] = Field(default_factory=dict)
-    deep_dive: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaxonomyGenerateRequest(BaseModel):
+    mode: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    regenerate: bool = False
+
+
+class TaxonomySettingsRequest(BaseModel):
+    active: Optional[str] = None
+    default: Optional[str] = None
+    policy: Optional[str] = None

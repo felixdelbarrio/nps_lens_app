@@ -58,14 +58,14 @@ _RESOLVED_AT_CANDIDATES = (
 @dataclass(frozen=True)
 class HelixOperationalBenchmark:
     incident_to_support_orgs: dict[str, tuple[str, ...]]
-    support_org_eta_weeks: dict[str, float]
-    overall_eta_weeks: Optional[float]
+    support_org_resolution_weeks: dict[str, float]
+    overall_resolution_weeks: Optional[float]
 
 
 @dataclass(frozen=True)
 class HelixOperationalMetrics:
-    owner_role: str
-    eta_weeks: float
+    support_organizations: str
+    historical_resolution_weeks: float
 
 
 def _normalize_name(value: object) -> str:
@@ -145,7 +145,7 @@ def _split_support_orgs(value: object) -> tuple[str, ...]:
     return _unique_preserve_order(_SUPPORT_ORG_SPLIT_RE.split(text))
 
 
-def _existing_eta(value: object) -> float:
+def _existing_duration(value: object) -> float:
     parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     return float(parsed) if pd.notna(parsed) else float("nan")
 
@@ -195,9 +195,9 @@ def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationa
         & pd.to_numeric(exploded["resolution_weeks"], errors="coerce").notna()
     ].copy()
 
-    support_org_eta_weeks: dict[str, float] = {}
+    support_org_resolution_weeks: dict[str, float] = {}
     if not exploded.empty:
-        support_org_eta_weeks = {
+        support_org_resolution_weeks = {
             str(support_org).strip(): float(
                 pd.to_numeric(group["resolution_weeks"], errors="coerce").mean()
             )
@@ -206,11 +206,11 @@ def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationa
         }
 
     overall_values = pd.to_numeric(base["resolution_weeks"], errors="coerce").dropna()
-    overall_eta_weeks = float(overall_values.mean()) if not overall_values.empty else None
+    overall_resolution_weeks = float(overall_values.mean()) if not overall_values.empty else None
     return HelixOperationalBenchmark(
         incident_to_support_orgs=incident_to_support_orgs,
-        support_org_eta_weeks=support_org_eta_weeks,
-        overall_eta_weeks=overall_eta_weeks,
+        support_org_resolution_weeks=support_org_resolution_weeks,
+        overall_resolution_weeks=overall_resolution_weeks,
     )
 
 
@@ -223,7 +223,7 @@ def summarize_operational_metrics_for_incidents(
         return HelixOperationalMetrics("", float("nan"))
 
     support_orgs: list[str] = []
-    eta_samples: list[float] = []
+    duration_samples: list[float] = []
     seen_orgs: set[str] = set()
     for incident_id in unique_incident_ids:
         incident_support_orgs = benchmark.incident_to_support_orgs.get(
@@ -236,17 +236,19 @@ def summarize_operational_metrics_for_incidents(
             if normalized_support_org not in seen_orgs:
                 support_orgs.append(normalized_support_org)
                 seen_orgs.add(normalized_support_org)
-            eta_value = benchmark.support_org_eta_weeks.get(normalized_support_org)
-            if eta_value is not None and np.isfinite(float(eta_value)):
-                eta_samples.append(float(eta_value))
+            duration = benchmark.support_org_resolution_weeks.get(normalized_support_org)
+            if duration is not None and np.isfinite(float(duration)):
+                duration_samples.append(float(duration))
 
-    if not eta_samples and benchmark.overall_eta_weeks is not None:
-        eta_samples = [float(benchmark.overall_eta_weeks)]
+    if not duration_samples and benchmark.overall_resolution_weeks is not None:
+        duration_samples = [float(benchmark.overall_resolution_weeks)]
 
-    eta_weeks = float(np.mean(eta_samples)) if eta_samples else float("nan")
+    historical_resolution_weeks = (
+        float(np.mean(duration_samples)) if duration_samples else float("nan")
+    )
     return HelixOperationalMetrics(
-        owner_role=" · ".join(support_orgs),
-        eta_weeks=eta_weeks,
+        support_organizations=" · ".join(support_orgs),
+        historical_resolution_weeks=historical_resolution_weeks,
     )
 
 
@@ -275,28 +277,28 @@ def enrich_rationale_with_operational_metrics(
         }
 
     out = rationale_df.copy()
-    if "owner_role" not in out.columns:
-        out["owner_role"] = ""
-    if "eta_weeks" not in out.columns:
-        out["eta_weeks"] = np.nan
+    if "support_organizations" not in out.columns:
+        out["support_organizations"] = ""
+    if "historical_resolution_weeks" not in out.columns:
+        out["historical_resolution_weeks"] = np.nan
 
-    owner_roles: list[str] = []
-    eta_weeks_values: list[float] = []
+    support_organizations: list[str] = []
+    historical_resolution_weeks: list[float] = []
     for _, row in out.iterrows():
         topic = str(row.get("nps_topic", "") or "").strip()
         metrics = summarize_operational_metrics_for_incidents(
             topic_to_incidents.get(topic, tuple()),
             benchmark,
         )
-        owner_roles.append(metrics.owner_role or str(row.get("owner_role", "") or "").strip())
-        eta_weeks_values.append(
-            metrics.eta_weeks
-            if np.isfinite(metrics.eta_weeks)
-            else _existing_eta(row.get("eta_weeks"))
+        support_organizations.append(metrics.support_organizations)
+        historical_resolution_weeks.append(
+            metrics.historical_resolution_weeks
+            if np.isfinite(metrics.historical_resolution_weeks)
+            else _existing_duration(row.get("historical_resolution_weeks"))
         )
 
-    out["owner_role"] = owner_roles
-    out["eta_weeks"] = eta_weeks_values
+    out["support_organizations"] = support_organizations
+    out["historical_resolution_weeks"] = historical_resolution_weeks
     return out
 
 
@@ -311,13 +313,13 @@ def enrich_chain_with_operational_metrics(
         return chain_df.copy()
 
     out = chain_df.copy()
-    if "owner_role" not in out.columns:
-        out["owner_role"] = ""
-    if "eta_weeks" not in out.columns:
-        out["eta_weeks"] = np.nan
+    if "support_organizations" not in out.columns:
+        out["support_organizations"] = ""
+    if "historical_resolution_weeks" not in out.columns:
+        out["historical_resolution_weeks"] = np.nan
 
-    owner_roles: list[str] = []
-    eta_weeks_values: list[float] = []
+    support_organizations: list[str] = []
+    historical_resolution_weeks: list[float] = []
     for _, row in out.iterrows():
         incident_records = row.get("incident_records")
         source_records = incident_records if isinstance(incident_records, list) else []
@@ -327,13 +329,13 @@ def enrich_chain_with_operational_metrics(
             if isinstance(entry, dict)
         ]
         metrics = summarize_operational_metrics_for_incidents(incident_ids, benchmark)
-        owner_roles.append(metrics.owner_role or str(row.get("owner_role", "") or "").strip())
-        eta_weeks_values.append(
-            metrics.eta_weeks
-            if np.isfinite(metrics.eta_weeks)
-            else _existing_eta(row.get("eta_weeks"))
+        support_organizations.append(metrics.support_organizations)
+        historical_resolution_weeks.append(
+            metrics.historical_resolution_weeks
+            if np.isfinite(metrics.historical_resolution_weeks)
+            else _existing_duration(row.get("historical_resolution_weeks"))
         )
 
-    out["owner_role"] = owner_roles
-    out["eta_weeks"] = eta_weeks_values
+    out["support_organizations"] = support_organizations
+    out["historical_resolution_weeks"] = historical_resolution_weeks
     return out

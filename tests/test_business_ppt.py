@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import os
-import tempfile
 import zipfile
 from datetime import date
 from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 from pptx import Presentation
+from pptx.enum.text import PP_ALIGN
 
-import nps_lens.reports.ppt_template as ppt_template_module
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
 )
-from nps_lens.design.tokens import DesignTokens, nps_score_color
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.content_selectors import (
     parse_markdown_strong,
@@ -25,18 +21,12 @@ from nps_lens.reports.content_selectors import (
     select_nonzero_kpis,
 )
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
-from nps_lens.reports.ppt_template import (
-    build_presentation,
-    find_corporate_template_path,
-    resolve_layout,
-)
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.settings import Settings
 from nps_lens.ui.charts import (
     chart_daily_kpis,
     chart_daily_mix_business,
-    chart_incident_risk_recovery,
 )
 from nps_lens.ui.theme import get_theme
 
@@ -86,40 +76,19 @@ def _sample_payload() -> dict:
             {
                 "nps_topic": "Pagos > SPEI",
                 "touchpoint": "Pagos",
-                "priority": 0.91,
-                "confidence": 0.80,
-                "focus_probability_with_incident": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.9,
-                "causal_score": 0.84,
-                "nps_points_at_risk": 1.9,
-                "nps_points_recoverable": 1.2,
+                "focus_rate_high_incidence": 0.47,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Acceso > Login",
                 "touchpoint": "Acceso",
-                "priority": 0.79,
-                "confidence": 0.71,
-                "focus_probability_with_incident": 0.39,
-                "nps_delta_expected": -3.6,
-                "total_nps_impact": 1.1,
-                "causal_score": 0.77,
-                "nps_points_at_risk": 1.1,
-                "nps_points_recoverable": 0.7,
+                "focus_rate_high_incidence": 0.39,
                 "best_lag_weeks": 1.0,
             },
             {
                 "nps_topic": "Tarjetas > Bloqueo",
                 "touchpoint": "Tarjetas",
-                "priority": 0.68,
-                "confidence": 0.64,
-                "focus_probability_with_incident": 0.31,
-                "nps_delta_expected": -2.8,
-                "total_nps_impact": 0.9,
-                "causal_score": 0.66,
-                "nps_points_at_risk": 0.9,
-                "nps_points_recoverable": 0.5,
+                "focus_rate_high_incidence": 0.31,
                 "best_lag_weeks": 2.0,
             },
         ]
@@ -174,21 +143,12 @@ def _sample_payload() -> dict:
                 "linked_pairs": 5,
                 "avg_similarity": 0.89,
                 "avg_nps": 1.5,
-                "detractor_probability": 0.47,
-                "nps_delta_expected": -4.8,
-                "total_nps_impact": 1.7,
-                "nps_points_at_risk": 1.7,
-                "nps_points_recoverable": 1.1,
-                "priority": 0.91,
-                "confidence": 0.82,
-                "causal_score": 0.86,
-                "delta_focus_rate_pp": 29.0,
+                "focus_rate_high_incidence": 0.47,
                 "incident_rate_per_100_responses": 8.5,
                 "incidents": 5,
                 "responses": 120,
-                "action_lane": "Fix estructural",
-                "owner_role": "Producto + Tecnologia",
-                "eta_weeks": 6.0,
+                "support_organizations": "Producto + Tecnologia",
+                "historical_resolution_weeks": 6.0,
                 "incident_records": [
                     {
                         "incident_id": "INC00001",
@@ -340,26 +300,6 @@ def _assert_no_shape_overflow(prs: Presentation) -> None:
 
 def test_generate_business_review_ppt_builds_new_story() -> None:
     payload = _sample_payload()
-    business_story = """# Informe de negocio — NPS Lens
-
-## 1) Qué está pasando
-- Muestras: 36,872 · Score medio (0-10): 8.53 · Detractores: 12.7% · Promotores: 72.5%
-- Zona de fricción: Agregar funcionalidad · Zona fuerte: FAN
-
-## 2) Cambio vs base de comparación
-- Periodo actual: Mes actual (Febrero 2026 · 2026-02-01 → 2026-02-22) (n=20,791)
-- Periodo base: Base histórica anterior a Febrero 2026 (2025-11-01 → 2026-01-31) (n=16,081)
-- Variación: Delta NPS Clásico -0.18 · Δ detractores +2.5 pp
-
-## 3) Dónde atacar primero (oportunidades)
-- Si mejoramos Palanca=Funcionamiento Continuo, el modelo estima un potencial de +57.2 puntos.
-
-## 4) Qué están diciendo (temas de texto)
-- Tema #1: fallas de continuidad, caídas y lentitud en procesos críticos.
-
-## 5) Próximos pasos recomendados
-- Validar releases, alinear owners y aterrizar quick wins del mes.
-"""
 
     out = generate_business_review_ppt(
         service_origin="BBVA México",
@@ -368,39 +308,25 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        nps_points_at_risk=3.9,
-        nps_points_recoverable=2.4,
-        top3_incident_share=0.74,
-        median_lag_weeks=1.2,
-        story_md=business_story,
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        logo_path=None,
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source="domain_touchpoint",
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Confianza media", "value": "0.82"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Confianza", "value": "82%"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 10
+    assert out.slide_count == 7
 
     prs = Presentation(BytesIO(out.content))
+    assert out.file_name.startswith("nps-comentarios-incidencias-")
+    assert "thermal-causality-v3" in (prs.core_properties.keywords or "")
     assert len(prs.slides) == out.slide_count
     _assert_no_shape_overflow(prs)
 
@@ -417,27 +343,19 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
             for paragraph in shape.text_frame.paragraphs:
                 cover_texts.append(paragraph.text or "")
 
-    assert any("Análisis NPS térmico y causalidad" in t for t in texts)
-    assert any("NPS térmico" in t for t in texts)
-    assert any("PROMOTORES" in t for t in texts)
-    assert any("Se analizaron" in t for t in texts)
-    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("2. Que dicen los detractores" in t for t in texts)
-    assert any("3. Qué ha cambiado en Palanca" in t for t in texts)
+    assert any("NPS : Comentarios" in t for t in cover_texts)
+    assert any("Método de agrupación:" in t for t in cover_texts)
+    assert any("NPS" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
+    assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("4. Dónde duele en la Web · Palanca" in t for t in texts)
+    assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
-    assert any("5. Oportunidades priorizadas · Palanca" in t for t in texts)
+    assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Bloque 1 · Analisis VoC" in t for t in texts)
-    assert any("Highlights del periodo" in t for t in texts)
-    assert any("Análisis causal empleado · Por Subpalanca" in t for t in texts)
-    assert any("6. Journeys de detracción" in t for t in texts)
-    assert any("7.1 Acceso > Login" in t for t in texts)
-    assert any("Análisis causal de Subpalanca: Escenario #1 ·" in t for t in texts)
-    assert any("Sumario del análisis del escenario" in t for t in texts)
-    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
-    assert any("Ejemplos de Comentarios enlazados" in t for t in texts)
+    assert any("Acceso / Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -457,17 +375,50 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert not any("Fix estructural" in t for t in texts)
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
-    assert any("La web expulsa al usuario al entrar" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
-    assert all(
-        shape.text_frame.vertical_anchor != executive_ppt.MSO_VERTICAL_ANCHOR.MIDDLE
-        for slide in prs.slides
-        for shape in slide.shapes
-        if getattr(shape, "has_text_frame", False)
-        and any((paragraph.text or "").strip() for paragraph in shape.text_frame.paragraphs)
+    change_tables = [shape.table for shape in prs.slides[4].shapes if getattr(shape, "has_table", False)]
+    assert len(change_tables) == 1
+    assert len(change_tables[0].rows) == 1 + len(
+        executive_ppt.select_negative_delta_rows(
+            executive_ppt._build_presentation_context(
+                service_origin="BBVA México",
+                service_origin_n1="Empresas Mobile",
+                service_origin_n2="",
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 31),
+                focus_name="detractores",
+                topic_channel="Web",
+                attribution_df=payload["attribution"],
+                selected_nps_df=payload["selected_nps"],
+                comparison_nps_df=payload["comparison_nps"],
+                touchpoint_source="domain_touchpoint",
+                entity_summary_df=payload["attribution"],
+                entity_summary_kpis=[],
+                broken_journeys_df=None,
+            ).dimensions["Palanca"].change_table_df,
+            max_rows=4,
+        )
     )
+    causal_slide = prs.slides[6]
+    assert causal_slide.shapes[4].text == "NOTA MEDIA DEL TÓPICO"
+    assert causal_slide.shapes[7].text == "CONFIANZA"
+    assert causal_slide.shapes[2].text == ""
+    assert causal_slide.shapes[5].text == ""
+    evidence_paragraphs = [
+        paragraph
+        for shape in causal_slide.shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+        if "INC" in paragraph.text
+    ]
+    assert any("INC00040, INC00041" in paragraph.text for paragraph in evidence_paragraphs)
+    assert not any("INC..." in paragraph.text for paragraph in evidence_paragraphs)
+    assert all(paragraph.alignment == PP_ALIGN.LEFT for paragraph in evidence_paragraphs)
+    assert all(paragraph._p.get_or_add_pPr().get("marL") for paragraph in evidence_paragraphs)
+    assert out.compact_file_name.endswith("-sin-evolucion-nps.pptx")
+    assert len(Presentation(BytesIO(out.compact_content)).slides) == out.slide_count - 2
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide10.xml.rels").decode("utf-8")
+        rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
 
 
@@ -480,19 +431,9 @@ def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        nps_points_at_risk=3.9,
-        nps_points_recoverable=2.4,
-        top3_incident_share=0.74,
-        median_lag_weeks=1.2,
-        story_md="",
-        script_8slides_md="",
         attribution_df=payload["attribution"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        logo_path=None,
     )
 
     assert "/" not in out.file_name
@@ -509,10 +450,9 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
     attribution.loc[:, "touchpoint"] = ["Login / autenticación"]
     attribution.loc[:, "palanca"] = ["Acceso"]
     attribution.loc[:, "subpalanca"] = ["Bloqueo / OTP"]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Comentarios sobre login + incidencias de autenticación"
     ]
-    attribution.loc[:, "journey_impact_label"] = ["Muy alto"]
     attribution.loc[:, "presentation_mode"] = [TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS]
 
     out = generate_business_review_ppt(
@@ -522,29 +462,15 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        nps_points_at_risk=3.9,
-        nps_points_recoverable=2.4,
-        top3_incident_share=0.74,
-        median_lag_weeks=1.2,
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        logo_path=None,
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "1"},
             {"label": "Touchpoints cubiertos", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -557,12 +483,11 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("6. Journeys de detracción" in t for t in texts)
-    assert any("Análisis causal de Journey de detracción: Escenario #1 ·" in t for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
     assert any("Acceso bloqueado" in t for t in texts)
 
 
-def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slides() -> None:
+def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck() -> None:
     payload = _sample_payload()
     base = payload["attribution"].iloc[0].to_dict()
     rows = [
@@ -575,9 +500,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
             "linked_incidents": 5,
             "linked_comments": 3,
             "linked_pairs": 5,
-            "detractor_probability": 0.13,
-            "confidence": 0.20,
-            "priority": 0.91,
+            "focus_rate_high_incidence": 0.13,
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
         {
@@ -589,9 +512,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
             "linked_incidents": 8,
             "linked_comments": 5,
             "linked_pairs": 10,
-            "detractor_probability": 0.45,
-            "confidence": 0.15,
-            "priority": 0.62,
+            "focus_rate_high_incidence": 0.45,
             "incident_records": [
                 {
                     "incident_id": "INC000104256298",
@@ -629,9 +550,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
             "linked_incidents": 2,
             "linked_comments": 2,
             "linked_pairs": 2,
-            "detractor_probability": float("nan"),
-            "confidence": 0.0,
-            "priority": 0.10,
+            "focus_rate_high_incidence": float("nan"),
             "incident_records": [
                 {
                     "incident_id": "",
@@ -646,6 +565,17 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
             ],
             "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
         },
+        {
+            **base,
+            "nps_topic": "Firma digital interrumpida",
+            "touchpoint": "Firma / validación",
+            "palanca": "Operativa",
+            "subpalanca": "Firma digital",
+            "linked_incidents": 1,
+            "linked_comments": 1,
+            "linked_pairs": 1,
+            "presentation_mode": TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
+        },
     ]
     attribution = pd.DataFrame(rows)
 
@@ -656,16 +586,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
         period_start=date(2026, 3, 1),
         period_end=date(2026, 3, 29),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        nps_points_at_risk=0.0,
-        nps_points_recoverable=0.0,
-        top3_incident_share=0.0,
-        median_lag_weeks=0.0,
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
         touchpoint_source=TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
@@ -673,7 +594,7 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
         entity_summary_kpis=[
             {"label": "Journeys de detracción", "value": "3"},
             {"label": "Touchpoints cubiertos", "value": "3"},
-            {"label": "Links validados", "value": "17"},
+            {"label": "Vínculos semánticos", "value": "17"},
         ],
     )
 
@@ -686,24 +607,38 @@ def test_generate_business_review_ppt_merges_three_causal_scenarios_into_15_slid
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 12
-    assert any("7.1 Operativa crítica fallida" in t for t in texts)
-    assert any("7.2 Acceso bloqueado" in t for t in texts)
-    assert any("7.3 Rendimiento degradado" in t for t in texts)
-    assert any("Sumario del análisis del escenario" in t for t in texts)
-    assert any("Ejemplos de incidencias en el caso de uso" in t for t in texts)
-    assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
-    slide_11_texts = [
+    assert out.slide_count == 10
+    compact_prs = Presentation(BytesIO(out.compact_content))
+    assert len(compact_prs.slides) == 8
+    compact_texts = [
         paragraph.text or ""
-        for shape in prs.slides[10].shapes
+        for slide in compact_prs.slides
+        for shape in slide.shapes
         if getattr(shape, "has_text_frame", False)
         for paragraph in shape.text_frame.paragraphs
     ]
-    assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_11_texts)
+    assert any(
+        t == "Operativa crítica fallida" for t in compact_texts
+    )
+    assert any(t == "Operativa crítica fallida" for t in texts)
+    assert any(t == "Acceso bloqueado" for t in texts)
+    assert any(t == "Rendimiento degradado" for t in texts)
+    assert any(t == "Firma digital interrumpida" for t in texts)
+    assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
+    slide_9_texts = [
+        paragraph.text or ""
+        for shape in prs.slides[8].shapes
+        if getattr(shape, "has_text_frame", False)
+        for paragraph in shape.text_frame.paragraphs
+    ]
+    assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
-    assert any("VÍNCULOS VALIDADOS" in t for t in texts)
+    assert any("VÍNCULOS SEMÁNTICOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide10.xml.rels").decode("utf-8")
+        rels = "".join(
+            archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
+            for index in range(7, 10)
+        )
     assert "https://helix.example/INC000104257175" in rels
 
 
@@ -717,7 +652,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
     attribution.loc[:, "journey_route"] = [
         "Incidencia -> Login -> Acceso / Login -> comentario VoC -> NPS"
     ]
-    attribution.loc[:, "journey_expected_evidence"] = [
+    attribution.loc[:, "journey_evidence_pattern"] = [
         "Keywords semánticas: Login, Otp. Helix Source Service N2 dominante: Auth."
     ]
     attribution.loc[:, "journey_cx_readout"] = ["5 links Helix↔VoC convergen en este journey roto."]
@@ -730,29 +665,15 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"],
-        nps_points_at_risk=3.9,
-        nps_points_recoverable=2.4,
-        top3_incident_share=0.74,
-        median_lag_weeks=1.2,
-        story_md="",
-        script_8slides_md="",
         attribution_df=attribution,
-        ranking_df=payload["rationale"],
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
-        lag_days_by_topic=payload["lag_days"],
-        logo_path=None,
-        incident_evidence_df=payload["incident_evidence"],
-        changepoints_by_topic=payload["changepoints"],
         touchpoint_source=TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
         entity_summary_df=attribution,
         entity_summary_kpis=[
             {"label": "Journeys rotos", "value": "1"},
             {"label": "Touchpoints detectados", "value": "1"},
-            {"label": "Links validados", "value": "5"},
+            {"label": "Vínculos semánticos", "value": "5"},
         ],
         broken_journeys_df=payload["broken_journeys"],
     )
@@ -765,8 +686,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("6. Journeys rotos" in t for t in texts)
-    assert any("Análisis causal de Journey roto: Escenario #1 ·" in t for t in texts)
+    assert any(t == "Acceso / Login" for t in texts)
     assert any("Acceso / Login" in t for t in texts)
 
 
@@ -791,6 +711,34 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     )
     assert not palanca_change.empty
     assert "delta_nps" in palanca_change.columns
+
+
+def test_overview_figure_uses_full_history_and_highlights_requested_period() -> None:
+    history = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2025-11-01", "2026-01-05", "2026-01-31"]),
+            "NPS": [9, 2, 8],
+        }
+    )
+    figure = executive_ppt._build_overview_figure(
+        history,
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+    )
+
+    assert figure is not None
+    all_dates = [
+        pd.Timestamp(value)
+        for trace in figure.data
+        for value in (list(trace.x) if trace.x is not None else [])
+    ]
+    assert min(all_dates) == pd.Timestamp("2025-11-01")
+    assert list(figure.data[0].y) == [100.0, -100.0, 0.0]
+    assert any(
+        pd.Timestamp(shape.x0) == pd.Timestamp("2026-01-01")
+        and pd.Timestamp(shape.x1) == pd.Timestamp("2026-01-31")
+        for shape in figure.layout.shapes
+    )
 
 
 def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
@@ -820,215 +768,52 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
 
 
-def test_add_topic_timing_slide_reuses_app_charts_and_handles_empty_state() -> None:
-    payload = _sample_payload()
-    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
-
-    prs = Presentation()
-    executive_ppt._add_topic_timing_slide(
-        prs,
-        period_label="2026-02-01 -> 2026-02-22",
-        period_days=22,
-        selected_nps_df=payload["selected_nps"],
-    )
-    executive_ppt._add_topic_timing_slide(
-        prs,
-        period_label="2026-02-01 -> 2026-02-22",
-        period_days=22,
-        selected_nps_df=pd.DataFrame(),
-    )
-
-    assert len(prs.slides) == 2
-
-    slide_texts: list[str] = []
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                for paragraph in shape.text_frame.paragraphs:
-                    slide_texts.append(paragraph.text or "")
-
-    assert any("2. Cuándo y cómo lo dicen" in text for text in slide_texts)
-    assert any("Cuándo lo dicen" in text for text in slide_texts)
-    assert any("Cómo lo dicen" in text for text in slide_texts)
-    assert any(
-        "No hay señal suficiente para mostrar el volumen diario del periodo." in text
-        for text in slide_texts
-    )
-    assert any(
-        "No hay señal suficiente para la distribución diaria por grupo." in text
-        for text in slide_texts
-    )
-
-    group_matrix = executive_ppt._group_matrix(current, dimension="Palanca")
-    assert not group_matrix.empty
-    assert set(group_matrix["band"].tolist()) <= {"Detractor", "Pasivo", "Promotor"}
-
-    opportunities = executive_ppt._opportunities_table(current, dimension="Palanca", min_n=20)
-    assert not opportunities.empty
-    assert {"dimension", "potential_uplift", "confidence"}.issubset(opportunities.columns)
-
-    gaps = executive_ppt._gap_vs_overall_table(current, top_k=5)
-    assert len(gaps) <= 5
-    assert not gaps.empty
-
-
-def test_executive_ppt_legacy_chart_helpers_render_expected_figures() -> None:
-    payload = _sample_payload()
-    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
-    daily_mix = executive_ppt._daily_group_mix(current)
-    topic_summary = executive_ppt._topic_summary(payload["by_topic_daily"])
-
-    top_fig = executive_ppt._top_topics_fig(topic_summary, top_k=5)
-    assert top_fig is not None
-    assert len(top_fig.data) == 1
-
-    heatmap_fig = executive_ppt._topic_heatmap_fig(payload["by_topic_daily"], top_k=3)
-    assert heatmap_fig is not None
-    assert len(heatmap_fig.data) == 1
-
-    mix_fig = executive_ppt._daily_group_mix_fig(daily_mix)
-    assert mix_fig is not None
-    assert len(mix_fig.data) == 3
-    assert {trace.type for trace in mix_fig.data} == {"scatter"}
-
-    themed = executive_ppt._apply_ppt_figure_theme(
-        go.Figure(
-            [
-                go.Bar(name="Promotores", x=[1], y=[2]),
-                go.Bar(name="Pasivos", x=[1], y=[3]),
-                go.Bar(name="Detractores", x=[1], y=[4]),
-                go.Bar(name="Incidencias", x=[1], y=[1]),
-                go.Scatter(name="NPS clásico", x=[1], y=[2], mode="lines+markers"),
-                go.Scatter(name="Incidencias", x=[1], y=[1], mode="lines"),
-            ]
-        )
-    )
-    assert themed.layout.legend.orientation == "h"
-    assert themed.layout.font.size == 17
-    assert themed.layout.legend.yanchor == "bottom"
-    assert themed.data[0].marker.color == "#" + executive_ppt.BBVA_COLORS["green"]
-    assert themed.data[1].marker.color == "#" + executive_ppt.BBVA_COLORS["yellow"]
-    assert themed.data[2].marker.color == "#" + executive_ppt.BBVA_COLORS["red"]
-    assert themed.data[3].marker.color == "#" + executive_ppt.BBVA_COLORS["sky"]
-
-    heatmap_themed = executive_ppt._apply_ppt_figure_theme(
-        go.Figure(
-            [
-                go.Heatmap(
-                    z=[[0, 1]],
-                    x=["2026-02-10", "2026-02-11"],
-                    y=["Incidencias"],
-                    colorbar=dict(title="Incidencias"),
-                )
-            ]
-        )
-    )
-    assert heatmap_themed.layout.font.size == 18
-    assert heatmap_themed.layout.margin.r >= 84
-    assert heatmap_themed.data[0].xgap >= 2
-    assert heatmap_themed.data[0].ygap >= 2
-    assert heatmap_themed.data[0].colorbar.title.side == "right"
-
-
-def test_add_opportunity_slide_reuses_app_chart_and_bullets() -> None:
-    payload = _sample_payload()
-    current = executive_ppt._coerce_nps_records(payload["selected_nps"])
-    opportunities = executive_ppt._opportunities_table(current, dimension="Palanca", min_n=20)
-
-    prs = Presentation()
-    executive_ppt._add_opportunity_slide(
-        prs,
-        period_label="2026-02-01 -> 2026-02-22",
-        opportunities_df=opportunities,
-    )
-    executive_ppt._add_opportunity_slide(
-        prs,
-        period_label="2026-02-01 -> 2026-02-22",
-        opportunities_df=pd.DataFrame(columns=opportunities.columns),
-    )
-
-    texts: list[str] = []
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                for paragraph in shape.text_frame.paragraphs:
-                    texts.append(paragraph.text or "")
-
-    assert any("6. Oportunidades a priorizar" in text for text in texts)
-    assert any("Ranking por impacto estimado x confianza" in text for text in texts)
-    assert any("Si mejoramos" in text for text in texts)
-    assert not any("**" in text for text in texts)
-    assert any(
-        run.font.bold
-        for slide in prs.slides
-        for shape in slide.shapes
-        if getattr(shape, "has_text_frame", False)
-        for paragraph in shape.text_frame.paragraphs
-        for run in paragraph.runs
-        if "Palanca=" in run.text or "potencial de +" in run.text
-    )
-    assert any(
-        "No se identificaron oportunidades robustas con el umbral actual." in text for text in texts
-    )
-
-
-def test_executive_ppt_helper_functions_cover_business_formatting_paths() -> None:
-    assert executive_ppt._fmt_pct_or_nd(0.25) == "25,00%"
-    assert executive_ppt._fmt_pct_or_nd(float("nan")) == "n/d"
-    assert (
-        executive_ppt._fmt_count_with_label(1, singular="incidencia", plural="incidencias")
-        == "**1** incidencia"
-    )
-    assert executive_ppt._fmt_signed_or_nd(-2.34, decimals=1) == "-2,3"
-    assert executive_ppt._fmt_num_or_nd(7.891, decimals=1) == "7,9"
-    assert executive_ppt._clip("abcdefgh", 5) == "abcd…"
-    assert executive_ppt._wrap_label("", width=6, max_lines=2) == ""
-    assert executive_ppt._wrap_label("uno dos tres cuatro cinco seis", width=6, max_lines=2) != ""
-    assert executive_ppt._focus_risk_label("detractores") == "detracción"
-    assert executive_ppt._focus_probability_label("promotores") == "Prob. de promoción"
-    assert executive_ppt._focus_risk_label("otros") == "otros"
-    assert executive_ppt._format_opportunity_scope("Palanca", "Pagos") == "Pagos (palanca)"
-    assert executive_ppt._format_opportunity_scope("Subpalanca", "Login") == "Login (subpalanca)"
-    assert executive_ppt._format_opportunity_scope("nps_topic", "Tema X") == "Tema X"
-    assert executive_ppt._clean_evidence_excerpt("", max_len=20) == ""
-    assert executive_ppt._clean_evidence_excerpt("Descripción: texto de prueba", max_len=20) != ""
-    assert executive_ppt._is_cover_metric_line("Score medio del periodo")
-
-    source_df = pd.DataFrame(
+def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None:
+    current = pd.DataFrame(
         {
-            "Fecha": pd.to_datetime(["2026-01-01", "2026-01-03", "2025-12-20"]),
-            "NPS": [8, 4, 9],
+            "Canal": ["Web"] * 9,
+            "Subpalanca": ["Falla"] * 3 + ["Login"] * 2 + ["Fácil"] * 3 + ["Seguro"],
+            "NPS": [4, 5, 6, 0, 10, 9, 9, 10, 10],
         }
     )
-    current, baseline = executive_ppt._split_source_period_frames(
-        source_df,
-        period_start=date(2026, 1, 1),
-        period_end=date(2026, 1, 31),
+
+    overview = executive_ppt._period_overview(current, topic_channel="Web")
+
+    assert overview["pain_point"] == "Falla"
+    assert overview["strength_point"] == "Fácil"
+
+
+def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
+    current = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-02-01", "2026-02-02", "2026-02-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [0, 10, 0],
+        }
     )
-    assert len(current) == 2
-    assert len(baseline) == 1
-    assert str(executive_ppt._coerce_datetime_scalar("09-03-2026").date()) == "2026-03-09"
-    assert executive_ppt._coerce_datetime_series(["09-03-2026", "10-03-2026"]).notna().all()
-    assert executive_ppt._safe_date("09-03-2026") == "2026-03-09"
-    assert executive_ppt._safe_dt("09-03-2026") is not None
-    assert executive_ppt._month_label_es(date(2026, 3, 9)) == "marzo 2026"
-    assert executive_ppt._slug("") == "na"
-    assert executive_ppt._slug("Señal crítica / pagos") == "senal-critica-pagos"
-    assert executive_ppt._safe_date(object()) != ""
-    assert executive_ppt._safe_dt("no-date") is None
-    assert executive_ppt._safe_float("7.5") == 7.5
-    assert executive_ppt._safe_int("7.5") == 7
-    assert executive_ppt._nps_band(10) == "Promotor"
-    assert executive_ppt._nps_band(8) == "Pasivo"
-    assert executive_ppt._nps_band(2) == "Detractor"
-    assert (
-        executive_ppt._normalize_category_value("Funcionamiento Continuo")
-        == "Funcionamiento continuo"
+    baseline = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-02"]),
+            "Canal": ["Web", "App", "App"],
+            "Palanca": ["Acceso", "Acceso", "Pagos"],
+            "NPS": [10, 10, 10],
+        }
     )
-    assert (
-        executive_ppt._normalize_category_value("Agregar Funcionalidad") == "Agregar funcionalidad"
+
+    view = executive_ppt._build_dimension_view_model(
+        dimension="Palanca",
+        selected_raw=executive_ppt._coerce_nps_records(current),
+        current_source_period=current,
+        baseline_source_period=baseline,
+        topic_channel="Web",
     )
-    assert executive_ppt._normalize_category_value("Fallas en el Login") == "Fallas en el login"
+
+    assert view.topic_table_df["value"].tolist() == ["Acceso"]
+    assert view.topic_table_df.iloc[0]["n"] == 2
+    assert view.topic_table_df.iloc[0]["nps"] == 5.0
+    assert view.change_table_df.iloc[0]["n_current"] == 2
+    assert view.change_table_df.iloc[0]["nps_current"] == 0.0
 
 
 def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
@@ -1069,18 +854,14 @@ def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> N
             [
                 {
                     "nps_topic": "Acceso bloqueado",
-                    "priority": 0.91,
-                    "confidence": 0.20,
-                    "detractor_probability": 0.13,
+                    "focus_rate_high_incidence": 0.13,
                     "linked_pairs": 5,
                     "linked_incidents": 5,
                     "linked_comments": 3,
                 },
                 {
                     "nps_topic": "Operativa crítica fallida",
-                    "priority": 0.62,
-                    "confidence": 0.15,
-                    "detractor_probability": 0.45,
+                    "focus_rate_high_incidence": 0.45,
                     "linked_pairs": 10,
                     "linked_incidents": 8,
                     "linked_comments": 5,
@@ -1133,25 +914,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=payload["rationale"].head(0),
-        nps_points_at_risk=0.0,
-        nps_points_recoverable=0.0,
-        top3_incident_share=0.0,
-        median_lag_weeks=0.0,
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=pd.DataFrame(),
-        lag_days_by_topic=pd.DataFrame(),
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        logo_path=None,
-        incident_evidence_df=pd.DataFrame(),
-        changepoints_by_topic=pd.DataFrame(),
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -1162,12 +927,9 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("6. Journeys de detracción" in t for t in texts)
-    assert any("7. Análisis causal no concluyente" in t for t in texts)
-    assert any(
-        "No se identificaron patrones causales estadísticamente defendibles" in t for t in texts
-    )
+    assert any("acumulado histórico" in t for t in texts)
+    assert len(prs.slides) == 6
+    assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
 
 
@@ -1180,14 +942,6 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=pd.DataFrame(),
-        rationale_df=pd.DataFrame(),
-        nps_points_at_risk=0.0,
-        nps_points_recoverable=0.0,
-        top3_incident_share=0.0,
-        median_lag_weeks=0.0,
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
         selected_nps_df=payload["selected_nps"],
         comparison_nps_df=payload["comparison_nps"],
@@ -1203,69 +957,11 @@ def test_generate_business_review_ppt_can_omit_causal_section_explicitly() -> No
                     texts.append(paragraph.text or "")
 
     assert out.slide_count > 0
-    assert not any("6. Journeys de detracción" in t for t in texts)
-    assert not any("7. Análisis causal no concluyente" in t for t in texts)
+    assert not any("Journeys de detracción" in t for t in texts)
+    assert not any("evidencia disponible no permite afirmar causalidad" in t for t in texts)
 
 
-def test_ppt_template_fallback_builds_default_presentation() -> None:
-    prs = build_presentation(template_path=None)
-    layout = resolve_layout(prs, ["layout inexistente"], fallback_index=0)
-
-    assert prs is not None
-    assert layout is not None
-
-
-def test_ppt_template_path_resolution_supports_explicit_and_env_paths() -> None:
-    original = os.environ.get("NPS_LENS_PPT_TEMPLATE")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = Path(tmpdir)
-        pptx_path = tmp_path / "corporate-template.pptx"
-        Presentation().save(pptx_path)
-
-        found_explicit = find_corporate_template_path(
-            explicit_path=pptx_path, workspace_root=tmp_path
-        )
-        assert found_explicit == pptx_path
-
-        os.environ["NPS_LENS_PPT_TEMPLATE"] = str(pptx_path)
-        found_env = find_corporate_template_path(explicit_path=pptx_path, workspace_root=tmp_path)
-        assert found_env == pptx_path
-
-        fallback_prs = build_presentation(template_path=None, workspace_root=tmp_path / "missing")
-        assert fallback_prs is not None
-
-    if original is None:
-        os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
-    else:
-        os.environ["NPS_LENS_PPT_TEMPLATE"] = original
-
-
-def test_ppt_template_resolution_handles_duplicates_and_no_match() -> None:
-    original_env = os.environ.get("NPS_LENS_PPT_TEMPLATE")
-    original_names = ppt_template_module._TEMPLATE_FILE_NAMES
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            missing = tmp_path / "missing-template.pptx"
-            os.environ["NPS_LENS_PPT_TEMPLATE"] = str(missing)
-            ppt_template_module._TEMPLATE_FILE_NAMES = ()
-
-            assert (
-                find_corporate_template_path(explicit_path=missing, workspace_root=tmp_path) is None
-            )
-
-            prs = build_presentation(template_path=None, workspace_root=tmp_path)
-            assert prs is not None
-    finally:
-        ppt_template_module._TEMPLATE_FILE_NAMES = original_names
-        if original_env is None:
-            os.environ.pop("NPS_LENS_PPT_TEMPLATE", None)
-        else:
-            os.environ["NPS_LENS_PPT_TEMPLATE"] = original_env
-
-
-def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_raw_nps() -> None:
-    payload = _sample_payload()
+def test_generate_business_review_ppt_handles_missing_raw_nps() -> None:
     out = generate_business_review_ppt(
         service_origin="BBVA México",
         service_origin_n1="Empresas Mobile",
@@ -1273,25 +969,9 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
         focus_name="detractores",
-        overall_weekly=payload["overall_daily"],
-        rationale_df=pd.DataFrame(),
-        nps_points_at_risk=0.0,
-        nps_points_recoverable=0.0,
-        top3_incident_share=0.0,
-        median_lag_weeks=0.0,
-        story_md="",
-        script_8slides_md="",
         attribution_df=pd.DataFrame(),
-        ranking_df=pd.DataFrame(),
-        by_topic_daily=payload["by_topic_daily"],
         selected_nps_df=None,
         comparison_nps_df=None,
-        lag_days_by_topic=None,
-        by_topic_weekly=None,
-        lag_weeks_by_topic=None,
-        logo_path=None,
-        incident_evidence_df=None,
-        changepoints_by_topic=None,
     )
 
     prs = Presentation(BytesIO(out.content))
@@ -1302,127 +982,11 @@ def test_generate_business_review_ppt_falls_back_to_aggregate_signals_without_ra
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any("1. Evolución del NPS clásico del periodo" in t for t in texts)
-    assert any("5. Oportunidades priorizadas · Palanca" in t for t in texts)
+    assert any("acumulado histórico" in t for t in texts)
+    assert any("El peso detractor pasa" in t for t in texts)
 
 
-def test_history_fig_daily_uses_requested_colors() -> None:
-    daily = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"]),
-            "nps_mean": [7.2, 7.4, 7.1],
-            "detractor_rate": [0.22, 0.20, 0.24],
-            "incidents": [3, 4, 2],
-        }
-    )
-    fig = executive_ppt._history_fig(daily, focus_name="detractores")
-    assert fig is not None
-    expected_markers = [
-        nps_score_color(DesignTokens.default(), "light", value)
-        for value in daily["nps_mean"].tolist()
-    ]
-    assert fig.data[0]["mode"] == "lines+markers"
-    assert fig.data[0]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
-    assert list(fig.data[0]["marker"]["color"]) == expected_markers
-    assert fig.data[2]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["yellow"]
-
-
-def test_month_overlap_highlights_matched_incidents_with_labels() -> None:
-    month = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"]),
-            "nps_mean": [7.2, 7.3, 7.1],
-            "detractor_rate": [0.21, 0.22, 0.24],
-            "incidents": [4, 5, 2],
-        }
-    )
-    matched = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-03"]),
-            "matched_incidents": [2, 1],
-        }
-    )
-    fig = executive_ppt._month_overlap_fig(
-        month,
-        focus_name="detractores",
-        matched_daily=matched,
-    )
-    assert fig is not None
-    assert fig.data[3]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["orange"]
-    assert list(fig.data[3]["text"]) == ["2", "", "1"]
-
-
-def test_executive_ppt_helper_figures_cover_secondary_paths() -> None:
-    payload = _sample_payload()
-
-    chain_fig = executive_ppt._chain_portfolio_fig(
-        payload["attribution"],
-        highlight_topic="Acceso > Login",
-    )
-    assert chain_fig is not None
-    assert chain_fig.data[0]["marker"]["color"][0] == "#" + executive_ppt.BBVA_COLORS["red"]
-    assert len(chain_fig.data[0]["x"]) == 1
-
-    evo = executive_ppt._nps_evolution_fig(
-        executive_ppt._daily_group_mix(executive_ppt._coerce_nps_records(payload["selected_nps"])),
-        payload["overall_daily"],
-    )
-    assert evo is not None
-    assert len(evo.data) == 3
-    assert evo.data[0]["name"] == "NPS clásico"
-    assert evo.data[1]["name"] == "% detractores"
-
-    change_df = pd.DataFrame(
-        {
-            "value": ["A", "B", "C"],
-            "n_current": [20, 10, 5],
-            "delta_nps": [1.2, -2.5, 0.5],
-        }
-    )
-    delta_fig = executive_ppt._delta_bars_fig(
-        change_df,
-        metric="delta_nps",
-        x_title="Cambio NPS",
-    )
-    assert delta_fig is not None
-    assert delta_fig.data[0]["orientation"] == "h"
-
-    matrix_df = pd.DataFrame(
-        {
-            "Palanca": ["Pagos", "Pagos", "Pagos", "Acceso", "Acceso", "Acceso"],
-            "band": ["Detractor", "Pasivo", "Promotor"] * 2,
-            "share": [0.5, 0.3, 0.2, 0.2, 0.4, 0.4],
-        }
-    )
-    heatmap = executive_ppt._group_heatmap_fig(matrix_df, dimension="Palanca")
-    assert heatmap is not None
-    assert len(heatmap.data) == 1
-
-    gaps = pd.DataFrame(
-        {
-            "value": ["Pagos", "Acceso"],
-            "gap_vs_overall": [-10.5, -3.2],
-        }
-    )
-    gap_fig = executive_ppt._gap_vs_overall_fig(gaps)
-    assert gap_fig is not None
-    assert gap_fig.data[0]["orientation"] == "h"
-
-    opps = pd.DataFrame(
-        {
-            "dimension": ["Palanca", "Subpalanca", "nps_topic"],
-            "value": ["Pagos", "Login", "Transferencias lentas"],
-            "confidence": [0.7, 0.4, 0.5],
-            "potential_uplift": [4.2, 2.1, 1.3],
-            "n": [100, 64, 25],
-        }
-    )
-    opp_fig = executive_ppt._opportunity_bubble_fig(opps)
-    assert opp_fig is not None
-    assert len(opp_fig.data) == 1
-
-
-def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() -> None:
+def test_text_topic_selector_limits_table_rows() -> None:
     topics = pd.DataFrame(
         {
             "cluster_id": [1, 2, 3, 4, 5],
@@ -1435,41 +999,8 @@ def test_text_topic_slide_uses_all_clusters_for_chart_and_top_three_for_table() 
         }
     )
 
-    fig = executive_ppt._build_text_topic_figure(topics)
-    assert fig is not None
-    assert len(fig.data[0].x) == 5
-
-    prs = Presentation()
-    executive_ppt._add_deep_dive_slide(
-        prs,
-        period_label="2026-03-01 -> 2026-03-29",
-        text_topics_df=topics,
-        topic_figure=None,
-    )
-    texts = [
-        paragraph.text or ""
-        for shape in prs.slides[0].shapes
-        if getattr(shape, "has_text_frame", False)
-        for paragraph in shape.text_frame.paragraphs
-    ]
-    assert "uno, dos" in texts
-    assert "ejemplo" in texts
-    assert not any(text in {"1", "2", "3", "4", "5"} for text in texts)
-
-
-def test_chain_helpers_cover_edge_cases() -> None:
-    assert executive_ppt._chain_list([" A ", "", "B"]) == ["A", "B"]
-    assert executive_ppt._chain_list(None) == []
-    assert executive_ppt._chain_list("uno") == ["uno"]
-    assert executive_ppt._chain_header("Helix", shown=2, total=5) == "Helix (2 de 5)"
-    assert executive_ppt._chain_header("Helix", shown=2, total=2) == "Helix (2)"
-    assert executive_ppt._chain_incident_records([{"incident_id": "INC1", "summary": "hola"}]) == [
-        {"incident_id": "INC1", "summary": "hola", "url": ""}
-    ]
-    assert executive_ppt._chain_incident_records(
-        [{"incident_id": "INC2", "summary": "hola", "incident_id__href": "https://helix/2"}]
-    ) == [{"incident_id": "INC2", "summary": "hola", "url": "https://helix/2"}]
-    assert executive_ppt._chain_incident_records(["bad"]) == []
+    selected = executive_ppt.select_text_clusters(topics, max_clusters=3)
+    assert selected["cluster_id"].tolist() == [1, 2, 3]
 
 
 def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Path) -> None:
@@ -1507,367 +1038,7 @@ def test_dashboard_service_injects_helix_urls_into_incident_records(tmp_path: Pa
     assert record["incident_id__href"] == record["url"]
 
 
-def test_incident_risk_recovery_wraps_labels_for_small_ppt_panels() -> None:
-    rationale = pd.DataFrame(
-        {
-            "nps_topic": ["Pagos / Transferencias / No funciona bien / Error intermitente"],
-            "nps_points_at_risk": [0.74],
-            "nps_points_recoverable": [0.15],
-            "priority": [0.82],
-        }
-    )
-
-    fig = chart_incident_risk_recovery(rationale, get_theme("light"), top_k=1)
-    assert fig is not None
-    assert "<br>" in str(fig.data[0]["y"][0]) or "…" in str(fig.data[0]["y"][0])
-    assert fig.data[0]["cliponaxis"] is False
-    assert fig.data[1]["cliponaxis"] is False
-
-
-def test_build_incident_timeline_daily_filters_to_matching_hot_terms() -> None:
-    timeline = pd.DataFrame(
-        {
-            "date": [
-                "2026-02-10",
-                "2026-02-10",
-                "2026-02-12",
-                "2026-02-13",
-                "2026-03-01",
-            ],
-            "helix_records": [2, 1, 3, 0, 5],
-            "nps_comments": [1, 2, 1, 4, 1],
-            "hot_term": ["pagos", "login", "pagos", "pagos", "pagos"],
-        }
-    )
-    evidence = pd.DataFrame(
-        {
-            "hot_term": ["pagos", "login", "otros"],
-            "hot_rank": [1, 2, 4],
-        }
-    )
-
-    out = executive_ppt._hotspot_matches_by_day(
-        timeline,
-        evidence,
-        month_start=pd.Timestamp("2026-02-01"),
-        month_end=pd.Timestamp("2026-02-28"),
-    )
-
-    assert list(out["matched_incidents"]) == [3, 3]
-    assert out["date"].dt.strftime("%Y-%m-%d").tolist() == ["2026-02-10", "2026-02-12"]
-
-    missing = executive_ppt._hotspot_matches_by_day(
-        pd.DataFrame({"date": ["2026-02-10"]}),
-        evidence,
-        month_start=pd.Timestamp("2026-02-01"),
-        month_end=pd.Timestamp("2026-02-28"),
-    )
-    assert missing.empty
-
-
-def test_topic_metrics_and_placeholder_text_helpers() -> None:
-    payload = _sample_payload()
-    metrics = executive_ppt._topic_metrics("Pagos > SPEI", payload["rationale"])
-    assert metrics["risk"] == 1.9
-    assert metrics["recoverable"] == 1.2
-    assert executive_ppt._topic_metrics("Inexistente", payload["rationale"]) == {}
-    assert executive_ppt._topic_metrics("Pagos > SPEI", pd.DataFrame()) == {}
-
-    prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[0])
-    executive_ppt._set_placeholder_text(
-        slide,
-        0,
-        "Titulo de prueba",
-        font_name=executive_ppt.BBVA_FONT_HEAD,
-        size_pt=24,
-    )
-    assert slide.placeholders[0].text == "Titulo de prueba"
-    executive_ppt._set_placeholder_text(
-        slide,
-        99,
-        "Ignorado",
-        font_name=executive_ppt.BBVA_FONT_HEAD,
-        size_pt=24,
-    )
-
-
-def test_add_story_card_caps_bullets_by_height() -> None:
-    prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-
-    executive_ppt._add_story_card(
-        slide,
-        left=1.0,
-        top=1.0,
-        width=4.0,
-        height=1.5,
-        title="Resumen",
-        bullets=["uno", "dos", "tres", "cuatro", "cinco"],
-    )
-
-    shape = slide.shapes[-1]
-    texts = [p.text for p in shape.text_frame.paragraphs]
-    assert texts[0] == "Resumen"
-    assert len([t for t in texts[1:] if t]) == 3
-
-
-def test_executive_ppt_helper_guards_return_empty_or_none_cleanly() -> None:
-    assert executive_ppt._chain_portfolio_fig(pd.DataFrame(), highlight_topic="x") is None
-    assert executive_ppt._nps_evolution_fig(pd.DataFrame(), pd.DataFrame()) is None
-    assert executive_ppt._delta_bars_fig(pd.DataFrame(), metric="delta_nps", x_title="x") is None
-    assert executive_ppt._group_heatmap_fig(pd.DataFrame(), dimension="Palanca") is None
-    assert executive_ppt._gap_vs_overall_fig(pd.DataFrame()) is None
-    assert executive_ppt._opportunity_bubble_fig(pd.DataFrame()) is None
-    assert executive_ppt._hotspot_matches_by_day(
-        None,
-        None,
-        month_start=pd.Timestamp("2026-02-01"),
-        month_end=pd.Timestamp("2026-02-28"),
-    ).empty
-
-
-def test_top_hotspots_fig_uses_top3_colors_and_inbar_labels() -> None:
-    evidence = pd.DataFrame(
-        {
-            "hot_rank": [1, 1, 2, 2, 3, 3],
-            "hot_term": [
-                "pagos",
-                "pagos",
-                "movimientos",
-                "movimientos",
-                "transferencias",
-                "transferencias",
-            ],
-            "mention_incidents": [60, 60, 45, 45, 30, 30],
-            "mention_comments": [114, 114, 98, 98, 85, 85],
-            "hotspot_comments": [114, 114, 98, 98, 85, 85],
-            "hotspot_links": [90, 90, 72, 72, 54, 54],
-        }
-    )
-    timeline = pd.DataFrame(
-        {
-            "incident_id": ["", "", ""],
-            "hot_term": ["pagos", "movimientos", "transferencias"],
-            "date": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-01"]),
-            "helix_records": [60, 45, 30],
-            "nps_comments": [114, 98, 85],
-        }
-    )
-
-    fig = executive_ppt._top_hotspots_fig(evidence, timeline, top_k=3)
-    assert fig is not None
-    assert len(fig.data) == 1
-
-    colors = list(fig.data[0]["marker"]["color"])
-    assert colors == [
-        "#" + executive_ppt.BBVA_COLORS["yellow"],
-        "#" + executive_ppt.BBVA_COLORS["orange"],
-        "#" + executive_ppt.BBVA_COLORS["red"],
-    ]
-    assert fig.layout.xaxis.visible is False
-    assert all(str(t).strip().startswith("#") for t in list(fig.data[0]["text"]))
-
-
-def test_hotspot_matches_by_day_uses_hot_terms_and_overlap_signal() -> None:
-    timeline = pd.DataFrame(
-        {
-            "incident_id": ["", "", "", ""],
-            "hot_term": ["transferencias", "transferencias", "login", "login"],
-            "date": pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-05", "2026-01-07"]),
-            "helix_records": [3, 2, 1, 2],
-            "nps_comments": [2, 0, 1, 3],
-        }
-    )
-    evidence = pd.DataFrame(
-        {
-            "hot_term": ["transferencias", "login"],
-            "hot_rank": [1, 2],
-        }
-    )
-    out = executive_ppt._hotspot_matches_by_day(
-        timeline,
-        evidence,
-        month_start=pd.Timestamp("2026-01-01"),
-        month_end=pd.Timestamp("2026-01-31"),
-    )
-    assert list(out["date"].dt.strftime("%Y-%m-%d")) == ["2026-01-05", "2026-01-07"]
-    assert list(out["matched_incidents"].astype(int)) == [4, 2]
-
-
-def test_hotspot_stack_fig_uses_requested_color_semantics_and_horizontal_legend() -> None:
-    daily = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-02"]),
-            "nps_mean": [7.1, 7.2],
-            "detractor_rate": [0.2, 0.21],
-            "incidents": [5, 6],
-        }
-    )
-    evidence = pd.DataFrame(
-        {
-            "incident_id": ["INC-1", "INC-2", "INC-3"],
-            "incident_date": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-02"]),
-            "hot_rank": [1, 2, 3],
-            "hot_term": ["transferencias", "token", "autenticacion"],
-            "similarity": [0.9, 0.8, 0.7],
-        }
-    )
-    fig = executive_ppt._hotspot_stack_fig(daily, evidence)
-    assert fig is not None
-    assert fig.data[0]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
-    assert fig.data[1]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["yellow"]
-    assert fig.data[2]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["orange"]
-    assert fig.data[3]["marker"]["color"] == "#" + executive_ppt.BBVA_COLORS["red"]
-    assert fig.layout.legend.orientation == "h"
-
-
-def test_incident_related_timeline_keeps_only_days_with_related_evidence() -> None:
-    timeline = pd.DataFrame(
-        {
-            "incident_id": ["INC-9001", "INC-9001", "INC-9001", "INC-9002"],
-            "date": pd.to_datetime(["2026-01-10", "2026-01-11", "2026-01-12", "2026-01-10"]),
-            "helix_records": [1, 0, 2, 1],
-            "nps_comments": [0, 3, 0, 1],
-        }
-    )
-    out = executive_ppt._incident_related_timeline(
-        incident_id="INC-9001",
-        incident_timeline_df=timeline,
-    )
-    assert not out.empty
-    assert list(out["date"].dt.strftime("%Y-%m-%d")) == ["2026-01-10", "2026-01-11", "2026-01-12"]
-    assert out["helix_records"].sum() == 3
-    assert out["nps_comments"].sum() == 3
-
-
-def test_prepare_incident_evidence_prefers_detailed_description_rowwise() -> None:
-    raw = pd.DataFrame(
-        {
-            "incident_id": ["INC-1", "INC-2"],
-            "summary": ["Resumen muy corto", "Resumen fallback"],
-            "Detailed Description": ["Detalle amplio 1", ""],
-            "detractor_comment": ["Comentario 1", "Comentario 2"],
-            "similarity": [0.81, 0.62],
-        }
-    )
-    out = executive_ppt._prepare_incident_evidence(raw)
-    assert out.iloc[0]["incident_summary"] == "Detalle amplio 1"
-    assert out.iloc[1]["incident_summary"] == "Resumen fallback"
-
-
-def test_select_zoom_incidents_groups_hotspots_instead_of_single_1to1() -> None:
-    evidence = pd.DataFrame(
-        {
-            "incident_id": ["INC-A1", "INC-A2", "INC-B1"],
-            "incident_date": pd.to_datetime(["2026-01-10", "2026-01-11", "2026-01-13"]),
-            "nps_topic": ["Pagos > Transferencias", "Pagos > Transferencias", "Acceso > Login"],
-            "incident_summary": ["Fallo 1", "Fallo 2", "Fallo 3"],
-            "detractor_comment": ["No transfiere", "Transferencia falla", "No puedo entrar"],
-            "similarity": [0.91, 0.87, 0.80],
-            "hot_term": ["transferencias", "transferencias", "login"],
-            "hot_rank": [1, 1, 2],
-            "hotspot_incidents": [8, 8, 3],
-            "hotspot_comments": [21, 21, 7],
-            "hotspot_links": [13, 13, 5],
-        }
-    )
-    selected = executive_ppt._select_zoom_incidents([], evidence, max_items=2)
-    assert len(selected) == 2
-    assert selected[0].hot_term == "transferencias"
-    assert selected[0].hotspot_incidents == 8
-    assert selected[0].hotspot_comments == 21
-    assert selected[0].hotspot_links == 13
-    assert "INC-A1" in selected[0].sample_incidents
-    assert "INC-A2" in selected[0].sample_incidents
-
-
-def test_incident_related_timeline_can_aggregate_by_hotspot_term() -> None:
-    timeline = pd.DataFrame(
-        {
-            "incident_id": ["INC-A1", "INC-A2", "INC-B1"],
-            "hot_term": ["transferencias", "transferencias", "login"],
-            "date": pd.to_datetime(["2026-01-10", "2026-01-10", "2026-01-11"]),
-            "helix_records": [2, 1, 1],
-            "nps_comments": [1, 3, 0],
-            "nps_comments_moderate": [1, 1, 0],
-            "nps_comments_high": [0, 2, 0],
-            "nps_comments_critical": [0, 0, 0],
-        }
-    )
-    out = executive_ppt._incident_related_timeline(
-        incident_id="INC-A1",
-        hot_term="transferencias",
-        incident_timeline_df=timeline,
-    )
-    assert len(out) == 1
-    assert out.iloc[0]["helix_records"] == 3
-    assert out.iloc[0]["nps_comments"] == 4
-    assert out.iloc[0]["nps_comments_moderate"] == 2
-    assert out.iloc[0]["nps_comments_high"] == 2
-    assert "INC-A1" in out.iloc[0]["incident_ids"]
-    assert "INC-A2" in out.iloc[0]["incident_ids"]
-
-
-def test_zoom_hotspot_fig_uses_daily_red_comments_blue_points_and_nps_line() -> None:
-    rel = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-20"]),
-            "helix_records": [1, 1],
-            "nps_comments": [2, 0],
-            "nps_comments_moderate": [1, 0],
-            "nps_comments_high": [1, 0],
-            "nps_comments_critical": [0, 0],
-            "incident_ids": ["INC-1", "INC-2"],
-        }
-    )
-    incident = executive_ppt.ZoomIncident(
-        incident_id="INC-1",
-        incident_date=pd.Timestamp("2026-01-20"),
-        nps_topic="Pagos > Transferencias",
-        incident_summary="Resumen",
-        detractor_comment="Comentario",
-        similarity=0.9,
-        hot_term="transferencias",
-    )
-    topic_daily = pd.DataFrame(
-        {
-            "date": pd.to_datetime(["2026-01-01", "2026-01-20"]),
-            "nps_mean": [8.2, 6.1],
-        }
-    )
-    fig = executive_ppt._zoom_incident_fig(
-        topic_daily=topic_daily,
-        related_timeline=rel,
-        incident=incident,
-        lag_days=4,
-        changepoints=[],
-        focus_name="detractores",
-    )
-    assert fig is not None
-    assert fig.data[0]["type"] == "bar"
-    assert fig.data[0]["name"] == "Comentarios moderados (NPS 5-6)"
-    assert fig.data[1]["name"] == "Comentarios altos (NPS 3-4)"
-    assert fig.data[2]["name"] == "Comentarios críticos (NPS 0-2)"
-    assert fig.data[4]["type"] == "scatter"
-    assert fig.data[4]["mode"] == "markers+text"
-    assert fig.data[4]["yaxis"] == "y2"
-    assert any(str(t) == "INC-1" for t in fig.data[4]["text"])
-    assert fig.data[5]["name"] == "Score medio"
-    assert fig.data[5]["type"] == "scatter"
-    assert fig.data[5]["mode"] == "lines+markers"
-    assert fig.data[5]["yaxis"] == "y3"
-    assert fig.data[5]["line"]["color"] == "#" + executive_ppt.BBVA_COLORS["blue"]
-
-
-def test_change_layout_uses_full_width_chart_and_table() -> None:
-    layout = executive_ppt.CHANGE_SLIDE_LAYOUT
-
-    assert layout.chart_panel.left < 0.70
-    assert layout.chart_panel.width > 12.0
-    assert layout.table_panel.top > layout.chart_panel.top + layout.chart_panel.height
-    assert layout.max_rows == 4
-
+def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
             "value": ["B", "A", "C"],
@@ -1896,8 +1067,6 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
                 "linked_pairs": 16,
                 "linked_comments": 13,
                 "avg_nps": 2.0,
-                "confidence": 0.38,
-                "priority": 0.5,
             }
         ]
     )
@@ -1911,4 +1080,4 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "journey"] == "Operativa crítica fallida"
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
-    assert {"touchpoint", "subpalanca", "links", "confidence"}.issubset(table.columns)
+    assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)

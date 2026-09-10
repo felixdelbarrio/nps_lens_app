@@ -1,20 +1,10 @@
 import { useEffect, useState } from "react";
 
 import {
-  canUseDesktopFileBridge,
   downloadTelemetry,
   fetchTelemetry,
   type TelemetryPayload
 } from "../api";
-
-function saveBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 export function TelemetryPanel({ disabled = false }: { disabled?: boolean }) {
   const [value, setValue] = useState<TelemetryPayload | null>(null);
@@ -51,13 +41,8 @@ export function TelemetryPanel({ disabled = false }: { disabled?: boolean }) {
             setError("");
             setDownloadStatus("");
             void downloadTelemetry()
-              .then(({ blob, fileName, savedPath }) => {
-                if (savedPath && canUseDesktopFileBridge()) {
-                  setDownloadStatus(`Fichero guardado en ${savedPath}`);
-                } else if (blob) {
-                  saveBlob(blob, fileName);
-                  setDownloadStatus("Descarga preparada correctamente.");
-                }
+              .then((savedPath) => {
+                setDownloadStatus(savedPath ? `Fichero guardado en ${savedPath}` : "Descarga completada correctamente.");
               })
               .catch((caught: Error) => setError(caught.message));
           }}

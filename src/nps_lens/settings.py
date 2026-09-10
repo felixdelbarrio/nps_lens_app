@@ -9,16 +9,18 @@ from typing import Mapping, Optional
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
+from nps_lens.platform.resources import resource_root
+
 DEFAULT_UI_THEME_MODE = "light"
-DEFAULT_UI_TOUCHPOINT_SOURCE = "palanca_touchpoint"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
 DEFAULT_UI_REPORT_DIMENSION_ANALYSIS = "palanca"
 DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
-DEFAULT_UI_MIN_SIMILARITY = 0.25
-DEFAULT_UI_MAX_DAYS_APART = 10
-DEFAULT_UI_MIN_N_OPPORTUNITIES = 200
+DEFAULT_UI_MIN_SIMILARITY = 0.15
+DEFAULT_UI_MAX_DAYS_APART = 90
+DEFAULT_UI_MIN_N_NPS_GAPS = 200
 DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
-DEFAULT_UI_NPS_GROUP = "Todos"
-DEFAULT_UI_SCORE_CHANNEL = "Todos"
+DEFAULT_UI_NPS_GROUP = "Detractores"
+DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
 DEFAULT_SERVICE_ORIGINS = [
     "BBVA México",
@@ -60,7 +62,7 @@ UI_PREF_ENV_KEYS = {
     "touchpoint_source": "NPS_LENS_UI_TOUCHPOINT_SOURCE",
     "min_similarity": "NPS_LENS_UI_MIN_SIMILARITY",
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
-    "min_n_opportunities": "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
+    "min_n_nps_gaps": "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "min_n_cross_comparisons": "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
 }
 
@@ -176,14 +178,6 @@ def _runtime_app_home() -> Path:
     return Path(app_home_raw).expanduser() if app_home_raw else (Path.home() / ".nps-lens")
 
 
-def _resource_root() -> Path:
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            return Path(str(meipass))
-    return Path(__file__).resolve().parents[2]
-
-
 def resolve_dotenv_path() -> Optional[Path]:
     explicit = str(os.getenv("NPS_LENS_DOTENV_PATH", "")).strip()
     if explicit:
@@ -193,7 +187,7 @@ def resolve_dotenv_path() -> Optional[Path]:
     if getattr(sys, "frozen", False):
         return _runtime_app_home() / ".env"
 
-    repo_root = _resource_root()
+    repo_root = resource_root()
     candidates = [
         Path.cwd() / ".env",
         repo_root / ".env",
@@ -207,7 +201,7 @@ def resolve_dotenv_path() -> Optional[Path]:
 
 def resolve_dotenv_example_path() -> Optional[Path]:
     candidates = [
-        _resource_root() / ".env.example",
+        resource_root() / ".env.example",
         Path.cwd() / ".env.example",
     ]
     for candidate in candidates:
@@ -432,18 +426,8 @@ class Settings:
     default_helix_base_url: str = DEFAULT_UI_HELIX_BASE_URL
     default_min_similarity: float = DEFAULT_UI_MIN_SIMILARITY
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
-    default_min_n_opportunities: int = DEFAULT_UI_MIN_N_OPPORTUNITIES
+    default_min_n_nps_gaps: int = DEFAULT_UI_MIN_N_NPS_GAPS
     default_min_n_cross_comparisons: int = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
-
-    @property
-    def service_origin_values(self) -> list[str]:
-        """Backward-compatible alias used by older callers and tests."""
-        return self.allowed_service_origins
-
-    @property
-    def service_origin_n1_map(self) -> dict[str, list[str]]:
-        """Backward-compatible alias used by older callers and tests."""
-        return self.allowed_service_origin_n1
 
     @staticmethod
     def from_env() -> "Settings":
@@ -545,14 +529,14 @@ class Settings:
                 DEFAULT_UI_MAX_DAYS_APART,
             ),
         )
-        default_min_n_opportunities = max(
+        default_min_n_nps_gaps = max(
             50,
             _to_int(
                 os.getenv(
-                    "NPS_LENS_UI_MIN_N_OPPORTUNITIES",
-                    str(DEFAULT_UI_MIN_N_OPPORTUNITIES),
+                    "NPS_LENS_UI_MIN_N_NPS_GAPS",
+                    str(DEFAULT_UI_MIN_N_NPS_GAPS),
                 ),
-                DEFAULT_UI_MIN_N_OPPORTUNITIES,
+                DEFAULT_UI_MIN_N_NPS_GAPS,
             ),
         )
         default_min_n_cross_comparisons = min(
@@ -602,7 +586,7 @@ class Settings:
             default_helix_base_url=default_helix_base_url,
             default_min_similarity=default_min_similarity,
             default_max_days_apart=default_max_days_apart,
-            default_min_n_opportunities=default_min_n_opportunities,
+            default_min_n_nps_gaps=default_min_n_nps_gaps,
             default_min_n_cross_comparisons=default_min_n_cross_comparisons,
         )
 
@@ -664,11 +648,11 @@ class Settings:
                 self.default_max_days_apart,
             ),
         )
-        min_n_opportunities = max(
+        min_n_nps_gaps = max(
             50,
             _to_int(
-                ui_pref("min_n_opportunities", str(self.default_min_n_opportunities)),
-                self.default_min_n_opportunities,
+                ui_pref("min_n_nps_gaps", str(self.default_min_n_nps_gaps)),
+                self.default_min_n_nps_gaps,
             ),
         )
         min_n_cross_comparisons = min(
@@ -702,6 +686,6 @@ class Settings:
             "touchpoint_source": touchpoint_source,
             "min_similarity": min_similarity,
             "max_days_apart": max_days_apart,
-            "min_n_opportunities": min_n_opportunities,
+            "min_n_nps_gaps": min_n_nps_gaps,
             "min_n_cross_comparisons": min_n_cross_comparisons,
         }

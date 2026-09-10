@@ -6,8 +6,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.text_mining import extract_topics
-
 
 @dataclass(frozen=True)
 class RouteCandidate:
@@ -30,23 +28,7 @@ def build_routes(
     """
     data = nps_df.copy()
     data["is_detractor"] = (pd.to_numeric(data["NPS"], errors="coerce") <= 6).astype(int)
-    # topics from comments
-    topics = extract_topics(data[comment_col], n_clusters=8)
-    # map row -> topic cluster via simple keyword matching on top terms
-    # (best-effort; avoids heavy per-row clustering)
-    cluster_terms: dict[int, list[str]] = {t.cluster_id: t.top_terms[:5] for t in topics}
-
-    def assign_topic(txt: object) -> str:
-        if not isinstance(txt, str) or not txt:
-            return "__NO_TEXT__"
-        low = txt.lower()
-        for cid, terms in cluster_terms.items():
-            for term in terms:
-                if term in low:
-                    return f"topic_{cid}"
-        return "__OTHER__"
-
-    data["topic"] = data[comment_col].map(assign_topic)
+    data["topic"] = data[sublever_col].fillna("")
 
     # incident category join via simple geo/channel + time window + lever keywords
     if incidents_df is not None and not incidents_df.empty:

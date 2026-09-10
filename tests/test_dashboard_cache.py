@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
 
+import pandas as pd
+
 from nps_lens.domain.models import UploadContext
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
@@ -71,3 +73,50 @@ def test_cache_clear_forces_recalculation(tmp_path: Path, monkeypatch) -> None:
 
     assert first is second
     assert third == {"generation": 2}
+
+
+def test_causal_window_uses_nps_dates_and_handles_missing_dates() -> None:
+    nps = pd.DataFrame({"Fecha": pd.to_datetime(["2026-03-10", "2026-03-20"])})
+    helix = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2025-11-01", "2026-02-01", "2026-04-15"]),
+            "Incident Number": ["old", "before", "after"],
+        }
+    )
+
+    selected = DashboardService._causal_helix_window(helix, nps, max_days_apart=45)
+
+    assert selected["Incident Number"].tolist() == ["before", "after"]
+    assert DashboardService._causal_helix_window(
+        helix.drop(columns="Fecha"), nps, max_days_apart=45
+    ).empty
+    assert DashboardService._causal_helix_window(
+        helix, pd.DataFrame({"Fecha": [None]}), max_days_apart=45
+    ).empty
+
+
+def test_empty_causal_bundle_is_cached_with_explicit_scope(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    context = UploadContext("BBVA México", "Senda", "")
+
+    first = service._causal_analysis_bundle(
+        context=context,
+        pop_year="2026",
+        pop_month="03",
+        min_similarity=0.15,
+        max_days_apart=90,
+        touchpoint_source="domain_touchpoint",
+    )
+    second = service._causal_analysis_bundle(
+        context=context,
+        pop_year="2026",
+        pop_month="03",
+        min_similarity=0.15,
+        max_days_apart=90,
+        touchpoint_source="domain_touchpoint",
+    )
+
+    assert first is second
+    assert first["ready"] is False
+    assert first["resolved_channel"] == "Todos"
+    assert first["helix_window_rows"] == 0

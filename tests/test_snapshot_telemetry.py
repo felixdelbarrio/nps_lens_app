@@ -6,7 +6,7 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from nps_lens.core.telemetry import TelemetryCollector
-from nps_lens.platform.publication import build_publication_archive
+from nps_lens.platform.publication import build_publication_archive, build_static_data_snapshot
 
 
 def test_telemetry_is_bounded_and_does_not_export_payloads() -> None:
@@ -35,21 +35,33 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         }
         for index in range(800)
     ]
+    snapshot = build_static_data_snapshot(
+        {"columns": ["id", "comment"], "rows": list(rows)},
+        {"columns": ["id", "comment"], "rows": list(rows)},
+        page_size=20,
+    )
     publication: dict[str, object] = {
+        "schema_version": "4.0",
         "screens": {
-            "dashboard": {"kpis": {"samples": 800}},
+            "dashboard": {"kpis": {"samples": 800, "delta_nps": float("nan")}},
             "linking": {},
-            "data": {
-                "nps": {"rows": list(rows)},
-                "helix": {"rows": list(rows)},
-            },
+            "data": {"nps": {"deferred": True}, "helix": {"deferred": True}},
+        },
+        "snapshots": {
+            "data": snapshot,
+            "taxonomy": {"records": "unused" * 300_000},
         },
         "manifest": {},
     }
+    assert set(snapshot["datasets"]["nps"]) == {"columns", "total_rows", "page"}
+    assert len(snapshot["datasets"]["nps"]["columns"]) <= 14
+    assert len(snapshot["datasets"]["helix"]["columns"]) <= 14
     artifact = build_publication_archive(
         publication,
         report_name="informe.pptx",
         report_content=b"PPTX" * 100,
+        compact_report_name="informe-sin-evolucion-nps.pptx",
+        compact_report_content=b"COMPACT" * 100,
         file_name="publication.zip",
         max_bytes=25_000,
     )
@@ -59,8 +71,15 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
             "publication.json",
             "newsletter.html",
             "informe.pptx",
+            "informe-sin-evolucion-nps.pptx",
         }
-        contract = json.loads(archive.read("publication.json"))
+        publication_json = archive.read("publication.json")
+        assert b"NaN" not in publication_json
+        assert b"Infinity" not in publication_json
+        contract = json.loads(publication_json)
+        assert contract["screens"]["dashboard"]["kpis"]["delta_nps"] is None
+        assert set(contract["snapshots"]) == {"data"}
         assert contract["manifest"]["size_budget_bytes"] == 25_000
+        assert contract["manifest"]["publication_json_bytes"] < 100_000
         assert contract["manifest"]["truncated"] is True
         assert b"Banca de Empresas e Instituciones" in archive.read("newsletter.html")

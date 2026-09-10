@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nps-lens"
 version = "0.1.0"
-description = "NPS Lens — análisis avanzado de NPS térmico + VoC multi-fuente (MVP Senda MX)."
+description = "NPS Lens — análisis avanzado de NPS + VoC multi-fuente (MVP Senda MX)."
 readme = "README.md"
 requires-python = ">=3.9,<3.10"
 
@@ -85,7 +85,6 @@ module = [
   "nps_lens.analytics.*",
   "nps_lens.ingest.*",
   "nps_lens.reports.executive_ppt",
-  "nps_lens.reports.exclusive_ppt",
   "nps_lens.core.store",
   "nps_lens.platform.*",
   "nps_lens.application.service",
@@ -128,7 +127,6 @@ omit = [
   "src/nps_lens/analytics/changepoints.py",
   "src/nps_lens/analytics/causal.py",
   "src/nps_lens/analytics/journey.py",
-  "src/nps_lens/analytics/opportunities.py",
   "src/nps_lens/analytics/nps_helix_link.py",
   "src/nps_lens/llm/client.py",
   "src/nps_lens/llm/pack.py",

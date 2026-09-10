@@ -62,14 +62,14 @@ def test_run_platform_batch_exports_artifacts(tmp_path: Path, monkeypatch: Any) 
         lambda *a, **k: _Res(df=pd.DataFrame(), issues=[]),
     )
 
-    # rank_opportunities is used inside; return one stable opportunity
+    # rank_nps_gaps is used inside; return one stable nps_gap
     @dataclass
     class _Opp:
         dimension: str
         value: str
 
     monkeypatch.setattr(
-        "nps_lens.analytics.opportunities.rank_opportunities",
+        "nps_lens.analytics.nps_gaps.rank_nps_gaps",
         lambda *a, **k: [_Opp("Palanca", "A")],
     )
 

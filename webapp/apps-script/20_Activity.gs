@@ -3,6 +3,24 @@ const ACTIVITY_HEADERS = Object.freeze([
   'view', 'duration_ms', 'status', 'detail', 'version'
 ]);
 
+// Only operation identifiers belong in diagnostics, never exception messages.
+function _activityDetail_(event) {
+  const operations = [
+    'getActivityReport', 'getPublishedDataset', 'getPublishedShell',
+    'getEvolutionNpsSettings', 'saveEvolutionNpsSettings',
+    'getPublicationSettings', 'savePublicationFolder',
+    'getNewsletterWorkspace', 'saveNewsletterRecipient', 'selectPublicationScope',
+    'revalidateNewsletterSender', 'testNewsletter', 'sendNewsletter',
+    'importPublicationArchive'
+  ];
+  if (event.name === 'client_error') return 'client_error';
+  if (event.name === 'view') return 'render';
+  if (event.name === 'server_call' || event.name === 'snapshot_load') {
+    return operations.indexOf(event.detail) >= 0 ? event.detail : 'unknown_operation';
+  }
+  return '';
+}
+
 function recordActivityEvents(events) {
   const viewer = _viewer_();
   _assertViewer_(viewer);
@@ -16,7 +34,7 @@ function recordActivityEvents(events) {
     return [timestamp, viewer.email, _cleanText_(event.sessionId, 80),
     _cleanText_(event.name || 'view', 80), _cleanText_(event.area, 60), _cleanText_(event.section, 80),
     _cleanText_(event.view, 100), Math.max(0, Math.round(Number(event.durationMs) || 0)),
-    _cleanText_(event.status || 'ok', 30), _cleanText_(event.detail, 500), 'v' + NPS_LENS.version];
+    _cleanText_(event.status || 'ok', 30), _activityDetail_(event), 'v' + NPS_LENS.version];
   });
   const lock = LockService.getScriptLock();
   lock.waitLock(5000);
@@ -35,6 +53,10 @@ function getActivityReport(request) {
   const options = request || {};
   const days = Math.min(365, Math.max(1, Number(options.days) || 30));
   const email = _cleanText_(options.email, 180).toLowerCase();
+  const digest = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, days + '|' + email)).slice(0,24);
+  const cache = CacheService.getScriptCache(), cacheKey = _cacheKey_('activity-' + digest);
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
   const cutoff = Date.now() - days * 86400000;
   const sheet = _sheet_(NPS_LENS.activitySheet);
   const values = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, ACTIVITY_HEADERS.length).getValues() : [];
@@ -54,9 +76,9 @@ function getActivityReport(request) {
   const performanceVersion = NPS_LENS.version.split('.').slice(0, 2).join('.');
   const performanceEvents = selected.filter(row => String(row[10] || '').indexOf('v' + performanceVersion + '.') === 0);
   const viewEvents = performanceEvents.filter(row => row[3] === 'view');
-  const serverCalls = performanceEvents.filter(row => row[3] === 'server_call');
+  const serverCalls = performanceEvents.filter(row => row[3] === 'server_call' || row[3] === 'snapshot_load');
   const users = counts(selected, 1).map(item => ({email: item.name, events: item.events}));
-  return {
+  const report = {
     generatedAt: new Date().toISOString(), periodDays: days,
     summary: {events: selected.length, performanceVersion, performanceEvents: performanceEvents.length,
       historicalEvents: selected.length - performanceEvents.length, users: users.length,
@@ -73,4 +95,7 @@ function getActivityReport(request) {
       duration_ms: Number(row[7]) || 0, status: String(row[8] || ''), detail: String(row[9] || ''),
       version: row[10] instanceof Date ? 'unknown' : String(row[10] || '')}))
   };
+  const serialized = JSON.stringify(report);
+  if (serialized.length < 90000) cache.put(cacheKey, serialized, 60);
+  return report;
 }

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from nps_lens.analytics.opportunities import rank_opportunities
+from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.domain.normalization import EquivalenceRegistry, equivalence_key
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 
@@ -16,19 +16,19 @@ def test_equivalence_key_unifies_joiners_case_accents_and_spacing() -> None:
     assert len({equivalence_key(value) for value in values}) == 1
 
 
-def test_default_registry_unifies_business_labels_and_neutrals() -> None:
+def test_default_registry_unifies_business_labels() -> None:
     registry = EquivalenceRegistry.default()
-    assert registry.normalize("Palanca", "Pagos y transferencias") == "Pagos/transferencias"
-    assert registry.normalize("Palanca", "Pagos/ Transferencias") == "Pagos/transferencias"
-    assert registry.normalize("NPS Group", "NEUTROS") == "PASIVO"
+    assert registry.normalize("nps.Palanca", "pagos y transferencias") == "Pagos/transferencias"
+    assert registry.normalize("nps.Palanca", "pagos/ transferencias") == "Pagos/transferencias"
+    assert "NPS Group" not in registry.to_dict()["dimensions"]
 
 
 def test_registry_rejects_ambiguous_aliases() -> None:
     payload = {
         "dimensions": {
-            "Palanca": [
+            "nps.Palanca": [
                 {"canonical": "Uno", "aliases": ["igual"]},
-                {"canonical": "Dos", "aliases": ["IGUAL"]},
+                {"canonical": "Dos", "aliases": ["igual"]},
             ]
         }
     }
@@ -64,18 +64,17 @@ def test_parser_accepts_current_senda_export_headers(tmp_path: Path) -> None:
     )
 
     assert not [issue for issue in result.issues if issue.level == "ERROR"]
-    assert result.df["Palanca"].unique().tolist() == ["Pagos/transferencias"]
-    assert result.df["Subpalanca"].unique().tolist() == ["Fallas en el login"]
+    assert result.df["source_lever"].tolist() == source["Palanca"].tolist()
+    assert result.df["source_sublever"].tolist() == source["Subpalanca"].tolist()
     assert result.df["NPS Group"].tolist() == ["PASIVO", "DETRACTOR"]
 
 
-def test_opportunities_never_expose_an_empty_business_label() -> None:
+def test_nps_gaps_never_expose_an_empty_business_label() -> None:
     frame = pd.DataFrame(
         {
             "NPS": [0] * 250 + [10] * 250,
             "Palanca": [""] * 250 + ["Pagos y transferencias"] * 250,
         }
     )
-    opportunities = rank_opportunities(frame, ["Palanca"], min_n=200)
-    assert all(item.value for item in opportunities)
-    assert all(item.why != "'Palanca='" for item in opportunities)
+    nps_gaps = rank_nps_gaps(frame, ["Palanca"], min_n=200)
+    assert all(item.value for item in nps_gaps)

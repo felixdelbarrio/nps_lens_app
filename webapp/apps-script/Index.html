@@ -3,6 +3,7 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
   <title>NPS Lens · BBVA</title>
   <?!= include('BrandIdentity') ?>
@@ -18,7 +19,7 @@
     </aside>
     <main class="workspace">
       <header class="topbar">
-        <div><p class="eyebrow">BANCA DE EMPRESAS E INSTITUCIONES</p><h2 id="screen-title">Sumario del periodo</h2></div>
+        <div><p class="eyebrow">BANCA DE EMPRESAS E INSTITUCIONES</p><h2 id="screen-title">Evolución NPS</h2></div>
         <div class="workspace-actions">
           <a id="report-link" class="button secondary" hidden target="_blank">Abrir presentación</a>
           <button class="workspace-action admin-only" data-admin-route="newsletter" title="Newsletter" aria-label="Newsletter"><span aria-hidden="true">✉</span><span>Newsletter</span></button>
@@ -32,7 +33,7 @@
   </div>
   <script id="publication-data" type="application/json"><?!= publicationJson ?></script>
   <script id="viewer-data" type="application/json"><?!= viewerJson ?></script>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+  <script src="https://cdn.plot.ly/plotly-cartesian-2.35.2.min.js" defer></script>
   <?!= include('App') ?>
 </body>
 </html>

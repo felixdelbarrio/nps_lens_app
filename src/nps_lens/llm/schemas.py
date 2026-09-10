@@ -20,5 +20,4 @@ class InsightPackV1(BaseModel):
     qualitative_evidence: Dict[str, Any]
     hypotheses: List[Dict[str, Any]]
     suggested_questions: List[str]
-    suggested_actions: List[str]
     technical_trace: Dict[str, Any]

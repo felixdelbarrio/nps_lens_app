@@ -27,8 +27,7 @@ class ChangePoint:
 class ChangePointSignificance:
     """Changepoints with an empirical stability estimate.
 
-    stability is in [0,1] and approximates the probability that a changepoint is
-    recovered under resampling.
+    stability is the share of resamples in which a changepoint is recovered.
     """
 
     dimension: str

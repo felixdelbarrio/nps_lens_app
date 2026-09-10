@@ -44,7 +44,7 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
         {
             "Fecha": ["2026-03-01"],
             "NPS": [10],
-            "Canal": ["Web"],
+            "Comment": ["Sin canal"],
         }
     ).to_excel(path, index=False)
 
@@ -58,7 +58,7 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
     missing_columns = {
         issue.column for issue in result.issues if issue.code == "missing_required_column"
     }
-    assert {"Palanca", "Subpalanca"}.issubset(missing_columns)
+    assert "Canal" in missing_columns
 
 
 def test_parser_fingerprint_business_key_ignores_non_business_schema_drift(

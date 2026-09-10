@@ -13,7 +13,7 @@ flowchart TB
 BUUG/N1/N2]
     SPeriod[Sidebar: PERIOD CONTAINER
 Año/Mes]
-    S2[Tabs: Sumario del Periodo · Analítica NPS Térmico · Incidencias↔NPS · Datos]
+    S2[Tabs: Sumario del Periodo · Analítica NPS · Incidencias↔NPS · Datos]
   end
 
   subgraph Core[Core / Plataforma]
@@ -69,7 +69,7 @@ artifacts/]
 ### 2.1 UI (exploración)
 - El usuario selecciona **SERVICE CONTAINER**: `service_origin` + `service_origin_n1` + (opcional) `service_origin_n2`.
 - Selecciona **PERIOD CONTAINER**: `Año` / `Mes`. Es transversal a dashboard, tablas y reportes.
-- `Canal` y `Grupo Score` viven bajo **Analítica NPS Térmico**. En **Incidencias ↔ NPS**, el canal queda fijado a `Web`, el grupo Score se elimina de la UI y `Método causal` queda por defecto en `Por Palanca`.
+- `Canal` y `Grupo Score` viven bajo **Analítica NPS**. En **Incidencias ↔ NPS**, el canal queda fijado a `Web`, el grupo Score se elimina de la UI y `Método causal` queda por defecto en `Por Palanca`.
 - **Sumario del Periodo** no aplica Canal ni Grupo Score: sus KPIs y gráficos dependen solo de Service + Period.
 - La UI consume payloads de `DashboardService`; no calcula KPIs, periodos, grupos ni URLs Helix.
 - Los KPIs, deltas de ámbito, narrativas de gráficos y URLs Helix viven en `src/nps_lens/services/analytics/*` y `src/nps_lens/services/helix_service.py`, compartidos por UI, API y generación PPT.
@@ -79,7 +79,7 @@ artifacts/]
 ### 2.2 Semántica Score/NPS
 - **Score** = valor individual 0-10 y medias 0-10.
 - **NPS clásico** = `% promotores - % detractores`.
-- **NPS térmico** = fuente/dominio; las columnas históricas `NPS` y `NPS Group` se conservan por contrato de ingesta.
+- **NPS** = fuente/dominio; las columnas históricas `NPS` y `NPS Group` se conservan por contrato de ingesta.
 - Las etiquetas visuales y de PPT usan `Score medio`, `Score actual`, `Score base` o `Delta Score` cuando hablan de medias 0-10.
 
 ### 2.3 Batch (plataforma)

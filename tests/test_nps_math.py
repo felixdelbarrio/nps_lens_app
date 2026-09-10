@@ -5,11 +5,11 @@ import pandas as pd
 from nps_lens.core.nps_math import daily_metrics, filter_by_nps_group, grouped_focus_rates
 
 
-def test_filter_by_nps_group_uses_label_or_score() -> None:
+def test_filter_by_nps_group_uses_only_score() -> None:
     df = pd.DataFrame(
         {
             "NPS": [10, 8, 6, None],
-            "NPS Group": ["Promoter", "Neutral", "Detractor", "Promoter"],
+            "NPS Group": ["Detractor", "Promoter", "Neutral", "Promoter"],
             "Fecha": pd.to_datetime(["2026-01-01"] * 4),
         }
     )
@@ -18,7 +18,7 @@ def test_filter_by_nps_group_uses_label_or_score() -> None:
     pas = filter_by_nps_group(df, "Neutros")
 
     assert len(det) == 1
-    assert len(pro) == 2
+    assert len(pro) == 1
     assert len(pas) == 1
 
 

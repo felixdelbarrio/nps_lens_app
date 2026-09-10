@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 STOPWORDS_ES = {
     "de",
@@ -124,52 +121,41 @@ class TopicCluster:
     examples: list[str]
 
 
-def _clean_text(s: str) -> str:
-    s2 = s.lower()
+def preprocess_text(value: object) -> str:
+    if value is None or bool(pd.isna(value)):
+        return ""
+    s2 = str(value).lower()
     s2 = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in s2)
     s2 = " ".join(s2.split())
     return s2
 
 
-def extract_topics(
-    texts: pd.Series, n_clusters: int = 10, max_features: int = 4000
-) -> list[TopicCluster]:
-    cleaned = texts.dropna().astype(str).map(_clean_text)
-    cleaned = cleaned[cleaned.str.len() >= 5]
-    if cleaned.empty:
+def summarize_taxonomy(frame: pd.DataFrame, limit: int = 10) -> list[TopicCluster]:
+    """Summarize the resolved lens without training or clustering on visual filters."""
+    if frame.empty:
         return []
-
-    vec = TfidfVectorizer(
-        max_features=max_features,
-        ngram_range=(1, 2),
-        stop_words=sorted(STOPWORDS_ES),
-        min_df=2,
+    labels = frame.get("Subpalanca", pd.Series("", index=frame.index)).astype("string").fillna("")
+    labels = labels.mask(labels.eq(""), frame.get("Palanca", pd.Series("", index=frame.index)))
+    comments = (
+        frame.get("Comment", frame.get("comment_txt", pd.Series("", index=frame.index)))
+        .fillna("")
+        .astype(str)
     )
-    X = vec.fit_transform(cleaned.tolist())
-    k = min(n_clusters, max(2, X.shape[0] // 50)) if X.shape[0] >= 100 else min(5, X.shape[0])
-    if k < 2:
-        return []
-    km = KMeans(n_clusters=k, n_init=10, random_state=42)
-    labels = km.fit_predict(X)
-
-    terms = np.array(vec.get_feature_names_out())
-    clusters: list[TopicCluster] = []
-    for cid in range(k):
-        idxs = np.where(labels == cid)[0]
-        if len(idxs) == 0:
-            continue
-        center = km.cluster_centers_[cid]
-        top = terms[np.argsort(center)[-10:][::-1]].tolist()
-        ex = cleaned.iloc[idxs].head(5).tolist()
-        clusters.append(TopicCluster(cluster_id=cid, n=int(len(idxs)), top_terms=top, examples=ex))
-    clusters.sort(key=lambda c: c.n, reverse=True)
-    return clusters
+    return [
+        TopicCluster(
+            i,
+            int(count),
+            [str(label)],
+            comments.loc[labels.eq(label) & comments.str.strip().ne("")].head(5).tolist(),
+        )
+        for i, (label, count) in enumerate(labels[labels.ne("")].value_counts().head(limit).items())
+    ]
 
 
 def classify_tone(text: Optional[str]) -> list[str]:
     if not text:
         return []
-    t = _clean_text(text)
+    t = preprocess_text(text)
     labels: list[str] = []
     for label, pats in TONE_LEXICON.items():
         for p in pats:

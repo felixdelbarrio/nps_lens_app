@@ -2,15 +2,14 @@
 
 ## Identidad canónica de dimensiones
 
-La ingesta aplica un registro versionado en `NPS_LENS_EQUIVALENCES_PATH`. La identidad es
-insensible a mayúsculas, acentos, espacios y separadores, y elimina las conjunciones españolas
-`y/e`. Así, `Pagos y transferencias`, `Pagos/ transferencias` y
-`Pagos/transferencias` comparten clave. No se usa distancia difusa: una similitud textual nunca
-fusiona conceptos de negocio sin una equivalencia explícita.
+La ingesta conserva los valores originales de Canal, Palanca, Subpalanca y Comment.
+Las equivalencias se aplican al resolver la lente NORMALIZED, por dominio y dimensión
+(`nps.*` o `helix.*`), mediante alias explícitos. Las variantes por acento, mayúsculas o
+separadores se sugieren para revisión; no se agrupan automáticamente. Cambiar una
+equivalencia no modifica el histórico original ni la identidad de los registros.
 
-El registro incluye `DETRACTOR`, `PASIVO` (`NEUTRO`, `NEUTROS`, `neutral`, `passive`) y
-`PROMOTOR`, además de las colisiones observadas en Palanca/Subpalanca. La edición desde
-Configuración valida alias ambiguos y recanoniza el histórico mediante una operación SQL.
+La clasificación NPS se calcula exclusivamente desde la nota y no admite equivalencias.
+Véase [Taxonomy Engine](TAXONOMY_ENGINE.md) para modos, caché y snapshots.
 
 Los esquemas NPS admitidos incluyen las cabeceras actuales de Senda:
 `gf_cust_survey_response_date`, `gf_cust_survey_opinion_id`, `user_type`, `nps_response`,
@@ -25,22 +24,26 @@ Este documento define:
 
 ---
 
-## 1) Fuente: NPS Térmico (Excel)
+## 1) Fuente: NPS (Excel)
 
 ### Columnas mínimas esperadas
 - `Fecha` (o equivalente; se normaliza a `Fecha`)
 - `ID` (si existe; recomendable)
-- `NPS` (score numérico 0-10; se conserva el nombre histórico de columna)
-- `NPS Group` (Promotor/Pasivo/Detractor) o derivable; en UI/reportes se etiqueta como `Grupo Score`
+- `NPS` (nota entera de 0 a 10; las filas con notas inválidas se descartan con diagnóstico)
 - `Comment` (texto)
 - `Canal`
-- `Palanca`
-- `Subpalanca`
+- Opcionales: `Palanca`, `Subpalanca` (su ausencia no impide importar)
 - Opcionales: `Segmento`, `UsuarioDecisión`, etc.
+
+### Clasificación automática
+`NPS Group` es un campo calculado: ≤6 → `DETRACTOR`, 7–8 → `PASIVO` (neutro), ≥9 → `PROMOTOR`. Las etiquetas manuales del Excel no participan en la clasificación ni en los cálculos. La regla fija se muestra en Configuración → Reglas de ingesta y no admite equivalencias.
+
+La lectura del histórico recalcula el grupo desde `NPS`. Las nuevas publicaciones mantienen el campo `NPS Group` y sus valores en el Snapshot que consume la WebApp; no requieren cambios en ella. Los snapshots ya publicados son inmutables: para reflejar la corrección se genera una nueva publicación local.
 
 ### Normalización
 - `Fecha` → datetime naive
-- strings → `str.strip()` + normalización ligera
+- `Comment` y categorías fuente conservados sin normalización destructiva
+- texto preparado para análisis en columnas internas independientes
 - columnas de control internas:
   - `_text_norm`
   - `_service_origin_n2_key`
@@ -48,7 +51,7 @@ Este documento define:
 ### Semántica de negocio
 - `Score` = valor 0-10 individual o media 0-10.
 - `NPS clásico` = `% promotores - % detractores`.
-- `NPS térmico` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
+- `NPS` = fuente/dominio. No se renombra destructivamente la columna `NPS` para mantener compatibilidad de ingesta y tests.
 - El filtro `Canal` se calcula desde `Canal`; por defecto usa `Web` si existe y `Todos` si no.
 
 ### Taxonomía temporal oficial
@@ -144,3 +147,13 @@ classDiagram
 - Si faltan columnas mínimas: **ERROR** y no se persiste.
 - Si hay degradación recuperable: **WARN** (se persiste pero se informa).
 - Los issues se devuelven siempre al caller (UI/Batch) para trazabilidad.
+
+### Causalidad — contrato de publicación 4.0 (Iteración 20)
+
+- Evidencias publica seis columnas en el orden de presentación y el enlace auxiliar de `Incident ID`. `NPS Topic` filtra exclusivamente esa tabla, con `Todos` por defecto.
+- Journeys rotos publica seis columnas de detalle. `entity_summary.topic_figures` contiene los gráficos calculados localmente por tópico ancla, incluido el ranking de cada tópico antes de limitarlo a diez journeys. Las variantes reutilizan el tema de `entity_summary.figure`; el filtro no modifica los KPIs.
+- `scenarios.cards[].identity_rows` define los tres datos de la ficha; la duración se entrega formateada con dos decimales.
+- `incident_records[].summary_segments` contiene fragmentos de texto y un booleano `bold`. Se deriva localmente de las características TF-IDF de palabra y carácter que aportan a los enlaces aceptados, reutilizando las matrices dispersas. Se unen los términos de los enlaces de cada incidencia dentro de cada escenario. Los renderizadores escapan el texto y no calculan similitudes ni interpretan HTML.
+- Se eliminan las diferencias de nota y tasa foco entre incidencia alta/baja, sus cálculos y el KPI asociado, también en los informes.
+
+La WebApp actualizada requiere publicaciones 4.0: reiniciar el backend local, generar una nueva edición e importar el ZIP para reflejar estos cambios. No se convierten ni reescriben las publicaciones anteriores.

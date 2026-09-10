@@ -39,12 +39,10 @@ def render_pack_markdown(pack: InsightPackV1) -> str:
     hyps_lines = []
     for h in pack.hypotheses:
         title = h.get("title", "Hipótesis")
-        conf = h.get("confidence", "?")
         why = h.get("why", "")
-        hyps_lines.append(f"- **{title}** (conf={conf}) — {why}")
+        hyps_lines.append(f"- **{title}** — {why}")
     hyps = "\n".join(hyps_lines)
     questions = "\n".join([f"- {q}" for q in pack.suggested_questions])
-    actions = "\n".join([f"- {a}" for a in pack.suggested_actions])
 
     n_val = _as_int(pack.quantitative_evidence.get("n"), default=0)
 
@@ -68,14 +66,11 @@ def render_pack_markdown(pack: InsightPackV1) -> str:
 {json.dumps(pack.qualitative_evidence, ensure_ascii=False, indent=2)}
 ```
 
-## Hipótesis causales (ranked)
+## Asociaciones analizadas
 {hyps}
 
 ## Preguntas sugeridas para el deep-dive
 {questions}
-
-## Acciones sugeridas (fixes / experimentos / instrumentación)
-{actions}
 
 ## Trazabilidad técnica
 ```json
@@ -115,18 +110,14 @@ def build_insight_pack(
 
     hypotheses: list[dict[str, Any]] = []
     if causal is not None:
-        conf = 0.2
-        if causal.p_value == causal.p_value:  # not NaN
-            conf = float(1.0 - min(1.0, causal.p_value * 5.0))
         hypotheses.append(
             {
-                "title": "Tratamiento asociado a detractores (best-effort)",
+                "title": "Asociación con detractores",
                 "treatment": causal.treatment,
                 "effect": causal.effect,
                 "p_value": causal.p_value,
                 "n": causal.n,
                 "method": causal.method,
-                "confidence": conf,
                 "why": (
                     "Estimación con controles observables (segmento/canal/periodo/geo). "
                     "Ver supuestos."
@@ -149,13 +140,6 @@ def build_insight_pack(
             "la causa raíz rápidamente?"
         ),
     ]
-    suggested_actions = [
-        "Abrir ticket con evidencia multi-fuente y owner claro (producto/tech/ops).",
-        "Instrumentar evento en el touchpoint afectado (journey_step) para medir fricción.",
-        "Diseñar experimento A/B (o rollout controlado) sobre la palanca/subpalanca priorizada.",
-        "Crear alerta semanal para degradaciones del driver (change-point + umbral).",
-    ]
-
     technical_trace = {
         "pack_version": "1.0",
         "filters": context,
@@ -172,7 +156,6 @@ def build_insight_pack(
         qualitative_evidence=qualitative,
         hypotheses=hypotheses,
         suggested_questions=suggested_questions,
-        suggested_actions=suggested_actions,
         technical_trace=technical_trace,
     )
 

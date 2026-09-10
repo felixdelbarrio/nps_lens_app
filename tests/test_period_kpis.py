@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from nps_lens.services.analytics.insights_service import daily_nps_explanation
 from nps_lens.services.analytics.kpis_service import (
     build_period_aggregates,
     build_period_kpis,
@@ -38,20 +39,21 @@ def test_period_kpis_use_official_temporal_taxonomy_and_aggregated_period_nps() 
         context_label="Marzo 2026",
     )
 
-    assert set(scope) == {"historical", "period", "cumulative", "temporal", "period_aggregates"}
+    assert set(scope) == {"historical", "period", "cumulative", "period_aggregates"}
     assert scope["historical"]["period_type"] == "historical_previous"
     assert scope["period"]["period_type"] == "current_period"
     assert scope["cumulative"]["period_type"] == "cumulative_to_current"
-    assert scope["temporal"]["period_type"] == "internal_period_evolution"
 
     historical = scope["historical"]
     assert historical["label"] == "Febrero 2026"
+    assert historical["note"] == "KPIs agregados del período anterior (01/02/2026 a 28/02/2026)"
     assert historical["kpis"]["samples"] == 2
     assert historical["kpis"]["classic_nps"] == 0.0
     assert historical["deltas"] is None
     assert historical["show_deltas"] is False
 
     period = scope["period"]
+    assert period["note"] == "KPIs agregados del período (01/03/2026 a 31/03/2026)"
     assert period["kpis"]["comments"] == 3
     assert period["kpis"]["nps_average"] == 5.0
     assert period["kpis"]["classic_nps"] == 0.0
@@ -75,12 +77,16 @@ def test_period_kpis_use_official_temporal_taxonomy_and_aggregated_period_nps() 
     assert cumulative["deltas"] is None
     assert cumulative["show_deltas"] is False
 
-    temporal = scope["temporal"]
+    temporal = scope["period"]["temporal"]
     assert temporal["base_display"]["classic_nps"] == "100,00"
     assert temporal["display"]["classic_nps"] == "-100,00"
     assert temporal["deltas"]["classic_nps"]["display"] == "-200,00 pts"
     assert temporal["display"]["detractor_rate"] == "100,00%"
-    assert scope["period"]["temporal"] == temporal
+    assert daily_nps_explanation(scope["period"])[:2] == [
+        "El NPS clásico agregado de Marzo 2026 es **0,00**.",
+        "En el primer día con respuestas (2026-03-01) el NPS clásico es "
+        "**100,00**; en el último (2026-03-31) es **-100,00**.",
+    ]
 
     aggregates = scope["period_aggregates"]
     assert [item["label"] for item in aggregates] == ["Enero 2026", "Febrero 2026", "Marzo 2026"]

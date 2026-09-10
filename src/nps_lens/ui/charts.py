@@ -779,10 +779,10 @@ def chart_daily_volume(
     return apply_plotly_template(fig, theme)
 
 
-def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
-    """Bar chart for driver gaps vs overall.
+def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12, *, base_label: str = "base"):
+    """Bar chart for driver gaps vs the classic-NPS base.
 
-    Requires 'gap_vs_overall' column in driver_df.
+    Requires 'gap_vs_base' column in driver_df.
     """
     if driver_df.empty:
         return None
@@ -790,77 +790,77 @@ def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12):
     import plotly.express as px  # lazy import for faster cold-start
 
     d = driver_df.copy()
-    if "gap_vs_overall" not in d.columns:
-        raise ValueError("driver_df must include gap_vs_overall")
-    d = d.sort_values(["gap_vs_overall", "n"], ascending=[True, False]).head(top_k).copy()
+    if "gap_vs_base" not in d.columns:
+        raise ValueError("driver_df must include gap_vs_base")
+    d = d.sort_values(["gap_vs_base", "n"], ascending=[True, False]).head(top_k).copy()
     plot_df = d.iloc[::-1].copy()
+    gap_values = pd.to_numeric(plot_df["gap_vs_base"], errors="coerce").fillna(0.0)
+    plot_df["gap_vs_base"] = gap_values
     plot_df["gap_direction"] = np.where(
-        pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").fillna(0.0) < 0.0,
-        "por debajo del promedio global",
-        "por encima del promedio global",
+        gap_values < 0.0,
+        "por debajo de la base",
+        "por encima de la base",
     )
-    plot_df["abs_gap"] = pd.to_numeric(plot_df["gap_vs_overall"], errors="coerce").abs()
+    plot_df["abs_gap"] = gap_values.abs()
     fig = px.bar(
         plot_df,
-        x="gap_vs_overall",
+        x="gap_vs_base",
         y="value",
         orientation="h",
-        custom_data=["n", "nps", "gap_vs_overall", "abs_gap", "gap_direction"],
+        custom_data=["n", "nps", "gap_vs_base", "abs_gap", "gap_direction"],
     )
     fig.update_traces(
-        marker_color=_diverging_colors(theme, plot_df["gap_vs_overall"]),
+        marker_color=_diverging_colors(theme, plot_df["gap_vs_base"]),
         hovertemplate=(
             "%{y}<br>"
             "n: %{customdata[0]}<br>"
             "NPS Clásico: %{customdata[1]:.2f}<br>"
-            "Brecha vs Global: %{customdata[2]:.2f} pts<br>"
+            f"Brecha vs Base [{base_label}]: %{{customdata[2]:.2f}} pts<br>"
             "Esta palanca presenta un NPS %{customdata[3]:.2f} puntos "
             "%{customdata[4]}.<extra></extra>"
         ),
     )
     fig.update_layout(
-        xaxis_title="Brecha vs NPS Global (pts)",
+        xaxis_title=f"Brecha vs Base [{base_label}] (pts)",
         yaxis_title="",
         showlegend=False,
     )
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["value"].tolist())
     _layout_common(fig, th, height=360)
-    return apply_plotly_template(fig, theme)
 
-
-def chart_opportunities_bar(opp_df: pd.DataFrame, theme: Theme, top_k: int = 12):
-    """Bar chart for prioritized opportunities (impact) with confidence intensity."""
-    if opp_df.empty:
-        return None
-    th = chart_theme(theme)
-    import plotly.express as px
-
-    d = (
-        opp_df.sort_values(["potential_uplift", "confidence"], ascending=[False, False])
-        .head(top_k)
-        .copy()
-    )
-    if "label" not in d.columns:
-        d["label"] = d.apply(lambda r: f"{r.get('dimension')}={r.get('value')}", axis=1)
-
-    # Intensity: mix accent toward background based on confidence
-    conf = pd.to_numeric(d.get("confidence", 0.0), errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    colors: list[str] = []
-    for c in conf.tolist():
-        # higher confidence -> closer to accent
-        colors.append(_shade(th.accent, toward=th.plot_bg, t=0.65 * (1.0 - float(c))))
-
-    fig = px.bar(
-        d,
-        x="potential_uplift",
-        y="label",
-        orientation="h",
-        hover_data={"n": True, "confidence": ":.2f", "potential_uplift": ":.2f"},
-    )
-    fig.update_traces(marker_color=colors)
-    fig.update_layout(xaxis_title="Impacto estimado (puntos NPS)", yaxis_title="", showlegend=False)
-    fig.update_yaxes(categoryorder="array", categoryarray=list(reversed(d["label"].tolist())))
-    _layout_common(fig, th, height=360)
+    zero_rows = plot_df.loc[gap_values.abs().le(1e-9)]
+    if not zero_rows.empty:
+        fig.add_scatter(
+            x=[0.0] * len(zero_rows),
+            y=zero_rows["value"],
+            mode="markers+text",
+            marker={
+                "color": theme.warning,
+                "size": 11,
+                "line": {"color": theme.brand, "width": 1},
+            },
+            text=["0 pts"] * len(zero_rows),
+            textposition="middle right",
+            textfont={"color": theme.text},
+            hovertemplate=f"%{{y}}<br>Brecha vs Base [{base_label}]: 0 pts<extra></extra>",
+            showlegend=False,
+        )
+    if len(zero_rows) == len(plot_df):
+        fig.update_xaxes(
+            range=[-1.0, 1.0],
+            zeroline=True,
+            zerolinecolor=theme.chart_zero_line,
+            zerolinewidth=2,
+        )
+        fig.add_annotation(
+            x=0.5,
+            y=1.08,
+            xref="paper",
+            yref="paper",
+            text=f"Sin brechas: todos los segmentos coinciden con la base de {base_label}.",
+            showarrow=False,
+            font={"color": theme.muted, "size": 12},
+        )
     return apply_plotly_template(fig, theme)
 
 
@@ -907,7 +907,7 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(
-        xaxis_title="Links validados Helix↔VoC",
+        xaxis_title="Vínculos semánticos Helix↔VoC",
         yaxis_title="Journey roto",
         coloraxis=dict(
             cmin=0.0,
@@ -947,12 +947,10 @@ def chart_causal_entity_bar(
         if column not in tmp.columns:
             tmp[column] = ""
     tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
-    tmp["nps_points_at_risk"] = pd.to_numeric(
-        tmp.get("nps_points_at_risk"), errors="coerce"
-    ).fillna(0.0)
+    tmp["avg_similarity"] = pd.to_numeric(tmp.get("avg_similarity"), errors="coerce").fillna(0.0)
     tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
     tmp = tmp.sort_values(
-        ["linked_pairs", "nps_points_at_risk", "avg_nps"],
+        ["linked_pairs", "avg_similarity", "avg_nps"],
         ascending=[False, False, True],
     ).head(int(top_k))
     if tmp.empty:
@@ -963,12 +961,13 @@ def chart_causal_entity_bar(
 
     plot_df = tmp.iloc[::-1].copy()
     plot_df["entity_label"] = plot_df["entity_label"].astype(str)
+    plot_df["confidence_pct"] = plot_df["avg_similarity"] * 100.0
     fig = px.bar(
         plot_df,
         x="linked_pairs",
         y="entity_label",
         orientation="h",
-        color="nps_points_at_risk",
+        color="confidence_pct",
         color_continuous_scale=_colorscale_rgy(theme),
         text="linked_pairs",
         hover_data={
@@ -977,216 +976,22 @@ def chart_causal_entity_bar(
             "subpalanca": True,
             "anchor_topic": True,
             "avg_nps": ":.2f",
-            "nps_points_at_risk": ":.2f",
+            "confidence_pct": ":.1f",
         },
     )
     fig.update_traces(textposition="outside")
     fig.update_layout(
-        xaxis_title="Links validados Helix↔VoC",
+        xaxis_title="Vínculos semánticos Helix↔VoC",
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="NPS en riesgo",
+                title="Confianza (%)",
                 tickfont=dict(size=10),
             )
         ),
     )
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["entity_label"].tolist())
     _layout_common(fig, th, height=max(320, 56 * len(plot_df) + 80))
-    return apply_plotly_template(fig, theme)
-
-
-def chart_incident_priority_matrix(
-    rationale_df: pd.DataFrame,
-    theme: Theme,
-    *,
-    top_k: int = 12,
-):
-    """Readable priority ranking (bar + confidence marker) for incident-driven topics."""
-    if rationale_df.empty:
-        return None
-    required = {"nps_topic", "confidence", "nps_points_at_risk", "incidents", "priority"}
-    if not required.issubset(set(rationale_df.columns)):
-        return None
-
-    d = (
-        rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False)
-        .head(top_k)
-        .copy()
-    )
-    if d.empty:
-        return None
-
-    d["short_topic"] = (
-        d["nps_topic"]
-        .astype(str)
-        .map(lambda value: _compact_axis_label(value, width=20, max_lines=2, max_chars=36))
-    )
-    d["confidence"] = pd.to_numeric(d["confidence"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
-    d["priority"] = pd.to_numeric(d["priority"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
-    d["incidents"] = pd.to_numeric(d["incidents"], errors="coerce").fillna(0.0).clip(lower=0.0)
-    d = d.reset_index(drop=True)
-    d["rank"] = np.arange(1, len(d) + 1)
-    d["topic_label"] = d.apply(
-        lambda r: (
-            f"TOP {int(r['rank'])} · {r['short_topic']}"
-            if int(r["rank"]) <= 3
-            else str(r["short_topic"])
-        ),
-        axis=1,
-    )
-    d = d.iloc[::-1].copy()
-
-    th = chart_theme(theme)
-    detr_c, warn_c, pro_c = _status_colors(theme)
-    bar_colors = []
-    for rk in d["rank"].tolist():
-        if int(rk) == 1:
-            bar_colors.append(detr_c)
-        elif int(rk) == 2:
-            bar_colors.append(warn_c)
-        elif int(rk) == 3:
-            bar_colors.append(pro_c)
-        else:
-            bar_colors.append(th.grid)
-
-    import plotly.graph_objects as go
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=d["priority"],
-            y=d["topic_label"],
-            orientation="h",
-            marker=dict(color=bar_colors),
-            name="Prioridad",
-            text=[f"{v:.2f}" for v in d["priority"].tolist()],
-            textposition="outside",
-            cliponaxis=False,
-            customdata=np.column_stack([d["confidence"], d["nps_points_at_risk"], d["incidents"]]),
-            hovertemplate=(
-                "Tópico=%{y}<br>Prioridad=%{x:.2f}<br>"
-                "Confianza=%{customdata[0]:.2f}<br>"
-                "NPS en riesgo=%{customdata[1]:.2f}<br>"
-                "Incidencias=%{customdata[2]:.0f}<extra></extra>"
-            ),
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=d["confidence"],
-            y=d["topic_label"],
-            mode="markers",
-            name="Confianza",
-            marker=dict(color=th.accent, size=11, symbol="diamond"),
-            hovertemplate="Tópico=%{y}<br>Confianza=%{x:.2f}<extra></extra>",
-        )
-    )
-    fig.update_layout(
-        xaxis_title="Indice 0-1 (barra=prioridad, rombo=confianza)",
-        yaxis_title="",
-        barmode="overlay",
-        legend=dict(orientation="h", y=1.08, x=0),
-    )
-    fig.update_xaxes(range=[0, 1], dtick=0.1, gridcolor=th.grid)
-    fig.update_yaxes(
-        automargin=True,
-        categoryorder="array",
-        categoryarray=d["topic_label"].tolist(),
-    )
-    _layout_common(fig, th, height=max(430, 240 + 38 * min(int(top_k), len(d))))
-    return apply_plotly_template(fig, theme)
-
-
-def chart_incident_risk_recovery(
-    rationale_df: pd.DataFrame,
-    theme: Theme,
-    *,
-    top_k: int = 8,
-):
-    """Risk vs recoverable comparison using dumbbell chart (readable for committees)."""
-    if rationale_df.empty:
-        return None
-    required = {"nps_topic", "nps_points_at_risk", "nps_points_recoverable"}
-    if not required.issubset(set(rationale_df.columns)):
-        return None
-
-    d = rationale_df.sort_values(["priority", "nps_points_at_risk"], ascending=False).copy()
-    if d.empty:
-        return None
-
-    d["nps_points_at_risk"] = pd.to_numeric(d["nps_points_at_risk"], errors="coerce").fillna(0.0)
-    d["nps_points_recoverable"] = pd.to_numeric(
-        d["nps_points_recoverable"], errors="coerce"
-    ).fillna(0.0)
-    d["signal"] = d[["nps_points_at_risk", "nps_points_recoverable"]].max(axis=1)
-    d = d[d["signal"] > 0.0005].copy()
-    if d.empty:
-        return None
-    d = d.head(top_k).copy()
-
-    d["topic"] = (
-        d["nps_topic"]
-        .astype(str)
-        .map(lambda value: _compact_axis_label(value, width=18, max_lines=2, max_chars=34))
-    )
-    d["gap"] = d["nps_points_at_risk"] - d["nps_points_recoverable"]
-    d = d.sort_values(["nps_points_at_risk", "gap"], ascending=[True, True]).copy()
-
-    detr_c, _, pro_c = _status_colors(theme)
-
-    th = chart_theme(theme)
-    import plotly.graph_objects as go
-
-    fig = go.Figure()
-    for _, row in d.iterrows():
-        fig.add_shape(
-            type="line",
-            x0=float(row["nps_points_recoverable"]),
-            y0=str(row["topic"]),
-            x1=float(row["nps_points_at_risk"]),
-            y1=str(row["topic"]),
-            line=dict(color=th.grid, width=3),
-        )
-    fig.add_trace(
-        go.Scatter(
-            x=d["nps_points_at_risk"],
-            y=d["topic"],
-            mode="markers+text",
-            name="NPS en riesgo",
-            marker=dict(color=detr_c, size=11),
-            text=[f"{v:.2f}" for v in d["nps_points_at_risk"].tolist()],
-            textposition="middle right",
-            cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>NPS en riesgo=%{x:.2f}<extra></extra>",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=d["nps_points_recoverable"],
-            y=d["topic"],
-            mode="markers+text",
-            name="NPS recuperable",
-            marker=dict(color=pro_c, size=11, symbol="diamond"),
-            text=[f"{v:.2f}" for v in d["nps_points_recoverable"].tolist()],
-            textposition="middle left",
-            cliponaxis=False,
-            hovertemplate="Tópico=%{y}<br>NPS recuperable=%{x:.2f}<extra></extra>",
-        )
-    )
-    fig.update_layout(
-        xaxis_title="Puntos NPS",
-        yaxis_title="",
-        legend_title_text="Metricas",
-        legend=dict(orientation="h", y=1.08, x=0),
-    )
-    fig.update_yaxes(automargin=True, categoryorder="array", categoryarray=d["topic"].tolist())
-    xmax = float(max(d["nps_points_at_risk"].max(), d["nps_points_recoverable"].max()))
-    upper = xmax * 1.18 if xmax > 0 else 1.0
-    dtick = 0.1 if upper <= 1.25 else 0.2 if upper <= 2.5 else None
-    fig.update_xaxes(range=[0.0, upper], dtick=dtick)
-    _layout_common(fig, th, height=max(420, 240 + 42 * min(int(top_k), len(d))))
     return apply_plotly_template(fig, theme)
 
 

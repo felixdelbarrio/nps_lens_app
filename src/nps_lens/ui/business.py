@@ -8,6 +8,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.ui.population import POP_ALL
 
 
@@ -161,22 +162,22 @@ def driver_delta_table(
     if score_col not in current_df.columns or score_col not in baseline_df.columns:
         return pd.DataFrame()
 
-    cur = current_df.dropna(subset=[dimension, score_col]).copy()
-    base = baseline_df.dropna(subset=[dimension, score_col]).copy()
-    if cur.empty or base.empty:
+    cur_agg = grouped_driver_stats(
+        current_df.dropna(subset=[dimension]),
+        dimension,
+        survey_score_col=score_col,
+    )[[dimension, "valid_n", "nps"]].rename(
+        columns={"valid_n": "n_current", "nps": "nps_current"}
+    )
+    base_agg = grouped_driver_stats(
+        baseline_df.dropna(subset=[dimension]),
+        dimension,
+        survey_score_col=score_col,
+    )[[dimension, "valid_n", "nps"]].rename(
+        columns={"valid_n": "n_baseline", "nps": "nps_baseline"}
+    )
+    if cur_agg.empty or base_agg.empty:
         return pd.DataFrame()
-
-    cur[dimension] = cur[dimension].astype(str)
-    base[dimension] = base[dimension].astype(str)
-
-    cur_agg = cur.groupby(dimension, as_index=False).agg(
-        n_current=(score_col, "size"),
-        nps_current=(score_col, "mean"),
-    )
-    base_agg = base.groupby(dimension, as_index=False).agg(
-        n_baseline=(score_col, "size"),
-        nps_baseline=(score_col, "mean"),
-    )
     merged = cur_agg.merge(base_agg, on=dimension, how="inner")
     merged = merged.loc[
         (merged["n_current"] >= int(min_n)) & (merged["n_baseline"] >= int(min_n))
