@@ -179,10 +179,11 @@ function _publicationFolder_() {
 }
 
 function _publicationCatalog_() {
+  const showEvolutionNps = _evolutionNpsVisible_();
   return _publicationRows_().map(item => ({
     scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.buug,item.n1,item.year,item.month,item.causalMethodLabel].join(' · '),
     buug:item.buug,n1:item.n1,n2:item.n2,year:item.year,month:item.month,causalMethod:item.causalMethod,
-    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_presentationEntryUrl_(item.scopeKey)
+    causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_reportUrl_(item.scopeKey,showEvolutionNps)
   }));
 }
 
@@ -260,15 +261,10 @@ function importPublicationArchive(form) {
   return _administration_({scopeKey:edition.scope.key,generatedAt:edition.generated_at,slidesFileId}, viewer);
 }
 
-function _reportUrl_(scopeKey) {
+function _reportUrl_(scopeKey, showEvolutionNps) {
   const publication = _publicationByKey_(scopeKey);
   if (!publication) return '';
   const compactId = _property_(_compactSlidesProperty_(publication.scopeKey));
-  const slidesId = _evolutionNpsVisible_() ? publication.slidesFileId : compactId;
+  const slidesId = showEvolutionNps ? publication.slidesFileId : compactId;
   return slidesId ? 'https://docs.google.com/presentation/d/' + encodeURIComponent(slidesId) + '/edit' : '';
-}
-
-function _presentationEntryUrl_(scopeKey) {
-  const base = ScriptApp.getService().getUrl();
-  return base ? base + '?presentation=1&scope=' + encodeURIComponent(String(scopeKey || '')) : '';
 }

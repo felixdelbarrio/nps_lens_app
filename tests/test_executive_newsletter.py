@@ -8,12 +8,20 @@ from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 
 
-def test_newsletter_uses_monthly_kpis_and_connects_voc_with_incidents() -> None:
+def test_newsletter_uses_monthly_kpis_and_keeps_only_the_short_editorial_model() -> None:
     history = pd.DataFrame(
         {
-            "Fecha": pd.to_datetime(["2026-06-10", "2026-06-11", "2026-07-01", "2026-07-10", "2026-07-20"]),
+            "Fecha": pd.to_datetime(
+                ["2026-06-10", "2026-06-11", "2026-07-01", "2026-07-10", "2026-07-20"]
+            ),
             "Canal": ["Web"] * 5,
-            "Palanca": ["Uso", "Uso", "Funcionamiento continuo", "Funcionamiento continuo", "Pagos/transferencias"],
+            "Palanca": [
+                "Uso",
+                "Uso",
+                "Funcionamiento continuo",
+                "Funcionamiento continuo",
+                "Pagos/transferencias",
+            ],
             "NPS": [9, 6, 0, 4, 9],
             "Comment": ["bien", "regular", "no funciona", "falla login", "pago correcto"],
         }
@@ -28,13 +36,15 @@ def test_newsletter_uses_monthly_kpis_and_connects_voc_with_incidents() -> None:
     )
     linking = {
         "scenarios": {
-            "cards": [{
-                "title": "Funcionamiento continuo / Fallas en login",
-                "avg_nps": 2.0,
-                "linked_pairs": 3,
-                "comment_records": [{"comment": "no funciona"}],
-                "incident_records": [{"incident_id": "INC0001", "summary": "Error de acceso"}],
-            }]
+            "cards": [
+                {
+                    "title": "Funcionamiento continuo / Fallas en login",
+                    "avg_nps": 2.0,
+                    "linked_pairs": 3,
+                    "comment_records": [{"comment": "no funciona"}],
+                    "incident_records": [{"incident_id": "INC0001", "summary": "Error de acceso"}],
+                }
+            ]
         }
     }
 
@@ -48,12 +58,17 @@ def test_newsletter_uses_monthly_kpis_and_connects_voc_with_incidents() -> None:
     )
 
     assert result["period"] == "1–20 julio 2026"
-    assert result["focus"]["title"] == "Funcionamiento continuo"
+    assert result["headline"] == "El principal foco de fricción está en funcionamiento continuo"
     assert [item["label"] for item in result["scorecard"]] == [
-        "Comentarios", "NPS clásico mensual", "Score medio", "Promotores", "Detractores"
+        "Comentarios",
+        "NPS clásico mensual",
+        "Score medio",
+        "Promotores",
+        "Detractores",
     ]
     assert result["scorecard"][1]["value"] == "-33,33"
-    assert result["connections"][0]["semantic_links"] == 3
-    assert result["connections"][0]["incidents"][0]["id"] == "INC0001"
     assert result["quotes"] == ["no funciona"]
-    assert "no implica causalidad" in result["connections"][0]["caveat"]
+    assert result["signals"][0]["label"] == "Funcionamiento continuo"
+    assert "insights" not in result
+    assert "focus" not in result
+    assert "connections" not in result

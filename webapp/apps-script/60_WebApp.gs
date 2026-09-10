@@ -3,15 +3,9 @@ function doGet(event) {
   _assertViewer_(viewer);
   const requestedScope = String(event && event.parameter && event.parameter.scope || '').trim();
   const publication = _publicationByKey_(requestedScope || _property_(NPS_LENS.selectedScopeProperty));
-  if (event && event.parameter && event.parameter.presentation === '1') {
-    const reportUrl = publication ? _reportUrl_(publication.scopeKey) : '';
-    if (!reportUrl) return HtmlService.createHtmlOutput('<p>No hay una presentación publicada para este ámbito.</p>');
-    return HtmlService.createHtmlOutput('<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Abriendo presentación</title></head><body><p>Abriendo presentación…</p><script>window.top.location.replace(' + JSON.stringify(reportUrl) + ');</script><p><a href="' + reportUrl.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '">Continuar</a></p></body></html>')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
   viewer.scopeKey = publication ? publication.scopeKey : '';
-  viewer.reportUrl = publication ? _presentationEntryUrl_(publication.scopeKey) : '';
   viewer.evolutionNpsVisible = _evolutionNpsVisible_();
+  viewer.reportUrl = publication ? _reportUrl_(publication.scopeKey,viewer.evolutionNpsVisible) : '';
   viewer.causalMethodLocked = String(event && event.parameter && event.parameter.source || '') === 'newsletter';
   viewer.shellDeferred = Boolean(publication);
   viewer.publicationCatalog = _publicationCatalog_();

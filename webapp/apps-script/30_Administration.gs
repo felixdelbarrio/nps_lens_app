@@ -3,7 +3,7 @@ function _administration_(publication, viewer) {
     version: NPS_LENS.version,
     generatedAt: publication ? publication.generatedAt : '',
     selectedScopeKey: publication ? publication.scopeKey : '',
-    reportUrl: publication ? _presentationEntryUrl_(publication.scopeKey) : '',
+    reportUrl: publication ? _reportUrl_(publication.scopeKey,_evolutionNpsVisible_()) : '',
     access: {
       email: viewer.email,
       role: viewer.role,
