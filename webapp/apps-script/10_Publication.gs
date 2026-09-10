@@ -196,9 +196,85 @@ function selectPublicationScope(scopeKey) {
 }
 
 function importPublicationArchive(form) {
-  const viewer = _viewer_(); _assertAdmin_(viewer);
   const archiveBlob = form && form.publication;
   if (!archiveBlob || typeof archiveBlob.getBytes !== 'function') throw new Error('Selecciona la edición ZIP generada por la aplicación local.');
+  return _importPublicationArchiveBlob_(archiveBlob);
+}
+
+const NPS_LENS_UPLOAD_CHUNK_BYTES = 192 * 1024;
+const NPS_LENS_UPLOAD_SESSION_PREFIX = 'NPS_LENS_UPLOAD_SESSION_';
+
+function beginPublicationUpload(metadata) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  const name = String(metadata && metadata.name || '');
+  const size = Number(metadata && metadata.size || 0);
+  if (!name.toLowerCase().endsWith('.zip')) throw new Error('La edición debe ser un fichero ZIP.');
+  if (!Number.isFinite(size) || size < 1 || size > NPS_LENS.maxPublicationBytes) throw new Error('La edición debe ocupar entre 1 byte y 30 MB.');
+  const destination = _publicationFolder_();
+  const uploadId = Utilities.getUuid();
+  const session = {uploadId,name,size,received:0,chunks:[],destinationId:destination.id,email:viewer.email,createdAt:new Date().toISOString()};
+  PropertiesService.getUserProperties().setProperty(NPS_LENS_UPLOAD_SESSION_PREFIX + uploadId, JSON.stringify(session));
+  return {uploadId,chunkBytes:NPS_LENS_UPLOAD_CHUNK_BYTES,size};
+}
+
+function appendPublicationUploadChunk(uploadId, index, base64Data) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  const session = _publicationUploadSession_(uploadId, viewer);
+  const expectedIndex = session.chunks.length;
+  if (Number(index) !== expectedIndex) throw new Error('La carga ha llegado fuera de secuencia. Reintenta la publicación.');
+  const encoded = String(base64Data || '');
+  if (!encoded) throw new Error('Se ha recibido un bloque vacío durante la carga.');
+  const bytes = Utilities.base64Decode(encoded);
+  if (!bytes.length || bytes.length > NPS_LENS_UPLOAD_CHUNK_BYTES) throw new Error('El tamaño de un bloque de carga no es válido.');
+  if (session.received + bytes.length > session.size) throw new Error('La carga supera el tamaño declarado del ZIP.');
+  const chunkName = '.nps-lens-upload-' + session.uploadId + '-' + String(expectedIndex).padStart(4,'0') + '.b64';
+  const chunkBlob = Utilities.newBlob(encoded, 'text/plain', chunkName);
+  const created = Drive.Files.create({name:chunkName,mimeType:'text/plain',parents:[session.destinationId]},chunkBlob,{supportsAllDrives:true,fields:'id'});
+  session.chunks.push(String(created.id));
+  session.received += bytes.length;
+  PropertiesService.getUserProperties().setProperty(NPS_LENS_UPLOAD_SESSION_PREFIX + session.uploadId, JSON.stringify(session));
+  return {received:session.received,size:session.size,index:expectedIndex};
+}
+
+function commitPublicationUpload(uploadId) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  const session = _publicationUploadSession_(uploadId, viewer);
+  try {
+    if (session.received !== session.size || !session.chunks.length) throw new Error('La carga está incompleta. Vuelve a seleccionar el ZIP y reintenta.');
+    let encoded = '';
+    session.chunks.forEach(id => { encoded += DriveApp.getFileById(id).getBlob().getDataAsString('UTF-8'); });
+    const archiveBytes = Utilities.base64Decode(encoded);
+    if (archiveBytes.length !== session.size) throw new Error('La carga se ha corrompido durante la transferencia. Vuelve a intentarlo.');
+    return _importPublicationArchiveBlob_(Utilities.newBlob(archiveBytes,'application/zip',session.name));
+  } finally {
+    _discardPublicationUploadSession_(session);
+  }
+}
+
+function abortPublicationUpload(uploadId) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
+  const session = _publicationUploadSession_(uploadId, viewer, true);
+  if (session) _discardPublicationUploadSession_(session);
+  return {aborted:Boolean(session)};
+}
+
+function _publicationUploadSession_(uploadId, viewer, optional) {
+  const id = String(uploadId || '');
+  const properties = PropertiesService.getUserProperties();
+  const raw = properties.getProperty(NPS_LENS_UPLOAD_SESSION_PREFIX + id);
+  if (!raw) { if (optional) return null; throw new Error('La sesión de carga ha caducado. Vuelve a seleccionar el ZIP.'); }
+  const session = JSON.parse(raw);
+  if (String(session.email || '') !== String(viewer.email || '')) throw new Error('La sesión de carga no pertenece al usuario conectado.');
+  return session;
+}
+
+function _discardPublicationUploadSession_(session) {
+  (session.chunks || []).forEach(id => { try { if (id) DriveApp.getFileById(id).setTrashed(true); } catch(ignore) {} });
+  PropertiesService.getUserProperties().deleteProperty(NPS_LENS_UPLOAD_SESSION_PREFIX + session.uploadId);
+}
+
+function _importPublicationArchiveBlob_(archiveBlob) {
+  const viewer = _viewer_(); _assertAdmin_(viewer);
   const archiveName = String(archiveBlob.getName() || 'publicacion.zip'), archiveBytes = archiveBlob.getBytes();
   if (!archiveName.toLowerCase().endsWith('.zip')) throw new Error('La edición debe ser un fichero ZIP.');
   if (!archiveBytes.length || archiveBytes.length > NPS_LENS.maxPublicationBytes) throw new Error('La edición debe ocupar entre 1 byte y 30 MB.');

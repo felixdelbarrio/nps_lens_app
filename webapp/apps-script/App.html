@@ -222,13 +222,37 @@
       throw error;
     });
   }
-  function importPublication(form) {
+  function uploadRpc(name,args=[]) {
+    return new Promise((resolve,reject) => google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args));
+  }
+  function bytesToBase64(bytes) {
+    let binary=''; const block=0x8000;
+    for(let i=0;i<bytes.length;i+=block) binary += String.fromCharCode(...bytes.subarray(i,Math.min(i+block,bytes.length)));
+    return btoa(binary);
+  }
+  async function importPublication(form) {
     const started = performance.now();
-    return new Promise((resolve,reject) => {
-      if (viewer.local) return reject(new Error('La importación se habilita al desplegar el proyecto en Google Apps Script.'));
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).importPublicationArchive(form);
-    }).then(value => {queueActivity('server_call','importPublicationArchive','ok',performance.now()-started);return value;},
-      error => {queueActivity('server_call','importPublicationArchive','error',performance.now()-started);throw error;});
+    if (viewer.local) throw new Error('La importación se habilita al desplegar el proyecto en Google Apps Script.');
+    const input=form?.querySelector('input[name="publication"]'),file=input?.files?.[0];
+    if(!file) throw new Error('Selecciona la edición ZIP generada por la aplicación local.');
+    if(!String(file.name||'').toLowerCase().endsWith('.zip')) throw new Error('La edición debe ser un fichero ZIP.');
+    if(file.size<1 || file.size>30*1024*1024) throw new Error('La edición debe ocupar entre 1 byte y 30 MB.');
+    let uploadId='';
+    try {
+      const session=await uploadRpc('beginPublicationUpload',[{name:file.name,size:file.size}]);
+      uploadId=session.uploadId; const chunkBytes=Number(session.chunkBytes)||192*1024;
+      for(let offset=0,index=0;offset<file.size;offset+=chunkBytes,index++) {
+        const bytes=new Uint8Array(await file.slice(offset,Math.min(offset+chunkBytes,file.size)).arrayBuffer());
+        await uploadRpc('appendPublicationUploadChunk',[uploadId,index,bytesToBase64(bytes)]);
+        const progress=Math.min(100,Math.round(Math.min(offset+chunkBytes,file.size)*100/file.size));
+        const status=$('publication-status'); if(status) status.textContent=`Subiendo edición… ${progress}%`;
+      }
+      const value=await uploadRpc('commitPublicationUpload',[uploadId]); uploadId='';
+      queueActivity('server_call','importPublicationArchive','ok',performance.now()-started); return value;
+    } catch(error) {
+      if(uploadId) uploadRpc('abortPublicationUpload',[uploadId]).catch(()=>{});
+      queueActivity('server_call','importPublicationArchive','error',performance.now()-started); throw error;
+    }
   }
   function downloadJson(fileName, content) {
     const url = URL.createObjectURL(new Blob([content], {type:'application/json'}));
