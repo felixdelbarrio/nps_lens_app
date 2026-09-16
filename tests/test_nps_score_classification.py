@@ -4,7 +4,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from nps_lens.core.nps_math import classify_nps_scores, grouped_focus_rates
+from nps_lens.core.nps_math import (
+    classify_nps_scores,
+    grouped_focus_rates,
+    normalize_nps_scores,
+)
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
@@ -50,6 +54,22 @@ def test_ingestion_ignores_manual_groups_and_uses_every_score_boundary(
     assert rates["promoter_rate"] == pytest.approx(2 / 11)
 
 
+def test_fractional_scores_are_rounded_to_integers_before_classification() -> None:
+    scores = pd.Series([0.49, 0.5, 6.49, 6.5, 8.49, 8.5, 9.9, 10.0])
+
+    assert normalize_nps_scores(scores).tolist() == [0, 1, 6, 7, 8, 9, 10, 10]
+    assert classify_nps_scores(normalize_nps_scores(scores)).tolist() == [
+        "DETRACTOR",
+        "DETRACTOR",
+        "DETRACTOR",
+        "PASIVO",
+        "PASIVO",
+        "PROMOTOR",
+        "PROMOTOR",
+        "PROMOTOR",
+    ]
+
+
 def test_invalid_scores_cannot_be_rescued_by_manual_group(tmp_path: Path) -> None:
     scores = [None, "invalid", -1, 11, 6.5, float("inf"), 8]
     assert classify_nps_scores(pd.Series(scores)).tolist() == [""] * 6 + ["PASIVO"]
@@ -58,12 +78,15 @@ def test_invalid_scores_cannot_be_rescued_by_manual_group(tmp_path: Path) -> Non
     path = tmp_path / "invalid.xlsx"
     frame.to_excel(path, index=False)
     result = read_nps_thermal_excel(str(path), service_origin="Bank", service_origin_n1="Web")
-    assert result.df["NPS"].tolist() == [8]
+    assert result.df["NPS"].tolist() == [7, 8]
+    assert next(
+        issue for issue in result.issues if issue.code == "fractional_nps_rounded"
+    ).details == {"rows": 1, "method": "nearest_integer_half_up"}
     assert (
         next(issue for issue in result.issues if issue.code == "invalid_nps_dropped").details[
             "rows"
         ]
-        == 6
+        == 5
     )
 
 
