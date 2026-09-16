@@ -291,6 +291,11 @@ export type EquivalenceRegistryPayload = {
   statistics?: Record<string, { groups: Array<{ canonical: string; affected: number }>; suggestions: Array<{ variants: string[] }> }>;
 };
 
+export type ColumnAliasRegistryPayload = {
+  schema_version: string;
+  fields: Array<{ canonical: string; required: boolean; aliases: string[] }>;
+};
+
 export type TelemetryPayload = {
   schema_version: string;
   generated_at: string;
@@ -541,6 +546,22 @@ export async function updateEquivalences(
 ): Promise<EquivalenceRegistryPayload> {
   return parseResponse<EquivalenceRegistryPayload>(
     await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function fetchNpsColumnAliases(): Promise<ColumnAliasRegistryPayload> {
+  return parseResponse<ColumnAliasRegistryPayload>(await fetch("/api/settings/nps-column-aliases"));
+}
+
+export async function updateNpsColumnAliases(
+  payload: ColumnAliasRegistryPayload
+): Promise<ColumnAliasRegistryPayload> {
+  return parseResponse<ColumnAliasRegistryPayload>(
+    await fetch("/api/settings/nps-column-aliases", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

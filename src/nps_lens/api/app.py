@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from nps_lens.analytics.taxonomy import TaxonomyConfig
 from nps_lens.api.schemas import (
+    ColumnAliasRegistryRequest,
     ContextOptionsResponse,
     DashboardResponse,
     DatasetTableResponse,
@@ -30,6 +31,7 @@ from nps_lens.api.schemas import (
 )
 from nps_lens.core.store import DatasetContext
 from nps_lens.core.telemetry import RequestTimer, TelemetryCollector
+from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry
 from nps_lens.platform.downloads import persist_download
@@ -539,6 +541,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         dashboard_layer.clear_caches()
         return equivalences(request, dashboard_layer)
+
+    @app.get("/api/settings/nps-column-aliases")
+    def nps_column_aliases(request: Request) -> dict[str, object]:
+        require_admin(request)
+        settings = cast(Settings, request.app.state.settings)
+        return ColumnAliasRegistry.load(settings.column_aliases_path).to_dict()
+
+    @app.put("/api/settings/nps-column-aliases")
+    def update_nps_column_aliases(
+        payload: ColumnAliasRegistryRequest,
+        request: Request,
+    ) -> dict[str, object]:
+        require_admin(request)
+        settings = cast(Settings, request.app.state.settings)
+        try:
+            registry = ColumnAliasRegistry.from_dict(payload.model_dump())
+            registry.save(settings.column_aliases_path)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return registry.to_dict()
 
     @app.get("/api/taxonomy")
     def taxonomy_studio(

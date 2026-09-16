@@ -4,13 +4,22 @@ import { useState } from "react";
 import { expect, it, vi } from "vitest";
 
 import { SettingsSheet, type SettingsTab } from "./SettingsSheet";
+import { updateNpsColumnAliases } from "../api";
 
 vi.mock("../api", () => ({
   fetchEquivalences: vi.fn().mockResolvedValue({
     schema_version: "2.0",
     dimensions: { "nps.Palanca": [], "nps.Subpalanca": [] }
   }),
-  updateEquivalences: vi.fn()
+  updateEquivalences: vi.fn(),
+  fetchNpsColumnAliases: vi.fn().mockResolvedValue({
+    schema_version: "1.0",
+    fields: [
+      { canonical: "Fecha", required: true, aliases: ["Date"] },
+      { canonical: "Comment", required: false, aliases: ["Text"] }
+    ]
+  }),
+  updateNpsColumnAliases: vi.fn().mockImplementation(async (payload) => payload)
 }));
 
 function SettingsHarness() {
@@ -43,4 +52,28 @@ it("shows fixed score rules separately from editable equivalences", async () => 
   expect(await screen.findByRole("heading", { name: "nps.Palanca" })).toBeInTheDocument();
   expect(screen.getByRole("option", { name: "Subpalanca" })).toBeInTheDocument();
   expect(screen.queryByText("Clasificación NPS")).not.toBeInTheDocument();
+});
+
+it("edits NPS column aliases while keeping required status read-only", async () => {
+  const user = userEvent.setup();
+  render(<SettingsHarness />);
+
+  await user.click(screen.getByRole("tab", { name: "Alias de columnas NPS" }));
+  expect(await screen.findByRole("heading", { name: "Fecha" })).toBeInTheDocument();
+  expect(screen.getByText("Obligatorio")).toBeInTheDocument();
+  expect(screen.getByText("Opcional")).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+
+  const input = screen.getByRole("textbox", { name: "Añadir alias para Fecha" });
+  await user.type(input, "Survey Date{Enter}");
+  await user.click(screen.getByRole("button", { name: "Guardar alias de columnas" }));
+
+  expect(updateNpsColumnAliases).toHaveBeenCalledWith(
+    expect.objectContaining({
+      fields: expect.arrayContaining([
+        expect.objectContaining({ canonical: "Fecha", aliases: ["Date", "Survey Date"] })
+      ])
+    })
+  );
+  expect(await screen.findByText("Alias de columnas NPS guardados.")).toBeInTheDocument();
 });
