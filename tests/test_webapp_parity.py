@@ -106,7 +106,10 @@ def test_admin_navigation_and_activity_are_centralized() -> None:
     assert "recordActivityEvents" in app
     assert "recordTelemetry" not in app
     assert ".workspace-action" in design
-    assert ".settings-page{display:flex;flex-direction:column;gap:24px;min-width:0;width:100%}" in design
+    assert (
+        ".settings-page{display:flex;flex-direction:column;gap:24px;min-width:0;width:100%}"
+        in design
+    )
     assert ".settings-tabs{" not in design
     assert ".activity-metrics{grid-column:1/-1}" in design
 

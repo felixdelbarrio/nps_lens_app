@@ -166,9 +166,7 @@ def driver_delta_table(
         current_df.dropna(subset=[dimension]),
         dimension,
         survey_score_col=score_col,
-    )[[dimension, "valid_n", "nps"]].rename(
-        columns={"valid_n": "n_current", "nps": "nps_current"}
-    )
+    )[[dimension, "valid_n", "nps"]].rename(columns={"valid_n": "n_current", "nps": "nps_current"})
     base_agg = grouped_driver_stats(
         baseline_df.dropna(subset=[dimension]),
         dimension,

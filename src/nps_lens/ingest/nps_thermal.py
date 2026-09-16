@@ -15,7 +15,7 @@ from nps_lens.domain.record_identity import business_keys, hash_rows
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.09.16.column-aliases"
+PARSER_VERSION = "2026.09.16.column-aliases-by-context"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -153,7 +153,11 @@ def read_nps_thermal_excel(
 
     issues: list[ValidationIssue] = []
     raw_rows = int(len(df))
-    resolution = ColumnAliasRegistry.load(column_aliases_path).resolve(df.columns)
+    resolution = ColumnAliasRegistry.load(
+        column_aliases_path,
+        service_origin or "",
+        service_origin_n1 or "",
+    ).resolve(df.columns)
     df = df.rename(columns=resolution.rename)
     applied_column_aliases = [
         {"source": source, "canonical": canonical}

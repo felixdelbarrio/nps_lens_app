@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -173,3 +174,98 @@ def test_senda_headers_produce_canonical_internal_schema(tmp_path: Path) -> None
         "Text",
         "Id",
     }
+
+
+def test_aliases_are_isolated_by_buug_and_n1(tmp_path: Path) -> None:
+    path = tmp_path / "aliases.json"
+    argentina_payload = ColumnAliasRegistry.default().to_dict()
+    mexico_payload = ColumnAliasRegistry.default().to_dict()
+    next(field for field in argentina_payload["fields"] if field["canonical"] == "Canal")[
+        "aliases"
+    ].append("Canal AR")
+    next(field for field in mexico_payload["fields"] if field["canonical"] == "Canal")[
+        "aliases"
+    ].append("Canal MX")
+
+    ColumnAliasRegistry.from_dict(argentina_payload).save_for_context(
+        path, "BBVA Argentina", "SENDA"
+    )
+    ColumnAliasRegistry.from_dict(mexico_payload).save_for_context(path, "BBVA México", "WEB")
+
+    argentina = ColumnAliasRegistry.load(path, "BBVA Argentina", "SENDA").to_dict()
+    mexico = ColumnAliasRegistry.load(path, "BBVA México", "WEB").to_dict()
+    unconfigured = ColumnAliasRegistry.load(path, "BBVA Perú", "APP").to_dict()
+    argentina_canal = next(
+        field["aliases"] for field in argentina["fields"] if field["canonical"] == "Canal"
+    )
+    mexico_canal = next(
+        field["aliases"] for field in mexico["fields"] if field["canonical"] == "Canal"
+    )
+    default_canal = next(
+        field["aliases"] for field in unconfigured["fields"] if field["canonical"] == "Canal"
+    )
+
+    assert "Canal AR" in argentina_canal and "Canal MX" not in argentina_canal
+    assert "Canal MX" in mexico_canal and "Canal AR" not in mexico_canal
+    assert "Canal AR" not in default_canal and "Canal MX" not in default_canal
+
+
+def test_ingest_selects_aliases_from_its_buug_and_n1(tmp_path: Path) -> None:
+    aliases_path = tmp_path / "aliases.json"
+    payload = ColumnAliasRegistry.default().to_dict()
+    next(field for field in payload["fields"] if field["canonical"] == "NPS")["aliases"].append(
+        "Score AR"
+    )
+    ColumnAliasRegistry.from_dict(payload).save_for_context(aliases_path, "BBVA Argentina", "SENDA")
+    excel = _write_excel(
+        tmp_path,
+        {"Fecha": ["2026-09-01"], "Score AR": [9], "Canal": ["App"]},
+    )
+
+    argentina = read_nps_thermal_excel(
+        str(excel),
+        service_origin="BBVA Argentina",
+        service_origin_n1="SENDA",
+        column_aliases_path=aliases_path,
+    )
+    mexico = read_nps_thermal_excel(
+        str(excel),
+        service_origin="BBVA México",
+        service_origin_n1="WEB",
+        column_aliases_path=aliases_path,
+    )
+
+    assert not any(issue.level == "ERROR" for issue in argentina.issues)
+    assert any(
+        issue.code == "missing_required_column" and issue.column == "NPS" for issue in mexico.issues
+    )
+
+
+def test_legacy_global_configuration_migrates_without_losing_fallback(tmp_path: Path) -> None:
+    path = tmp_path / "aliases.json"
+    legacy_payload = ColumnAliasRegistry.default().to_dict()
+    next(field for field in legacy_payload["fields"] if field["canonical"] == "Comment")[
+        "aliases"
+    ].append("Legacy comment")
+    ColumnAliasRegistry.from_dict(legacy_payload).save(path)
+
+    scoped_payload = ColumnAliasRegistry.default().to_dict()
+    next(field for field in scoped_payload["fields"] if field["canonical"] == "Comment")[
+        "aliases"
+    ].append("Scoped comment")
+    ColumnAliasRegistry.from_dict(scoped_payload).save_for_context(path, "BBVA Argentina", "SENDA")
+
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    fallback = ColumnAliasRegistry.load(path, "BBVA Colombia", "APP").to_dict()
+    scoped = ColumnAliasRegistry.load(path, "BBVA Argentina", "SENDA").to_dict()
+    fallback_comments = next(
+        field["aliases"] for field in fallback["fields"] if field["canonical"] == "Comment"
+    )
+    scoped_comments = next(
+        field["aliases"] for field in scoped["fields"] if field["canonical"] == "Comment"
+    )
+
+    assert stored["schema_version"] == "2.0"
+    assert "Legacy comment" in fallback_comments
+    assert "Scoped comment" in scoped_comments
+    assert "Legacy comment" not in scoped_comments

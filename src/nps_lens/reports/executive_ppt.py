@@ -401,7 +401,9 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
     out["Subpalanca"] = out.get("Subpalanca", pd.Series([""] * len(out), index=out.index)).map(
         _normalize_category_value
     )
-    out["Canal"] = out.get("Canal", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    out["Canal"] = (
+        out.get("Canal", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
+    )
     out["band"] = out["NPS"].map(_nps_band)
     out = out.dropna(subset=["date"]).copy()
     return out[cols].copy()
@@ -2334,9 +2336,7 @@ def _build_presentation_context(
         }
     )
     detractor_raw = (
-        channel_selected[
-            channel_selected["band"].astype(str).str.casefold().eq("detractor")
-        ].copy()
+        channel_selected[channel_selected["band"].astype(str).str.casefold().eq("detractor")].copy()
         if "band" in channel_selected.columns
         else channel_selected.copy()
     )
@@ -2400,9 +2400,11 @@ def _build_presentation_context(
         overview=overview,
         period_kpis=resolved_period_kpis,
         overview_figure=_build_overview_figure(
-            comparison_nps_df
-            if comparison_nps_df is not None and not comparison_nps_df.empty
-            else selected_nps_df,
+            (
+                comparison_nps_df
+                if comparison_nps_df is not None and not comparison_nps_df.empty
+                else selected_nps_df
+            ),
             period_start=period_start,
             period_end=period_end,
         ),
@@ -2495,7 +2497,9 @@ def _replace_template_table(
 ) -> object:
     shape = slide.shapes[shape_index]
     left, top, height = shape.left, shape.top, shape.height
-    width = sum((column.width for column in shape.table.columns), 0) if shape.has_table else shape.width
+    width = (
+        sum((column.width for column in shape.table.columns), 0) if shape.has_table else shape.width
+    )
     shape._element.getparent().remove(shape._element)
     table = slide.shapes.add_table(len(rows), len(column_widths), left, top, width, height).table
     for column, width_in in zip(table.columns, column_widths):
@@ -2503,9 +2507,7 @@ def _replace_template_table(
     for row_index, row in enumerate(table.rows):
         for cell in row.cells:
             cell.fill.solid()
-            cell.fill.fore_color.rgb = _rgb(
-                BBVA_COLORS["blue"] if row_index == 0 else "FFFFFF"
-            )
+            cell.fill.fore_color.rgb = _rgb(BBVA_COLORS["blue"] if row_index == 0 else "FFFFFF")
     _set_template_table(table, rows)
     return table
 
@@ -2546,10 +2548,15 @@ def _add_highlighted_runs(
     terms = {
         str(segment.get("text", "")).strip().casefold()
         for segment in (segments if isinstance(segments, list) else [])
-        if isinstance(segment, dict) and segment.get("bold") and str(segment.get("text", "")).strip()
+        if isinstance(segment, dict)
+        and segment.get("bold")
+        and str(segment.get("text", "")).strip()
     }
     pattern = (
-        re.compile("(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")", re.IGNORECASE)
+        re.compile(
+            "(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")",
+            re.IGNORECASE,
+        )
         if terms
         else None
     )
@@ -2740,7 +2747,9 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
                 line_length += incident_length
 
 
-def _scenario_comment_groups(row: pd.Series, fallback: list[str]) -> list[tuple[str, str, list[dict[str, object]]]]:
+def _scenario_comment_groups(
+    row: pd.Series, fallback: list[str]
+) -> list[tuple[str, str, list[dict[str, object]]]]:
     records = row.get("comment_records")
     source = records if isinstance(records, list) else []
     grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()

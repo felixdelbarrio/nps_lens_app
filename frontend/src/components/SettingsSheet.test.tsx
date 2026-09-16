@@ -13,7 +13,9 @@ vi.mock("../api", () => ({
   }),
   updateEquivalences: vi.fn(),
   fetchNpsColumnAliases: vi.fn().mockResolvedValue({
-    schema_version: "1.0",
+    schema_version: "2.0",
+    service_origin: "Bank",
+    service_origin_n1: "Web",
     fields: [
       { canonical: "Fecha", required: true, aliases: ["Date"] },
       { canonical: "Comment", required: false, aliases: ["Text"] }
@@ -25,6 +27,7 @@ vi.mock("../api", () => ({
 function SettingsHarness() {
   const [tab, setTab] = useState<SettingsTab>("appearance");
   return <SettingsSheet
+    taxonomyContext={{ service_origin: "Bank", service_origin_n1: "Web" }}
     open activeTab={tab} onTabChange={setTab} onClose={vi.fn()}
     themeMode="light" setThemeMode={vi.fn()}
     downloadsPath="" setDownloadsPath={vi.fn()}
@@ -73,7 +76,9 @@ it("edits NPS column aliases while keeping required status read-only", async () 
       fields: expect.arrayContaining([
         expect.objectContaining({ canonical: "Fecha", aliases: ["Date", "Survey Date"] })
       ])
-    })
+    }),
+    { service_origin: "Bank", service_origin_n1: "Web" }
   );
+  expect(screen.getByText("Configuración para: Bank → Web")).toBeInTheDocument();
   expect(await screen.findByText("Alias de columnas NPS guardados.")).toBeInTheDocument();
 });

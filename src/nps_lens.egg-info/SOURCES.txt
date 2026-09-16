@@ -46,6 +46,7 @@ src/nps_lens/design/__init__.py
 src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
+src/nps_lens/domain/column_aliases.py
 src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
@@ -111,6 +112,7 @@ src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
+tests/test_column_aliases.py
 tests/test_config_env.py
 tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
