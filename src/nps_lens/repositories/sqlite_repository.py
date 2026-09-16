@@ -174,7 +174,9 @@ class SqliteNpsRepository:
                 "CREATE TABLE IF NOT EXISTS taxonomy_state (context TEXT PRIMARY KEY, payload TEXT NOT NULL)"
             )
 
-    def migrate_source_identity(self, uploads_dir: Path) -> None:
+    def migrate_source_identity(
+        self, uploads_dir: Path, column_aliases_path: Optional[Path] = None
+    ) -> None:
         """Recover originals from retained uploads, then migrate keys once in a transaction."""
         with self._connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -202,6 +204,7 @@ class SqliteNpsRepository:
                         first["service_origin"],
                         first["service_origin_n1"],
                         first["service_origin_n2"],
+                        column_aliases_path=column_aliases_path,
                     ).df
                     if parsed.empty:
                         continue

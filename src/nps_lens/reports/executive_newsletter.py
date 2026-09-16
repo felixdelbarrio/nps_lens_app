@@ -188,7 +188,8 @@ def build_executive_newsletter(
 
     quotes: list[str] = []
     for connection in connections:
-        for quote in connection["comments"]:
+        for raw_quote in _list(connection.get("comments")):
+            quote = str(raw_quote)
             if quote not in quotes:
                 quotes.append(quote)
             if len(quotes) == 4:

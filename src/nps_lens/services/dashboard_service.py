@@ -864,9 +864,14 @@ class DashboardService:
     ) -> dict[str, object]:
         base_value = compute_nps_from_scores(base_df["NPS"]) if not base_df.empty else float("nan")
         base_nps = float(base_value) if np.isfinite(base_value) else None
-        base_label = selected_month_label(df=base_df).replace("periodo seleccionado", "sin histórico")
-        base_dates = pd.to_datetime(base_df.get("Fecha"), errors="coerce").dropna()
-        base_range = (
+        base_label = selected_month_label(df=base_df).replace(
+            "periodo seleccionado", "sin histórico"
+        )
+        base_date_values = (
+            base_df["Fecha"] if "Fecha" in base_df.columns else pd.Series(dtype="datetime64[ns]")
+        )
+        base_dates = pd.to_datetime(base_date_values, errors="coerce").dropna()
+        base_range: dict[str, Optional[str]] = (
             {
                 "start": base_dates.min().date().isoformat(),
                 "end": (
@@ -897,9 +902,7 @@ class DashboardService:
             "subtitle": (
                 "El canal selecciona tópicos; sus NPS y la base usan todas las opiniones."
             ),
-            "figure": self._serialize_figure(
-                chart_driver_bar(stats, theme, base_label=base_label)
-            ),
+            "figure": self._serialize_figure(chart_driver_bar(stats, theme, base_label=base_label)),
             "table": self._serialize_rows(stats.head(30)),
             "has_data": not stats.empty,
         }

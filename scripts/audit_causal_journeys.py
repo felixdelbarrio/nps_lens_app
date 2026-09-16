@@ -9,6 +9,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Optional, cast
+
+import pandas as pd
 
 from nps_lens.analytics.incident_attribution import build_incident_attribution_chains
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_MIN_SIMILARITY
@@ -54,8 +57,15 @@ def main() -> None:
         raise SystemExit(
             "No hay datos suficientes para auditar el contexto y periodo seleccionados."
         )
-    catalog = bundle["mode_payload"]["broken_journeys_df"]
-    evidence = bundle["mode_payload"]["broken_journey_links_df"]
+    mode_payload = cast(dict[str, pd.DataFrame], bundle["mode_payload"])
+    core = cast(dict[str, object], bundle["core"])
+    focus_df = cast(pd.DataFrame, bundle["focus_df"])
+    helix_slice = cast(pd.DataFrame, bundle["helix_slice"])
+    executive_journey_catalog = cast(
+        Optional[list[dict[str, object]]], bundle["executive_journey_catalog"]
+    )
+    catalog = mode_payload["broken_journeys_df"]
+    evidence = mode_payload["broken_journey_links_df"]
     checks = {
         "unique_journey_ids": bool(catalog.journey_id.is_unique),
         "unique_journey_labels": bool(catalog.journey_label.is_unique),
@@ -75,25 +85,25 @@ def main() -> None:
     ):
         payload = service._build_touchpoint_mode_payload(
             touchpoint_source=mode,
-            links_df=bundle["core"]["links_df"],
-            focus_df=bundle["focus_df"],
-            helix_df=bundle["helix_slice"],
-            by_topic_weekly=bundle["core"]["by_topic_weekly"],
-            executive_journey_catalog=bundle["executive_journey_catalog"],
+            links_df=cast(pd.DataFrame, core["links_df"]),
+            focus_df=focus_df,
+            helix_df=helix_slice,
+            by_topic_weekly=cast(pd.DataFrame, core["by_topic_weekly"]),
+            executive_journey_catalog=executive_journey_catalog,
         )
         mapping = payload["causal_topic_map_df"]
         mapped = payload["links_mode_df"]
         chains = build_incident_attribution_chains(
             mapped,
-            bundle["focus_df"],
-            bundle["helix_slice"],
+            focus_df,
+            helix_slice,
             touchpoint_source=mode,
             top_k=0,
             journey_catalog_df=payload["broken_journeys_df"],
             journey_links_df=payload["broken_journey_links_df"],
-            executive_journey_catalog=bundle["executive_journey_catalog"],
+            executive_journey_catalog=executive_journey_catalog,
         )
-        original_series = bundle["core"]["by_topic_weekly"]
+        original_series = cast(pd.DataFrame, core["by_topic_weekly"])
         eligible = original_series.loc[original_series.nps_topic.isin(mapping.source_nps_topic)]
         remapped_series = payload["by_topic_weekly_mode"]
         valid = {

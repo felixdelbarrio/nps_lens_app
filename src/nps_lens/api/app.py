@@ -546,7 +546,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def nps_column_aliases(request: Request) -> dict[str, object]:
         require_admin(request)
         settings = cast(Settings, request.app.state.settings)
-        return ColumnAliasRegistry.load(settings.column_aliases_path).to_dict()
+        context = taxonomy_context(request)
+        return ColumnAliasRegistry.load(
+            settings.column_aliases_path,
+            context.service_origin,
+            context.service_origin_n1,
+        ).to_context_dict(context.service_origin, context.service_origin_n1)
 
     @app.put("/api/settings/nps-column-aliases")
     def update_nps_column_aliases(
@@ -555,12 +560,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, object]:
         require_admin(request)
         settings = cast(Settings, request.app.state.settings)
+        context = taxonomy_context(request)
         try:
-            registry = ColumnAliasRegistry.from_dict(payload.model_dump())
-            registry.save(settings.column_aliases_path)
+            if payload.service_origin and payload.service_origin != context.service_origin:
+                raise ValueError("El BUUG del payload no coincide con el contexto seleccionado.")
+            if payload.service_origin_n1 and payload.service_origin_n1 != context.service_origin_n1:
+                raise ValueError("El N1 del payload no coincide con el contexto seleccionado.")
+            registry = ColumnAliasRegistry.from_dict(
+                {"schema_version": "1.0", "fields": payload.model_dump()["fields"]}
+            )
+            registry.save_for_context(
+                settings.column_aliases_path,
+                context.service_origin,
+                context.service_origin_n1,
+            )
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return registry.to_dict()
+        return registry.to_context_dict(context.service_origin, context.service_origin_n1)
 
     @app.get("/api/taxonomy")
     def taxonomy_studio(

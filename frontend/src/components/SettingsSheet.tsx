@@ -268,7 +268,11 @@ export function SettingsSheet({
                 Adapta nombres de cabeceras de nuevos formatos sin alterar sus datos.
               </p>
             </div></div>
-            <ColumnAliasMaintenance disabled={actionsDisabled} />
+            <ColumnAliasMaintenance
+              context={taxonomyContext}
+              disabled={actionsDisabled}
+              key={`${taxonomyContext.service_origin || ""}:${taxonomyContext.service_origin_n1 || ""}`}
+            />
           </section>
         ) : null}
 

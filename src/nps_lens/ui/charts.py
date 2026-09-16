@@ -779,7 +779,9 @@ def chart_daily_volume(
     return apply_plotly_template(fig, theme)
 
 
-def chart_driver_bar(driver_df: pd.DataFrame, theme: Theme, top_k: int = 12, *, base_label: str = "base"):
+def chart_driver_bar(
+    driver_df: pd.DataFrame, theme: Theme, top_k: int = 12, *, base_label: str = "base"
+):
     """Bar chart for driver gaps vs the classic-NPS base.
 
     Requires 'gap_vs_base' column in driver_df.

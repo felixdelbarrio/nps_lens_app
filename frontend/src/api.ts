@@ -293,6 +293,8 @@ export type EquivalenceRegistryPayload = {
 
 export type ColumnAliasRegistryPayload = {
   schema_version: string;
+  service_origin: string;
+  service_origin_n1: string;
   fields: Array<{ canonical: string; required: boolean; aliases: string[] }>;
 };
 
@@ -553,15 +555,20 @@ export async function updateEquivalences(
   );
 }
 
-export async function fetchNpsColumnAliases(): Promise<ColumnAliasRegistryPayload> {
-  return parseResponse<ColumnAliasRegistryPayload>(await fetch("/api/settings/nps-column-aliases"));
+export async function fetchNpsColumnAliases(
+  context: TaxonomyContext = {}
+): Promise<ColumnAliasRegistryPayload> {
+  return parseResponse<ColumnAliasRegistryPayload>(
+    await fetch(`/api/settings/nps-column-aliases?${new URLSearchParams(context)}`)
+  );
 }
 
 export async function updateNpsColumnAliases(
-  payload: ColumnAliasRegistryPayload
+  payload: ColumnAliasRegistryPayload,
+  context: TaxonomyContext = {}
 ): Promise<ColumnAliasRegistryPayload> {
   return parseResponse<ColumnAliasRegistryPayload>(
-    await fetch("/api/settings/nps-column-aliases", {
+    await fetch(`/api/settings/nps-column-aliases?${new URLSearchParams(context)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

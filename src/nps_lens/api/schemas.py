@@ -121,7 +121,9 @@ class ColumnAliasFieldRequest(BaseModel):
 
 
 class ColumnAliasRegistryRequest(BaseModel):
-    schema_version: str = "1.0"
+    schema_version: str = "2.0"
+    service_origin: str = ""
+    service_origin_n1: str = ""
     fields: list[ColumnAliasFieldRequest] = Field(default_factory=list)
 
 

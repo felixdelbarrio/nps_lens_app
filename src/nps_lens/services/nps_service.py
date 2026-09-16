@@ -21,7 +21,9 @@ class NpsService:
     def __init__(self, repository: SqliteNpsRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self.repository.migrate_source_identity(settings.data_dir / "uploads")
+        self.repository.migrate_source_identity(
+            settings.data_dir / "uploads", settings.column_aliases_path
+        )
         self.logger = logging.getLogger(__name__)
         repaired = self.repository.reconcile_processing_uploads()
         if repaired:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
 COLUMN_ALIAS_SCHEMA_VERSION = "1.0"
+COLUMN_ALIAS_STORAGE_SCHEMA_VERSION = "2.0"
 
 NPS_COLUMN_SPECS: tuple[tuple[str, bool, tuple[str, ...]], ...] = (
     ("Fecha", True, ("Date", "GF CUST SURVEY RESPONSE DATE")),
@@ -170,19 +171,111 @@ class ColumnAliasRegistry:
         return cls(fields)
 
     @classmethod
-    def load(cls, path: Optional[Path]) -> "ColumnAliasRegistry":
+    def load(
+        cls,
+        path: Optional[Path],
+        service_origin: str = "",
+        service_origin_n1: str = "",
+    ) -> "ColumnAliasRegistry":
         if path is None or not path.exists():
             return cls.default()
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
             raise ValueError("El fichero de alias de columnas no contiene un objeto JSON.")
-        return cls.from_dict(payload)
+        default_registry, contexts = cls._parse_storage(payload)
+        context_key = (str(service_origin).strip(), str(service_origin_n1).strip())
+        return contexts.get(context_key, default_registry)
 
     def save(self, path: Path) -> None:
+        """Persist a legacy/global registry; scoped saves migrate it automatically."""
+
+        self._write_payload(path, self.to_dict())
+
+    def save_for_context(
+        self,
+        path: Path,
+        service_origin: str,
+        service_origin_n1: str,
+    ) -> None:
+        origin = str(service_origin).strip()
+        origin_n1 = str(service_origin_n1).strip()
+        if not origin or not origin_n1:
+            raise ValueError("La configuración de alias requiere BUUG y N1.")
+
+        default_registry = self.default()
+        contexts: dict[tuple[str, str], ColumnAliasRegistry] = {}
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping):
+                raise ValueError("El fichero de alias de columnas no contiene un objeto JSON.")
+            default_registry, contexts = self._parse_storage(payload)
+        contexts[(origin, origin_n1)] = self
+        self._write_payload(
+            path,
+            {
+                "schema_version": COLUMN_ALIAS_STORAGE_SCHEMA_VERSION,
+                "default_fields": [field.to_dict() for field in default_registry.fields],
+                "contexts": [
+                    {
+                        "service_origin": context_origin,
+                        "service_origin_n1": context_n1,
+                        "fields": [field.to_dict() for field in registry.fields],
+                    }
+                    for (context_origin, context_n1), registry in sorted(contexts.items())
+                ],
+            },
+        )
+
+    def to_context_dict(self, service_origin: str, service_origin_n1: str) -> dict[str, object]:
+        return {
+            "schema_version": COLUMN_ALIAS_STORAGE_SCHEMA_VERSION,
+            "service_origin": str(service_origin).strip(),
+            "service_origin_n1": str(service_origin_n1).strip(),
+            "fields": [field.to_dict() for field in self.fields],
+        }
+
+    @classmethod
+    def _parse_storage(
+        cls, payload: Mapping[str, object]
+    ) -> tuple["ColumnAliasRegistry", dict[tuple[str, str], "ColumnAliasRegistry"]]:
+        version = str(payload.get("schema_version", COLUMN_ALIAS_SCHEMA_VERSION))
+        if version == COLUMN_ALIAS_SCHEMA_VERSION:
+            return cls.from_dict(payload), {}
+        if version != COLUMN_ALIAS_STORAGE_SCHEMA_VERSION:
+            raise ValueError("Versión de configuración de alias de columnas no soportada.")
+
+        default_fields = payload.get("default_fields")
+        default_registry = cls.from_dict(
+            {"schema_version": COLUMN_ALIAS_SCHEMA_VERSION, "fields": default_fields}
+        )
+        raw_contexts = payload.get("contexts", [])
+        if not isinstance(raw_contexts, list):
+            raise ValueError("Los contextos de alias de columnas deben ser una lista.")
+        contexts: dict[tuple[str, str], ColumnAliasRegistry] = {}
+        for raw_context in raw_contexts:
+            if not isinstance(raw_context, Mapping):
+                raise ValueError("Cada contexto de alias de columnas debe ser un objeto.")
+            origin = str(raw_context.get("service_origin", "")).strip()
+            origin_n1 = str(raw_context.get("service_origin_n1", "")).strip()
+            if not origin or not origin_n1:
+                raise ValueError("Cada contexto de alias requiere BUUG y N1.")
+            key = (origin, origin_n1)
+            if key in contexts:
+                raise ValueError(f"El contexto de alias '{origin} → {origin_n1}' está duplicado.")
+            contexts[key] = cls.from_dict(
+                {
+                    "schema_version": COLUMN_ALIAS_SCHEMA_VERSION,
+                    "fields": raw_context.get("fields"),
+                }
+            )
+        return default_registry, contexts
+
+    @staticmethod
+    def _write_payload(path: Path, payload: Mapping[str, object]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(
-            json.dumps(self.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         temporary.replace(path)

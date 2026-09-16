@@ -4,11 +4,26 @@ import useSWR from "swr";
 import {
   fetchNpsColumnAliases,
   updateNpsColumnAliases,
-  type ColumnAliasRegistryPayload
+  type ColumnAliasRegistryPayload,
+  type TaxonomyContext
 } from "../api";
 
-export function ColumnAliasMaintenance({ disabled = false }: { disabled?: boolean }) {
-  const { data, error, mutate } = useSWR("nps-column-aliases", fetchNpsColumnAliases);
+export function ColumnAliasMaintenance({
+  context = {},
+  disabled = false
+}: {
+  context?: TaxonomyContext;
+  disabled?: boolean;
+}) {
+  const aliasContext = {
+    service_origin: context.service_origin || "",
+    service_origin_n1: context.service_origin_n1 || ""
+  };
+  const contextKey = new URLSearchParams(aliasContext).toString();
+  const { data, error, mutate } = useSWR(
+    ["nps-column-aliases", contextKey],
+    () => fetchNpsColumnAliases(aliasContext)
+  );
   const [draft, setDraft] = useState<ColumnAliasRegistryPayload | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -30,7 +45,7 @@ export function ColumnAliasMaintenance({ disabled = false }: { disabled?: boolea
     setSaving(true);
     setMessage("");
     try {
-      const next = await updateNpsColumnAliases(registry);
+      const next = await updateNpsColumnAliases(registry, aliasContext);
       setDraft(null);
       await mutate(next, false);
       setMessage("Alias de columnas NPS guardados.");
@@ -45,6 +60,9 @@ export function ColumnAliasMaintenance({ disabled = false }: { disabled?: boolea
     <div className="settings-section-stack">
       <p className="secondary-copy">
         Se busca primero el nombre estándar. Los alias solo identifican cabeceras y no cambian valores ni reglas NPS.
+      </p>
+      <p className="field-hint">
+        Configuración para: {registry.service_origin} → {registry.service_origin_n1}
       </p>
       {registry.fields.map((field, index) => (
         <article className="settings-subsection" key={field.canonical}>

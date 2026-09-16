@@ -112,19 +112,28 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
 def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     client = TestClient(create_app(settings))
-    original = client.get("/api/settings/nps-column-aliases")
+    senda_context = {"service_origin": "BBVA México", "service_origin_n1": "Senda"}
+    web_context = {"service_origin": "BBVA México", "service_origin_n1": "Web"}
+    original = client.get("/api/settings/nps-column-aliases", params=senda_context)
     assert original.status_code == 200
     payload = original.json()
     canal = next(field for field in payload["fields"] if field["canonical"] == "Canal")
     canal["aliases"].append("Touch point")
 
-    saved = client.put("/api/settings/nps-column-aliases", json=payload)
+    saved = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
     assert saved.status_code == 200
     assert settings.column_aliases_path.exists()
-    assert client.get("/api/settings/nps-column-aliases").json() == saved.json()
+    assert (
+        client.get("/api/settings/nps-column-aliases", params=senda_context).json() == saved.json()
+    )
+    other_context = client.get("/api/settings/nps-column-aliases", params=web_context).json()
+    assert "Touch point" not in next(
+        field["aliases"] for field in other_context["fields"] if field["canonical"] == "Canal"
+    )
+    assert other_context["service_origin_n1"] == "Web"
 
     canal["aliases"].append("touch-point")
-    rejected = client.put("/api/settings/nps-column-aliases", json=payload)
+    rejected = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
     assert rejected.status_code == 400
     assert "duplicado" in rejected.json()["detail"]
 

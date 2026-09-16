@@ -18,9 +18,7 @@ def rank_nps_gaps(
 ) -> list[DriverStat]:
     """Observed negative gaps against the supplied classic-NPS base."""
     reference = (
-        float(base_nps)
-        if base_nps is not None
-        else compute_nps_from_scores(df[survey_score_col])
+        float(base_nps) if base_nps is not None else compute_nps_from_scores(df[survey_score_col])
     )
     rows = [
         row
