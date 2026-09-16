@@ -417,6 +417,7 @@ class Settings:
     dotenv_path: Optional[Path] = None
     knowledge_dir: Path = Path("./knowledge")
     equivalences_path: Path = Path("./data/config/equivalences.json")
+    column_aliases_path: Path = Path("./data/config/nps_column_aliases.json")
     service_origin_n2_values: list[str] = field(default_factory=list)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
@@ -446,6 +447,12 @@ class Settings:
             os.getenv(
                 "NPS_LENS_EQUIVALENCES_PATH",
                 str(data_dir / "config" / "equivalences.json"),
+            )
+        ).expanduser()
+        column_aliases_path = Path(
+            os.getenv(
+                "NPS_LENS_COLUMN_ALIASES_PATH",
+                str(data_dir / "config" / "nps_column_aliases.json"),
             )
         ).expanduser()
 
@@ -577,6 +584,7 @@ class Settings:
             dotenv_path=resolve_dotenv_path(),
             knowledge_dir=knowledge_dir,
             equivalences_path=equivalences_path,
+            column_aliases_path=column_aliases_path,
             service_origin_n2_values=service_origin_n2_values,
             service_origin_n2_map=service_origin_n2_map,
             default_theme_mode=default_theme_mode,

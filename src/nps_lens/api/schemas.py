@@ -114,6 +114,17 @@ class EquivalenceRegistryRequest(BaseModel):
     dimensions: dict[str, list[EquivalenceGroupRequest]] = Field(default_factory=dict)
 
 
+class ColumnAliasFieldRequest(BaseModel):
+    canonical: str
+    required: bool
+    aliases: list[str] = Field(default_factory=list)
+
+
+class ColumnAliasRegistryRequest(BaseModel):
+    schema_version: str = "1.0"
+    fields: list[ColumnAliasFieldRequest] = Field(default_factory=list)
+
+
 class HelixUploadResponse(BaseModel):
     upload_id: str
     filename: str

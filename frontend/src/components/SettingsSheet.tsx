@@ -9,8 +9,9 @@ import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
 import { SnapshotSettings } from "./TaxonomyStudio";
 import type { TaxonomyContext } from "../api";
 import { TelemetryPanel } from "./TelemetryPanel";
+import { ColumnAliasMaintenance } from "./ColumnAliasMaintenance";
 
-export type SettingsTab = "appearance" | "ingestion" | "advanced" | "maintenance" | "equivalences" | "telemetry" | "snapshots";
+export type SettingsTab = "appearance" | "ingestion" | "column-aliases" | "advanced" | "maintenance" | "equivalences" | "telemetry" | "snapshots";
 
 type SettingsSheetProps = {
   taxonomyContext?: TaxonomyContext;
@@ -46,6 +47,7 @@ type SettingsSheetProps = {
 const SETTINGS_TABS = [
   { id: "appearance", label: "Configuración" },
   { id: "ingestion", label: "Reglas de ingesta" },
+  { id: "column-aliases", label: "Alias de columnas NPS" },
   { id: "advanced", label: "Ajustes avanzados" },
   { id: "equivalences", label: "Equivalencias" },
   { id: "snapshots", label: "Snapshots" },
@@ -255,6 +257,18 @@ export function SettingsSheet({
                 La regla también se aplica al histórico y a las nuevas publicaciones.
               </p>
             </article>
+          </section>
+        ) : null}
+
+        {activeTab === "column-aliases" ? (
+          <section className="settings-group">
+            <div className="section-heading"><div>
+              <h3>Alias de columnas NPS</h3>
+              <p className="secondary-copy">
+                Adapta nombres de cabeceras de nuevos formatos sin alterar sus datos.
+              </p>
+            </div></div>
+            <ColumnAliasMaintenance disabled={actionsDisabled} />
           </section>
         ) : null}
 

@@ -23,6 +23,7 @@ def _settings(tmp_path: Path) -> Settings:
         default_service_origin_n1="Senda",
         allowed_service_origins=["BBVA México"],
         allowed_service_origin_n1={"BBVA México": ["Senda"]},
+        column_aliases_path=tmp_path / "data" / "config" / "nps_column_aliases.json",
         default_downloads_path=str(tmp_path / "downloads"),
         log_level="INFO",
     )
@@ -106,6 +107,26 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
     payload = response.json()
     assert payload["status"] == "failed"
     assert any(issue["code"] == "missing_required_column" for issue in payload["issues"])
+
+
+def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    client = TestClient(create_app(settings))
+    original = client.get("/api/settings/nps-column-aliases")
+    assert original.status_code == 200
+    payload = original.json()
+    canal = next(field for field in payload["fields"] if field["canonical"] == "Canal")
+    canal["aliases"].append("Touch point")
+
+    saved = client.put("/api/settings/nps-column-aliases", json=payload)
+    assert saved.status_code == 200
+    assert settings.column_aliases_path.exists()
+    assert client.get("/api/settings/nps-column-aliases").json() == saved.json()
+
+    canal["aliases"].append("touch-point")
+    rejected = client.put("/api/settings/nps-column-aliases", json=payload)
+    assert rejected.status_code == 400
+    assert "duplicado" in rejected.json()["detail"]
 
 
 def test_gcp_iap_domain_and_admin_boundaries(tmp_path: Path) -> None:

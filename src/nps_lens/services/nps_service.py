@@ -74,6 +74,7 @@ class NpsService:
             service_origin_n1=context.service_origin_n1,
             service_origin_n2=context.service_origin_n2,
             sheet_name=sheet_name or None,
+            column_aliases_path=self.settings.column_aliases_path,
         )
         raw_rows = self._meta_int(result.meta, "raw_rows", len(result.df))
         normalized_rows = self._meta_int(result.meta, "normalized_rows", len(result.df))
