@@ -45,7 +45,7 @@ def normalize_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
 
     numeric = pd.to_numeric(scores, errors="coerce")
     valid = numeric.between(0, 10) & np.isfinite(numeric)
-    rounded = cast(pd.Series[Any], np.floor(numeric + 0.5))
+    rounded: pd.Series[Any] = cast(Any, np.floor(numeric + 0.5))
     return rounded.where(valid)
 
 
