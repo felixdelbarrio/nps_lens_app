@@ -18,7 +18,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const [message, setMessage] = useState("");
   const [certaintyThreshold, setCertaintyThreshold] = useState(0.65);
   const [minF1, setMinF1] = useState(0.65);
-  const [discoveryMethod, setDiscoveryMethod] = useState<TaxonomyDiscoverySettings["method"]>("disabled");
+  const [discoveryMethod, setDiscoveryMethod] = useState<TaxonomyDiscoverySettings["method"]>("local");
   const [designerUrl, setDesignerUrl] = useState("");
   const [classifierUrl, setClassifierUrl] = useState("");
   const [left, setLeft] = useState<TaxonomyMode>("NORMALIZED");
@@ -48,23 +48,30 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   }
   async function saveDiscovery(nextMethod = discoveryMethod) {
     await action(async () => {
-      await taxonomyRequest("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("Configuración de descubrimiento guardada.");
     }, false);
   }
   async function connectDiscovery() {
     await action(async () => {
-      await taxonomyRequest("/discovery/connect", context, { method: "POST" });
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/connect", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("ChatGPT conectado.");
     }, false);
   }
   async function disconnectDiscovery() {
     await action(async () => {
-      await taxonomyRequest("/discovery/disconnect", context, { method: "POST" });
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/disconnect", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("Sesión local de ChatGPT eliminada.");
+    }, false);
+  }
+  async function verifyDiscovery() {
+    await action(async () => {
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/verify", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
+      setMessage("Conexión con ChatGPT verificada.");
     }, false);
   }
   async function explore(next: typeof view) {
@@ -87,15 +94,15 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     </div>
     {data.discovery_local_available && discovery ? <article className="settings-subsection taxonomy-discovery-settings">
       <h3>Método de descubrimiento</h3>
-      <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="disabled">No configurado</option><option value="chatgpt_browser">ChatGPT automatizado</option></select></label>
+      <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="local">Local</option><option value="chatgpt_browser">ChatGPT automatizado</option></select></label>
       {discoveryMethod === "chatgpt_browser" ? <>
         <div className="field-grid">
           <label>Designer URL<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label>
           <label>Classifier URL<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label>
         </div>
-        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "expired" ? "Sesión caducada" : "No conectado"}</p>
-        <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
-        <p className="field-hint">El acceso se realiza directamente en Chromium. NPS Lens no captura usuario, contraseña ni MFA.</p>
+        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
+        <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
+        <p className="field-hint">El acceso se realiza directamente en Google Chrome cuando está instalado, con Chromium como alternativa. NPS Lens no captura usuario, contraseña ni MFA. Si Cloudflare repite el challenge, cierra la ventana, pulsa Desconectar y vuelve a Conectar una sola vez.</p>
       </> : null}
     </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>

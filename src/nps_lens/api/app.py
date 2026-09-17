@@ -675,7 +675,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(
         request: Request,
-        check_session: bool = True,
+        check_session: bool = False,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
@@ -734,6 +734,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_admin(request)
         require_local_taxonomy(request)
         return dashboard_layer.taxonomy.disconnect_discovery()
+
+    @app.post("/api/taxonomy/discovery/verify")
+    def verify_taxonomy_discovery(
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        try:
+            return dashboard_layer.taxonomy.verify_discovery_connection()
+        except TaxonomyDiscoveryError as exc:
+            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.put("/api/taxonomy/settings")
     def taxonomy_settings(

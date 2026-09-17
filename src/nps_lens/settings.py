@@ -23,7 +23,7 @@ DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Detractores"
 DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
-DEFAULT_TAXONOMY_DISCOVERY_METHOD = "disabled"
+DEFAULT_TAXONOMY_DISCOVERY_METHOD = "local"
 DEFAULT_TAXONOMY_DESIGNER_URL = "https://chatgpt.com/g/g-p-6aaabb05fd0881a49965c28ef21333a9"
 DEFAULT_TAXONOMY_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aaab79eb94481a498b0b2bb6ba2cb2a"
 DEFAULT_SERVICE_ORIGINS = [
@@ -382,7 +382,7 @@ def normalize_report_dimension_analysis(value: object) -> str:
 
 def normalize_taxonomy_discovery_method(value: object) -> str:
     raw = str(value or "").strip().lower()
-    if raw not in {"disabled", "chatgpt_browser"}:
+    if raw not in {"local", "chatgpt_browser"}:
         raise ValueError("Método de descubrimiento desconocido.")
     return raw
 

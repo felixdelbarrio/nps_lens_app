@@ -12,6 +12,7 @@ DISCOVERY_ENGINE_VERSION = "chatgpt-browser-v1"
 
 class DiscoveryErrorCode(str, Enum):
     AUTH_REQUIRED = "AUTH_REQUIRED"
+    INTERACTION_REQUIRED = "INTERACTION_REQUIRED"
     CHATGPT_UNAVAILABLE = "CHATGPT_UNAVAILABLE"
     PROJECT_NOT_ACCESSIBLE = "PROJECT_NOT_ACCESSIBLE"
     UI_CHANGED = "UI_CHANGED"
@@ -38,6 +39,8 @@ class ChatGPTBrowser(Protocol):
 
     def connect(self) -> str: ...
 
+    def verify_connection(self) -> str: ...
+
     def disconnect(self) -> None: ...
 
     def automation(self) -> ContextManager[BrowserAutomationRun]: ...
@@ -47,6 +50,8 @@ class TaxonomyDiscoveryProvider(Protocol):
     def session_status(self) -> str: ...
 
     def connect(self) -> str: ...
+
+    def verify_connection(self) -> str: ...
 
     def disconnect(self) -> None: ...
 
@@ -136,6 +141,9 @@ class ChatGPTTaxonomyDiscoveryProvider:
 
     def connect(self) -> str:
         return self.browser.connect()
+
+    def verify_connection(self) -> str:
+        return self.browser.verify_connection()
 
     def disconnect(self) -> None:
         self.browser.disconnect()

@@ -402,7 +402,9 @@ class DashboardService:
             batch_size=settings.taxonomy_batch_size,
         )
         browser = ChatGPTBrowserClient(
-            settings.data_dir / "sessions" / "chatgpt", settings.taxonomy_designer_url
+            settings.data_dir / "sessions" / "chatgpt",
+            settings.taxonomy_designer_url,
+            settings.taxonomy_classifier_url,
         )
         return ChatGPTTaxonomyDiscoveryProvider(browser, config)
 
