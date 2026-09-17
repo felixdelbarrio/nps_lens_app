@@ -90,6 +90,12 @@ class TaxonomyService:
     def set_discovery_provider(
         self, discovery_provider: Optional[TaxonomyDiscoveryProvider]
     ) -> None:
+        if self.discovery_provider is not None:
+            if discovery_provider is not None and (
+                self.discovery_provider.signature_config() == discovery_provider.signature_config()
+            ):
+                return
+            self.discovery_provider.disconnect()
         self.discovery_provider = discovery_provider
 
     def discovery_status(self, *, check_session: bool = False) -> dict[str, Any]:
@@ -97,7 +103,7 @@ class TaxonomyService:
             return {"method": "local", "session": "not_connected"}
         return {
             **self.discovery_provider.signature_config(),
-            "session": (self.discovery_provider.session_status() if check_session else "unknown"),
+            "session": self.discovery_provider.session_status(),
         }
 
     def connect_discovery(self) -> dict[str, Any]:
@@ -119,7 +125,7 @@ class TaxonomyService:
     def disconnect_discovery(self) -> dict[str, Any]:
         if self.discovery_provider is not None:
             self.discovery_provider.disconnect()
-        return {"session": "not_connected"}
+        return self.discovery_status(check_session=True)
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)
