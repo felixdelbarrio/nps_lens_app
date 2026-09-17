@@ -48,7 +48,7 @@ MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
 PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
 
-.PHONY: default venv python-dev python-build setup frontend-install frontend-build frontend-test frontend-e2e build run kill webapp WebApp lint typecheck test ci clean
+.PHONY: default venv python-dev python-build python-playwright setup frontend-install frontend-build frontend-test frontend-e2e build run kill webapp WebApp lint typecheck test ci clean
 
 default:
 	@echo ""
@@ -72,16 +72,22 @@ venv:
 python-dev:
 	$(MAKE) venv
 	$(PIP) install -e ".[dev]"
+	$(MAKE) python-playwright
 
 python-build:
 	$(MAKE) venv
 	$(PIP) install -e ".[build]"
+	$(MAKE) python-playwright
+
+python-playwright:
+	PLAYWRIGHT_BROWSERS_PATH=0 $(PY) -m playwright install chromium
 
 setup:
 	$(MAKE) clean
 	rm -rf $(VENV)
 	$(MAKE) venv
 	$(PIP) install -e ".[dev,build]"
+	$(MAKE) python-playwright
 	$(MAKE) frontend-install
 
 frontend-install:
@@ -125,6 +131,7 @@ build:
 			--add-data="$(ROOT)/.env.example:." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
+			--collect-all playwright \
 			--copy-metadata python-dotenv \
 			--copy-metadata pywebview \
 			--copy-metadata fastapi \
@@ -169,6 +176,7 @@ build:
 			--add-data="$(ROOT)/.env.example:." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
+			--collect-all playwright \
 			--copy-metadata python-dotenv \
 			--copy-metadata pywebview \
 			--copy-metadata fastapi \
@@ -194,6 +202,7 @@ build:
 			--add-data="$(ROOT)/.env.example;." \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
+			--collect-all playwright \
 			--copy-metadata python-dotenv \
 			--copy-metadata pywebview \
 			--copy-metadata fastapi \

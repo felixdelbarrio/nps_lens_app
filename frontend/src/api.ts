@@ -661,7 +661,14 @@ export type TaxonomyStatus = {
   default: TaxonomyMode;
   policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
   restored: boolean;
+  discovery_local_available?: boolean;
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
+};
+export type TaxonomyDiscoverySettings = {
+  method: "disabled" | "chatgpt_browser";
+  designer_url: string;
+  classifier_url: string;
+  session: "connected" | "not_connected" | "expired" | "unknown";
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

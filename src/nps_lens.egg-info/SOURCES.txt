@@ -91,9 +91,11 @@ src/nps_lens/reports/presentation_context.py
 src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py
+src/nps_lens/services/chatgpt_browser.py
 src/nps_lens/services/dashboard_service.py
 src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
+src/nps_lens/services/taxonomy_discovery.py
 src/nps_lens/services/taxonomy_service.py
 src/nps_lens/services/analytics/__init__.py
 src/nps_lens/services/analytics/insights_service.py
@@ -148,6 +150,7 @@ tests/test_ppt_wrapped_table_layout.py
 tests/test_publication_scope.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
+tests/test_taxonomy_discovery.py
 tests/test_taxonomy_engine.py
 tests/test_text_mining.py
 tests/test_ui_business_periods.py
