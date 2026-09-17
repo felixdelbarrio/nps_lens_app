@@ -57,7 +57,7 @@ class FakeRun:
 class FakeBrowser:
     def __init__(self, run: FakeRun) -> None:
         self.run = run
-        self.headless_runs = 0
+        self.automation_runs = 0
         self.disconnected = False
 
     def session_status(self) -> str:
@@ -74,7 +74,7 @@ class FakeBrowser:
 
     @contextmanager
     def automation(self) -> Iterator[FakeRun]:
-        self.headless_runs += 1
+        self.automation_runs += 1
         yield self.run
 
 
@@ -318,3 +318,108 @@ def test_automation_does_not_open_browser_without_connect(browser):
         pass
     assert error.value.code == DiscoveryErrorCode.AUTH_REQUIRED
     assert not launches
+
+
+def test_disconnect_interrupts_a_pending_wait(browser, monkeypatch):
+    import asyncio
+    from concurrent.futures import CancelledError, ThreadPoolExecutor
+    from threading import Event
+
+    client, context, _, driver = browser
+    client.connect()
+    entered = Event()
+
+    async def waiting(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(context.pages[0], "wait_for_function", waiting)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(client.create_taxonomy, "pending", client.designer_url)
+        assert entered.wait(timeout=5)
+        profile = client.profile_dir
+        client.disconnect()
+        with pytest.raises(CancelledError):
+            future.result(timeout=5)
+    assert context.closed and driver.stopped
+    assert not profile.exists()
+
+
+def test_project_verification_challenge_does_not_renavigate(browser, monkeypatch):
+    client, context, launches, _ = browser
+    page = context.pages[0]
+    goto = page.goto
+
+    async def challenge(url, **kwargs):
+        await goto(url, **kwargs)
+        if url == client.designer_url:
+            page.state = "interaction"
+
+    monkeypatch.setattr(page, "goto", challenge)
+    with pytest.raises(TaxonomyDiscoveryError):
+        client.connect()
+    page.state = "ready"
+    client.verify_connection()
+    assert page.visited == ["https://chatgpt.com/", client.designer_url, client.classifier_url]
+    assert len(launches) == 1
+
+
+def test_network_error_does_not_retry_and_closes(browser, monkeypatch):
+    client, context, _, driver = browser
+    calls = []
+
+    async def failing(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("connection failed")
+
+    monkeypatch.setattr(context.pages[0], "goto", failing)
+    with pytest.raises(TaxonomyDiscoveryError) as error:
+        client.connect()
+    assert error.value.code == DiscoveryErrorCode.CHATGPT_UNAVAILABLE
+    assert len(calls) == 1
+    assert context.closed and driver.stopped
+    assert client.profile_dir is None
+
+
+def test_missing_completion_is_never_accepted(browser, monkeypatch):
+    client, context, _, driver = browser
+    client.connect()
+    page = context.pages[0]
+    wait = page.wait_for_function
+
+    async def incomplete(script, **kwargs):
+        if "before =>" in script:
+            page.responses.append("partial JSON")
+            raise RuntimeError("timeout waiting for completion")
+        await wait(script, **kwargs)
+
+    monkeypatch.setattr(page, "wait_for_function", incomplete)
+    with pytest.raises(TaxonomyDiscoveryError) as error:
+        with client.automation() as run:
+            run.create_taxonomy("bulk", client.designer_url)
+    assert error.value.code == DiscoveryErrorCode.TIMEOUT
+    assert page.sent == ["bulk"]
+    assert context.closed and driver.stopped
+
+
+def test_process_cleanup_targets_only_owned_processes(browser, monkeypatch):
+    from unittest.mock import Mock
+
+    import psutil
+
+    client, _, _, _ = browser
+    owned = Mock()
+    unrelated = Mock()
+    client._processes = [owned]
+    calls = []
+
+    def wait(processes, timeout):
+        calls.append(list(processes))
+        return ([], list(processes)) if len(calls) < 3 else (list(processes), [])
+
+    monkeypatch.setattr(psutil, "wait_procs", wait)
+    client._reap_processes()
+    owned.terminate.assert_called_once()
+    owned.kill.assert_called_once()
+    unrelated.terminate.assert_not_called()
+    assert all(processes == [owned] for processes in calls)
