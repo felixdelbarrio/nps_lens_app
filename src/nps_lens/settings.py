@@ -47,9 +47,7 @@ BOOTSTRAP_CONTEXT_ENV_KEYS = {
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
 }
-
 SERVICE_ORIGIN_N2_MAP_ENV_KEY = "NPS_LENS_SERVICE_ORIGIN_N2_MAP"
-
 UI_PREF_ENV_KEYS = {
     "service_origin": "NPS_LENS_UI_SERVICE_ORIGIN",
     "service_origin_n1": "NPS_LENS_UI_SERVICE_ORIGIN_N1",
@@ -123,7 +121,6 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
             else:
                 output[normalized_key] = _dedupe(_split_csv(str(items)))
         return output
-
     output = {}
     for chunk in [item.strip() for item in raw.split(";") if item.strip()]:
         if ":" not in chunk:
@@ -148,7 +145,6 @@ def _parse_origin_n2_map(value: str) -> dict[str, dict[str, list[str]]]:
         return {}
     if not isinstance(parsed, dict):
         return {}
-
     output: dict[str, dict[str, list[str]]] = {}
     for origin_key, origin_value in parsed.items():
         origin = str(origin_key).strip()
@@ -189,7 +185,6 @@ def resolve_dotenv_path() -> Optional[Path]:
     if explicit:
         candidate = Path(explicit).expanduser()
         return candidate if candidate.exists() else candidate
-
     if getattr(sys, "frozen", False):
         return _runtime_app_home() / ".env"
 
@@ -236,7 +231,6 @@ def _should_bootstrap_value(env_key: str, current_value: Optional[str]) -> bool:
 def ensure_runtime_dotenv(dotenv_path: Optional[Path]) -> Optional[Path]:
     if dotenv_path is None:
         return None
-
     dotenv_example_path = resolve_dotenv_example_path()
     template_values = _env_template_values(dotenv_example_path)
     try:
@@ -249,7 +243,6 @@ def ensure_runtime_dotenv(dotenv_path: Optional[Path]) -> Optional[Path]:
             else:
                 dotenv_path.touch()
             return dotenv_path
-
         if not template_values:
             return dotenv_path
 
@@ -300,11 +293,31 @@ def default_downloads_path() -> str:
 
 
 def normalize_downloads_path(value: object, *, create: bool = False) -> str:
-    raw = str(value or "").strip()
-    candidate = Path(raw).expanduser() if raw else Path(default_downloads_path())
-    if not candidate.is_absolute():
-        candidate = (Path.home() / candidate).expanduser()
-    candidate = candidate.resolve()
+    """Normalize a user-selected download directory and keep it inside the user's home.
+
+    The UI can persist this value, so it must be treated as untrusted input.  We first
+    canonicalize it with ``realpath`` (which also resolves symlinks), then enforce that
+    the resulting path stays below the user's home directory before any filesystem
+    access is performed.  This is the containment pattern recommended by CodeQL for
+    ``py/path-injection``.
+    """
+
+    safe_root = os.path.realpath(os.path.expanduser("~"))
+    raw = str(value or "").strip() or default_downloads_path()
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(safe_root, expanded)
+
+    candidate_str = os.path.realpath(os.path.normpath(expanded))
+    safe_root_cmp = os.path.normcase(safe_root)
+    candidate_cmp = os.path.normcase(candidate_str)
+    safe_prefix = safe_root_cmp.rstrip(os.sep) + os.sep
+    if candidate_cmp != safe_root_cmp and not candidate_cmp.startswith(safe_prefix):
+        raise ValueError(
+            "La ruta de descargas debe estar dentro del directorio personal del usuario."
+        )
+
+    candidate = Path(candidate_str)
     if candidate.exists() and not candidate.is_dir():
         raise ValueError("La ruta de descargas debe apuntar a un directorio.")
     if create:
@@ -358,7 +371,6 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
     if not dotenv_path.exists():
         dotenv_path.touch()
-
     for name, raw_value in values.items():
         env_key = UI_PREF_ENV_KEYS.get(str(name))
         if not env_key:
@@ -393,7 +405,6 @@ def persist_service_origin_hierarchy(
     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
     if not dotenv_path.exists():
         dotenv_path.touch()
-
     payloads = {
         "NPS_LENS_SERVICE_ORIGIN_BUUG": ", ".join(service_origins),
         "NPS_LENS_SERVICE_ORIGIN_N1": json.dumps(service_origin_n1_map, ensure_ascii=False),
@@ -483,7 +494,6 @@ class Settings:
                 str(data_dir / "config" / "nps_column_aliases.json"),
             )
         ).expanduser()
-
         origins_raw = os.getenv(
             "NPS_LENS_SERVICE_ORIGIN_BUUG",
             os.getenv("NPS_LENS_SERVICE_ORIGIN", ", ".join(DEFAULT_SERVICE_ORIGINS)),
@@ -493,7 +503,6 @@ class Settings:
             or _dedupe(_split_csv(origins_raw))
             or DEFAULT_SERVICE_ORIGINS
         )
-
         origin_n1_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", "")
         origin_n1_map = _complete_origin_n1_map(
             allowed_service_origins,
@@ -504,14 +513,12 @@ class Settings:
             os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")
         ) or _dedupe(_split_csv(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")))
         service_origin_n2_map = _parse_origin_n2_map(os.getenv(SERVICE_ORIGIN_N2_MAP_ENV_KEY, ""))
-
         default_service_origin = (
             os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", DEFAULT_SERVICE_ORIGIN).strip()
             or allowed_service_origins[0]
         )
         if default_service_origin not in allowed_service_origins:
             default_service_origin = allowed_service_origins[0]
-
         default_n1_candidates = origin_n1_map.get(default_service_origin) or _fallback_n1_values(
             default_service_origin
         )
@@ -521,14 +528,12 @@ class Settings:
         )
         if default_service_origin_n1 not in default_n1_candidates:
             default_service_origin_n1 = default_n1_candidates[0]
-
         default_theme_mode = (
             os.getenv("NPS_LENS_UI_THEME_MODE", DEFAULT_UI_THEME_MODE).strip().lower()
             or DEFAULT_UI_THEME_MODE
         )
         if default_theme_mode not in {"light", "dark"}:
             default_theme_mode = DEFAULT_UI_THEME_MODE
-
         default_touchpoint_source = (
             os.getenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", DEFAULT_UI_TOUCHPOINT_SOURCE).strip()
             or DEFAULT_UI_TOUCHPOINT_SOURCE
@@ -608,7 +613,6 @@ class Settings:
         taxonomy_batch_size = min(
             max(_to_int(os.getenv("NPS_LENS_TAXONOMY_BATCH_SIZE", "500"), 500), 50), 2000
         )
-
         return Settings(
             data_dir=data_dir,
             database_path=database_path,
@@ -663,20 +667,17 @@ class Settings:
         default_service_origin = ui_pref("service_origin", self.default_service_origin)
         if default_service_origin not in self.allowed_service_origins:
             default_service_origin = self.default_service_origin
-
         available_n1 = self.allowed_service_origin_n1.get(default_service_origin) or [
             self.default_service_origin_n1
         ]
         default_service_origin_n1 = ui_pref("service_origin_n1", self.default_service_origin_n1)
         if default_service_origin_n1 not in available_n1:
             default_service_origin_n1 = available_n1[0]
-
         theme_mode = (
             ui_pref("theme_mode", self.default_theme_mode).lower() or self.default_theme_mode
         )
         if theme_mode not in {"light", "dark"}:
             theme_mode = self.default_theme_mode
-
         touchpoint_source = (
             ui_pref("touchpoint_source", self.default_touchpoint_source)
             or self.default_touchpoint_source
@@ -729,7 +730,6 @@ class Settings:
             ),
             200,
         )
-
         return {
             "service_origin": default_service_origin,
             "service_origin_n1": default_service_origin_n1,
