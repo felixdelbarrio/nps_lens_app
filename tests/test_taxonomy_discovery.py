@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Iterator
 
 import pytest
 
-from nps_lens.services.chatgpt_browser import ChatGPTBrowserClient, ChatGPTBrowserRun
+from nps_lens.services.chatgpt_browser import ChatGPTBrowserClient
 from nps_lens.services.taxonomy_discovery import (
     ChatGPTDiscoveryConfig,
     ChatGPTTaxonomyDiscoveryProvider,
@@ -116,153 +115,206 @@ def test_unknown_or_missing_classification_ids_are_rejected() -> None:
 
 
 class FakePage:
-    url = "https://chatgpt.com/g/designer"
-    frames: list[object] = []
+    def __init__(self):
+        self.visited = []
+        self.state = "ready"
+        self.responses = []
+        self.prompt = ""
+        self.sent = []
+        self.last = self
+        self.response_error = None
 
-    def __init__(self) -> None:
-        self.visited: list[str] = []
-
-    def goto(self, url: str, **_kwargs: object) -> None:
+    async def goto(self, url, **kwargs):
         self.visited.append(url)
-        return None
+        self.responses = []
 
-    def close(self) -> None:
-        return None
+    async def evaluate(self, script):
+        return self.state
 
-    def locator(self, _selector: str) -> "ChallengeBody":
-        return ChallengeBody("")
+    async def wait_for_function(self, script, **kwargs):
+        if "before =>" in script:
+            if self.response_error:
+                self.state = self.response_error
+                self.response_error = None
+            else:
+                self.responses.append('{"result": "complete"}')
+
+    def locator(self, selector):
+        return self
+
+    async def count(self):
+        return len(self.responses)
+
+    async def fill(self, prompt):
+        self.prompt = prompt
+
+    async def press(self, key):
+        self.sent.append(self.prompt)
+
+    async def inner_text(self):
+        return self.responses[-1]
 
 
 class FakeContext:
-    def __init__(self) -> None:
+    def __init__(self):
         self.pages = [FakePage()]
+        self.closed = False
+        self.windows = []
 
-    def new_page(self) -> FakePage:
-        page = FakePage()
-        self.pages.append(page)
-        return page
+    async def close(self):
+        self.closed = True
 
+    async def new_cdp_session(self, page):
+        return self
 
-def test_browser_visibility_is_limited_to_explicit_connect(tmp_path: Path, monkeypatch) -> None:
-    client = ChatGPTBrowserClient(
-        tmp_path / "profile",
-        "https://chatgpt.com/g/designer",
-        "https://chatgpt.com/g/classifier",
-    )
-    seen: list[bool] = []
-    contexts: list[FakeContext] = []
+    async def send(self, command, args=None):
+        if args:
+            self.windows.append(args["bounds"]["windowState"])
+        return {"windowId": 1}
 
-    @contextmanager
-    def fake_context(*, headless: bool) -> Iterator[FakeContext]:
-        seen.append(headless)
-        client.profile_dir.mkdir(parents=True, exist_ok=True)
-        context = FakeContext()
-        contexts.append(context)
-        yield context
-
-    monkeypatch.setattr(client, "_context", fake_context)
-    monkeypatch.setattr(client, "_composer_visible", lambda _page: True)
-
-    assert client.connect() == "connected"
-    assert len(contexts[0].pages) == 1
-    assert contexts[0].pages[-1].visited == [
-        "https://chatgpt.com/",
-        "https://chatgpt.com/g/designer",
-        "https://chatgpt.com/g/classifier",
-    ]
-    assert client.verify_connection() == "connected"
-    assert client.session_status() == "connected"
-    with client.automation():
+    async def detach(self):
         pass
-    assert seen == [False, False, True, True]
 
 
-def test_disconnect_removes_complete_dedicated_profile(tmp_path: Path) -> None:
-    profile = tmp_path / "profile"
-    profile.mkdir()
-    (profile / "technical-state").write_text("session", encoding="utf-8")
+@pytest.fixture
+def browser(monkeypatch):
+    from playwright import async_api
+
+    context = FakeContext()
+    launches = []
+
+    class Driver:
+        chromium = None
+        stopped = False
+
+        async def start(self):
+            self.chromium = self
+            return self
+
+        async def launch_persistent_context(self, profile, **options):
+            launches.append((profile, options))
+            return context
+
+        async def stop(self):
+            self.stopped = True
+
+    driver = Driver()
+    monkeypatch.setattr(async_api, "async_playwright", lambda: driver)
     client = ChatGPTBrowserClient(
-        profile,
-        "https://chatgpt.com/g/designer",
-        "https://chatgpt.com/g/classifier",
+        "https://chatgpt.com/g/designer", "https://chatgpt.com/g/classifier"
     )
+    monkeypatch.setattr(client, "_capture_processes", lambda: None)
+    yield client, context, launches, driver
     client.disconnect()
+
+
+def test_one_sandboxed_installed_chrome_for_whole_session(browser):
+    client, context, launches, driver = browser
+    assert client.session_status() == "not_connected"
+    assert not launches
+    assert client.connect() == "connected"
+    profile = client.profile_dir
+    assert profile.is_dir()
+    assert client.verify_connection() == "connected"
+    with client.automation() as run:
+        run.create_taxonomy("designer bulk", client.designer_url)
+        run.classify_comments("classifier bulk", client.classifier_url)
+    assert len(launches) == 1
+    assert launches[0][1] == dict(channel="chrome", headless=False, chromium_sandbox=True)
+    assert context.pages[0].visited == [
+        "https://chatgpt.com/",
+        client.designer_url,
+        client.classifier_url,
+        client.designer_url,
+        client.classifier_url,
+    ]
+    assert context.windows == ["minimized"]
+    assert not context.closed
+    client.disconnect()
+    assert context.closed and driver.stopped
     assert not profile.exists()
+    assert client.session_status() == "not_connected"
+    assert client._loop is None
 
 
-def test_profile_cleanup_preserves_session_and_challenge_state(tmp_path: Path) -> None:
-    profile = tmp_path / "profile"
-    disposable = profile / "Default" / "Cache"
-    session_state = profile / "Default" / "Local Storage"
-    challenge_state = profile / "Default" / "IndexedDB"
-    for directory in (disposable, session_state, challenge_state):
-        directory.mkdir(parents=True)
-        (directory / "state").write_text("kept", encoding="utf-8")
-    client = ChatGPTBrowserClient(
-        profile,
-        "https://chatgpt.com/g/designer",
-        "https://chatgpt.com/g/classifier",
-    )
-
-    client._minimize_profile()
-
-    assert not disposable.exists()
-    assert session_state.exists()
-    assert challenge_state.exists()
+def test_challenge_keeps_same_window_without_reload(browser):
+    client, context, launches, _ = browser
+    page = context.pages[0]
+    page.state = "interaction"
+    for _ in range(2):
+        with pytest.raises(TaxonomyDiscoveryError) as error:
+            client.connect()
+        assert error.value.code == DiscoveryErrorCode.INTERACTION_REQUIRED
+    assert len(launches) == 1
+    assert page.visited == ["https://chatgpt.com/"]
+    assert not context.closed
+    page.state = "ready"
+    assert client.verify_connection() == "connected"
+    assert page.visited.count("https://chatgpt.com/") == 1
 
 
-class ChallengeFrame:
-    url = "https://challenges.cloudflare.com/turnstile/v0/"
+def test_mid_response_challenge_resumes_without_resending(browser):
+    client, context, launches, _ = browser
+    client.connect()
+    page = context.pages[0]
+    with pytest.raises(TaxonomyDiscoveryError), client.automation() as run:
+        run.create_taxonomy("designer", client.designer_url)
+        page.response_error = "interaction"
+        run.classify_comments("classifier", client.classifier_url)
+    visited = list(page.visited)
+    page.state = "ready"
+    client.verify_connection()
+    with client.automation() as run:
+        run.create_taxonomy("designer", client.designer_url)
+        run.classify_comments("classifier", client.classifier_url)
+    assert page.sent == ["designer", "classifier"]
+    assert page.visited == visited
+    assert len(launches) == 1
 
 
-class ChallengeBody:
-    def __init__(self, text: str = "Verifique que es un ser humano") -> None:
-        self.text = text
-
-    def inner_text(self, **_kwargs: object) -> str:
-        return self.text
-
-
-class ChallengePage(FakePage):
-    frames = [ChallengeFrame()]
-
-    def __init__(self) -> None:
-        self.goto_calls = 0
-
-    def goto(self, *_args: object, **_kwargs: object) -> None:
-        self.goto_calls += 1
-
-    def locator(self, _selector: str) -> ChallengeBody:
-        return ChallengeBody()
+@pytest.mark.parametrize(
+    "state,code",
+    [
+        ("policy", DiscoveryErrorCode.CORPORATE_POLICY_BLOCKED),
+        ("project", DiscoveryErrorCode.PROJECT_NOT_ACCESSIBLE),
+    ],
+)
+def test_terminal_access_errors_close_resources(browser, state, code):
+    client, context, _, driver = browser
+    context.pages[0].state = state
+    with pytest.raises(TaxonomyDiscoveryError) as error:
+        client.connect()
+    assert error.value.code == code
+    assert context.closed and driver.stopped
+    assert client.profile_dir is None
 
 
-class ChallengeContext:
-    def __init__(self) -> None:
-        self.page = ChallengePage()
-        self.new_page_calls = 0
-
-    def new_page(self) -> ChallengePage:
-        self.new_page_calls += 1
-        return self.page
-
-
-def test_cloudflare_is_terminal_without_reload_or_retry() -> None:
-    context = ChallengeContext()
-    run = ChatGPTBrowserRun(context, 1000)
-    with pytest.raises(TaxonomyDiscoveryError) as caught:
-        run.create_taxonomy("payload", "https://chatgpt.com/g/designer")
-    assert caught.value.code is DiscoveryErrorCode.INTERACTION_REQUIRED
-    assert context.new_page_calls == 1
-    assert context.page.goto_calls == 1
+def test_invalid_json_closes_session(browser):
+    client, context, _, driver = browser
+    client.connect()
+    with pytest.raises(TaxonomyDiscoveryError), client.automation():
+        raise TaxonomyDiscoveryError(DiscoveryErrorCode.INVALID_JSON, "invalid")
+    assert context.closed and driver.stopped
+    assert client.profile_dir is None
 
 
-def test_login_or_mfa_is_interaction_required() -> None:
-    class LoginPage(ChallengePage):
-        frames: list[object] = []
-        url = "https://chatgpt.com/"
+def test_missing_chrome_does_not_install_or_fallback(browser, monkeypatch):
+    client, _, launches, driver = browser
 
-        def locator(self, _selector: str) -> ChallengeBody:
-            return ChallengeBody("Enter verification code to log in")
+    async def missing(*args, **kwargs):
+        raise RuntimeError("Chrome distribution not found")
 
-    page = LoginPage()
-    assert ChatGPTBrowserRun._interaction_required(page)
+    monkeypatch.setattr(driver, "launch_persistent_context", missing)
+    with pytest.raises(TaxonomyDiscoveryError) as error:
+        client.connect()
+    assert error.value.code == DiscoveryErrorCode.BROWSER_UNAVAILABLE
+    assert not launches and driver.stopped
+    assert client.profile_dir is None
+
+
+def test_automation_does_not_open_browser_without_connect(browser):
+    client, _, launches, _ = browser
+    with pytest.raises(TaxonomyDiscoveryError) as error, client.automation():
+        pass
+    assert error.value.code == DiscoveryErrorCode.AUTH_REQUIRED
+    assert not launches

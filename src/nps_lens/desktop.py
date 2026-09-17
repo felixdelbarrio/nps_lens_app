@@ -108,6 +108,7 @@ def _run_api_server(port: int) -> None:
         port=port,
         log_config=None,
         log_level=log_level,
+        timeout_graceful_shutdown=2,
     )
 
 
@@ -142,7 +143,7 @@ def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
         return
     proc.terminate()
     try:
-        proc.wait(timeout=8)
+        proc.wait(timeout=15)
     except subprocess.TimeoutExpired:
         proc.kill()
 
@@ -433,6 +434,18 @@ def _run_desktop(port: int) -> None:
         bridge.attach_window(window)
         webview.start(debug=False)
     finally:
+        # Explicit cleanup also works on Windows, where terminate() is not SIGTERM.
+        if proc.poll() is None:
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/taxonomy/discovery/disconnect",
+                    data=b"",
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=10):
+                    pass
+            except (OSError, urllib.error.URLError):
+                pass
         _terminate_process(proc)
 
 

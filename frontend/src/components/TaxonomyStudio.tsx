@@ -36,7 +36,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     try {
       await run();
       if (refresh) { await mutate(); await onChange(); setExploration(null); }
-    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "No se pudo completar la operación."); }
+    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "No se pudo completar la operación."); await mutateDiscovery(); }
     finally { setBusy(false); }
   }
   async function generate(mode: TaxonomyMode, regenerate: boolean) {
@@ -102,7 +102,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
         </div>
         <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
         <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
-        <p className="field-hint">El acceso se realiza directamente en Google Chrome cuando está instalado, con Chromium como alternativa. NPS Lens no captura usuario, contraseña ni MFA. Si Cloudflare repite el challenge, cierra la ventana, pulsa Desconectar y vuelve a Conectar una sola vez.</p>
+        <p className="field-hint">Se requiere Google Chrome instalado. Inicia sesión y completa MFA o Cloudflare directamente en esa ventana; después pulsa Verificar conexión. No cierres ni recargues la ventana ante un challenge. NPS Lens reutiliza la misma sesión y minimiza Chrome durante la generación. Al desconectar o cerrar NPS Lens se elimina el perfil temporal; el siguiente inicio puede requerir autenticación.</p>
       </> : null}
     </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>

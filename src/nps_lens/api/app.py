@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, cast
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, cast
 from urllib.parse import quote
 
 import pandas as pd
@@ -102,7 +104,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     service = NpsService(repository=repository, settings=app_settings)
     dashboard_service = DashboardService(repository=repository, settings=app_settings)
 
-    app = FastAPI(title="NPS Lens API", version="2.0.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(dashboard_service.taxonomy.disconnect_discovery)
+
+    app = FastAPI(title="NPS Lens API", version="2.0.0", lifespan=lifespan)
     app.state.settings = app_settings
     app.state.repository = repository
     app.state.service = service
