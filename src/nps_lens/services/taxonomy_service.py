@@ -94,7 +94,7 @@ class TaxonomyService:
 
     def discovery_status(self, *, check_session: bool = False) -> dict[str, Any]:
         if self.discovery_provider is None:
-            return {"method": "disabled", "session": "not_connected"}
+            return {"method": "local", "session": "not_connected"}
         return {
             **self.discovery_provider.signature_config(),
             "session": (self.discovery_provider.session_status() if check_session else "unknown"),
@@ -106,6 +106,14 @@ class TaxonomyService:
         return {
             **self.discovery_provider.signature_config(),
             "session": self.discovery_provider.connect(),
+        }
+
+    def verify_discovery_connection(self) -> dict[str, Any]:
+        if self.discovery_provider is None:
+            raise ValueError("Selecciona ChatGPT automatizado antes de verificar.")
+        return {
+            **self.discovery_provider.signature_config(),
+            "session": self.discovery_provider.verify_connection(),
         }
 
     def disconnect_discovery(self) -> dict[str, Any]:

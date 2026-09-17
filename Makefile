@@ -21,6 +21,7 @@ ICON_DIR ?= build/icons
 ICON_PNG ?= $(ICON_DIR)/app.png
 ICON_ICO ?= $(ICON_DIR)/app.ico
 ICON_ICNS ?= $(ICON_DIR)/app.icns
+
 ifeq ($(OS),Windows_NT)
 ICON_RUNTIME ?= $(ICON_ICO)
 else
@@ -31,14 +32,26 @@ else
 ICON_RUNTIME ?= $(ICON_PNG)
 endif
 endif
+
 MACOS_BUNDLE_ID ?= com.npslens.app
 MACOS_CODESIGN_IDENTITY ?=
 MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
 MACOS_INSTALL_TO_APPLICATIONS ?= 0
+
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
 WEBAPP_PORT ?= 8625
+
+# Frontend Playwright browser cache (E2E).
 PLAYWRIGHT_BROWSERS_PATH ?= $(ROOT)/$(FRONTEND_DIR)/.playwright-browsers
+
+# Python Playwright browsers MUST live outside site-packages.
+# Keeping them in PLAYWRIGHT_BROWSERS_PATH=0 makes the Playwright PyInstaller
+# hook classify the embedded Chrome.app binaries individually on macOS, which
+# breaks codesigning during COLLECT. We package this directory ourselves after
+# PyInstaller has finished, preserving Chrome's own bundle/signature structure.
+PY_PLAYWRIGHT_BROWSERS_PATH ?= $(VENV)/.playwright-browsers
+PYINSTALLER_RUNTIME_HOOK ?= build/pyinstaller/runtime_hook_playwright.py
 
 PIP = $(VENV_BIN)/pip$(BIN_EXT)
 PY = $(VENV_BIN)/python$(BIN_EXT)
@@ -80,7 +93,13 @@ python-build:
 	$(MAKE) python-playwright
 
 python-playwright:
-	PLAYWRIGHT_BROWSERS_PATH=0 $(PY) -m playwright install chromium
+	@legacy_browser_dir="$$($(PY) -c 'from pathlib import Path; import playwright; print(Path(playwright.__file__).resolve().parent / "driver" / "package" / ".local-browsers")')"; \
+	if [ -d "$$legacy_browser_dir" ]; then \
+		echo "Removing legacy Playwright browsers from site-packages: $$legacy_browser_dir"; \
+		rm -rf "$$legacy_browser_dir"; \
+	fi
+	@mkdir -p "$(PY_PLAYWRIGHT_BROWSERS_PATH)"
+	PLAYWRIGHT_BROWSERS_PATH="$(abspath $(PY_PLAYWRIGHT_BROWSERS_PATH))" $(PY) -m playwright install chromium
 
 setup:
 	$(MAKE) clean
@@ -114,7 +133,26 @@ build:
 	rm -rf build/pyinstaller dist || true
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
-	@uname_s=$$(uname -s); \
+	@mkdir -p "$$(dirname "$(PYINSTALLER_RUNTIME_HOOK)")"
+	@printf '%s\n' \
+		'import os' \
+		'import sys' \
+		'from pathlib import Path' \
+		'' \
+		'if getattr(sys, "frozen", False):' \
+		'    executable = Path(sys.executable).resolve()' \
+		'    if sys.platform == "darwin":' \
+		'        browser_dir = executable.parent.parent / "Resources" / "playwright-browsers"' \
+		'    else:' \
+		'        browser_dir = executable.parent / "playwright-browsers"' \
+		'    if browser_dir.is_dir():' \
+		'        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browser_dir)' \
+		> "$(PYINSTALLER_RUNTIME_HOOK)"
+	@set -eu; \
+	uname_s=$$(uname -s 2>/dev/null || printf unknown); \
+	browser_src="$(abspath $(PY_PLAYWRIGHT_BROWSERS_PATH))"; \
+	runtime_hook="$(abspath $(PYINSTALLER_RUNTIME_HOOK))"; \
+	test -d "$$browser_src" || { echo "ERROR: Python Playwright browsers not found at $$browser_src"; exit 1; }; \
 	if [ "$$uname_s" = "Darwin" ]; then \
 		out=build/pyinstaller/macos; \
 		mkdir -p $$out/dist $$out/work $$out/spec; \
@@ -129,6 +167,7 @@ build:
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
+			--runtime-hook "$$runtime_hook" \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
 			--collect-all playwright \
@@ -147,16 +186,63 @@ build:
 			if [ -f "$(MACOS_ENTITLEMENTS)" ]; then \
 				set -- "$$@" --osx-entitlements-file "$(MACOS_ENTITLEMENTS)"; \
 			fi; \
-			echo "macOS signing enabled for identity: $(MACOS_CODESIGN_IDENTITY)"; \
+			echo "macOS PyInstaller signing enabled for identity: $(MACOS_CODESIGN_IDENTITY)"; \
 		else \
-			echo "macOS signing disabled (set MACOS_CODESIGN_IDENTITY to enable)."; \
+			echo "macOS PyInstaller uses ad-hoc signing; set MACOS_CODESIGN_IDENTITY for Developer ID signing."; \
 		fi; \
 		"$(VENV_BIN)/pyinstaller$(BIN_EXT)" "$$@"; \
-		echo "Built app: $$out/dist/nps-lens.app"; \
+		app="$$out/dist/nps-lens.app"; \
+		test -d "$$app" || { echo "ERROR: PyInstaller did not create $$app"; exit 1; }; \
+		browser_dst="$$app/Contents/Resources/playwright-browsers"; \
+		rm -rf "$$browser_dst"; \
+		mkdir -p "$$(dirname "$$browser_dst")"; \
+		echo "Embedding Playwright browsers after PyInstaller: $$browser_dst"; \
+		/usr/bin/ditto "$$browser_src" "$$browser_dst"; \
+		echo "Signing embedded Playwright browser binaries before sealing the app."; \
+		find "$$browser_dst" -type f -exec sh -eu -c ' \
+			identity="$$1"; shift; \
+			for binary do \
+				if /usr/bin/file -b "$$binary" | grep -q "Mach-O"; then \
+					if [ -n "$$identity" ]; then \
+						/usr/bin/codesign --force --options runtime --timestamp --sign "$$identity" "$$binary"; \
+					else \
+						/usr/bin/codesign --force --sign - --timestamp=none "$$binary"; \
+					fi; \
+				fi; \
+			done \
+		' sh "$(MACOS_CODESIGN_IDENTITY)" {} +; \
+		find "$$browser_dst" -depth -type d -name '*.app' -exec sh -eu -c ' \
+			identity="$$1"; shift; \
+			for browser_app do \
+				if [ -n "$$identity" ]; then \
+					/usr/bin/codesign --force --deep --options runtime --timestamp --sign "$$identity" "$$browser_app"; \
+				else \
+					/usr/bin/codesign --force --deep --sign - --timestamp=none "$$browser_app"; \
+				fi; \
+			done \
+		' sh "$(MACOS_CODESIGN_IDENTITY)" {} +; \
+		if [ -n "$(MACOS_CODESIGN_IDENTITY)" ]; then \
+			echo "Sealing final app with identity: $(MACOS_CODESIGN_IDENTITY)"; \
+			/usr/bin/codesign --force --options runtime --timestamp --sign "$(MACOS_CODESIGN_IDENTITY)" "$$app"; \
+		else \
+			echo "Sealing final app with ad-hoc signature."; \
+			/usr/bin/codesign --force --sign - --timestamp=none "$$app"; \
+		fi; \
+		find "$$browser_dst" -depth -type d -name '*.app' \
+			-exec /usr/bin/codesign --verify --deep --strict {} \;; \
+		find "$$browser_dst" -type f -exec sh -eu -c ' \
+			for binary do \
+				if /usr/bin/file -b "$$binary" | grep -q "Mach-O"; then \
+					/usr/bin/codesign --verify --strict "$$binary"; \
+				fi; \
+			done \
+		' sh {} +; \
+		/usr/bin/codesign --verify --deep --strict "$$app"; \
+		echo "Built app: $$app"; \
 		if [ "$(MACOS_INSTALL_TO_APPLICATIONS)" = "1" ]; then \
 			app_dst="/Applications/nps-lens.app"; \
 			rm -rf "$$app_dst" 2>/dev/null || true; \
-			if cp -R "$$out/dist/nps-lens.app" "$$app_dst" 2>/dev/null; then \
+			if /usr/bin/ditto "$$app" "$$app_dst" 2>/dev/null; then \
 				echo "Installed app: $$app_dst"; \
 			else \
 				echo "Could not copy app to /Applications."; \
@@ -174,6 +260,7 @@ build:
 			--add-data="$(ROOT)/assets:assets" \
 			--add-data="$(ROOT)/$(ICON_DIR):build/icons" \
 			--add-data="$(ROOT)/.env.example:." \
+			--runtime-hook "$$runtime_hook" \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
 			--collect-all playwright \
@@ -186,7 +273,10 @@ build:
 			--workpath $$out/work \
 			--specpath $$out/spec \
 			"$(DESKTOP_SCRIPT)"; \
+		rm -rf "$$out/dist/playwright-browsers"; \
+		cp -R "$$browser_src" "$$out/dist/playwright-browsers"; \
 		echo "Built binary: $$out/dist/nps-lens"; \
+		echo "Bundled browsers: $$out/dist/playwright-browsers"; \
 	elif [ "$(OS)" = "Windows_NT" ] || printf "%s" "$$uname_s" | grep -Eq 'MINGW|MSYS|CYGWIN'; then \
 		out=build/pyinstaller/windows; \
 		mkdir -p $$out/dist $$out/work $$out/spec; \
@@ -200,6 +290,7 @@ build:
 			--add-data="$(ROOT)/assets;assets" \
 			--add-data="$(ROOT)/$(ICON_DIR);build/icons" \
 			--add-data="$(ROOT)/.env.example;." \
+			--runtime-hook "$$runtime_hook" \
 			--collect-submodules nps_lens \
 			--collect-submodules webview \
 			--collect-all playwright \
@@ -212,7 +303,10 @@ build:
 			--workpath $$out/work \
 			--specpath $$out/spec \
 			"$(DESKTOP_SCRIPT)"; \
+		rm -rf "$$out/dist/playwright-browsers"; \
+		cp -R "$$browser_src" "$$out/dist/playwright-browsers"; \
 		echo "Built binary: $$out/dist/nps-lens.exe"; \
+		echo "Bundled browsers: $$out/dist/playwright-browsers"; \
 	else \
 		echo "Unsupported OS for local build: $$uname_s"; \
 		exit 1; \
@@ -226,6 +320,7 @@ run:
 	NPS_LENS_PORT="$(APP_PORT)" \
 	NPS_LENS_ICON="$(ROOT)/$(ICON_RUNTIME)" \
 	NPS_LENS_FRONTEND_DIST_DIR="$(ROOT)/$(FRONTEND_DIR)/dist" \
+	PLAYWRIGHT_BROWSERS_PATH="$(abspath $(PY_PLAYWRIGHT_BROWSERS_PATH))" \
 	$(PY) -m nps_lens.desktop
 
 kill:
