@@ -417,6 +417,7 @@ describe("App", () => {
   const revokeObjectUrl = vi.fn();
   const anchorClick = vi.fn();
   let currentLinkingPayload: Record<string, unknown>;
+  let currentUploads: Array<typeof uploadPayload>;
 
   beforeEach(() => {
     currentLinkingPayload = {
@@ -431,6 +432,7 @@ describe("App", () => {
       journey_routes_table: [],
       top_topic: ""
     };
+    currentUploads = [uploadPayload];
     vi.stubGlobal(
       "URL",
       Object.assign(URL, {
@@ -447,7 +449,17 @@ describe("App", () => {
           return new Response(JSON.stringify(contextPayload));
         }
         if (url.includes("/api/uploads") && init?.method !== "POST") {
-          return new Response(JSON.stringify([uploadPayload]));
+          return new Response(JSON.stringify(currentUploads));
+        }
+        if (url.includes("/api/uploads/nps/") && url.endsWith("/replace") && init?.method === "POST") {
+          const replaced = {
+            ...currentUploads[0],
+            status: "completed",
+            inserted_rows: 10,
+            issues: [{ level: "INFO", code: "previous_upload_replaced", message: "Carga sustituida." }]
+          };
+          currentUploads = [replaced];
+          return new Response(JSON.stringify(replaced));
         }
         if (url.includes("/api/dashboard/nps")) {
           return new Response(JSON.stringify(dashboardPayload));
@@ -633,6 +645,41 @@ describe("App", () => {
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
     await waitFor(() => expect(screen.getByTestId("generate-report-button")).toBeEnabled());
+  });
+
+  it("allows an administrator to replace a duplicate upload after confirmation", async () => {
+    const user = userEvent.setup();
+    currentUploads = [
+      {
+        ...uploadPayload,
+        status: "duplicate_upload",
+        inserted_rows: 0,
+        issues: [{ level: "WARN", code: "duplicate_upload", message: "Ya cargado." }]
+      }
+    ];
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
+    );
+    await user.click(screen.getByRole("button", { name: /Ingesta/i }));
+    await user.click(screen.getByRole("tab", { name: "Histórico" }));
+    await user.click(screen.getByRole("button", { name: "Ver issues" }));
+    await user.click(screen.getByRole("button", { name: "Reemplazar carga anterior" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            String(input).endsWith("/api/uploads/nps/u-1/replace") && init?.method === "POST"
+        )
+      ).toBe(true)
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Reemplazar carga anterior" })).not.toBeInTheDocument()
+    );
   });
 
   it("renders the linking workspace with method-driven situation and scenarios", async () => {

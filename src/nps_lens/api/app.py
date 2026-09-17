@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from nps_lens.analytics.taxonomy import TaxonomyConfig
 from nps_lens.api.schemas import (
+    ColumnAliasRegistryRequest,
     ContextOptionsResponse,
     DashboardResponse,
     DatasetTableResponse,
@@ -30,6 +31,7 @@ from nps_lens.api.schemas import (
 )
 from nps_lens.core.store import DatasetContext
 from nps_lens.core.telemetry import RequestTimer, TelemetryCollector
+from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry
 from nps_lens.platform.downloads import persist_download
@@ -324,6 +326,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         dashboard_layer.clear_caches()
         return result
 
+    @app.post("/api/uploads/nps/{upload_id}/replace", response_model=UploadResponse)
+    def replace_nps_upload(
+        upload_id: str,
+        request: Request,
+        service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, object]:
+        require_admin(request)
+        try:
+            result = service_layer.replace_duplicate_upload(upload_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result["status"] == "completed":
+            context = UploadContext(
+                str(result["service_origin"]),
+                str(result["service_origin_n1"]),
+                str(result["service_origin_n2"]),
+            )
+            if dashboard_layer.taxonomy.state(context).get("restored"):
+                dashboard_layer.taxonomy.resume_local(context)
+        dashboard_layer.clear_caches()
+        return result
+
     @app.post("/api/uploads/helix", response_model=HelixUploadResponse)
     async def upload_helix(
         request: Request,
@@ -539,6 +564,42 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         dashboard_layer.clear_caches()
         return equivalences(request, dashboard_layer)
+
+    @app.get("/api/settings/nps-column-aliases")
+    def nps_column_aliases(request: Request) -> dict[str, object]:
+        require_admin(request)
+        settings = cast(Settings, request.app.state.settings)
+        context = taxonomy_context(request)
+        return ColumnAliasRegistry.load(
+            settings.column_aliases_path,
+            context.service_origin,
+            context.service_origin_n1,
+        ).to_context_dict(context.service_origin, context.service_origin_n1)
+
+    @app.put("/api/settings/nps-column-aliases")
+    def update_nps_column_aliases(
+        payload: ColumnAliasRegistryRequest,
+        request: Request,
+    ) -> dict[str, object]:
+        require_admin(request)
+        settings = cast(Settings, request.app.state.settings)
+        context = taxonomy_context(request)
+        try:
+            if payload.service_origin and payload.service_origin != context.service_origin:
+                raise ValueError("El BUUG del payload no coincide con el contexto seleccionado.")
+            if payload.service_origin_n1 and payload.service_origin_n1 != context.service_origin_n1:
+                raise ValueError("El N1 del payload no coincide con el contexto seleccionado.")
+            registry = ColumnAliasRegistry.from_dict(
+                {"schema_version": "1.0", "fields": payload.model_dump()["fields"]}
+            )
+            registry.save_for_context(
+                settings.column_aliases_path,
+                context.service_origin,
+                context.service_origin_n1,
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return registry.to_context_dict(context.service_origin, context.service_origin_n1)
 
     @app.get("/api/taxonomy")
     def taxonomy_studio(

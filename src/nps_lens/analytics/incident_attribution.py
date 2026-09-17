@@ -1793,9 +1793,7 @@ def build_incident_attribution_chains(
         ):
             if isinstance(terms, (list, tuple)):
                 highlights_by_incident.setdefault(str(incident_id), set()).update(terms)
-        for comment_id, terms in zip(
-            grp["nps_id"], grp.get("matched_terms", [[]] * len(grp))
-        ):
+        for comment_id, terms in zip(grp["nps_id"], grp.get("matched_terms", [[]] * len(grp))):
             if isinstance(terms, (list, tuple)):
                 highlights_by_comment.setdefault(str(comment_id), set()).update(terms)
         incident_records = [
@@ -1823,9 +1821,7 @@ def build_incident_attribution_chains(
         ]
         comment_records = []
         for _, r in comment_ranked.iterrows():
-            comment = " ".join(
-                str(r.get("comment_norm") or r.get("comment_txt") or "").split()
-            )
+            comment = " ".join(str(r.get("comment_norm") or r.get("comment_txt") or "").split())
             if not comment:
                 continue
             comment_record = {

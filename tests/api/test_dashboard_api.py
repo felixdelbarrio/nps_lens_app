@@ -952,7 +952,6 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                     all_texts.append(paragraph.text or "")
 
     assert any(
-        "lidera el deterioro entre los tópicos observados en Web" in text
-        for text in all_texts
+        "lidera el deterioro entre los tópicos observados en Web" in text for text in all_texts
     )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

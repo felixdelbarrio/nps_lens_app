@@ -65,6 +65,48 @@ def test_sequential_uploads_are_accumulative_and_duplicate_safe(tmp_path: Path) 
     assert service.list_uploads()[0]["status"] == "duplicate_upload"
 
 
+def test_duplicate_upload_can_replace_previous_ingestion(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    repository = SqliteNpsRepository(settings.database_path)
+    service = NpsService(repository, settings)
+    context = UploadContext(service_origin="BBVA México", service_origin_n1="Senda")
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
+
+    original = service.ingest_excel(
+        filename=march.name, payload=march.read_bytes(), context=context
+    )
+    duplicate = service.ingest_excel(
+        filename=march.name, payload=march.read_bytes(), context=context
+    )
+    total_before = service.summary(context)["total_records"]
+
+    replacement = service.replace_duplicate_upload(str(duplicate["upload_id"]))
+
+    assert replacement["status"] == "completed"
+    assert service.summary(context)["total_records"] == total_before
+    assert any(issue["code"] == "previous_upload_replaced" for issue in replacement["issues"])
+    uploads = {upload["upload_id"]: upload for upload in service.list_uploads()}
+    assert uploads[original["upload_id"]]["status"] == "replaced"
+    assert uploads[duplicate["upload_id"]]["status"] == "completed"
+
+
+def test_only_duplicate_attempts_can_trigger_replacement(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    service = NpsService(SqliteNpsRepository(settings.database_path), settings)
+    context = UploadContext(service_origin="BBVA México", service_origin_n1="Senda")
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
+    completed = service.ingest_excel(
+        filename=march.name, payload=march.read_bytes(), context=context
+    )
+
+    try:
+        service.replace_duplicate_upload(str(completed["upload_id"]))
+    except ValueError as exc:
+        assert "no está disponible" in str(exc)
+    else:
+        raise AssertionError("A completed upload must not be replaceable directly")
+
+
 def test_historical_merge_keeps_single_record_per_business_key(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     repository = SqliteNpsRepository(settings.database_path)

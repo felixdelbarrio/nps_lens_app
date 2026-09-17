@@ -23,6 +23,7 @@ def _settings(tmp_path: Path) -> Settings:
         default_service_origin_n1="Senda",
         allowed_service_origins=["BBVA México"],
         allowed_service_origin_n1={"BBVA México": ["Senda"]},
+        column_aliases_path=tmp_path / "data" / "config" / "nps_column_aliases.json",
         default_downloads_path=str(tmp_path / "downloads"),
         log_level="INFO",
     )
@@ -74,6 +75,34 @@ def test_api_uploads_and_returns_accumulative_summary(tmp_path: Path) -> None:
     assert uploads[0]["upload_id"] == payload["upload_id"]
 
 
+def test_api_replaces_a_duplicate_upload_on_explicit_request(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
+    upload_ids: list[str] = []
+    for _ in range(2):
+        with march.open("rb") as handle:
+            response = client.post(
+                "/api/uploads/nps",
+                data={
+                    "service_origin": "BBVA México",
+                    "service_origin_n1": "Senda",
+                    "service_origin_n2": "",
+                },
+                files={"file": (march.name, handle, "application/vnd.ms-excel")},
+            )
+        assert response.status_code == 200
+        upload_ids.append(response.json()["upload_id"])
+
+    before = client.get("/api/summary").json()["total_records"]
+    response = client.post(f"/api/uploads/nps/{upload_ids[1]}/replace")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert client.get("/api/summary").json()["total_records"] == before
+    uploads = {upload["upload_id"]: upload for upload in client.get("/api/uploads").json()}
+    assert uploads[upload_ids[0]]["status"] == "replaced"
+
+
 def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
     invalid = tmp_path / "invalid.xlsx"
@@ -106,6 +135,35 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
     payload = response.json()
     assert payload["status"] == "failed"
     assert any(issue["code"] == "missing_required_column" for issue in payload["issues"])
+
+
+def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    client = TestClient(create_app(settings))
+    senda_context = {"service_origin": "BBVA México", "service_origin_n1": "Senda"}
+    web_context = {"service_origin": "BBVA México", "service_origin_n1": "Web"}
+    original = client.get("/api/settings/nps-column-aliases", params=senda_context)
+    assert original.status_code == 200
+    payload = original.json()
+    canal = next(field for field in payload["fields"] if field["canonical"] == "Canal")
+    canal["aliases"].append("Touch point")
+
+    saved = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    assert saved.status_code == 200
+    assert settings.column_aliases_path.exists()
+    assert (
+        client.get("/api/settings/nps-column-aliases", params=senda_context).json() == saved.json()
+    )
+    other_context = client.get("/api/settings/nps-column-aliases", params=web_context).json()
+    assert "Touch point" not in next(
+        field["aliases"] for field in other_context["fields"] if field["canonical"] == "Canal"
+    )
+    assert other_context["service_origin_n1"] == "Web"
+
+    canal["aliases"].append("touch-point")
+    rejected = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    assert rejected.status_code == 400
+    assert "duplicado" in rejected.json()["detail"]
 
 
 def test_gcp_iap_domain_and_admin_boundaries(tmp_path: Path) -> None:

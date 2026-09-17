@@ -291,6 +291,13 @@ export type EquivalenceRegistryPayload = {
   statistics?: Record<string, { groups: Array<{ canonical: string; affected: number }>; suggestions: Array<{ variants: string[] }> }>;
 };
 
+export type ColumnAliasRegistryPayload = {
+  schema_version: string;
+  service_origin: string;
+  service_origin_n1: string;
+  fields: Array<{ canonical: string; required: boolean; aliases: string[] }>;
+};
+
 export type TelemetryPayload = {
   schema_version: string;
   generated_at: string;
@@ -462,6 +469,14 @@ export async function uploadNpsFile(payload: {
   );
 }
 
+export async function replaceNpsUpload(uploadId: string): Promise<UploadResult> {
+  return parseResponse<UploadResult>(
+    await fetch(`/api/uploads/nps/${encodeURIComponent(uploadId)}/replace`, {
+      method: "POST"
+    })
+  );
+}
+
 export async function uploadHelixFile(payload: {
   file?: File;
   desktopFilePath?: string;
@@ -541,6 +556,27 @@ export async function updateEquivalences(
 ): Promise<EquivalenceRegistryPayload> {
   return parseResponse<EquivalenceRegistryPayload>(
     await fetch(`/api/settings/equivalences?${new URLSearchParams(context)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+  );
+}
+
+export async function fetchNpsColumnAliases(
+  context: TaxonomyContext = {}
+): Promise<ColumnAliasRegistryPayload> {
+  return parseResponse<ColumnAliasRegistryPayload>(
+    await fetch(`/api/settings/nps-column-aliases?${new URLSearchParams(context)}`)
+  );
+}
+
+export async function updateNpsColumnAliases(
+  payload: ColumnAliasRegistryPayload,
+  context: TaxonomyContext = {}
+): Promise<ColumnAliasRegistryPayload> {
+  return parseResponse<ColumnAliasRegistryPayload>(
+    await fetch(`/api/settings/nps-column-aliases?${new URLSearchParams(context)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

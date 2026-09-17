@@ -376,7 +376,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("problema en el login" in t for t in texts)
     assert any("No hay quien entre a la aplicación" in t for t in texts)
     assert not any("Muestras" in t for t in cover_texts)
-    change_tables = [shape.table for shape in prs.slides[4].shapes if getattr(shape, "has_table", False)]
+    change_tables = [
+        shape.table for shape in prs.slides[4].shapes if getattr(shape, "has_table", False)
+    ]
     assert len(change_tables) == 1
     assert len(change_tables[0].rows) == 1 + len(
         executive_ppt.select_negative_delta_rows(
@@ -395,7 +397,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 entity_summary_df=payload["attribution"],
                 entity_summary_kpis=[],
                 broken_journeys_df=None,
-            ).dimensions["Palanca"].change_table_df,
+            )
+            .dimensions["Palanca"]
+            .change_table_df,
             max_rows=4,
         )
     )
@@ -617,9 +621,7 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
         if getattr(shape, "has_text_frame", False)
         for paragraph in shape.text_frame.paragraphs
     ]
-    assert any(
-        t == "Operativa crítica fallida" for t in compact_texts
-    )
+    assert any(t == "Operativa crítica fallida" for t in compact_texts)
     assert any(t == "Operativa crítica fallida" for t in texts)
     assert any(t == "Acceso bloqueado" for t in texts)
     assert any(t == "Rendimiento degradado" for t in texts)

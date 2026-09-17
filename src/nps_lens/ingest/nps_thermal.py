@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from hashlib import sha1
+from pathlib import Path
 from typing import Optional, Union
 
 import pandas as pd
 
 from nps_lens import PIPELINE_VERSION
-from nps_lens.core.nps_math import classify_nps_scores
+from nps_lens.core.nps_math import classify_nps_scores, normalize_nps_scores
 from nps_lens.core.store import DatasetContext
+from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.record_identity import business_keys, hash_rows
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.09.07.taxonomy"
+PARSER_VERSION = "2026.09.16.column-aliases-by-context"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -40,50 +41,8 @@ SCHEMA_DRIFT_COLUMNS = {
     "Operating System",
 }
 
-_HEADER_TOKEN_RE = re.compile(r"[^a-z0-9]+")
 _WS_RE = re.compile(r"\s+")
 _EMPTY_MARKERS = {"", "nan", "none", "null", "nat"}
-
-_HEADER_ALIASES = {
-    "fecha": "Fecha",
-    "gfcustsurveyresponsedate": "Fecha",
-    "id": "ID",
-    "gfcustsurveyopinionid": "ID",
-    "nps": "NPS",
-    "npsresponse": "NPS",
-    "comment": "Comment",
-    "commentresponse": "Comment",
-    "comments": "Comment",
-    "comentario": "Comment",
-    "texto": "Comment",
-    "usuariodecision": "UsuarioDecisión",
-    "tomadesicion": "UsuarioDecisión",
-    "tomadecision": "UsuarioDecisión",
-    "usuariodecisionfinal": "UsuarioDecisión",
-    "decisionusuario": "UsuarioDecisión",
-    "usuario decision": "UsuarioDecisión",
-    "canal": "Canal",
-    "channel": "Canal",
-    "palanca": "Palanca",
-    "lever": "Palanca",
-    "subpalanca": "Subpalanca",
-    "sublever": "Subpalanca",
-    "browser": "Browser",
-    "navegador": "Browser",
-    "operatingsystem": "Operating System",
-    "gfoperatingsystemname": "Operating System",
-    "gfsurveyaccuserdevicedesc": "Browser",
-    "operatingsystemname": "Operating System",
-    "sistemaoperativo": "Operating System",
-    "serviceoriginbuug": "service_origin",
-    "serviceoriginbug": "service_origin",
-    "serviceorigin": "service_origin",
-    "service_origin": "service_origin",
-    "serviceoriginn1": "service_origin_n1",
-    "service_origin_n1": "service_origin_n1",
-    "serviceoriginn2": "service_origin_n2",
-    "service_origin_n2": "service_origin_n2",
-}
 
 
 def dataset_id_for(path: str, service_origin: str, service_origin_n1: str) -> str:
@@ -91,24 +50,6 @@ def dataset_id_for(path: str, service_origin: str, service_origin_n1: str) -> st
         f"{path}|{service_origin}|{service_origin_n1}|{PARSER_VERSION}".encode("utf-8")
     ).hexdigest()[:10]
     return f"nps_thermal:{service_origin}:{service_origin_n1}:{h}"
-
-
-def _normalize_header(value: object) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = text.lower()
-    text = _HEADER_TOKEN_RE.sub(" ", text)
-    return _WS_RE.sub(" ", text).strip()
-
-
-def _canonical_column_name(column: object) -> str:
-    normalized = _normalize_header(column)
-    alias_key = normalized.replace(" ", "")
-    mapped = _HEADER_ALIASES.get(alias_key) or _HEADER_ALIASES.get(normalized)
-    return mapped or str(column).strip()
 
 
 def _is_missing(value: object) -> bool:
@@ -203,16 +144,50 @@ def read_nps_thermal_excel(
     service_origin_n1: Optional[str] = None,
     service_origin_n2: Optional[str] = None,
     sheet_name: Optional[Union[str, int]] = None,
+    column_aliases_path: Optional[Path] = None,
 ) -> IngestResult:
     sheet: Union[str, int] = sheet_name if sheet_name is not None and sheet_name != "" else 0
     df = pd.read_excel(path, sheet_name=sheet, engine="openpyxl", dtype=object)
     if isinstance(df, dict):
         df = list(df.values())[0]
 
-    df = df.rename(columns={column: _canonical_column_name(column) for column in df.columns})
-
     issues: list[ValidationIssue] = []
     raw_rows = int(len(df))
+    resolution = ColumnAliasRegistry.load(
+        column_aliases_path,
+        service_origin or "",
+        service_origin_n1 or "",
+    ).resolve(df.columns)
+    df = df.rename(columns=resolution.rename)
+    applied_column_aliases = [
+        {"source": source, "canonical": canonical}
+        for source, canonical in resolution.applied_aliases
+    ]
+    for canonical, sources in resolution.ambiguities:
+        issues.append(
+            ValidationIssue(
+                level="ERROR",
+                code="ambiguous_column_alias",
+                message=(
+                    f"Varias columnas representan '{canonical}': {', '.join(sources)}. "
+                    "Conserva solo una o usa el nombre canónico."
+                ),
+                column=canonical,
+                details={"columns": list(sources)},
+            )
+        )
+    if applied_column_aliases:
+        issues.append(
+            ValidationIssue(
+                level="INFO",
+                code="column_aliases_applied",
+                message="Alias de columnas aplicados: "
+                + ", ".join(
+                    f"{item['source']} → {item['canonical']}" for item in applied_column_aliases
+                ),
+                details={"mappings": applied_column_aliases},
+            )
+        )
 
     known_columns = set(NPS_THERMAL_REQUIRED + NPS_THERMAL_OPTIONAL)
     extra_columns = sorted(
@@ -294,6 +269,7 @@ def read_nps_thermal_excel(
                 "raw_rows": raw_rows,
                 "extra_columns": extra_columns,
                 "missing_optional_columns": missing_optional_columns,
+                "applied_column_aliases": applied_column_aliases,
             },
         )
 
@@ -347,8 +323,24 @@ def read_nps_thermal_excel(
         )
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
-    work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
+    numeric_nps = pd.to_numeric(work["NPS"], errors="coerce")
+    fractional_nps_rows = int((numeric_nps.between(0, 10) & numeric_nps.mod(1).ne(0)).sum())
+    work["NPS"] = normalize_nps_scores(numeric_nps)
     work["NPS Group"] = classify_nps_scores(work["NPS"])
+
+    if fractional_nps_rows:
+        issues.append(
+            ValidationIssue(
+                level="INFO",
+                code="fractional_nps_rounded",
+                message=(
+                    f"Se convirtieron {fractional_nps_rows} puntuaciones NPS decimales "
+                    "al entero más cercano antes de cargarlas."
+                ),
+                column="NPS",
+                details={"rows": fractional_nps_rows, "method": "nearest_integer_half_up"},
+            )
+        )
 
     invalid_date_rows = int(work["Fecha"].isna().sum())
     if invalid_date_rows:
@@ -367,7 +359,7 @@ def read_nps_thermal_excel(
             ValidationIssue(
                 level="WARN",
                 code="invalid_nps_dropped",
-                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido (debe ser un entero de 0 a 10).",
+                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido (debe ser un número entre 0 y 10).",
                 column="NPS",
                 details={"rows": invalid_nps_rows},
             )
@@ -391,6 +383,7 @@ def read_nps_thermal_excel(
                 "raw_rows": raw_rows,
                 "extra_columns": extra_columns,
                 "missing_optional_columns": missing_optional_columns,
+                "applied_column_aliases": applied_column_aliases,
             },
         )
 
@@ -460,5 +453,6 @@ def read_nps_thermal_excel(
             "duplicate_rows_in_file": duplicate_rows_in_file,
             "extra_columns": extra_columns,
             "missing_optional_columns": missing_optional_columns,
+            "applied_column_aliases": applied_column_aliases,
         },
     )
