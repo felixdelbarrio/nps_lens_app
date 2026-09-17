@@ -15,9 +15,11 @@ from nps_lens.services.taxonomy_discovery import DiscoveryErrorCode, TaxonomyDis
 # Inspect only visible controls, not assistant text (which may discuss login).
 _ACCESS = """() => {
     const visible = s => [...document.querySelectorAll(s)].some(e => e.getClientRects().length);
-    if (location.href.startsWith('chrome-error:') ||
+    if (!visible('#prompt-textarea') &&
         /ERR_BLOCKED_BY_ADMINISTRATOR|blocked by your administrator/i.test(document.body.innerText))
         return 'policy';
+    if (location.href.startsWith('chrome-error:') || location.href === 'about:blank')
+        return 'unavailable';
     if (!visible('#prompt-textarea') &&
         /you do not have access|gpt inaccessible or not found|no tienes acceso/i.test(document.body.innerText))
         return 'project';
@@ -33,7 +35,7 @@ _ACCESS = """() => {
 
 _COMPLETE = """before => {
     const access = (ACCESS)();
-    if (['interaction', 'policy', 'project'].includes(access)) return access;
+    if (['interaction', 'policy', 'project', 'unavailable'].includes(access)) return access;
     const messages = document.querySelectorAll('[data-message-author-role="assistant"]');
     if (messages.length <= before) return false;
     const turn = messages[messages.length - 1].closest('article');
@@ -73,6 +75,7 @@ class ChatGPTBrowserClient:
         self._sent = False
         self._before = 0
         self._processes: list[psutil.Process] = []
+        self._active_tasks: set[asyncio.Task[Any]] = set()
 
     def _call(self, operation: Coroutine[Any, Any, Any]) -> Any:
         with self._lock:
@@ -106,6 +109,10 @@ class ChatGPTBrowserClient:
 
     async def _access(self) -> None:
         state = await self._page.evaluate(_ACCESS)
+        if state == "unavailable":
+            raise TaxonomyDiscoveryError(
+                DiscoveryErrorCode.CHATGPT_UNAVAILABLE, "Chrome no pudo cargar ChatGPT."
+            )
         if state == "policy":
             raise TaxonomyDiscoveryError(
                 DiscoveryErrorCode.CORPORATE_POLICY_BLOCKED,
@@ -202,6 +209,9 @@ class ChatGPTBrowserClient:
         return self._status
 
     async def _guard(self, operation: Coroutine[Any, Any, Any]) -> Any:
+        task = asyncio.current_task()
+        if task is not None:
+            self._active_tasks.add(task)
         try:
             return await operation
         except TaxonomyDiscoveryError as exc:
@@ -235,6 +245,9 @@ class ChatGPTBrowserClient:
             raise TaxonomyDiscoveryError(
                 code, "ChatGPT no completó la operación. La sesión se ha cerrado."
             ) from exc
+        finally:
+            if task is not None:
+                self._active_tasks.discard(task)
 
     def connect(self) -> str:
         with self._operations:
@@ -342,7 +355,8 @@ class ChatGPTBrowserClient:
                     self.profile_dir = None
 
     async def _shutdown(self) -> None:
-        pending = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        # Keep Playwright's transport alive until context.close()/driver.stop().
+        pending = list(self._active_tasks)
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)

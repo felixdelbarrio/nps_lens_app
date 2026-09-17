@@ -394,9 +394,8 @@ def test_missing_completion_is_never_accepted(browser, monkeypatch):
         await wait(script, **kwargs)
 
     monkeypatch.setattr(page, "wait_for_function", incomplete)
-    with pytest.raises(TaxonomyDiscoveryError) as error:
-        with client.automation() as run:
-            run.create_taxonomy("bulk", client.designer_url)
+    with pytest.raises(TaxonomyDiscoveryError) as error, client.automation() as run:
+        run.create_taxonomy("bulk", client.designer_url)
     assert error.value.code == DiscoveryErrorCode.TIMEOUT
     assert page.sent == ["bulk"]
     assert context.closed and driver.stopped
@@ -423,3 +422,46 @@ def test_process_cleanup_targets_only_owned_processes(browser, monkeypatch):
     owned.kill.assert_called_once()
     unrelated.terminate.assert_not_called()
     assert all(processes == [owned] for processes in calls)
+
+
+def test_disconnect_cleans_driver_profile_and_thread_even_when_context_close_fails(
+    browser, monkeypatch
+):
+    client, context, _, driver = browser
+    client.connect()
+    profile = client.profile_dir
+
+    async def failed_close():
+        raise RuntimeError("context already lost")
+
+    monkeypatch.setattr(context, "close", failed_close)
+    with pytest.raises(RuntimeError, match="already lost"):
+        client.disconnect()
+    assert driver.stopped
+    assert not profile.exists()
+    assert client._loop is None
+
+
+def test_shutdown_keeps_driver_transport_alive_until_context_closes(browser, monkeypatch):
+    import asyncio
+
+    client, context, _, _ = browser
+    client.connect()
+
+    async def transport():
+        await asyncio.Event().wait()
+
+    async def setup():
+        return asyncio.create_task(transport())
+
+    task = client._call(setup())
+    original = context.close
+
+    async def close():
+        assert not task.cancelled()
+        await original()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    monkeypatch.setattr(context, "close", close)
+    client.disconnect()
