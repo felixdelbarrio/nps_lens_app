@@ -10,6 +10,7 @@ import {
   fetchLinkingDashboard,
   fetchUploads,
   persistPreferences,
+  replaceNpsUpload,
   reprocessSummary,
   updateServiceOrigins,
   uploadHelixFile,
@@ -683,6 +684,27 @@ export function App() {
         setIngestTab("traceability");
         setActiveUploadId(result.upload_id);
       });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function handleReplaceNpsUpload(upload: UploadResult) {
+    const confirmed = globalThis.confirm(
+      `Se eliminarán los registros exclusivos de la carga anterior de “${toBusinessCopy(upload.filename)}” y se reingestará el fichero conservado con las reglas actuales. ¿Quieres continuar?`
+    );
+    if (!confirmed) {
+      return;
+    }
+    setIsMutating(true);
+    setError(null);
+    try {
+      const result = await replaceNpsUpload(upload.upload_id);
+      setLatestNpsUpload(result);
+      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset(), mutateLinking()]);
+      setActiveUploadId(result.upload_id);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -1541,6 +1563,23 @@ export function App() {
                     issues={selectedUpload.issues}
                     testId="selected-issues-list"
                   />
+                  {selectedUpload.status === "duplicate_upload" ? (
+                    <div className="replacement-action">
+                      <p>
+                        Si el fichero contiene correcciones, puedes sustituir la carga anterior y
+                        procesarlo de nuevo con las reglas actuales.
+                      </p>
+                      <button
+                        className="secondary-button"
+                        data-testid="replace-duplicate-upload"
+                        disabled={actionsDisabled || isMutating}
+                        onClick={() => void handleReplaceNpsUpload(selectedUpload)}
+                        type="button"
+                      >
+                        Reemplazar carga anterior
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               )}
             </aside>

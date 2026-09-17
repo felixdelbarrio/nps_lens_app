@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, ContextManager, Optional, cast
 
 import pandas as pd
 
@@ -261,17 +262,20 @@ class SqliteNpsRepository:
                 )
             connection.execute("PRAGMA user_version = 2")
 
-    def has_completed_file_hash(self, file_hash: str, context: UploadContext) -> bool:
+    def find_completed_upload(
+        self, file_hash: str, context: UploadContext
+    ) -> Optional[dict[str, Any]]:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT 1
+                SELECT *
                 FROM uploads
                 WHERE file_hash = ?
                   AND service_origin = ?
                   AND service_origin_n1 = ?
                   AND service_origin_n2 = ?
                   AND status = 'completed'
+                ORDER BY uploaded_at DESC
                 LIMIT 1
                 """,
                 (
@@ -281,7 +285,14 @@ class SqliteNpsRepository:
                     context.service_origin_n2,
                 ),
             ).fetchone()
-        return row is not None
+        return self._serialize_upload_row(row) if row is not None else None
+
+    def get_upload(self, upload_id: str) -> Optional[dict[str, Any]]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM uploads WHERE upload_id = ?", (upload_id,)
+            ).fetchone()
+        return self._serialize_upload_row(row) if row is not None else None
 
     def persist_upload_attempt(self, attempt: UploadAttempt) -> None:
         with self._connect() as connection:
@@ -424,6 +435,7 @@ class SqliteNpsRepository:
         upload_id: str,
         uploaded_at: str,
         frame: pd.DataFrame,
+        _connection: Optional[sqlite3.Connection] = None,
     ) -> tuple[int, int, int]:
         rows = frame.to_dict(orient="records")
         if not rows:
@@ -434,7 +446,11 @@ class SqliteNpsRepository:
         updated = 0
         duplicate_historical = 0
 
-        with self._connect() as connection:
+        connection_context = cast(
+            ContextManager[sqlite3.Connection],
+            self._connect() if _connection is None else nullcontext(_connection),
+        )
+        with connection_context as connection:
             existing: dict[str, dict[str, Any]] = {}
             for start in range(0, len(business_keys), _SQLITE_IN_BATCH_SIZE):
                 chunk = business_keys[start : start + _SQLITE_IN_BATCH_SIZE]
@@ -634,6 +650,43 @@ class SqliteNpsRepository:
             )
 
         return inserted, updated, duplicate_historical
+
+    def replace_upload_records(
+        self,
+        *,
+        replaced_upload_id: str,
+        replacement_upload_id: str,
+        uploaded_at: str,
+        frame: pd.DataFrame,
+    ) -> tuple[int, int, int, int]:
+        """Replace one upload atomically without deleting records superseded elsewhere."""
+        with self._connect() as connection:
+            deleted_rows = connection.execute(
+                """
+                DELETE FROM records
+                WHERE last_upload_id = ?
+                  AND business_key IN (
+                      SELECT business_key
+                      FROM upload_records
+                      WHERE upload_id = ? AND status = 'inserted'
+                  )
+                """,
+                (replaced_upload_id, replaced_upload_id),
+            ).rowcount
+            connection.execute(
+                "DELETE FROM upload_records WHERE upload_id = ?", (replacement_upload_id,)
+            )
+            inserted, updated, duplicate_historical = self.upsert_records(
+                upload_id=replacement_upload_id,
+                uploaded_at=uploaded_at,
+                frame=frame,
+                _connection=connection,
+            )
+            connection.execute(
+                "UPDATE uploads SET status = 'replaced' WHERE upload_id = ?",
+                (replaced_upload_id,),
+            )
+        return inserted, updated, duplicate_historical, max(0, deleted_rows)
 
     def list_uploads(
         self,

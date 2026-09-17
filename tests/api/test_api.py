@@ -75,6 +75,34 @@ def test_api_uploads_and_returns_accumulative_summary(tmp_path: Path) -> None:
     assert uploads[0]["upload_id"] == payload["upload_id"]
 
 
+def test_api_replaces_a_duplicate_upload_on_explicit_request(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    march = fixture_excel("NPS Térmico Senda - 03Marzo.xlsx")
+    upload_ids: list[str] = []
+    for _ in range(2):
+        with march.open("rb") as handle:
+            response = client.post(
+                "/api/uploads/nps",
+                data={
+                    "service_origin": "BBVA México",
+                    "service_origin_n1": "Senda",
+                    "service_origin_n2": "",
+                },
+                files={"file": (march.name, handle, "application/vnd.ms-excel")},
+            )
+        assert response.status_code == 200
+        upload_ids.append(response.json()["upload_id"])
+
+    before = client.get("/api/summary").json()["total_records"]
+    response = client.post(f"/api/uploads/nps/{upload_ids[1]}/replace")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert client.get("/api/summary").json()["total_records"] == before
+    uploads = {upload["upload_id"]: upload for upload in client.get("/api/uploads").json()}
+    assert uploads[upload_ids[0]]["status"] == "replaced"
+
+
 def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
     invalid = tmp_path / "invalid.xlsx"
