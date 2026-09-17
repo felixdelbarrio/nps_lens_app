@@ -747,6 +747,15 @@ ul {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.taxonomy-project-instructions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  min-width: 0;
+}
+.taxonomy-project-instructions summary { cursor: pointer; }
+.taxonomy-project-instructions textarea { width: 100%; resize: vertical; }
+
 .field-grid.single-column {
   grid-template-columns: 1fr;
 }

@@ -26,12 +26,14 @@ Requires-Dist: ruptures<2.0,>=1.1.8
 Requires-Dist: openpyxl<3.2,>=3.1
 Requires-Dist: typing_extensions<5.0,>=4.7
 Requires-Dist: playwright<2.0,>=1.54
+Requires-Dist: psutil<8,>=5.9
 Provides-Extra: dev
 Requires-Dist: pytest<9.0,>=8.0; extra == "dev"
 Requires-Dist: pytest-cov<6.0,>=5.0; extra == "dev"
 Requires-Dist: httpx<0.29,>=0.28; extra == "dev"
 Requires-Dist: mypy<1.12,>=1.8; extra == "dev"
 Requires-Dist: types-python-dateutil; extra == "dev"
+Requires-Dist: types-psutil; extra == "dev"
 Requires-Dist: pandas-stubs==2.2.2.240807; extra == "dev"
 Requires-Dist: ruff<0.7,>=0.3; extra == "dev"
 Requires-Dist: black<25.0,>=24.2; extra == "dev"
@@ -106,6 +108,15 @@ ranked]
 ## Quickstart
 
 ### Requisitos
+
+- Para **Taxonomy Studio → Descubierta → ChatGPT automatizado**, Google Chrome instalado.
+  NPS Lens no instala navegadores ni modifica Chrome. Usa un perfil temporal exclusivo,
+  con sandbox activado, y conserva el mismo Chrome visible durante toda la sesión.
+  Completa login/MFA/Cloudflare manualmente y pulsa **Verificar conexión**. Ante un
+  challenge, no cierres ni recargues la ventana: la generación puede reanudarse tras
+  verificar. Desconectar o cerrar NPS Lens elimina el perfil y cierra sus procesos.
+  No se garantiza que una política corporativa o Cloudflare permita la automatización.
+
 - **Python 3.9.13** (entorno corporativo)
 - `make` (macOS / Linux)
 - (Opcional) `xcode-select --install` en macOS para builds nativas.

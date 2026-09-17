@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ContextManager, Protocol, Sequence
+from typing import Any, ContextManager, Iterator, Protocol, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-DISCOVERY_ENGINE_VERSION = "chatgpt-browser-v1"
+from nps_lens.services.taxonomy_prompts import (
+    FALLBACK_LEVER,
+    FALLBACK_SUBLEVERS,
+    INSTRUCTIONS_VERSION,
+    MAX_LEVERS,
+    MAX_PROMPT_CHARS,
+    MAX_RESPONSE_CHARS,
+    MAX_SUBLEVERS,
+    batch_prompt,
+)
+
+DISCOVERY_ENGINE_VERSION = "chatgpt-browser-v2"
 
 
 class DiscoveryErrorCode(str, Enum):
     AUTH_REQUIRED = "AUTH_REQUIRED"
     INTERACTION_REQUIRED = "INTERACTION_REQUIRED"
+    BROWSER_UNAVAILABLE = "BROWSER_UNAVAILABLE"
+    CORPORATE_POLICY_BLOCKED = "CORPORATE_POLICY_BLOCKED"
     CHATGPT_UNAVAILABLE = "CHATGPT_UNAVAILABLE"
     PROJECT_NOT_ACCESSIBLE = "PROJECT_NOT_ACCESSIBLE"
     UI_CHANGED = "UI_CHANGED"
@@ -20,6 +34,7 @@ class DiscoveryErrorCode(str, Enum):
     INVALID_JSON = "INVALID_JSON"
     INVALID_TAXONOMY = "INVALID_TAXONOMY"
     INVALID_CLASSIFICATION = "INVALID_CLASSIFICATION"
+    INPUT_TOO_LARGE = "INPUT_TOO_LARGE"
 
 
 class TaxonomyDiscoveryError(RuntimeError):
@@ -66,7 +81,7 @@ class _StrictModel(BaseModel):
 
 class TaxonomyBranch(_StrictModel):
     lever: str = Field(min_length=1)
-    sublevers: list[str] = Field(min_length=1)
+    sublevers: list[str] = Field(min_length=1, max_length=MAX_SUBLEVERS)
 
     @field_validator("lever")
     @classmethod
@@ -86,7 +101,7 @@ class TaxonomyBranch(_StrictModel):
 
 
 class TaxonomyResponse(_StrictModel):
-    taxonomy: list[TaxonomyBranch] = Field(min_length=1)
+    taxonomy: list[TaxonomyBranch] = Field(min_length=1, max_length=MAX_LEVERS)
 
 
 class PrimaryClassification(_StrictModel):
@@ -119,9 +134,22 @@ class ChatGPTDiscoveryConfig:
 
 
 def _strict_json(raw: str, code: DiscoveryErrorCode, model: type[_StrictModel]) -> _StrictModel:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate JSON key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value: str) -> None:
+        raise ValueError("Non-JSON numeric constant")
+
+    if len(raw) > MAX_RESPONSE_CHARS:
+        raise TaxonomyDiscoveryError(code, "La respuesta excede el presupuesto del contrato batch.")
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        payload = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    except ValueError as exc:
         raise TaxonomyDiscoveryError(
             DiscoveryErrorCode.INVALID_JSON, "ChatGPT no devolvió un documento JSON válido."
         ) from exc
@@ -155,41 +183,109 @@ class ChatGPTTaxonomyDiscoveryProvider:
             "designer_url": self.config.designer_url,
             "classifier_url": self.config.classifier_url,
             "batch_size": self.config.batch_size,
+            "instructions_version": INSTRUCTIONS_VERSION,
         }
 
     @staticmethod
     def _designer_prompt(comments: Sequence[tuple[str, str]]) -> str:
         rows = [{"id": key, "Comment": comment} for key, comment in comments]
-        return (
-            "Crea una taxonomía jerárquica exhaustiva para estos comentarios. "
-            "Devuelve exclusivamente JSON válido con este contrato exacto: "
-            '{"taxonomy":[{"lever":"...","sublevers":["..."]}]}. '
-            "No incluyas markdown, explicaciones ni campos adicionales. Comentarios: "
-            + json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+        return batch_prompt(
+            "designer",
+            {
+                "task": "create_taxonomy",
+                "config": {"max_levers": MAX_LEVERS, "max_sublevers_per_lever": MAX_SUBLEVERS},
+                "comments": rows,
+            },
         )
 
     @staticmethod
     def _classifier_prompt(taxonomy: TaxonomyResponse, comments: Sequence[tuple[str, str]]) -> str:
         rows = [{"id": key, "Comment": comment} for key, comment in comments]
-        return (
-            "Clasifica todos los comentarios en una única categoría de la taxonomía dada. "
-            "Devuelve exclusivamente JSON válido con este contrato exacto: "
-            '{"classifications":[{"id":"...","primary_classification":'
-            '{"lever":"...","sublever":"..."}}]}. '
-            "No omitas IDs y no incluyas markdown, explicaciones ni campos adicionales. Taxonomía: "
-            + taxonomy.model_dump_json()
-            + ". Comentarios: "
-            + json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+        return batch_prompt(
+            "classifier",
+            {
+                "task": "classify_comments",
+                "taxonomy": taxonomy.model_dump()["taxonomy"],
+                "comments": rows,
+            },
         )
+
+    def _classifier_batches(
+        self, taxonomy: TaxonomyResponse, comments: Sequence[tuple[str, str]]
+    ) -> Iterator[list[tuple[str, str]]]:
+        # Greedy, linear packing: deterministic and bounded by both input and output.
+        input_base = len(self._classifier_prompt(taxonomy, []))
+        output_base = len('{"classifications":[]}')
+        longest_pair = max(
+            len(
+                json.dumps(
+                    {"lever": branch.lever, "sublever": sub},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+            for branch in taxonomy.taxonomy
+            for sub in branch.sublevers
+        )
+        batch: list[tuple[str, str]] = []
+        input_size, output_size = input_base, output_base
+        for key, comment in comments:
+            row_size = len(
+                json.dumps(
+                    {"id": key, "Comment": comment}, ensure_ascii=False, separators=(",", ":")
+                )
+            )
+            result_size = (
+                len(
+                    json.dumps(
+                        {"id": key, "primary_classification": {}},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                )
+                - 2
+                + longest_pair
+            )
+            if (
+                input_base + row_size > MAX_PROMPT_CHARS
+                or output_base + result_size > MAX_RESPONSE_CHARS
+            ):
+                raise TaxonomyDiscoveryError(
+                    DiscoveryErrorCode.INPUT_TOO_LARGE,
+                    "Una fila no cabe en el presupuesto batch. No se truncará su contenido.",
+                )
+            if batch and (
+                len(batch) >= self.config.batch_size
+                or input_size + 1 + row_size > MAX_PROMPT_CHARS
+                or output_size + 1 + result_size > MAX_RESPONSE_CHARS
+            ):
+                yield batch
+                batch = []
+                input_size, output_size = input_base, output_base
+            input_size += row_size + bool(batch)
+            output_size += result_size + bool(batch)
+            batch.append((key, comment))
+        if batch:
+            yield batch
 
     @staticmethod
     def _validate_taxonomy(taxonomy: TaxonomyResponse) -> dict[str, set[str]]:
-        levers = [branch.lever for branch in taxonomy.taxonomy]
-        if len(levers) != len(set(levers)):
+        def normalized(value: str) -> str:
+            return unicodedata.normalize("NFKC", value).casefold()
+
+        levers = [normalized(branch.lever) for branch in taxonomy.taxonomy]
+        sublevers = [normalized(sub) for branch in taxonomy.taxonomy for sub in branch.sublevers]
+        if len(levers) != len(set(levers)) or len(sublevers) != len(set(sublevers)):
             raise TaxonomyDiscoveryError(
-                DiscoveryErrorCode.INVALID_TAXONOMY, "La taxonomía contiene Palancas duplicadas."
+                DiscoveryErrorCode.INVALID_TAXONOMY, "La taxonomía contiene categorías duplicadas."
             )
-        return {branch.lever: set(branch.sublevers) for branch in taxonomy.taxonomy}
+        categories = {branch.lever: set(branch.sublevers) for branch in taxonomy.taxonomy}
+        if categories.get(FALLBACK_LEVER) != set(FALLBACK_SUBLEVERS):
+            raise TaxonomyDiscoveryError(
+                DiscoveryErrorCode.INVALID_TAXONOMY,
+                "La taxonomía no contiene las categorías obligatorias para texto sin encaje.",
+            )
+        return categories
 
     @staticmethod
     def _validate_batch(
@@ -222,19 +318,26 @@ class ChatGPTTaxonomyDiscoveryProvider:
             raise TaxonomyDiscoveryError(
                 DiscoveryErrorCode.INVALID_CLASSIFICATION, "Los IDs de entrada no son únicos."
             )
+        designer_prompt = self._designer_prompt(comments)
+        if len(designer_prompt) > MAX_PROMPT_CHARS:
+            raise TaxonomyDiscoveryError(
+                DiscoveryErrorCode.INPUT_TOO_LARGE,
+                "El corpus completo excede el presupuesto de Designer "
+                f"({MAX_PROMPT_CHARS:,} caracteres, instrucciones incluidas). "
+                "Reduce el corpus; no se enviará una muestra ni se abrirá el navegador.",
+            )
 
         # One persistent context owns Designer and all Classifier batches.
         with self.browser.automation() as run:
             taxonomy = _strict_json(
-                run.create_taxonomy(self._designer_prompt(comments), self.config.designer_url),
+                run.create_taxonomy(designer_prompt, self.config.designer_url),
                 DiscoveryErrorCode.INVALID_TAXONOMY,
                 TaxonomyResponse,
             )
             assert isinstance(taxonomy, TaxonomyResponse)
             categories = self._validate_taxonomy(taxonomy)
             assignments: dict[str, PrimaryClassification] = {}
-            for start in range(0, len(comments), self.config.batch_size):
-                batch = comments[start : start + self.config.batch_size]
+            for batch in self._classifier_batches(taxonomy, comments):
                 parsed = _strict_json(
                     run.classify_comments(
                         self._classifier_prompt(taxonomy, batch), self.config.classifier_url

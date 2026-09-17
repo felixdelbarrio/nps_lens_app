@@ -16,6 +16,7 @@ afterEach(() => vi.unstubAllGlobals());
 it("generates both lenses, explores, compares and selects without regenerating", async () => {
   const state = status();
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/discovery/instructions")) return new Response(JSON.stringify({ version: "test", designer: "Designer instructions", classifier: "Classifier instructions" }));
     if (url.includes("/discovery")) return new Response(JSON.stringify({ method: "chatgpt_browser", designer_url: "https://chatgpt.com/g/designer", classifier_url: "https://chatgpt.com/g/classifier", session: "connected" }));
     if (url.includes("/generate")) { const body = JSON.parse(String(init?.body)); const item = state.taxonomies.find(t => t.mode === body.mode)!; Object.assign(item, { available: true, coverage: 1, levers: 2, sublevers: 4 }); return new Response(JSON.stringify({ cache_hit: false })); }
     if (url.includes("/settings")) { state.active = JSON.parse(String(init?.body)).active; state.requested_active = state.active; return new Response("{}"); }

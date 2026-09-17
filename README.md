@@ -63,6 +63,15 @@ ranked]
 ## Quickstart
 
 ### Requisitos
+
+- Para **Taxonomy Studio → Descubierta → ChatGPT automatizado**, Google Chrome instalado.
+  NPS Lens no instala navegadores ni modifica Chrome. Usa un perfil temporal exclusivo,
+  con sandbox activado, y conserva el mismo Chrome visible durante toda la sesión.
+  Completa login/MFA/Cloudflare manualmente y pulsa **Verificar conexión**. Ante un
+  challenge, no cierres ni recargues la ventana: la generación puede reanudarse tras
+  verificar. Desconectar o cerrar NPS Lens elimina el perfil y cierra sus procesos.
+  No se garantiza que una política corporativa o Cloudflare permita la automatización.
+
 - **Python 3.9.13** (entorno corporativo)
 - `make` (macOS / Linux)
 - (Opcional) `xcode-select --install` en macOS para builds nativas.

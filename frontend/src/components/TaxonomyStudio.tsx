@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import useSWR from "swr";
 
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscoverySettings, type TaxonomyMode, type TaxonomyStatus } from "../api";
+import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
 
 const NAMES: Record<TaxonomyMode, string> = { SOURCE: "Origen", NORMALIZED: "Normalizada", COMPLETED: "Completada", DISCOVERED: "Descubierta" };
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -36,7 +37,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     try {
       await run();
       if (refresh) { await mutate(); await onChange(); setExploration(null); }
-    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "No se pudo completar la operación."); }
+    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "No se pudo completar la operación."); await mutateDiscovery(); }
     finally { setBusy(false); }
   }
   async function generate(mode: TaxonomyMode, regenerate: boolean) {
@@ -97,12 +98,13 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="local">Local</option><option value="chatgpt_browser">ChatGPT automatizado</option></select></label>
       {discoveryMethod === "chatgpt_browser" ? <>
         <div className="field-grid">
-          <label>Designer URL<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label>
-          <label>Classifier URL<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label>
+          <div><label>Designer URL · Crea Taxonomía<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="designer" context={context} /></div>
+          <div><label>Classifier URL · Clasifica taxonomía<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="classifier" context={context} /></div>
         </div>
+        <p className="field-hint">Copia cada plantilla en las instrucciones de su proyecto, sustituyendo reglas anteriores incompatibles. Copiar no modifica ChatGPT ni inicia una sesión. El diseño usa el corpus completo; los lotes de clasificación respetan límites de filas y tamaño sin truncar comentarios.</p>
         <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
         <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
-        <p className="field-hint">El acceso se realiza directamente en Google Chrome cuando está instalado, con Chromium como alternativa. NPS Lens no captura usuario, contraseña ni MFA. Si Cloudflare repite el challenge, cierra la ventana, pulsa Desconectar y vuelve a Conectar una sola vez.</p>
+        <p className="field-hint">Se requiere Google Chrome instalado. Inicia sesión y completa MFA o Cloudflare directamente en esa ventana; después pulsa Verificar conexión. No cierres ni recargues la ventana ante un challenge. NPS Lens reutiliza la misma sesión y minimiza Chrome durante la generación. Al desconectar o cerrar NPS Lens se elimina el perfil temporal; el siguiente inicio puede requerir autenticación.</p>
       </> : null}
     </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>
