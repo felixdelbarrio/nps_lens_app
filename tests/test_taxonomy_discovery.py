@@ -164,6 +164,7 @@ def test_browser_visibility_is_limited_to_explicit_connect(tmp_path: Path, monke
     monkeypatch.setattr(client, "_composer_visible", lambda _page: True)
 
     assert client.connect() == "connected"
+    assert len(contexts[0].pages) == 1
     assert contexts[0].pages[-1].visited == [
         "https://chatgpt.com/",
         "https://chatgpt.com/g/designer",
@@ -187,6 +188,27 @@ def test_disconnect_removes_complete_dedicated_profile(tmp_path: Path) -> None:
     )
     client.disconnect()
     assert not profile.exists()
+
+
+def test_profile_cleanup_preserves_session_and_challenge_state(tmp_path: Path) -> None:
+    profile = tmp_path / "profile"
+    disposable = profile / "Default" / "Cache"
+    session_state = profile / "Default" / "Local Storage"
+    challenge_state = profile / "Default" / "IndexedDB"
+    for directory in (disposable, session_state, challenge_state):
+        directory.mkdir(parents=True)
+        (directory / "state").write_text("kept", encoding="utf-8")
+    client = ChatGPTBrowserClient(
+        profile,
+        "https://chatgpt.com/g/designer",
+        "https://chatgpt.com/g/classifier",
+    )
+
+    client._minimize_profile()
+
+    assert not disposable.exists()
+    assert session_state.exists()
+    assert challenge_state.exists()
 
 
 class ChallengeFrame:
