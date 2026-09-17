@@ -161,9 +161,7 @@ class ChatGPTTaxonomyDiscoveryProvider:
         )
 
     @staticmethod
-    def _classifier_prompt(
-        taxonomy: TaxonomyResponse, comments: Sequence[tuple[str, str]]
-    ) -> str:
+    def _classifier_prompt(taxonomy: TaxonomyResponse, comments: Sequence[tuple[str, str]]) -> str:
         rows = [{"id": key, "Comment": comment} for key, comment in comments]
         return (
             "Clasifica todos los comentarios en una única categoría de la taxonomía dada. "

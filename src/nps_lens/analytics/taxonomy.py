@@ -219,4 +219,3 @@ def complete(frame: pd.DataFrame, config: TaxonomyConfig) -> dict[str, Any]:
         "quality": quality,
         "nodes": [],
     }
-

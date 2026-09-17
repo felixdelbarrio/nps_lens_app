@@ -97,9 +97,7 @@ class TaxonomyService:
             return {"method": "disabled", "session": "not_connected"}
         return {
             **self.discovery_provider.signature_config(),
-            "session": (
-                self.discovery_provider.session_status() if check_session else "unknown"
-            ),
+            "session": (self.discovery_provider.session_status() if check_session else "unknown"),
         }
 
     def connect_discovery(self) -> dict[str, Any]:

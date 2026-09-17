@@ -33,7 +33,10 @@ class ChatGPTBrowserRun:
             )
         body = page.locator("body")
         text = body.inner_text(timeout=5000).casefold()
-        if any(token in text for token in ("captcha", "verify you are human", "comprobando su navegador")):
+        if any(
+            token in text
+            for token in ("captcha", "verify you are human", "comprobando su navegador")
+        ):
             raise TaxonomyDiscoveryError(
                 DiscoveryErrorCode.AUTH_REQUIRED,
                 "ChatGPT solicita verificación interactiva. Vuelve a conectar.",
@@ -266,7 +269,9 @@ class ChatGPTBrowserClient:
                 while time.monotonic() < deadline:
                     active = context.pages[-1]
                     try:
-                        if not ChatGPTBrowserRun._auth_url(active.url) and self._composer_visible(active):
+                        if not ChatGPTBrowserRun._auth_url(active.url) and self._composer_visible(
+                            active
+                        ):
                             return "connected"
                     except Exception:
                         pass

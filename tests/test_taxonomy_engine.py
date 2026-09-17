@@ -32,11 +32,22 @@ class FakeDiscoveryProvider:
         self.calls = 0
 
     def signature_config(self) -> dict[str, object]:
-        return {"engine": "fake-v1", "method": "chatgpt_browser", "designer_url": "designer", "classifier_url": "classifier", "batch_size": 500}
+        return {
+            "engine": "fake-v1",
+            "method": "chatgpt_browser",
+            "designer_url": "designer",
+            "classifier_url": "classifier",
+            "batch_size": 500,
+        }
 
     def discover(self, comments: list[tuple[str, str]]) -> dict[str, object]:
         self.calls += 1
-        return {"lever": ["ChatGPT"] * len(comments), "sublever": ["Clasificado"] * len(comments), "provenance": ["chatgpt"] * len(comments), "nodes": []}
+        return {
+            "lever": ["ChatGPT"] * len(comments),
+            "sublever": ["Clasificado"] * len(comments),
+            "provenance": ["chatgpt"] * len(comments),
+            "nodes": [],
+        }
 
     def session_status(self) -> str:
         return "connected"
@@ -221,7 +232,9 @@ def test_resolver_all_modes_and_cached_generation(service) -> None:
                 "nps_lens.services.taxonomy_service.complete",
                 side_effect=AssertionError("retrained"),
             ),
-            patch.object(tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")),
+            patch.object(
+                tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")
+            ),
         ):
             assert tax.generate(ctx, mode, TaxonomyConfig())["cache_hit"]
             tax.configure(ctx, {"active": mode})
