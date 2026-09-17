@@ -49,6 +49,7 @@ from nps_lens.settings import (
     normalize_taxonomy_discovery_method,
     persist_service_origin_hierarchy,
     persist_ui_prefs,
+    safe_normalize_downloads_path,
 )
 
 
@@ -227,8 +228,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 payload,
                 file_name,
                 Path(
-                    normalize_downloads_path(
-                        current_settings.ui_defaults()["downloads_path"], create=True
+                    safe_normalize_downloads_path(
+                        current_settings.ui_defaults()["downloads_path"],
+                        current_settings.default_downloads_path,
                     )
                 ),
             )

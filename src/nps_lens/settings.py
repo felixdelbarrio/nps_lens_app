@@ -336,10 +336,36 @@ def normalize_helix_base_url(value: object) -> str:
 
 
 def safe_normalize_downloads_path(value: object, fallback: object) -> str:
+    """Normalize a UI downloads preference while preserving a trusted configured default.
+
+    ``fallback`` comes from application configuration and may legitimately live outside
+    the interactive user's home directory (for example pytest's ``tmp_path`` or a
+    deployment-mounted directory). If the requested value is exactly that configured
+    fallback, accept it after lexical normalization.
+
+    Any different value is treated as user-controlled input and must satisfy
+    ``normalize_downloads_path()``, which confines it to the user's home directory.
+    """
+
+    safe_root = Path.home().expanduser()
+
+    def _lexical(value_to_normalize: object) -> str:
+        raw = str(value_to_normalize or "").strip() or str(safe_root / "Downloads")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = safe_root / candidate
+        return os.path.abspath(os.path.normpath(str(candidate)))
+
+    fallback_path = _lexical(fallback)
+    requested_path = _lexical(value)
+
+    if os.path.normcase(requested_path) == os.path.normcase(fallback_path):
+        return fallback_path
+
     try:
         return normalize_downloads_path(value)
     except (OSError, ValueError):
-        return normalize_downloads_path(fallback)
+        return fallback_path
 
 
 def safe_normalize_helix_base_url(value: object, fallback: object) -> str:
