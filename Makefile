@@ -60,6 +60,7 @@ BLACK = $(VENV_BIN)/black$(BIN_EXT)
 MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
 PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
+PYTHON_FORMAT_PATHS ?= src tests scripts
 
 .PHONY: default venv python-dev python-build python-playwright setup frontend-install frontend-build frontend-test frontend-e2e build run kill webapp WebApp lint typecheck test ci clean
 
@@ -335,11 +336,11 @@ WebApp: webapp
 lint:
 	@test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
 	$(RUFF) check --no-fix .
-	$(BLACK) --check .
+	$(BLACK) --check $(PYTHON_FORMAT_PATHS)
 
 typecheck:
 	@test -x "$(MYPY)" || $(MAKE) python-dev
-	$(MYPY) .
+	$(MYPY)
 
 test:
 	@test -x "$(PYTEST)" || $(MAKE) python-dev
@@ -348,7 +349,7 @@ test:
 ci:
 	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
 	$(RUFF) check --no-fix .
-	$(BLACK) --check .
+	$(BLACK) --check $(PYTHON_FORMAT_PATHS)
 	$(MAKE) frontend-test
 	$(MAKE) frontend-build
 	$(MAKE) frontend-e2e

@@ -272,7 +272,9 @@ class ChatGPTBrowserClient:
     def _status_in_context(self, context: Any) -> str:
         page = context.new_page()
         try:
-            page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms)
+            page.goto(
+                "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
+            )
             if ChatGPTBrowserRun._interaction_required(page):
                 return "interaction_required"
             try:
@@ -292,7 +294,9 @@ class ChatGPTBrowserClient:
         with self._lock, self._context(headless=False) as context:
             page = context.new_page()
             try:
-                page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms)
+                page.goto(
+                    "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
+                )
                 self._wait_for_manual_access(context)
                 for project_url in (self.designer_url, self.classifier_url):
                     active = context.pages[-1]
