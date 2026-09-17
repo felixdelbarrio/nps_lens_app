@@ -62,6 +62,20 @@ def test_local_discovery_never_constructs_browser(tmp_path: Path, monkeypatch) -
     browser.assert_not_called()
 
 
+def test_project_instructions_are_local_read_only_and_match_batch_templates(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
+
+    browser = Mock(side_effect=AssertionError("instructions must not launch Chrome"))
+    monkeypatch.setattr("nps_lens.services.dashboard_service.ChatGPTBrowserClient", browser)
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        response = client.get("/api/taxonomy/discovery/instructions")
+    assert response.status_code == 200
+    assert response.json() == {"version": INSTRUCTIONS_VERSION, **PROJECT_INSTRUCTIONS}
+    browser.assert_not_called()
+
+
 def test_telemetry_excludes_unknown_paths_and_parameter_values(tmp_path: Path) -> None:
     app = create_app(_settings(tmp_path))
     client = TestClient(app)
