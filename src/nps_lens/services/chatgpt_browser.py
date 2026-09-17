@@ -353,12 +353,14 @@ class ChatGPTBrowserClient:
             if self._loop is None:
                 return
             loop, thread = self._loop, self._thread
-            asyncio.run_coroutine_threadsafe(self._shutdown(), loop).result()
-            loop.call_soon_threadsafe(loop.stop)
-            if thread is not None:
-                thread.join()
-            loop.close()
-            self._loop = self._thread = None
+            try:
+                asyncio.run_coroutine_threadsafe(self._shutdown(), loop).result()
+            finally:
+                loop.call_soon_threadsafe(loop.stop)
+                if thread is not None:
+                    thread.join()
+                loop.close()
+                self._loop = self._thread = None
 
     @contextmanager
     def automation(self) -> Iterator[ChatGPTBrowserClient]:
