@@ -17,13 +17,13 @@ from nps_lens.analytics.taxonomy import (
     TaxonomyConfig,
     complete,
     detect_taxonomy,
-    discover,
     labels,
     signature,
 )
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryProvider
 
 POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
 
@@ -72,7 +72,12 @@ class TaxonomyResolver:
 
 
 class TaxonomyService:
-    def __init__(self, repository: SqliteNpsRepository, equivalences_path: Any) -> None:
+    def __init__(
+        self,
+        repository: SqliteNpsRepository,
+        equivalences_path: Any,
+        discovery_provider: Optional[TaxonomyDiscoveryProvider] = None,
+    ) -> None:
         self.repository = repository
         self.equivalences_path = equivalences_path
         self.resolver = TaxonomyResolver()
@@ -80,6 +85,35 @@ class TaxonomyService:
         self.lens_override: Optional[str] = None
         self._state_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self.discovery_provider = discovery_provider
+
+    def set_discovery_provider(
+        self, discovery_provider: Optional[TaxonomyDiscoveryProvider]
+    ) -> None:
+        self.discovery_provider = discovery_provider
+
+    def discovery_status(self, *, check_session: bool = False) -> dict[str, Any]:
+        if self.discovery_provider is None:
+            return {"method": "disabled", "session": "not_connected"}
+        return {
+            **self.discovery_provider.signature_config(),
+            "session": (
+                self.discovery_provider.session_status() if check_session else "unknown"
+            ),
+        }
+
+    def connect_discovery(self) -> dict[str, Any]:
+        if self.discovery_provider is None:
+            raise ValueError("Selecciona ChatGPT automatizado antes de conectar.")
+        return {
+            **self.discovery_provider.signature_config(),
+            "session": self.discovery_provider.connect(),
+        }
+
+    def disconnect_discovery(self) -> dict[str, Any]:
+        if self.discovery_provider is not None:
+            self.discovery_provider.disconnect()
+        return {"session": "not_connected"}
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)
@@ -157,9 +191,12 @@ class TaxonomyService:
             item = self.artifact(sig)
             if item:
                 base = self.resolver.resolve(frame, "NORMALIZED", registry)
-                expected = signature(
-                    base, mode, TaxonomyConfig(**item["config"]), registry.signature("nps")
+                config: TaxonomyConfig | dict[str, Any] = (
+                    TaxonomyConfig(**item["config"])
+                    if mode == "COMPLETED"
+                    else cast(dict[str, Any], item["config"])
                 )
+                expected = signature(base, mode, config, registry.signature("nps"))
                 if sig == expected:
                     available[mode] = item
         return available
@@ -192,7 +229,11 @@ class TaxonomyService:
         return self.resolver.resolve(frame, selected, registry, item)
 
     def generate(
-        self, context: UploadContext, mode: str, config: TaxonomyConfig, regenerate: bool = False
+        self,
+        context: UploadContext,
+        mode: str,
+        config: Optional[TaxonomyConfig] = None,
+        regenerate: bool = False,
     ) -> dict[str, Any]:
         if mode not in ("COMPLETED", "DISCOVERED"):
             raise ValueError("Solo COMPLETED y DISCOVERED requieren generación.")
@@ -205,21 +246,40 @@ class TaxonomyService:
             .sort_values("_business_key")
             .reset_index(drop=True)
         )
-        sig = signature(frame, mode, config, registry.signature("nps"))
+        provider = self.discovery_provider
+        if mode == "COMPLETED":
+            artifact_config: dict[str, Any] = asdict(config or TaxonomyConfig())
+        else:
+            if provider is None:
+                raise ValueError("Selecciona ChatGPT automatizado en Taxonomy Studio.")
+            artifact_config = provider.signature_config()
+        sig = signature(frame, mode, artifact_config, registry.signature("nps"))
         artifact = None if regenerate else self.artifact(sig)
         hit = artifact is not None
         if artifact is None:
-            artifact = (complete if mode == "COMPLETED" else discover)(frame, config)
+            if mode == "COMPLETED":
+                artifact = complete(frame, config or TaxonomyConfig())
+            else:
+                assert provider is not None
+                comments = list(
+                    zip(
+                        frame["_business_key"].astype(str).tolist(),
+                        frame["Comment"].astype("string").fillna("").tolist(),
+                    )
+                )
+                artifact = provider.discover(comments)
             artifact.update(
                 {
                     "mode": mode,
                     "signature": sig,
                     "keys": frame["_business_key"].tolist(),
-                    "config": asdict(config),
+                    "config": artifact_config,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "equivalences": registry.to_dict() if mode == "COMPLETED" else {},
                 }
             )
+            state.setdefault("artifacts", {})[mode] = sig
+            # Artifact and active state become visible in the same SQLite transaction.
             with self.repository._connect() as connection:
                 connection.execute(
                     "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
@@ -230,9 +290,14 @@ class TaxonomyService:
                         json.dumps(artifact, ensure_ascii=False, allow_nan=False),
                     ),
                 )
-            self._cache.pop(sig, None)
-        state.setdefault("artifacts", {})[mode] = sig
-        self.save_state(context, state)
+                connection.execute(
+                    "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
+                    (context_key(context), json.dumps(state, ensure_ascii=False, allow_nan=False)),
+                )
+            self._cache[sig] = artifact
+        else:
+            state.setdefault("artifacts", {})[mode] = sig
+            self.save_state(context, state)
         return {
             "mode": mode,
             "signature": sig,

@@ -22,6 +22,9 @@ DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Detractores"
 DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
+DEFAULT_TAXONOMY_DISCOVERY_METHOD = "disabled"
+DEFAULT_TAXONOMY_DESIGNER_URL = "https://chatgpt.com/g/g-p-6aaabb05fd0881a49965c28ef21333a9"
+DEFAULT_TAXONOMY_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aaab79eb94481a498b0b2bb6ba2cb2a"
 DEFAULT_SERVICE_ORIGINS = [
     "BBVA México",
     "BBVA España",
@@ -64,6 +67,9 @@ UI_PREF_ENV_KEYS = {
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
     "min_n_nps_gaps": "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "min_n_cross_comparisons": "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
+    "taxonomy_discovery_method": "NPS_LENS_TAXONOMY_DISCOVERY_METHOD",
+    "taxonomy_designer_url": "NPS_LENS_TAXONOMY_DESIGNER_URL",
+    "taxonomy_classifier_url": "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
 }
 
 
@@ -332,6 +338,20 @@ def normalize_report_dimension_analysis(value: object) -> str:
     return raw if raw in {"palanca", "subpalanca"} else DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
 
 
+def normalize_taxonomy_discovery_method(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if raw not in {"disabled", "chatgpt_browser"}:
+        raise ValueError("Método de descubrimiento desconocido.")
+    return raw
+
+
+def normalize_chatgpt_project_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw.startswith("https://chatgpt.com/g/"):
+        raise ValueError("La URL debe ser un proyecto de https://chatgpt.com/g/.")
+    return raw
+
+
 def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
     if dotenv_path is None:
         return
@@ -349,6 +369,10 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
             value = normalize_helix_base_url(raw_value)
         elif str(name) == "report_dimension_analysis":
             value = normalize_report_dimension_analysis(raw_value)
+        elif str(name) == "taxonomy_discovery_method":
+            value = normalize_taxonomy_discovery_method(raw_value)
+        elif str(name) in {"taxonomy_designer_url", "taxonomy_classifier_url"}:
+            value = normalize_chatgpt_project_url(raw_value)
         else:
             value = str(raw_value)
         os.environ[env_key] = value
@@ -429,6 +453,10 @@ class Settings:
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
     default_min_n_nps_gaps: int = DEFAULT_UI_MIN_N_NPS_GAPS
     default_min_n_cross_comparisons: int = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
+    taxonomy_discovery_method: str = DEFAULT_TAXONOMY_DISCOVERY_METHOD
+    taxonomy_designer_url: str = DEFAULT_TAXONOMY_DESIGNER_URL
+    taxonomy_classifier_url: str = DEFAULT_TAXONOMY_CLASSIFIER_URL
+    taxonomy_batch_size: int = 500
 
     @staticmethod
     def from_env() -> "Settings":
@@ -559,6 +587,27 @@ class Settings:
             ),
             200,
         )
+        try:
+            taxonomy_discovery_method = normalize_taxonomy_discovery_method(
+                os.getenv("NPS_LENS_TAXONOMY_DISCOVERY_METHOD", DEFAULT_TAXONOMY_DISCOVERY_METHOD)
+            )
+        except ValueError:
+            taxonomy_discovery_method = DEFAULT_TAXONOMY_DISCOVERY_METHOD
+        try:
+            taxonomy_designer_url = normalize_chatgpt_project_url(
+                os.getenv("NPS_LENS_TAXONOMY_DESIGNER_URL", DEFAULT_TAXONOMY_DESIGNER_URL)
+            )
+        except ValueError:
+            taxonomy_designer_url = DEFAULT_TAXONOMY_DESIGNER_URL
+        try:
+            taxonomy_classifier_url = normalize_chatgpt_project_url(
+                os.getenv("NPS_LENS_TAXONOMY_CLASSIFIER_URL", DEFAULT_TAXONOMY_CLASSIFIER_URL)
+            )
+        except ValueError:
+            taxonomy_classifier_url = DEFAULT_TAXONOMY_CLASSIFIER_URL
+        taxonomy_batch_size = min(
+            max(_to_int(os.getenv("NPS_LENS_TAXONOMY_BATCH_SIZE", "500"), 500), 50), 2000
+        )
 
         return Settings(
             data_dir=data_dir,
@@ -596,6 +645,10 @@ class Settings:
             default_max_days_apart=default_max_days_apart,
             default_min_n_nps_gaps=default_min_n_nps_gaps,
             default_min_n_cross_comparisons=default_min_n_cross_comparisons,
+            taxonomy_discovery_method=taxonomy_discovery_method,
+            taxonomy_designer_url=taxonomy_designer_url,
+            taxonomy_classifier_url=taxonomy_classifier_url,
+            taxonomy_batch_size=taxonomy_batch_size,
         )
 
     def service_origin_n2_options(self, service_origin: str, service_origin_n1: str) -> list[str]:
@@ -696,4 +749,7 @@ class Settings:
             "max_days_apart": max_days_apart,
             "min_n_nps_gaps": min_n_nps_gaps,
             "min_n_cross_comparisons": min_n_cross_comparisons,
+            "taxonomy_discovery_method": self.taxonomy_discovery_method,
+            "taxonomy_designer_url": self.taxonomy_designer_url,
+            "taxonomy_classifier_url": self.taxonomy_classifier_url,
         }

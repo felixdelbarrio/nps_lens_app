@@ -97,6 +97,11 @@ from nps_lens.services.analytics import (
     format_metric,
     format_percentage,
 )
+from nps_lens.services.chatgpt_browser import ChatGPTBrowserClient
+from nps_lens.services.taxonomy_discovery import (
+    ChatGPTDiscoveryConfig,
+    ChatGPTTaxonomyDiscoveryProvider,
+)
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -371,7 +376,9 @@ class DashboardService:
     def __init__(self, repository: SqliteNpsRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self.taxonomy = TaxonomyService(repository, settings.equivalences_path)
+        self.taxonomy = TaxonomyService(
+            repository, settings.equivalences_path, self._taxonomy_discovery_provider(settings)
+        )
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self.logger = logging.getLogger(__name__)
         # The analytical routes allocate large pandas/sklearn intermediates.  A single
@@ -382,6 +389,25 @@ class DashboardService:
         self._result_cache: OrderedDict[tuple[object, ...], dict[str, object]] = OrderedDict()
         self._frame_cache_limit = 4
         self._result_cache_limit = 4
+
+    @staticmethod
+    def _taxonomy_discovery_provider(
+        settings: Settings,
+    ) -> Optional[ChatGPTTaxonomyDiscoveryProvider]:
+        if settings.auth_mode != "local" or settings.taxonomy_discovery_method != "chatgpt_browser":
+            return None
+        config = ChatGPTDiscoveryConfig(
+            designer_url=settings.taxonomy_designer_url,
+            classifier_url=settings.taxonomy_classifier_url,
+            batch_size=settings.taxonomy_batch_size,
+        )
+        browser = ChatGPTBrowserClient(
+            settings.data_dir / "sessions" / "chatgpt", settings.taxonomy_designer_url
+        )
+        return ChatGPTTaxonomyDiscoveryProvider(browser, config)
+
+    def refresh_taxonomy_discovery(self) -> None:
+        self.taxonomy.set_discovery_provider(self._taxonomy_discovery_provider(self.settings))
 
     @staticmethod
     def _path_revision(path: Path) -> tuple[int, int]:

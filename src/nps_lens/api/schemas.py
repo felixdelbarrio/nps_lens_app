@@ -185,3 +185,9 @@ class TaxonomySettingsRequest(BaseModel):
     active: Optional[str] = None
     default: Optional[str] = None
     policy: Optional[str] = None
+
+
+class TaxonomyDiscoverySettingsRequest(BaseModel):
+    method: str
+    designer_url: str
+    classifier_url: str

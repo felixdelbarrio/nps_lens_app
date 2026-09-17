@@ -15,7 +15,6 @@ from nps_lens.analytics.taxonomy import (
     TaxonomyConfig,
     complete,
     detect_taxonomy,
-    discover,
     signature,
 )
 from nps_lens.api.app import create_app
@@ -26,6 +25,27 @@ from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings
+
+
+class FakeDiscoveryProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def signature_config(self) -> dict[str, object]:
+        return {"engine": "fake-v1", "method": "chatgpt_browser", "designer_url": "designer", "classifier_url": "classifier", "batch_size": 500}
+
+    def discover(self, comments: list[tuple[str, str]]) -> dict[str, object]:
+        self.calls += 1
+        return {"lever": ["ChatGPT"] * len(comments), "sublever": ["Clasificado"] * len(comments), "provenance": ["chatgpt"] * len(comments), "nodes": []}
+
+    def session_status(self) -> str:
+        return "connected"
+
+    def connect(self) -> str:
+        return "connected"
+
+    def disconnect(self) -> None:
+        return None
 
 
 def corpus() -> pd.DataFrame:
@@ -77,7 +97,7 @@ def service(settings: Settings) -> tuple[TaxonomyService, UploadContext]:
         filename="test.xlsx", payload=content.getvalue(), context=context
     )
     assert result["status"] == "completed", result
-    return TaxonomyService(repo, settings.equivalences_path), context
+    return TaxonomyService(repo, settings.equivalences_path, FakeDiscoveryProvider()), context
 
 
 @pytest.mark.parametrize("state", ["COMPLETE", "PARTIAL", "MISSING", "NO_TEXT"])
@@ -166,15 +186,9 @@ def test_completed_rejects_uncertain_unseen_and_insufficient_training() -> None:
     assert tiny["quality"][0]["macro_f1"] is None
 
 
-def test_discovered_deterministic_and_independent_of_score() -> None:
+def test_discovered_signature_is_independent_of_score_and_equivalences() -> None:
     frame = corpus()
-    config = TaxonomyConfig(clusters=4, subclusters=2)
-    first = discover(frame, config)
-    second = discover(frame.assign(NPS=10), config)
-    assert first == second
-    assert len(set(first["lever"])) == 4
-    assert all(node["label"].startswith("Tema · ") for node in first["nodes"])
-    assert all(1 <= len(node["examples"]) <= 5 for node in first["nodes"])
+    config = {"engine": "fake-v1", "designer_url": "designer", "classifier_url": "classifier"}
     assert signature(frame, "DISCOVERED", config, "a") == signature(
         frame.assign(NPS=9), "DISCOVERED", config, "b"
     )
@@ -189,7 +203,6 @@ def test_discovered_deterministic_and_independent_of_score() -> None:
     ],
 )
 def test_empty_small_engines(frame: pd.DataFrame) -> None:
-    assert len(discover(frame, TaxonomyConfig())["lever"]) == len(frame)
     assert len(complete(frame, TaxonomyConfig())["lever"]) == len(frame)
     assert detect_taxonomy(frame)["rows"] == len(frame)
 
@@ -208,10 +221,7 @@ def test_resolver_all_modes_and_cached_generation(service) -> None:
                 "nps_lens.services.taxonomy_service.complete",
                 side_effect=AssertionError("retrained"),
             ),
-            patch(
-                "nps_lens.services.taxonomy_service.discover",
-                side_effect=AssertionError("reclustered"),
-            ),
+            patch.object(tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")),
         ):
             assert tax.generate(ctx, mode, TaxonomyConfig())["cache_hit"]
             tax.configure(ctx, {"active": mode})
@@ -240,19 +250,44 @@ def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     ]
 
 
+def test_discovered_regenerate_and_failure_are_atomic(service) -> None:
+    tax, ctx = service
+    provider = tax.discovery_provider
+    assert isinstance(provider, FakeDiscoveryProvider)
+    first = tax.generate(ctx, "DISCOVERED")
+    assert provider.calls == 1
+    tax.generate(ctx, "DISCOVERED", regenerate=True)
+    assert provider.calls == 2
+
+    with (
+        patch.object(provider, "discover", side_effect=RuntimeError("classifier failed")),
+        pytest.raises(RuntimeError, match="classifier failed"),
+    ):
+        tax.generate(ctx, "DISCOVERED", regenerate=True)
+    assert tax.state(ctx)["artifacts"]["DISCOVERED"] == first["signature"]
+    assert tax.artifact(first["signature"]) is not None
+
+
+def test_discovered_is_disabled_without_selected_provider(service) -> None:
+    tax, ctx = service
+    tax.set_discovery_provider(None)
+    with pytest.raises(ValueError, match="Selecciona ChatGPT"):
+        tax.generate(ctx, "DISCOVERED")
+
+
 @pytest.mark.parametrize(
     "policy,number", [("ACTIVE_ONLY", 1), ("SOURCE_AND_ACTIVE", 2), ("ALL_AVAILABLE", 4)]
 )
 def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, number) -> None:
     tax, ctx = service
     tax.generate(ctx, "COMPLETED", TaxonomyConfig())
-    tax.generate(ctx, "DISCOVERED", TaxonomyConfig(clusters=4))
+    tax.generate(ctx, "DISCOVERED", TaxonomyConfig())
     tax.configure(ctx, {"active": "DISCOVERED", "default": "DISCOVERED", "policy": policy})
     before = tax.resolve(ctx)
     snapshot = tax.snapshot(ctx)
     assert len(snapshot["taxonomies"]) == number
-    with patch(
-        "nps_lens.services.taxonomy_service.discover", side_effect=AssertionError("reclustered")
+    with patch.object(
+        tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")
     ):
         tax.restore(ctx, snapshot)
         pd.testing.assert_series_equal(tax.resolve(ctx).Palanca, before.Palanca, check_dtype=False)
@@ -285,13 +320,15 @@ def test_causal_path_accepts_every_lens(service, mode) -> None:
 
 def test_taxonomy_api_round_trip(settings, service) -> None:
     _, ctx = service
-    client = TestClient(create_app(settings))
+    app = create_app(settings)
+    app.state.dashboard_service.taxonomy.set_discovery_provider(FakeDiscoveryProvider())
+    client = TestClient(app)
     params = {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1}
     assert client.get("/api/taxonomy", params=params).status_code == 200
     generated = client.post(
         "/api/taxonomy/generate",
         params=params,
-        json={"mode": "DISCOVERED", "config": {"clusters": 4}},
+        json={"mode": "DISCOVERED", "config": {}},
     )
     assert generated.status_code == 200, generated.text
     assert (

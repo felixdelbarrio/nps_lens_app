@@ -25,6 +25,7 @@ from nps_lens.api.schemas import (
     PreferencesUpdateRequest,
     ServiceOriginHierarchyRequest,
     SummaryResponse,
+    TaxonomyDiscoverySettingsRequest,
     TaxonomyGenerateRequest,
     TaxonomySettingsRequest,
     UploadResponse,
@@ -38,11 +39,14 @@ from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
+from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.settings import (
     Settings,
     load_runtime_dotenv,
+    normalize_chatgpt_project_url,
     normalize_downloads_path,
     normalize_helix_base_url,
+    normalize_taxonomy_discovery_method,
     persist_service_origin_hierarchy,
     persist_ui_prefs,
 )
@@ -191,6 +195,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request.app.state.service.settings = reloaded
         request.app.state.dashboard_service.clear_caches()
         request.app.state.dashboard_service.settings = reloaded
+        request.app.state.dashboard_service.refresh_taxonomy_discovery()
         request.app.state.dashboard_service.helix_store = (
             request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
         )
@@ -605,7 +610,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def taxonomy_studio(
         request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, Any]:
-        return dashboard_layer.taxonomy.studio(taxonomy_context(request))
+        result = dashboard_layer.taxonomy.studio(taxonomy_context(request))
+        result["discovery_local_available"] = (
+            cast(Settings, request.app.state.settings).auth_mode == "local"
+        )
+        return result
 
     @app.get("/api/taxonomy/explore")
     def taxonomy_explore(
@@ -643,16 +652,86 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_admin(request)
         try:
             with dashboard_layer._analytics_lock:
+                config = TaxonomyConfig(**payload.config) if payload.mode == "COMPLETED" else None
                 result = dashboard_layer.taxonomy.generate(
                     taxonomy_context(request),
                     payload.mode,
-                    TaxonomyConfig(**payload.config),
+                    config,
                     payload.regenerate,
                 )
                 dashboard_layer.clear_caches()
                 return result
+        except TaxonomyDiscoveryError as exc:
+            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
         except (TypeError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    def require_local_taxonomy(request: Request) -> None:
+        if cast(Settings, request.app.state.settings).auth_mode != "local":
+            raise HTTPException(404, "La automatización de ChatGPT solo existe en la app local.")
+
+    @app.get("/api/taxonomy/discovery")
+    def taxonomy_discovery_settings(
+        request: Request,
+        check_session: bool = True,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        current = cast(Settings, request.app.state.settings)
+        status = dashboard_layer.taxonomy.discovery_status(
+            check_session=check_session and current.taxonomy_discovery_method == "chatgpt_browser"
+        )
+        return {
+            "method": current.taxonomy_discovery_method,
+            "designer_url": current.taxonomy_designer_url,
+            "classifier_url": current.taxonomy_classifier_url,
+            "session": status["session"],
+        }
+
+    @app.put("/api/taxonomy/discovery")
+    def update_taxonomy_discovery_settings(
+        payload: TaxonomyDiscoverySettingsRequest,
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        current = cast(Settings, request.app.state.settings)
+        try:
+            values = {
+                "taxonomy_discovery_method": normalize_taxonomy_discovery_method(payload.method),
+                "taxonomy_designer_url": normalize_chatgpt_project_url(payload.designer_url),
+                "taxonomy_classifier_url": normalize_chatgpt_project_url(payload.classifier_url),
+            }
+            persist_ui_prefs(current.dotenv_path, values)
+            refresh_settings(request)
+            return taxonomy_discovery_settings(request, False, dashboard_layer)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/taxonomy/discovery/connect")
+    def connect_taxonomy_discovery(
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        try:
+            return dashboard_layer.taxonomy.connect_discovery()
+        except TaxonomyDiscoveryError as exc:
+            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/taxonomy/discovery/disconnect")
+    def disconnect_taxonomy_discovery(
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        return dashboard_layer.taxonomy.disconnect_discovery()
 
     @app.put("/api/taxonomy/settings")
     def taxonomy_settings(
