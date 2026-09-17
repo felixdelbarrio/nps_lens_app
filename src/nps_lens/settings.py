@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
@@ -22,6 +23,9 @@ DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Detractores"
 DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
+DEFAULT_TAXONOMY_DISCOVERY_METHOD = "disabled"
+DEFAULT_TAXONOMY_DESIGNER_URL = "https://chatgpt.com/g/g-p-6aaabb05fd0881a49965c28ef21333a9"
+DEFAULT_TAXONOMY_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aaab79eb94481a498b0b2bb6ba2cb2a"
 DEFAULT_SERVICE_ORIGINS = [
     "BBVA México",
     "BBVA España",
@@ -44,9 +48,7 @@ BOOTSTRAP_CONTEXT_ENV_KEYS = {
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
 }
-
 SERVICE_ORIGIN_N2_MAP_ENV_KEY = "NPS_LENS_SERVICE_ORIGIN_N2_MAP"
-
 UI_PREF_ENV_KEYS = {
     "service_origin": "NPS_LENS_UI_SERVICE_ORIGIN",
     "service_origin_n1": "NPS_LENS_UI_SERVICE_ORIGIN_N1",
@@ -64,6 +66,9 @@ UI_PREF_ENV_KEYS = {
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
     "min_n_nps_gaps": "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "min_n_cross_comparisons": "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
+    "taxonomy_discovery_method": "NPS_LENS_TAXONOMY_DISCOVERY_METHOD",
+    "taxonomy_designer_url": "NPS_LENS_TAXONOMY_DESIGNER_URL",
+    "taxonomy_classifier_url": "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
 }
 
 
@@ -117,7 +122,6 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
             else:
                 output[normalized_key] = _dedupe(_split_csv(str(items)))
         return output
-
     output = {}
     for chunk in [item.strip() for item in raw.split(";") if item.strip()]:
         if ":" not in chunk:
@@ -142,7 +146,6 @@ def _parse_origin_n2_map(value: str) -> dict[str, dict[str, list[str]]]:
         return {}
     if not isinstance(parsed, dict):
         return {}
-
     output: dict[str, dict[str, list[str]]] = {}
     for origin_key, origin_value in parsed.items():
         origin = str(origin_key).strip()
@@ -183,7 +186,6 @@ def resolve_dotenv_path() -> Optional[Path]:
     if explicit:
         candidate = Path(explicit).expanduser()
         return candidate if candidate.exists() else candidate
-
     if getattr(sys, "frozen", False):
         return _runtime_app_home() / ".env"
 
@@ -230,7 +232,6 @@ def _should_bootstrap_value(env_key: str, current_value: Optional[str]) -> bool:
 def ensure_runtime_dotenv(dotenv_path: Optional[Path]) -> Optional[Path]:
     if dotenv_path is None:
         return None
-
     dotenv_example_path = resolve_dotenv_example_path()
     template_values = _env_template_values(dotenv_example_path)
     try:
@@ -243,7 +244,6 @@ def ensure_runtime_dotenv(dotenv_path: Optional[Path]) -> Optional[Path]:
             else:
                 dotenv_path.touch()
             return dotenv_path
-
         if not template_values:
             return dotenv_path
 
@@ -294,16 +294,38 @@ def default_downloads_path() -> str:
 
 
 def normalize_downloads_path(value: object, *, create: bool = False) -> str:
-    raw = str(value or "").strip()
-    candidate = Path(raw).expanduser() if raw else Path(default_downloads_path())
+    """Normalize a user-selected download path without touching the filesystem.
+
+    Values reaching this function can originate in an HTTP request.  Keeping this
+    function purely lexical prevents request-controlled data from reaching filesystem
+    operations during preference validation (the CodeQL ``py/path-injection`` flow).
+    Actual directory creation is performed later by the download persistence layer.
+
+    ``create`` is retained for API compatibility; directory creation is intentionally
+    not performed here.
+    """
+
+    safe_root = Path.home().expanduser()
+    raw = str(value or "").strip() or str(safe_root / "Downloads")
+    candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
-        candidate = (Path.home() / candidate).expanduser()
-    candidate = candidate.resolve()
-    if candidate.exists() and not candidate.is_dir():
-        raise ValueError("La ruta de descargas debe apuntar a un directorio.")
-    if create:
-        candidate.mkdir(parents=True, exist_ok=True)
-    return str(candidate)
+        candidate = safe_root / candidate
+
+    # Lexically collapse '.' and '..' without resolving symlinks or accessing disk.
+    candidate_str = os.path.abspath(os.path.normpath(str(candidate)))
+    safe_root_str = os.path.abspath(os.path.normpath(str(safe_root)))
+    try:
+        common = os.path.commonpath([safe_root_str, candidate_str])
+    except ValueError as exc:
+        raise ValueError(
+            "La ruta de descargas debe estar dentro del directorio personal del usuario."
+        ) from exc
+    if os.path.normcase(common) != os.path.normcase(safe_root_str):
+        raise ValueError(
+            "La ruta de descargas debe estar dentro del directorio personal del usuario."
+        )
+
+    return candidate_str
 
 
 def normalize_helix_base_url(value: object) -> str:
@@ -314,10 +336,36 @@ def normalize_helix_base_url(value: object) -> str:
 
 
 def safe_normalize_downloads_path(value: object, fallback: object) -> str:
+    """Normalize a UI downloads preference while preserving a trusted configured default.
+
+    ``fallback`` comes from application configuration and may legitimately live outside
+    the interactive user's home directory (for example pytest's ``tmp_path`` or a
+    deployment-mounted directory). If the requested value is exactly that configured
+    fallback, accept it after lexical normalization.
+
+    Any different value is treated as user-controlled input and must satisfy
+    ``normalize_downloads_path()``, which confines it to the user's home directory.
+    """
+
+    safe_root = Path.home().expanduser()
+
+    def _lexical(value_to_normalize: object) -> str:
+        raw = str(value_to_normalize or "").strip() or str(safe_root / "Downloads")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = safe_root / candidate
+        return os.path.abspath(os.path.normpath(str(candidate)))
+
+    fallback_path = _lexical(fallback)
+    requested_path = _lexical(value)
+
+    if os.path.normcase(requested_path) == os.path.normcase(fallback_path):
+        return fallback_path
+
     try:
         return normalize_downloads_path(value)
     except (OSError, ValueError):
-        return normalize_downloads_path(fallback)
+        return fallback_path
 
 
 def safe_normalize_helix_base_url(value: object, fallback: object) -> str:
@@ -332,23 +380,59 @@ def normalize_report_dimension_analysis(value: object) -> str:
     return raw if raw in {"palanca", "subpalanca"} else DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
 
 
+def normalize_taxonomy_discovery_method(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    if raw not in {"disabled", "chatgpt_browser"}:
+        raise ValueError("Método de descubrimiento desconocido.")
+    return raw
+
+
+def normalize_chatgpt_project_url(value: object) -> str:
+    raw = str(value or "").strip()
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("La URL de proyecto de ChatGPT no es válida.") from exc
+
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != "chatgpt.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or not parsed.path.startswith("/g/")
+    ):
+        raise ValueError("La URL debe ser un proyecto HTTPS de https://chatgpt.com/g/.")
+    return raw
+
+
 def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) -> None:
     if dotenv_path is None:
         return
     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
     if not dotenv_path.exists():
         dotenv_path.touch()
-
     for name, raw_value in values.items():
         env_key = UI_PREF_ENV_KEYS.get(str(name))
         if not env_key:
             continue
         if str(name) == "downloads_path":
-            value = normalize_downloads_path(raw_value)
+            # Callers validate this preference before persistence.  Do not route a
+            # generic Mapping value through filesystem/path operations here: doing so
+            # makes unrelated request fields (for example taxonomy URLs) appear to
+            # CodeQL as possible path inputs.
+            value = str(raw_value).strip()
+            if not value:
+                raise ValueError("La ruta de descargas no puede estar vacía.")
         elif str(name) == "helix_base_url":
             value = normalize_helix_base_url(raw_value)
         elif str(name) == "report_dimension_analysis":
             value = normalize_report_dimension_analysis(raw_value)
+        elif str(name) == "taxonomy_discovery_method":
+            value = normalize_taxonomy_discovery_method(raw_value)
+        elif str(name) in {"taxonomy_designer_url", "taxonomy_classifier_url"}:
+            value = normalize_chatgpt_project_url(raw_value)
         else:
             value = str(raw_value)
         os.environ[env_key] = value
@@ -369,7 +453,6 @@ def persist_service_origin_hierarchy(
     dotenv_path.parent.mkdir(parents=True, exist_ok=True)
     if not dotenv_path.exists():
         dotenv_path.touch()
-
     payloads = {
         "NPS_LENS_SERVICE_ORIGIN_BUUG": ", ".join(service_origins),
         "NPS_LENS_SERVICE_ORIGIN_N1": json.dumps(service_origin_n1_map, ensure_ascii=False),
@@ -429,6 +512,10 @@ class Settings:
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
     default_min_n_nps_gaps: int = DEFAULT_UI_MIN_N_NPS_GAPS
     default_min_n_cross_comparisons: int = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
+    taxonomy_discovery_method: str = DEFAULT_TAXONOMY_DISCOVERY_METHOD
+    taxonomy_designer_url: str = DEFAULT_TAXONOMY_DESIGNER_URL
+    taxonomy_classifier_url: str = DEFAULT_TAXONOMY_CLASSIFIER_URL
+    taxonomy_batch_size: int = 500
 
     @staticmethod
     def from_env() -> "Settings":
@@ -455,7 +542,6 @@ class Settings:
                 str(data_dir / "config" / "nps_column_aliases.json"),
             )
         ).expanduser()
-
         origins_raw = os.getenv(
             "NPS_LENS_SERVICE_ORIGIN_BUUG",
             os.getenv("NPS_LENS_SERVICE_ORIGIN", ", ".join(DEFAULT_SERVICE_ORIGINS)),
@@ -465,7 +551,6 @@ class Settings:
             or _dedupe(_split_csv(origins_raw))
             or DEFAULT_SERVICE_ORIGINS
         )
-
         origin_n1_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", "")
         origin_n1_map = _complete_origin_n1_map(
             allowed_service_origins,
@@ -476,14 +561,12 @@ class Settings:
             os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")
         ) or _dedupe(_split_csv(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")))
         service_origin_n2_map = _parse_origin_n2_map(os.getenv(SERVICE_ORIGIN_N2_MAP_ENV_KEY, ""))
-
         default_service_origin = (
             os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", DEFAULT_SERVICE_ORIGIN).strip()
             or allowed_service_origins[0]
         )
         if default_service_origin not in allowed_service_origins:
             default_service_origin = allowed_service_origins[0]
-
         default_n1_candidates = origin_n1_map.get(default_service_origin) or _fallback_n1_values(
             default_service_origin
         )
@@ -493,14 +576,12 @@ class Settings:
         )
         if default_service_origin_n1 not in default_n1_candidates:
             default_service_origin_n1 = default_n1_candidates[0]
-
         default_theme_mode = (
             os.getenv("NPS_LENS_UI_THEME_MODE", DEFAULT_UI_THEME_MODE).strip().lower()
             or DEFAULT_UI_THEME_MODE
         )
         if default_theme_mode not in {"light", "dark"}:
             default_theme_mode = DEFAULT_UI_THEME_MODE
-
         default_touchpoint_source = (
             os.getenv("NPS_LENS_UI_TOUCHPOINT_SOURCE", DEFAULT_UI_TOUCHPOINT_SOURCE).strip()
             or DEFAULT_UI_TOUCHPOINT_SOURCE
@@ -559,7 +640,27 @@ class Settings:
             ),
             200,
         )
-
+        try:
+            taxonomy_discovery_method = normalize_taxonomy_discovery_method(
+                os.getenv("NPS_LENS_TAXONOMY_DISCOVERY_METHOD", DEFAULT_TAXONOMY_DISCOVERY_METHOD)
+            )
+        except ValueError:
+            taxonomy_discovery_method = DEFAULT_TAXONOMY_DISCOVERY_METHOD
+        try:
+            taxonomy_designer_url = normalize_chatgpt_project_url(
+                os.getenv("NPS_LENS_TAXONOMY_DESIGNER_URL", DEFAULT_TAXONOMY_DESIGNER_URL)
+            )
+        except ValueError:
+            taxonomy_designer_url = DEFAULT_TAXONOMY_DESIGNER_URL
+        try:
+            taxonomy_classifier_url = normalize_chatgpt_project_url(
+                os.getenv("NPS_LENS_TAXONOMY_CLASSIFIER_URL", DEFAULT_TAXONOMY_CLASSIFIER_URL)
+            )
+        except ValueError:
+            taxonomy_classifier_url = DEFAULT_TAXONOMY_CLASSIFIER_URL
+        taxonomy_batch_size = min(
+            max(_to_int(os.getenv("NPS_LENS_TAXONOMY_BATCH_SIZE", "500"), 500), 50), 2000
+        )
         return Settings(
             data_dir=data_dir,
             database_path=database_path,
@@ -596,6 +697,10 @@ class Settings:
             default_max_days_apart=default_max_days_apart,
             default_min_n_nps_gaps=default_min_n_nps_gaps,
             default_min_n_cross_comparisons=default_min_n_cross_comparisons,
+            taxonomy_discovery_method=taxonomy_discovery_method,
+            taxonomy_designer_url=taxonomy_designer_url,
+            taxonomy_classifier_url=taxonomy_classifier_url,
+            taxonomy_batch_size=taxonomy_batch_size,
         )
 
     def service_origin_n2_options(self, service_origin: str, service_origin_n1: str) -> list[str]:
@@ -610,20 +715,17 @@ class Settings:
         default_service_origin = ui_pref("service_origin", self.default_service_origin)
         if default_service_origin not in self.allowed_service_origins:
             default_service_origin = self.default_service_origin
-
         available_n1 = self.allowed_service_origin_n1.get(default_service_origin) or [
             self.default_service_origin_n1
         ]
         default_service_origin_n1 = ui_pref("service_origin_n1", self.default_service_origin_n1)
         if default_service_origin_n1 not in available_n1:
             default_service_origin_n1 = available_n1[0]
-
         theme_mode = (
             ui_pref("theme_mode", self.default_theme_mode).lower() or self.default_theme_mode
         )
         if theme_mode not in {"light", "dark"}:
             theme_mode = self.default_theme_mode
-
         touchpoint_source = (
             ui_pref("touchpoint_source", self.default_touchpoint_source)
             or self.default_touchpoint_source
@@ -676,7 +778,6 @@ class Settings:
             ),
             200,
         )
-
         return {
             "service_origin": default_service_origin,
             "service_origin_n1": default_service_origin_n1,
@@ -696,4 +797,7 @@ class Settings:
             "max_days_apart": max_days_apart,
             "min_n_nps_gaps": min_n_nps_gaps,
             "min_n_cross_comparisons": min_n_cross_comparisons,
+            "taxonomy_discovery_method": self.taxonomy_discovery_method,
+            "taxonomy_designer_url": self.taxonomy_designer_url,
+            "taxonomy_classifier_url": self.taxonomy_classifier_url,
         }

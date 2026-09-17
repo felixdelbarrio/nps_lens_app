@@ -41,6 +41,10 @@ DOTENV_TEST_KEYS = {
     "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
     "NPS_LENS_UI_SCORE_CHANNEL",
     "NPS_LENS_UI_REPORT_DIMENSION_ANALYSIS",
+    "NPS_LENS_TAXONOMY_DISCOVERY_METHOD",
+    "NPS_LENS_TAXONOMY_DESIGNER_URL",
+    "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
+    "NPS_LENS_TAXONOMY_BATCH_SIZE",
     "NPS_LENS_PORT",
     "NPS_LENS_PPT_TEMPLATE",
     "NPS_LENS_OPENAI_API_KEY",
@@ -179,6 +183,30 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
 
     monkeypatch.delenv("NPS_LENS_UI_SERVICE_ORIGIN", raising=False)
     persist_ui_prefs(None, {"service_origin": "No-op"})
+
+
+def test_taxonomy_discovery_settings_are_local_and_validated(tmp_path: Path, monkeypatch) -> None:
+    clear_dotenv_test_keys(monkeypatch)
+    dotenv_path = tmp_path / ".env"
+    persist_ui_prefs(
+        dotenv_path,
+        {
+            "taxonomy_discovery_method": "chatgpt_browser",
+            "taxonomy_designer_url": "https://chatgpt.com/g/designer",
+            "taxonomy_classifier_url": "https://chatgpt.com/g/classifier",
+        },
+    )
+    settings = Settings.from_env()
+    assert settings.taxonomy_discovery_method == "chatgpt_browser"
+    assert settings.taxonomy_designer_url == "https://chatgpt.com/g/designer"
+    assert settings.taxonomy_classifier_url == "https://chatgpt.com/g/classifier"
+    assert settings.ui_defaults()["taxonomy_discovery_method"] == "chatgpt_browser"
+    for key in (
+        "NPS_LENS_TAXONOMY_DISCOVERY_METHOD",
+        "NPS_LENS_TAXONOMY_DESIGNER_URL",
+        "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_settings_parsers_ignore_invalid_and_blank_mapping_entries(monkeypatch):

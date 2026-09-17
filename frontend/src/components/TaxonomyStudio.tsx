@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 
-import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyMode, type TaxonomyStatus } from "../api";
+import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscoverySettings, type TaxonomyMode, type TaxonomyStatus } from "../api";
 
 const NAMES: Record<TaxonomyMode, string> = { SOURCE: "Origen", NORMALIZED: "Normalizada", COMPLETED: "Completada", DISCOVERED: "Descubierta" };
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -10,16 +10,27 @@ type Exploration = { rows: Array<Record<string, string | number | string[]>>; to
 
 export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const { data, error, mutate } = useSWR(taxonomyUrl("", context), () => taxonomyRequest<TaxonomyStatus>("", context));
+  const { data: discovery, mutate: mutateDiscovery } = useSWR(
+    data?.discovery_local_available ? taxonomyUrl("/discovery", context) : null,
+    () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context)
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [clusters, setClusters] = useState(0);
-  const [subclusters, setSubclusters] = useState(0);
   const [certaintyThreshold, setCertaintyThreshold] = useState(0.65);
   const [minF1, setMinF1] = useState(0.65);
+  const [discoveryMethod, setDiscoveryMethod] = useState<TaxonomyDiscoverySettings["method"]>("disabled");
+  const [designerUrl, setDesignerUrl] = useState("");
+  const [classifierUrl, setClassifierUrl] = useState("");
   const [left, setLeft] = useState<TaxonomyMode>("NORMALIZED");
   const [right, setRight] = useState<TaxonomyMode>("DISCOVERED");
   const [exploration, setExploration] = useState<Exploration | null>(null);
   const [view, setView] = useState<{ mode?: TaxonomyMode; compare?: boolean; offset: number }>({ offset: 0 });
+  useEffect(() => {
+    if (!discovery) return;
+    setDiscoveryMethod(discovery.method);
+    setDesignerUrl(discovery.designer_url);
+    setClassifierUrl(discovery.classifier_url);
+  }, [discovery]);
   async function action(run: () => Promise<unknown>, refresh = true) {
     setBusy(true); setMessage("");
     try {
@@ -30,9 +41,31 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   }
   async function generate(mode: TaxonomyMode, regenerate: boolean) {
     await action(async () => {
-      const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config: { clusters, subclusters, certainty_threshold: certaintyThreshold, min_f1: minF1 } }));
+      const config = mode === "COMPLETED" ? { certainty_threshold: certaintyThreshold, min_f1: minF1 } : {};
+      const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config }));
       setMessage(result.cache_hit ? "Resultado reutilizado de la caché local." : "Taxonomía calculada y guardada en local.");
     });
+  }
+  async function saveDiscovery(nextMethod = discoveryMethod) {
+    await action(async () => {
+      await taxonomyRequest("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
+      await mutateDiscovery();
+      setMessage("Configuración de descubrimiento guardada.");
+    }, false);
+  }
+  async function connectDiscovery() {
+    await action(async () => {
+      await taxonomyRequest("/discovery/connect", context, { method: "POST" });
+      await mutateDiscovery();
+      setMessage("ChatGPT conectado.");
+    }, false);
+  }
+  async function disconnectDiscovery() {
+    await action(async () => {
+      await taxonomyRequest("/discovery/disconnect", context, { method: "POST" });
+      await mutateDiscovery();
+      setMessage("Sesión local de ChatGPT eliminada.");
+    }, false);
   }
   async function explore(next: typeof view) {
     setView(next);
@@ -47,19 +80,30 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>Lente activa: <strong>{NAMES[data.active]}</strong> · {data.detection.rows.toLocaleString("es")} respuestas</p></div></div>
     {data.detection.originals_unavailable ? <p role="status">{data.detection.originals_unavailable} registros históricos no tienen el fichero original disponible. Origen muestra el valor conservado por la versión anterior.</p> : null}
     {data.requested_active !== data.active ? <p role="status">La lente anterior está desactualizada. Se muestra Normalizada hasta regenerarla.</p> : null}
-    <p className="secondary-copy">Completar aprende de etiquetas humanas; descubrir crea una alternativa desde los comentarios. La nota NPS no participa en ninguno de los modelos.</p>
+    <p className="secondary-copy">Completar aprende de etiquetas humanas; descubrir crea una alternativa usando únicamente ID y Comment. La nota NPS no se envía ni participa en el proceso.</p>
     <div className="field-grid">
-      <label>Temas (0 = automático)<input type="number" min={0} max={20} value={clusters} onChange={e => setClusters(Number(e.target.value))} disabled={locked} /></label>
-      <label>Subtemas (0 = automático)<input type="number" min={0} max={8} value={subclusters} onChange={e => setSubclusters(Number(e.target.value))} disabled={locked} /></label>
       <label>Umbral de asignación<input type="number" min={0.5} max={1} step={0.05} value={certaintyThreshold} onChange={e => setCertaintyThreshold(Number(e.target.value))} disabled={locked} /></label>
       <label>Macro F1 mínimo<input type="number" min={0} max={1} step={0.05} value={minF1} onChange={e => setMinF1(Number(e.target.value))} disabled={locked} /></label>
     </div>
+    {data.discovery_local_available && discovery ? <article className="settings-subsection taxonomy-discovery-settings">
+      <h3>Método de descubrimiento</h3>
+      <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="disabled">No configurado</option><option value="chatgpt_browser">ChatGPT automatizado</option></select></label>
+      {discoveryMethod === "chatgpt_browser" ? <>
+        <div className="field-grid">
+          <label>Designer URL<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label>
+          <label>Classifier URL<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label>
+        </div>
+        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "expired" ? "Sesión caducada" : "No conectado"}</p>
+        <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
+        <p className="field-hint">El acceso se realiza directamente en Chromium. NPS Lens no captura usuario, contraseña ni MFA.</p>
+      </> : null}
+    </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>
       <h3>{NAMES[item.mode]}</h3>
       {item.available ? <><p>{item.levers} Palancas · {item.sublevers} Subpalancas</p><p>{((item.coverage || 0) * 100).toFixed(1)}% cobertura{item.macro_f1 != null ? ` · Macro F1 ${item.macro_f1.toFixed(2)}` : ""}</p>{item.mode === "NORMALIZED" ? <p>{item.equivalence_groups} grupos de equivalencias</p> : null}</> : <p>{item.stale ? "Corpus o configuración modificados; requiere regeneración." : "Aún no creada."}</p>}
       <div className="inline-actions">
         {item.available ? <><button className="secondary-button" disabled={locked} onClick={() => void explore({ mode: item.mode, offset: 0 })}>Explorar {NAMES[item.mode]}</button><button className="primary-button" disabled={locked || data.active === item.mode} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: item.mode })))}>Usar como lente</button></> : null}
-        {(item.mode === "COMPLETED" || item.mode === "DISCOVERED") && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || (item.mode === "COMPLETED" && data.detection.state === "MISSING")} onClick={() => void generate(item.mode, item.available || Boolean(item.stale))}>{item.available || item.stale ? "Regenerar" : item.mode === "COMPLETED" ? "Completar" : "Descubrir"}</button> : null}
+        {(item.mode === "COMPLETED" || item.mode === "DISCOVERED") && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || (item.mode === "COMPLETED" && data.detection.state === "MISSING") || (item.mode === "DISCOVERED" && discoveryMethod !== "chatgpt_browser")} onClick={() => void generate(item.mode, item.available || Boolean(item.stale))}>{item.available || item.stale ? "Regenerar" : item.mode === "COMPLETED" ? "Completar" : "Descubrir"}</button> : null}
       </div>
     </article>)}</div>
     <div className="field-grid">
