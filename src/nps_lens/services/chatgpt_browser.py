@@ -18,7 +18,8 @@ _ACCESS = """() => {
     if (location.href.startsWith('chrome-error:') ||
         /ERR_BLOCKED_BY_ADMINISTRATOR|blocked by your administrator/i.test(document.body.innerText))
         return 'policy';
-    if (/you do not have access|gpt inaccessible or not found|no tienes acceso/i.test(document.body.innerText))
+    if (!visible('#prompt-textarea') &&
+        /you do not have access|gpt inaccessible or not found|no tienes acceso/i.test(document.body.innerText))
         return 'project';
     if (location.hostname !== 'chatgpt.com' || location.pathname.includes('/auth/') ||
         visible('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], #challenge-running') ||
@@ -115,7 +116,12 @@ class ChatGPTBrowserClient:
                 DiscoveryErrorCode.PROJECT_NOT_ACCESSIBLE,
                 "Esta cuenta no tiene acceso al proyecto de ChatGPT.",
             )
-        if state != "ready":
+        if state == "loading":
+            raise TaxonomyDiscoveryError(
+                DiscoveryErrorCode.UI_CHANGED,
+                "No se pudo verificar una página autenticada de ChatGPT. Revisa su interfaz.",
+            )
+        if state == "interaction":
             self._status = "interaction_required"
             await self._window("normal")
             raise TaxonomyDiscoveryError(
@@ -203,6 +209,12 @@ class ChatGPTBrowserClient:
                 await self._close()
             raise
         except Exception as exc:
+            if "ERR_BLOCKED_BY_ADMINISTRATOR" in str(exc):
+                await self._close()
+                raise TaxonomyDiscoveryError(
+                    DiscoveryErrorCode.CORPORATE_POLICY_BLOCKED,
+                    "Una política corporativa bloquea ChatGPT. Consulta con TI.",
+                ) from exc
             # Navigation timeouts can be challenges, never blindly retry.
             if self._page is not None:
                 try:
