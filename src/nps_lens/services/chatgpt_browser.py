@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -196,7 +197,7 @@ class ChatGPTBrowserClient:
         self.profile_dir.chmod(0o700)
 
     def _minimize_profile(self) -> None:
-        """Discard browsing residue while retaining ChatGPT's technical login state."""
+        """Discard caches and history without deleting authentication/challenge state."""
         disposable = (
             "Default/Cache",
             "Default/Code Cache",
@@ -204,12 +205,6 @@ class ChatGPTBrowserClient:
             "Default/History",
             "Default/History-journal",
             "Default/Download Metadata",
-            "Default/IndexedDB",
-            "Default/Local Storage",
-            "Default/Session Storage",
-            "Default/Sessions",
-            "Default/Web Data",
-            "Default/Web Data-journal",
             "BrowserMetrics",
             "Crashpad",
         )
@@ -223,6 +218,22 @@ class ChatGPTBrowserClient:
             except OSError:
                 # Cleanup must never hide the operation's real result.
                 continue
+
+    @staticmethod
+    def _stable_chrome_available() -> bool:
+        if sys.platform == "darwin":
+            return Path("/Applications/Google Chrome.app").is_dir()
+        if sys.platform == "win32":
+            roots = (
+                os.getenv("PROGRAMFILES"),
+                os.getenv("PROGRAMFILES(X86)"),
+                os.getenv("LOCALAPPDATA"),
+            )
+            return any(
+                root and (Path(root) / "Google/Chrome/Application/chrome.exe").is_file()
+                for root in roots
+            )
+        return any(shutil.which(binary) for binary in ("google-chrome", "google-chrome-stable"))
 
     @contextmanager
     def _context(self, *, headless: bool) -> Iterator[Any]:
@@ -238,10 +249,17 @@ class ChatGPTBrowserClient:
         playwright = sync_playwright().start()
         context: Optional[Any] = None
         try:
-            # TLS, proxy, user-agent and browser defaults are deliberately untouched.
-            context = playwright.chromium.launch_persistent_context(
-                str(self.profile_dir), headless=headless
-            )
+            # Prefer the user's standard Chrome build when present. This is a supported
+            # Playwright channel and leaves TLS, proxy, user-agent and browser defaults
+            # untouched; bundled Chromium remains the portable fallback.
+            if self._stable_chrome_available():
+                context = playwright.chromium.launch_persistent_context(
+                    str(self.profile_dir), headless=headless, channel="chrome"
+                )
+            else:
+                context = playwright.chromium.launch_persistent_context(
+                    str(self.profile_dir), headless=headless
+                )
             self._active_context = context
             yield context
         except TaxonomyDiscoveryError:
@@ -292,19 +310,16 @@ class ChatGPTBrowserClient:
 
     def _visible_verification(self) -> str:
         with self._lock, self._context(headless=False) as context:
-            page = context.new_page()
-            try:
-                page.goto(
-                    "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
-                )
-                self._wait_for_manual_access(context)
-                for project_url in (self.designer_url, self.classifier_url):
-                    active = context.pages[-1]
-                    active.goto(project_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-                    self._wait_for_manual_access(context, check_project=True)
-                return "connected"
-            finally:
-                page.close()
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(
+                "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
+            )
+            self._wait_for_manual_access(context)
+            for project_url in (self.designer_url, self.classifier_url):
+                active = context.pages[-1]
+                active.goto(project_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                self._wait_for_manual_access(context, check_project=True)
+            return "connected"
 
     def _wait_for_manual_access(self, context: Any, *, check_project: bool = False) -> None:
         deadline = time.monotonic() + self.login_timeout_s

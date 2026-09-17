@@ -48,29 +48,29 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   }
   async function saveDiscovery(nextMethod = discoveryMethod) {
     await action(async () => {
-      await taxonomyRequest("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("Configuración de descubrimiento guardada.");
     }, false);
   }
   async function connectDiscovery() {
     await action(async () => {
-      await taxonomyRequest("/discovery/connect", context, { method: "POST" });
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/connect", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("ChatGPT conectado.");
     }, false);
   }
   async function disconnectDiscovery() {
     await action(async () => {
-      await taxonomyRequest("/discovery/disconnect", context, { method: "POST" });
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/disconnect", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("Sesión local de ChatGPT eliminada.");
     }, false);
   }
   async function verifyDiscovery() {
     await action(async () => {
-      await taxonomyRequest("/discovery/verify", context, { method: "POST" });
-      await mutateDiscovery();
+      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/verify", context, { method: "POST" });
+      await mutateDiscovery(result, { revalidate: false });
       setMessage("Conexión con ChatGPT verificada.");
     }, false);
   }
@@ -100,9 +100,9 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
           <label>Designer URL<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label>
           <label>Classifier URL<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label>
         </div>
-        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : "No conectado"}</p>
+        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
         <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
-        <p className="field-hint">El acceso se realiza directamente en Chromium. NPS Lens no captura usuario, contraseña ni MFA.</p>
+        <p className="field-hint">El acceso se realiza directamente en Google Chrome cuando está instalado, con Chromium como alternativa. NPS Lens no captura usuario, contraseña ni MFA. Si Cloudflare repite el challenge, cierra la ventana, pulsa Desconectar y vuelve a Conectar una sola vez.</p>
       </> : null}
     </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>

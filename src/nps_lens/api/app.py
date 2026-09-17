@@ -675,7 +675,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(
         request: Request,
-        check_session: bool = True,
+        check_session: bool = False,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
