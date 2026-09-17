@@ -7,6 +7,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from urllib.parse import urlparse
 
 from nps_lens.services.taxonomy_discovery import DiscoveryErrorCode, TaxonomyDiscoveryError
 
@@ -19,7 +20,10 @@ class ChatGPTBrowserRun:
     @staticmethod
     def _auth_url(url: str) -> bool:
         lowered = url.casefold()
-        return "/auth/" in lowered or "auth.openai.com" in lowered
+        parsed = urlparse(lowered)
+        host = (parsed.hostname or "").casefold()
+        path = parsed.path.casefold()
+        return "/auth/" in path or host == "auth.openai.com"
 
     def _assert_access(self, page: Any) -> None:
         if self._auth_url(page.url):
