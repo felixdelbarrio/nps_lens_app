@@ -13,6 +13,20 @@ from nps_lens.services.taxonomy_discovery import (
     DiscoveryErrorCode,
     TaxonomyDiscoveryError,
 )
+from nps_lens.services.taxonomy_prompts import FALLBACK_LEVER, FALLBACK_SUBLEVERS
+
+
+def taxonomy_payload():
+    return {
+        "taxonomy": [
+            {"lever": "Pagos", "sublevers": ["Transferencias"]},
+            {"lever": FALLBACK_LEVER, "sublevers": list(FALLBACK_SUBLEVERS)},
+        ]
+    }
+
+
+def prompt_payload(prompt):
+    return json.loads(prompt.split("\n\nENTRADA_JSON:\n", 1)[1])
 
 
 class FakeRun:
@@ -26,15 +40,14 @@ class FakeRun:
         self.designer_calls += 1
         assert designer_url == "https://chatgpt.com/g/designer"
         assert '"Comment"' in prompt
-        assert "NPS" not in prompt and "Fecha" not in prompt
-        return self.designer or json.dumps(
-            {"taxonomy": [{"lever": "Pagos", "sublevers": ["Transferencias"]}]}
-        )
+        payload = prompt_payload(prompt)
+        assert all(set(row) == {"id", "Comment"} for row in payload["comments"])
+        return self.designer or json.dumps(taxonomy_payload())
 
     def classify_comments(self, prompt: str, classifier_url: str) -> str:
         self.classifier_calls += 1
         assert classifier_url == "https://chatgpt.com/g/classifier"
-        rows = json.loads(prompt.rsplit(". Comentarios: ", 1)[1])
+        rows = prompt_payload(prompt)["comments"]
         ids = [row["id"] for row in rows]
         if self.invalid_ids:
             ids[-1] = "unknown"

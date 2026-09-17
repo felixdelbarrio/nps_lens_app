@@ -42,6 +42,7 @@ from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
+from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
 from nps_lens.settings import (
     Settings,
     load_runtime_dotenv,
@@ -680,6 +681,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def require_local_taxonomy(request: Request) -> None:
         if cast(Settings, request.app.state.settings).auth_mode != "local":
             raise HTTPException(404, "La automatización de ChatGPT solo existe en la app local.")
+
+    @app.get("/api/taxonomy/discovery/instructions")
+    def taxonomy_project_instructions(request: Request) -> dict[str, Any]:
+        require_admin(request)
+        require_local_taxonomy(request)
+        return {"version": INSTRUCTIONS_VERSION, **PROJECT_INSTRUCTIONS}
 
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(

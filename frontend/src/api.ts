@@ -664,6 +664,11 @@ export type TaxonomyStatus = {
   discovery_local_available?: boolean;
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
 };
+export type TaxonomyProjectInstructions = {
+  version: string;
+  designer: string;
+  classifier: string;
+};
 export type TaxonomyDiscoverySettings = {
   method: "local" | "chatgpt_browser";
   designer_url: string;
