@@ -1,0 +1,93 @@
+{
+  "dimensions": {
+    "nps.Canal": [
+      {
+        "aliases": [
+          "Otros",
+          "Otros canales"
+        ],
+        "canonical": "Otros Canales"
+      }
+    ],
+    "nps.Palanca": [
+      {
+        "aliases": [
+          "pagos y transferencias",
+          "pagos / transferencias",
+          "pagos/ transferencias",
+          "pagos/transferencias"
+        ],
+        "canonical": "Pagos/transferencias"
+      },
+      {
+        "aliases": [
+          "funcionamiento continuo"
+        ],
+        "canonical": "Funcionamiento continuo"
+      },
+      {
+        "aliases": [
+          "agregar funcionalidad"
+        ],
+        "canonical": "Agregar funcionalidad"
+      }
+    ],
+    "nps.Subpalanca": [
+      {
+        "aliases": [
+          "pagos y transferencias",
+          "pagos / transferencias",
+          "pagos/ transferencias",
+          "pagos/transferencias"
+        ],
+        "canonical": "Pagos/transferencias"
+      },
+      {
+        "aliases": [
+          "practicidad / facilidad de uso",
+          "practicidad/facilidad de uso"
+        ],
+        "canonical": "Practicidad/Facilidad de uso"
+      },
+      {
+        "aliases": [
+          "fallas en el login"
+        ],
+        "canonical": "Fallas en el login"
+      },
+      {
+        "aliases": [
+          "no funciona bien / falla",
+          "no funciona bien/falla"
+        ],
+        "canonical": "No funciona bien/falla"
+      },
+      {
+        "aliases": [
+          "interface / actualización",
+          "interface/actualización"
+        ],
+        "canonical": "Interface/Actualización"
+      },
+      {
+        "aliases": [
+          "agregar funcionalidad"
+        ],
+        "canonical": "Agregar funcionalidad"
+      },
+      {
+        "aliases": [
+          "fan"
+        ],
+        "canonical": "FAN"
+      },
+      {
+        "aliases": [
+          "fan web"
+        ],
+        "canonical": "Fan Web"
+      }
+    ]
+  },
+  "schema_version": "2.0"
+}

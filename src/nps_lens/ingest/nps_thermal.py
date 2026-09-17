@@ -8,7 +8,7 @@ from typing import Optional, Union
 import pandas as pd
 
 from nps_lens import PIPELINE_VERSION
-from nps_lens.core.nps_math import classify_nps_scores
+from nps_lens.core.nps_math import classify_nps_scores, normalize_nps_scores
 from nps_lens.core.store import DatasetContext
 from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.record_identity import business_keys, hash_rows
@@ -323,8 +323,24 @@ def read_nps_thermal_excel(
         )
 
     work["Fecha"] = pd.to_datetime(work["Fecha"], errors="coerce")
-    work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
+    numeric_nps = pd.to_numeric(work["NPS"], errors="coerce")
+    fractional_nps_rows = int((numeric_nps.between(0, 10) & numeric_nps.mod(1).ne(0)).sum())
+    work["NPS"] = normalize_nps_scores(numeric_nps)
     work["NPS Group"] = classify_nps_scores(work["NPS"])
+
+    if fractional_nps_rows:
+        issues.append(
+            ValidationIssue(
+                level="INFO",
+                code="fractional_nps_rounded",
+                message=(
+                    f"Se convirtieron {fractional_nps_rows} puntuaciones NPS decimales "
+                    "al entero más cercano antes de cargarlas."
+                ),
+                column="NPS",
+                details={"rows": fractional_nps_rows, "method": "nearest_integer_half_up"},
+            )
+        )
 
     invalid_date_rows = int(work["Fecha"].isna().sum())
     if invalid_date_rows:
@@ -343,7 +359,7 @@ def read_nps_thermal_excel(
             ValidationIssue(
                 level="WARN",
                 code="invalid_nps_dropped",
-                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido (debe ser un entero de 0 a 10).",
+                message=f"Se descartaron {invalid_nps_rows} filas con NPS inválido (debe ser un número entre 0 y 10).",
                 column="NPS",
                 details={"rows": invalid_nps_rows},
             )

@@ -326,6 +326,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         dashboard_layer.clear_caches()
         return result
 
+    @app.post("/api/uploads/nps/{upload_id}/replace", response_model=UploadResponse)
+    def replace_nps_upload(
+        upload_id: str,
+        request: Request,
+        service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, object]:
+        require_admin(request)
+        try:
+            result = service_layer.replace_duplicate_upload(upload_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result["status"] == "completed":
+            context = UploadContext(
+                str(result["service_origin"]),
+                str(result["service_origin_n1"]),
+                str(result["service_origin_n2"]),
+            )
+            if dashboard_layer.taxonomy.state(context).get("restored"):
+                dashboard_layer.taxonomy.resume_local(context)
+        dashboard_layer.clear_caches()
+        return result
+
     @app.post("/api/uploads/helix", response_model=HelixUploadResponse)
     async def upload_helix(
         request: Request,

@@ -469,6 +469,14 @@ export async function uploadNpsFile(payload: {
   );
 }
 
+export async function replaceNpsUpload(uploadId: string): Promise<UploadResult> {
+  return parseResponse<UploadResult>(
+    await fetch(`/api/uploads/nps/${encodeURIComponent(uploadId)}/replace`, {
+      method: "POST"
+    })
+  );
+}
+
 export async function uploadHelixFile(payload: {
   file?: File;
   desktopFilePath?: string;

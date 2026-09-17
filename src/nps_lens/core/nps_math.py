@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -34,6 +34,19 @@ def _score_series(df: pd.DataFrame, *, score_col: str = "NPS") -> pd.Series[Any]
     if score_col not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype="float64")
     return pd.to_numeric(df[score_col], errors="coerce")
+
+
+def normalize_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
+    """Coerce numeric scores in the 0–10 range to their nearest integer.
+
+    NPS is non-negative, so ``floor(value + 0.5)`` provides deterministic
+    half-up rounding and avoids Python's banker rounding at ``x.5``.
+    """
+
+    numeric = pd.to_numeric(scores, errors="coerce")
+    valid = numeric.between(0, 10) & np.isfinite(numeric)
+    rounded: pd.Series[Any] = cast(Any, np.floor(numeric + 0.5))
+    return rounded.where(valid)
 
 
 def classify_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
