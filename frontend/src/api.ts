@@ -665,10 +665,10 @@ export type TaxonomyStatus = {
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
 };
 export type TaxonomyDiscoverySettings = {
-  method: "disabled" | "chatgpt_browser";
+  method: "local" | "chatgpt_browser";
   designer_url: string;
   classifier_url: string;
-  session: "connected" | "not_connected" | "expired" | "unknown";
+  session: "connected" | "not_connected" | "expired" | "interaction_required" | "unknown";
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

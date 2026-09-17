@@ -25,22 +25,46 @@ class ChatGPTBrowserRun:
         path = parsed.path.casefold()
         return "/auth/" in path or host == "auth.openai.com"
 
+    @classmethod
+    def _interaction_required(cls, page: Any) -> bool:
+        if cls._auth_url(page.url):
+            return True
+        try:
+            frame_urls = [str(frame.url).casefold() for frame in page.frames]
+            if any(
+                token in url
+                for url in frame_urls
+                for token in ("challenges.cloudflare.com", "turnstile", "/cdn-cgi/challenge")
+            ):
+                return True
+            text = page.locator("body").inner_text(timeout=3000).casefold()
+        except Exception:
+            return False
+        return any(
+            token in text
+            for token in (
+                "captcha",
+                "turnstile",
+                "verify you are human",
+                "verifique que es un ser humano",
+                "checking your browser",
+                "comprobando su navegador",
+                "multi-factor authentication",
+                "verification code",
+                "código de verificación",
+                "iniciar sesión",
+                "log in",
+            )
+        )
+
     def _assert_access(self, page: Any) -> None:
-        if self._auth_url(page.url):
+        if self._interaction_required(page):
             raise TaxonomyDiscoveryError(
-                DiscoveryErrorCode.AUTH_REQUIRED,
-                "La sesión de ChatGPT no es válida. Vuelve a conectar.",
+                DiscoveryErrorCode.INTERACTION_REQUIRED,
+                "ChatGPT requiere login, MFA o verificación humana. Usa Verificar conexión.",
             )
         body = page.locator("body")
         text = body.inner_text(timeout=5000).casefold()
-        if any(
-            token in text
-            for token in ("captcha", "verify you are human", "comprobando su navegador")
-        ):
-            raise TaxonomyDiscoveryError(
-                DiscoveryErrorCode.AUTH_REQUIRED,
-                "ChatGPT solicita verificación interactiva. Vuelve a conectar.",
-            )
         if any(
             token in text
             for token in (
@@ -153,13 +177,15 @@ class ChatGPTBrowserClient:
     def __init__(
         self,
         profile_dir: Path,
-        status_url: str,
+        designer_url: str,
+        classifier_url: str,
         *,
         timeout_ms: int = 120_000,
         login_timeout_s: int = 300,
     ) -> None:
         self.profile_dir = profile_dir
-        self.status_url = status_url
+        self.designer_url = designer_url
+        self.classifier_url = classifier_url
         self.timeout_ms = timeout_ms
         self.login_timeout_s = login_timeout_s
         self._lock = threading.RLock()
@@ -227,10 +253,12 @@ class ChatGPTBrowserClient:
             ) from exc
         finally:
             self._active_context = None
-            if context is not None:
-                context.close()
-            playwright.stop()
-            self._minimize_profile()
+            try:
+                if context is not None:
+                    context.close()
+            finally:
+                playwright.stop()
+                self._minimize_profile()
 
     @staticmethod
     def _composer_visible(page: Any) -> bool:
@@ -244,9 +272,11 @@ class ChatGPTBrowserClient:
     def _status_in_context(self, context: Any) -> str:
         page = context.new_page()
         try:
-            page.goto(self.status_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-            if ChatGPTBrowserRun._auth_url(page.url):
-                return "expired"
+            page.goto(
+                "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
+            )
+            if ChatGPTBrowserRun._interaction_required(page):
+                return "interaction_required"
             try:
                 return "connected" if self._composer_visible(page) else "expired"
             except Exception:
@@ -260,28 +290,50 @@ class ChatGPTBrowserClient:
         with self._lock, self._context(headless=True) as context:
             return self._status_in_context(context)
 
-    def connect(self) -> str:
+    def _visible_verification(self) -> str:
         with self._lock, self._context(headless=False) as context:
             page = context.new_page()
             try:
-                page.goto(self.status_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-                deadline = time.monotonic() + self.login_timeout_s
-                while time.monotonic() < deadline:
-                    active = context.pages[-1]
-                    try:
-                        if not ChatGPTBrowserRun._auth_url(active.url) and self._composer_visible(
-                            active
-                        ):
-                            return "connected"
-                    except Exception:
-                        pass
-                    active.wait_for_timeout(500)
-                raise TaxonomyDiscoveryError(
-                    DiscoveryErrorCode.TIMEOUT,
-                    "No se completó el acceso a ChatGPT dentro del tiempo disponible.",
+                page.goto(
+                    "https://chatgpt.com/", wait_until="domcontentloaded", timeout=self.timeout_ms
                 )
+                self._wait_for_manual_access(context)
+                for project_url in (self.designer_url, self.classifier_url):
+                    active = context.pages[-1]
+                    active.goto(project_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                    self._wait_for_manual_access(context, check_project=True)
+                return "connected"
             finally:
                 page.close()
+
+    def _wait_for_manual_access(self, context: Any, *, check_project: bool = False) -> None:
+        deadline = time.monotonic() + self.login_timeout_s
+        while time.monotonic() < deadline:
+            active = context.pages[-1]
+            if check_project and not ChatGPTBrowserRun._interaction_required(active):
+                ChatGPTBrowserRun(context, self.timeout_ms)._assert_access(active)
+            try:
+                if self._composer_visible(active):
+                    return
+            except Exception:
+                pass
+            active.wait_for_timeout(500)
+        active = context.pages[-1]
+        if ChatGPTBrowserRun._interaction_required(active):
+            raise TaxonomyDiscoveryError(
+                DiscoveryErrorCode.INTERACTION_REQUIRED,
+                "Completa manualmente el login, MFA o challenge y vuelve a verificar.",
+            )
+        raise TaxonomyDiscoveryError(
+            DiscoveryErrorCode.TIMEOUT,
+            "No se completó el acceso a ChatGPT dentro del tiempo disponible.",
+        )
+
+    def connect(self) -> str:
+        return self._visible_verification()
+
+    def verify_connection(self) -> str:
+        return self._visible_verification()
 
     def disconnect(self) -> None:
         with self._lock:
@@ -298,7 +350,13 @@ class ChatGPTBrowserClient:
                 DiscoveryErrorCode.AUTH_REQUIRED, "Conecta ChatGPT antes de descubrir la taxonomía."
             )
         with self._lock, self._context(headless=True) as context:
-            if self._status_in_context(context) != "connected":
+            status = self._status_in_context(context)
+            if status == "interaction_required":
+                raise TaxonomyDiscoveryError(
+                    DiscoveryErrorCode.INTERACTION_REQUIRED,
+                    "ChatGPT requiere interacción humana. Usa Verificar conexión.",
+                )
+            if status != "connected":
                 raise TaxonomyDiscoveryError(
                     DiscoveryErrorCode.AUTH_REQUIRED,
                     "La sesión de ChatGPT ha caducado. Vuelve a conectar.",
