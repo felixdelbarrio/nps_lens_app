@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Optional
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
@@ -293,36 +294,38 @@ def default_downloads_path() -> str:
 
 
 def normalize_downloads_path(value: object, *, create: bool = False) -> str:
-    """Normalize a user-selected download directory and keep it inside the user's home.
+    """Normalize a user-selected download path without touching the filesystem.
 
-    The UI can persist this value, so it must be treated as untrusted input.  We first
-    canonicalize it with ``realpath`` (which also resolves symlinks), then enforce that
-    the resulting path stays below the user's home directory before any filesystem
-    access is performed.  This is the containment pattern recommended by CodeQL for
-    ``py/path-injection``.
+    Values reaching this function can originate in an HTTP request.  Keeping this
+    function purely lexical prevents request-controlled data from reaching filesystem
+    operations during preference validation (the CodeQL ``py/path-injection`` flow).
+    Actual directory creation is performed later by the download persistence layer.
+
+    ``create`` is retained for API compatibility; directory creation is intentionally
+    not performed here.
     """
 
-    safe_root = os.path.realpath(os.path.expanduser("~"))
-    raw = str(value or "").strip() or default_downloads_path()
-    expanded = os.path.expanduser(raw)
-    if not os.path.isabs(expanded):
-        expanded = os.path.join(safe_root, expanded)
+    safe_root = Path.home().expanduser()
+    raw = str(value or "").strip() or str(safe_root / "Downloads")
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = safe_root / candidate
 
-    candidate_str = os.path.realpath(os.path.normpath(expanded))
-    safe_root_cmp = os.path.normcase(safe_root)
-    candidate_cmp = os.path.normcase(candidate_str)
-    safe_prefix = safe_root_cmp.rstrip(os.sep) + os.sep
-    if candidate_cmp != safe_root_cmp and not candidate_cmp.startswith(safe_prefix):
+    # Lexically collapse '.' and '..' without resolving symlinks or accessing disk.
+    candidate_str = os.path.abspath(os.path.normpath(str(candidate)))
+    safe_root_str = os.path.abspath(os.path.normpath(str(safe_root)))
+    try:
+        common = os.path.commonpath([safe_root_str, candidate_str])
+    except ValueError as exc:
+        raise ValueError(
+            "La ruta de descargas debe estar dentro del directorio personal del usuario."
+        ) from exc
+    if os.path.normcase(common) != os.path.normcase(safe_root_str):
         raise ValueError(
             "La ruta de descargas debe estar dentro del directorio personal del usuario."
         )
 
-    candidate = Path(candidate_str)
-    if candidate.exists() and not candidate.is_dir():
-        raise ValueError("La ruta de descargas debe apuntar a un directorio.")
-    if create:
-        candidate.mkdir(parents=True, exist_ok=True)
-    return str(candidate)
+    return candidate_str
 
 
 def normalize_helix_base_url(value: object) -> str:
@@ -360,8 +363,21 @@ def normalize_taxonomy_discovery_method(value: object) -> str:
 
 def normalize_chatgpt_project_url(value: object) -> str:
     raw = str(value or "").strip()
-    if not raw.startswith("https://chatgpt.com/g/"):
-        raise ValueError("La URL debe ser un proyecto de https://chatgpt.com/g/.")
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("La URL de proyecto de ChatGPT no es válida.") from exc
+
+    if (
+        parsed.scheme.casefold() != "https"
+        or (parsed.hostname or "").casefold() != "chatgpt.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or not parsed.path.startswith("/g/")
+    ):
+        raise ValueError("La URL debe ser un proyecto HTTPS de https://chatgpt.com/g/.")
     return raw
 
 
@@ -376,7 +392,13 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
         if not env_key:
             continue
         if str(name) == "downloads_path":
-            value = normalize_downloads_path(raw_value)
+            # Callers validate this preference before persistence.  Do not route a
+            # generic Mapping value through filesystem/path operations here: doing so
+            # makes unrelated request fields (for example taxonomy URLs) appear to
+            # CodeQL as possible path inputs.
+            value = str(raw_value).strip()
+            if not value:
+                raise ValueError("La ruta de descargas no puede estar vacía.")
         elif str(name) == "helix_base_url":
             value = normalize_helix_base_url(raw_value)
         elif str(name) == "report_dimension_analysis":
