@@ -691,7 +691,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "method": current.taxonomy_discovery_method,
             "designer_url": current.taxonomy_designer_url,
             "classifier_url": current.taxonomy_classifier_url,
-            "session": "not_connected",
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -718,7 +717,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def exchange(request: Request, dashboard_layer: DashboardService) -> TaxonomyExchange:
         require_admin(request)
         require_local_taxonomy(request)
-        return TaxonomyExchange(dashboard_layer.taxonomy, Path.home() / "Downloads")
+        current = cast(Settings, request.app.state.settings)
+        downloads = Path(
+            normalize_downloads_path(current.ui_defaults()["downloads_path"], create=True)
+        )
+        return TaxonomyExchange(dashboard_layer.taxonomy, downloads)
 
     @app.post("/api/taxonomy/discovery/export")
     def export_taxonomy_zip(

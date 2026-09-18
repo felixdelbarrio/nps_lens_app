@@ -64,7 +64,10 @@ def exchange(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(service, "source", lambda context: frame.copy())
     # API Downloads writes are isolated; never pollute real user downloads in tests.
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "nps_lens.api.app.normalize_downloads_path",
+        lambda value, create=False: str(tmp_path / "Downloads"),
+    )
     return (
         TaxonomyExchange(service, tmp_path / "Downloads"),
         UploadContext("Bank", "Web", ""),
@@ -153,6 +156,19 @@ def test_changed_corpus_and_foreign_job_rejected(exchange):
         handler.import_response(context, zipped(response))
 
 
+def test_exchange_history_is_bounded(exchange):
+    handler, context, _, _ = exchange
+    jobs = [handler.export(context) for _ in range(4)]
+    with handler.repository._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM taxonomy_exchange").fetchone()[0] == 3
+    oldest = exported(jobs[0]["saved_path"])
+    with pytest.raises(ValueError, match="intercambio"):
+        handler.import_response(
+            context,
+            zipped({"manifest.json": oldest["manifest.json"], "taxonomy.json": TAXONOMY}),
+        )
+
+
 @pytest.mark.parametrize(
     "name", ["../taxonomy.json", "/taxonomy.json", "a\\b.json", "a//b.json", "script.py", "folder/"]
 )
@@ -189,6 +205,6 @@ def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
     files["results/000001.json"]["classifications"][0]["primary_classification"][
         "lever"
     ] = "Inventada"
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, TaxonomyDiscoveryError)):
         handler.import_response(context, zipped(files))
     assert "DISCOVERED" not in handler.taxonomy.state(context)["artifacts"]

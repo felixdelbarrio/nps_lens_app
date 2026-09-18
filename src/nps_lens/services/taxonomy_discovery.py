@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unicodedata
 from enum import Enum
-from typing import Any, Protocol, Sequence
+from typing import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -23,11 +23,6 @@ class TaxonomyDiscoveryError(RuntimeError):
     def __init__(self, code: DiscoveryErrorCode, message: str) -> None:
         super().__init__(message)
         self.code = code
-
-
-class TaxonomyDiscoveryProvider(Protocol):
-    def signature_config(self) -> dict[str, Any]: ...
-    def discover(self, comments: Sequence[tuple[str, str]]) -> dict[str, Any]: ...
 
 
 class _StrictModel(BaseModel):

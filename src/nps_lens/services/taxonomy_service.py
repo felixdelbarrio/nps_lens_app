@@ -23,7 +23,6 @@ from nps_lens.analytics.taxonomy import (
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
-from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryProvider
 
 POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
 
@@ -76,7 +75,6 @@ class TaxonomyService:
         self,
         repository: SqliteNpsRepository,
         equivalences_path: Any,
-        discovery_provider: Optional[TaxonomyDiscoveryProvider] = None,
     ) -> None:
         self.repository = repository
         self.equivalences_path = equivalences_path
@@ -85,12 +83,6 @@ class TaxonomyService:
         self.lens_override: Optional[str] = None
         self._state_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
-        self.discovery_provider = discovery_provider
-
-    def set_discovery_provider(
-        self, discovery_provider: Optional[TaxonomyDiscoveryProvider]
-    ) -> None:
-        self.discovery_provider = discovery_provider
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)
@@ -212,8 +204,8 @@ class TaxonomyService:
         config: Optional[TaxonomyConfig] = None,
         regenerate: bool = False,
     ) -> dict[str, Any]:
-        if mode not in ("COMPLETED", "DISCOVERED"):
-            raise ValueError("Solo COMPLETED y DISCOVERED requieren generación.")
+        if mode != "COMPLETED":
+            raise ValueError("La taxonomía descubierta se crea mediante intercambio ZIP.")
         state = self.state(context)
         if state.get("restored"):
             raise ValueError("Snapshot inmutable: vuelve al dataset local antes de generar.")
@@ -223,28 +215,12 @@ class TaxonomyService:
             .sort_values("_business_key")
             .reset_index(drop=True)
         )
-        provider = self.discovery_provider
-        if mode == "COMPLETED":
-            artifact_config: dict[str, Any] = asdict(config or TaxonomyConfig())
-        else:
-            if provider is None:
-                raise ValueError("Selecciona ChatGPT automatizado en Taxonomy Studio.")
-            artifact_config = provider.signature_config()
+        artifact_config: dict[str, Any] = asdict(config or TaxonomyConfig())
         sig = signature(frame, mode, artifact_config, registry.signature("nps"))
         artifact = None if regenerate else self.artifact(sig)
         hit = artifact is not None
         if artifact is None:
-            if mode == "COMPLETED":
-                artifact = complete(frame, config or TaxonomyConfig())
-            else:
-                assert provider is not None
-                comments = list(
-                    zip(
-                        frame["_business_key"].astype(str).tolist(),
-                        frame["Comment"].astype("string").fillna("").tolist(),
-                    )
-                )
-                artifact = provider.discover(comments)
+            artifact = complete(frame, config or TaxonomyConfig())
             artifact.update(
                 {
                     "mode": mode,
@@ -252,7 +228,7 @@ class TaxonomyService:
                     "keys": frame["_business_key"].tolist(),
                     "config": artifact_config,
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                    "equivalences": registry.to_dict() if mode == "COMPLETED" else {},
+                    "equivalences": registry.to_dict(),
                 }
             )
             state.setdefault("artifacts", {})[mode] = sig

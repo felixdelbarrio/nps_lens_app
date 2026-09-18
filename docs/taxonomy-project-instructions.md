@@ -1,76 +1,58 @@
-# Instrucciones de proyectos y contrato batch
+# Instrucciones de proyectos e intercambio ZIP
 
-Las plantillas oficiales de la aplicación están en
-`src/nps_lens/services/taxonomy_prompts.py`. Taxonomy Studio permite copiarlas
-debajo de cada URL y consultarlas sin iniciar Chrome. Si el portapapeles está
-bloqueado, muestra el texto seleccionable. Copiar no actualiza el proyecto remoto:
-pega la plantilla correspondiente en sus instrucciones y sustituye las anteriores.
+Las plantillas oficiales están en `src/nps_lens/services/taxonomy_prompts.py` y
+Taxonomy Studio permite copiarlas debajo de las URLs. Deben sustituir por completo
+las instrucciones anteriores de **Crea Taxonomía** y **Clasifica taxonomía**.
 
-## Por qué se han ajustado
+## Flujo vigente
 
-Las instrucciones anteriores de los proyectos no coincidían con el adaptador:
-`results` frente a `classifications`, `comment` frente a `Comment`,
-Subpalancas con objetos frente a cadenas, y campos adicionales obligatorios
-(`description`, `confidence`, `needs_review`, evidencia, métricas y versiones)
-que el validador rechazaba. La aplicación tampoco tiene un circuito de revisión
-humana basado en esos campos. No se simula esa capacidad.
+1. Taxonomy Studio exporta `nps-lens-designer-<job>.zip` a Descargas.
+2. El usuario lo adjunta al proyecto Crea Taxonomía en su navegador habitual.
+3. El proyecto devuelve un ZIP con `manifest.json` y `taxonomy.json`.
+4. Al importarlo, NPS Lens valida la taxonomía y exporta
+   `nps-lens-classifier-<job>.zip`.
+5. El usuario lo adjunta a Clasifica taxonomía e importa su ZIP de respuesta.
+6. NPS Lens publica DISCOVERED únicamente tras validar todos los lotes.
 
-Se conservan el criterio semántico, «menos es más», la distinción entre fricción
-y producto/canal/journey, y la prohibición de inferir causalidad. Las etiquetas
-deben ser autoexplicativas porque el contrato vigente no transporta definiciones.
+NPS Lens no abre ni controla Chrome, no almacena una sesión de ChatGPT y no pide
+permisos de administración de aplicaciones en macOS. Los ZIP contienen comentarios
+originales: solo deben subirse a un espacio corporativo autorizado.
 
-## Contrato vigente
+## Contrato
 
-- **Crea Taxonomía:** corpus completo con IDs opacos y Comment; devuelve solamente
-  `{"taxonomy":[{"lever":"...","sublevers":["..."]}]}`. Máximo 10 Palancas,
-  incluida la de reserva, y 4 Subpalancas por Palanca; no se rellenan cuotas.
-- **Clasifica taxonomía:** la misma taxonomía para todos los lotes; devuelve
-  `{"classifications":[{"id":"...","primary_classification":{"lever":"...","sublever":"..."}}]}`.
-  Una asignación por ID. El backend valida todos los IDs y relaciones y restituye
-  el orden de entrada antes de publicar atómicamente.
-- **Reserva:** `Sin clasificación temática` con `Información insuficiente`
-  y `Tema no cubierto`. Son resultados explícitos, no confianza calibrada ni
-  una aprobación humana. Tener una asignación no demuestra precisión semántica.
+Cada ZIP de entrada contiene un manifiesto versionado, las instrucciones, y lotes
+deterministas de hasta 200 filas y 80.000 bytes. El manifiesto liga el intercambio
+al corpus, taxonomía, conteos y SHA-256 de cada lote. Los IDs enviados son opacos,
+secuenciales y no exponen las claves internas de negocio.
 
-El batch incorpora las mismas instrucciones que se copian. El contenido de los
-comentarios es dato no confiable y se serializa como JSON, separado de las reglas.
-No se aceptan claves JSON duplicadas, NaN, Infinity ni campos ajenos al contrato.
-Las categorías no pueden duplicarse por mayúsculas/Unicode ni tener varios padres.
+- Designer devuelve exactamente `manifest.json` y `taxonomy.json`.
+- Classifier devuelve `manifest.json` y uno o varios
+  `results/NNNNNN.json` completos.
+- La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, pero no
+  se hace visible como taxonomía.
+- Repetir una respuesta idéntica es idempotente; una respuesta diferente para un
+  lote ya importado se rechaza.
+- Un cambio del corpus, IDs ausentes o reordenados, categorías inventadas, JSON con
+  campos extra o un manifiesto alterado invalidan la importación completa.
 
-## Recursos y límites
+La taxonomía admite como máximo diez Palancas y cuatro Subpalancas por Palanca e
+incluye siempre `Sin clasificación temática / Información insuficiente` y
+`Sin clasificación temática / Tema no cubierto`. El clasificador devuelve una
+única pareja válida por comentario, en el mismo orden.
 
-El clasificador llena lotes de manera determinista y lineal, respetando el máximo
-de filas configurado y presupuestos de 100.000 caracteres de prompt y 40.000 de
-respuesta compacta estimada con las etiquetas más largas. Son salvaguardas de
-la aplicación, **no límites de tokens garantizados por ChatGPT**.
+## Seguridad y límites
 
-Designer realiza una única llamada si el corpus cabe. Para corpus mayores,
-procesa particiones deterministas que incluyen todos los comentarios y consolida
-sus propuestas en una taxonomía global. Si las propuestas tampoco caben juntas,
-la consolidación se realiza por niveles, siempre reduciendo el número de
-candidatas. Solo después se clasifica todo el corpus con la misma taxonomía.
-No se muestrea, no se trunca y no se publica ninguna propuesta intermedia.
-`INPUT_TOO_LARGE` se reserva para un comentario individual que no cabe en una
-petición; se detecta antes de abrir el navegador. Los límites son por petición,
-no por corpus. La calidad semántica de la consolidación necesita evaluación real.
+Los archivos se leen directamente desde el ZIP; nunca se extraen ni ejecutan.
+Se rechazan rutas absolutas o ascendentes, enlaces, entradas cifradas, métodos de
+compresión desconocidos, nombres duplicados, JSON no UTF-8, claves duplicadas,
+NaN/Infinity y archivos o expansiones por encima de los límites. La escritura en
+Descargas es atómica.
 
-El estado de sesión consulta el contexto existente sin abrir ni navegar Chrome.
-Durante el login la UI lo consulta cada cinco segundos mientras está visible.
-«Sesión iniciada» indica autenticación detectada, no acceso ya verificado a los
-proyectos. «Descubrir» verifica ese acceso automáticamente en el mismo contexto.
+El límite es 32 MiB comprimidos, 128 MiB expandidos, 2 MiB por JSON y 4.096 entradas.
+El corpus exportable se limita a 64 MiB sin truncarlo; si lo supera, debe dividirse
+explícitamente. Estas son salvaguardas locales, no límites garantizados de ChatGPT.
 
-La versión de instrucciones se calcula a partir de las plantillas y límites y
-forma parte de la firma de caché. Cambiarlas invalida resultados locales de
-descubrimiento; no altera SOURCE, NORMALIZED, COMPLETED ni snapshots históricos.
-
-## Verificación
-
-Las pruebas offline comprueban contrato, presupuestos, unicidad, orden,
-atomicidad, copia exacta y fallos de portapapeles. No prueban la precisión de un
-modelo real: esta requiere un corpus etiquetado de evaluación, especialmente
-con comentarios ambiguos, multitema, multilingües y sin información suficiente.
-
-La separación entre instrucciones y datos sigue la
-[guía oficial de prompting](https://developers.openai.com/api/docs/guides/prompt-engineering).
-En la interfaz web, pedir JSON no equivale a disponer de Structured Outputs de
-la API: la validación local sigue siendo obligatoria.
+Las pruebas automatizadas verifican el contrato, seguridad, reanudación, reinicio,
+idempotencia, atomicidad, orden y recorrido UI/API. La precisión semántica real del
+modelo debe evaluarse aparte con un corpus etiquetado; una prueba simulada no puede
+garantizarla.

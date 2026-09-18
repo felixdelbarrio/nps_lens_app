@@ -30,6 +30,7 @@ MAX_MEMBER_BYTES = 2 * 1024 * 1024
 MAX_MEMBERS = 4096
 BATCH_ROWS = 200
 BATCH_BYTES = 80_000
+MAX_RETAINED_JOBS = 3
 
 
 def encode(value: Any) -> bytes:
@@ -137,6 +138,24 @@ class TaxonomyExchange:
                 "INSERT OR REPLACE INTO taxonomy_exchange VALUES (?, ?, ?)",
                 (job["id"], context_key(context), encode(job).decode()),
             )
+            stale = [
+                row[0]
+                for row in db.execute(
+                    "SELECT id FROM taxonomy_exchange WHERE context=? "
+                    "ORDER BY rowid DESC LIMIT -1 OFFSET ?",
+                    (context_key(context), MAX_RETAINED_JOBS),
+                ).fetchall()
+            ]
+            if stale:
+                placeholders = ",".join("?" for _ in stale)
+                db.execute(
+                    f"DELETE FROM taxonomy_exchange_batches WHERE job IN ({placeholders})",
+                    stale,
+                )
+                db.execute(
+                    f"DELETE FROM taxonomy_exchange WHERE id IN ({placeholders})",
+                    stale,
+                )
 
     def _load(self, context: UploadContext, job_id: str) -> dict[str, Any]:
         with self.repository._connect() as db:
