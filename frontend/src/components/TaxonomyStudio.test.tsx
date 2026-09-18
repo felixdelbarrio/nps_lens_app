@@ -51,3 +51,22 @@ it("persists snapshot policy and default lens", async () => {
   await waitFor(() => expect(state.default).toBe("SOURCE"));
   expect(screen.getByRole("link", { name: "Guardar snapshot local" })).toHaveAttribute("href", expect.stringContaining("/api/taxonomy/snapshot"));
 });
+
+it("refreshes completed login without reconnecting and updates status after discovery", async () => {
+  let session = "interaction_required";
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/discovery/instructions")) return new Response(JSON.stringify({ version: "test", designer: "rules", classifier: "rules" }));
+    if (url.includes("/discovery")) return new Response(JSON.stringify({ method: "chatgpt_browser", designer_url: "https://chatgpt.com/g/designer", classifier_url: "https://chatgpt.com/g/classifier", session }));
+    if (url.includes("/generate")) { session = "connected"; return new Response(JSON.stringify({ cache_hit: false })); }
+    return new Response(JSON.stringify(status()));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<SWRConfig value={{ provider: () => new Map() }}><TaxonomyStudio context={context} onChange={async () => {}} /></SWRConfig>);
+  expect(await screen.findByText(/Interacción requerida ·/)).toBeInTheDocument();
+  session = "authenticated";
+  await waitFor(() => expect(screen.getByText(/Sesión iniciada ·/)).toBeInTheDocument(), { timeout: 7000 });
+  await user.click(screen.getByRole("button", { name: "Descubrir" }));
+  expect(await screen.findByText("Conectado · proyectos verificados")).toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([url]) => url.includes("/connect") || url.includes("/verify"))).toBe(false);
+}, 10000);

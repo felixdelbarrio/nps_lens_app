@@ -13,7 +13,8 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const { data, error, mutate } = useSWR(taxonomyUrl("", context), () => taxonomyRequest<TaxonomyStatus>("", context));
   const { data: discovery, mutate: mutateDiscovery } = useSWR(
     data?.discovery_local_available ? taxonomyUrl("/discovery", context) : null,
-    () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context)
+    () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context),
+    { refreshInterval: current => current && ["interaction_required", "unknown"].includes(current.session) ? 5000 : 0 }
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -44,6 +45,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     await action(async () => {
       const config = mode === "COMPLETED" ? { certainty_threshold: certaintyThreshold, min_f1: minF1 } : {};
       const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config }));
+      if (mode === "DISCOVERED") await mutateDiscovery();
       setMessage(result.cache_hit ? "Resultado reutilizado de la caché local." : "Taxonomía calculada y guardada en local.");
     });
   }
@@ -101,8 +103,8 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
           <div><label>Designer URL · Crea Taxonomía<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="designer" context={context} /></div>
           <div><label>Classifier URL · Clasifica taxonomía<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="classifier" context={context} /></div>
         </div>
-        <p className="field-hint">Copia cada plantilla en las instrucciones de su proyecto, sustituyendo reglas anteriores incompatibles. Copiar no modifica ChatGPT ni inicia una sesión. El diseño usa el corpus completo; los lotes de clasificación respetan límites de filas y tamaño sin truncar comentarios.</p>
-        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
+        <p className="field-hint">Copia cada plantilla en las instrucciones de su proyecto, sustituyendo reglas anteriores incompatibles. Copiar no modifica ChatGPT ni inicia una sesión. Designer procesa todos los comentarios por lotes cuando es necesario y consolida una taxonomía global antes de clasificar. No se truncan comentarios ni se publican resultados parciales.</p>
+        <p role="status">{discovery.session === "connected" ? "Conectado · proyectos verificados" : discovery.session === "authenticated" ? "Sesión iniciada · al descubrir se verificará el acceso a los proyectos" : discovery.session === "interaction_required" ? "Interacción requerida · el estado se actualizará al terminar el login" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Comprobando sesión" : "No conectado"}</p>
         <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
         <p className="field-hint">Se requiere Google Chrome instalado. Inicia sesión y completa MFA o Cloudflare directamente en esa ventana; después pulsa Verificar conexión. No cierres ni recargues la ventana ante un challenge. NPS Lens reutiliza la misma sesión y minimiza Chrome durante la generación. Al desconectar o cerrar NPS Lens se elimina el perfil temporal; el siguiente inicio puede requerir autenticación.</p>
       </> : null}

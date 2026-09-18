@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import tempfile
 import threading
+from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Coroutine, Iterator, Optional
@@ -14,7 +16,8 @@ from nps_lens.services.taxonomy_discovery import DiscoveryErrorCode, TaxonomyDis
 
 # Inspect only visible controls, not assistant text (which may discuss login).
 _ACCESS = """() => {
-    const visible = s => [...document.querySelectorAll(s)].some(e => e.getClientRects().length);
+    const visible = s => [...document.querySelectorAll(s)].some(e =>
+        e.getClientRects().length && e.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}));
     if (!visible('#prompt-textarea') &&
         /ERR_BLOCKED_BY_ADMINISTRATOR|blocked by your administrator/i.test(document.body.innerText))
         return 'policy';
@@ -89,6 +92,48 @@ class ChatGPTBrowserClient:
         return future.result()
 
     def session_status(self) -> str:
+        # A status request must never create Chrome or navigate away from a challenge.
+        with self._lock:
+            if self._context is None or not self._operations.acquire(blocking=False):
+                return self._status
+            assert self._loop is not None
+            future = asyncio.run_coroutine_threadsafe(self._guard(self._probe_status()), self._loop)
+        try:
+            return str(future.result())
+        except CancelledError:
+            return "not_connected"
+        finally:
+            self._operations.release()
+
+    async def _adopt_authenticated_page(self) -> str:
+        state = await self._page.evaluate(_ACCESS)
+        if state == "ready" or self._pending is not None:
+            return str(state)
+        # Some identity flows finish in another tab of this same dedicated context.
+        for page in self._context.pages:
+            if page is not self._page:
+                with suppress(Exception):
+                    if await page.evaluate(_ACCESS) == "ready":
+                        self._page = page
+                        # A different tab does not prove access to the pending project.
+                        self._verification_url = None
+                        return "ready"
+        return str(state)
+
+    async def _probe_status(self) -> str:
+        try:
+            state = await asyncio.wait_for(self._adopt_authenticated_page(), timeout=3)
+            if state == "ready":
+                projects = {self.designer_url, self.classifier_url}
+                self._status = "connected" if projects <= self._verified else "authenticated"
+            elif state == "interaction":
+                self._status = "interaction_required"
+            elif state == "loading":
+                self._status = "unknown"
+            else:
+                self._status = "expired"
+        except Exception:
+            self._status = "expired"
         return self._status
 
     async def _window(self, state: str) -> None:
@@ -190,8 +235,11 @@ class ChatGPTBrowserClient:
     async def _verify(self) -> str:
         if self._context is None:
             await self._start()
+        assert self._context is not None
+        await self._adopt_authenticated_page()
         if self._status == "connected":
             await self._access()
+            await self._window("minimized")
             return self._status
         # Resume the current page before navigating anywhere: never reload a challenge.
         await self._ready()
@@ -205,6 +253,9 @@ class ChatGPTBrowserClient:
                 self._verified.add(url)
         self._verification_url = None
         self._status = "connected"
+        for page in self._context.pages:
+            if page is not self._page:
+                await page.close()
         await self._window("minimized")
         return self._status
 
@@ -257,7 +308,7 @@ class ChatGPTBrowserClient:
         return self.connect()
 
     async def _conversation(self, prompt: str, url: str) -> str:
-        key = (url, prompt)
+        key = (url, hashlib.sha256(prompt.encode("utf-8")).hexdigest())
         if key in self._completed:
             return self._completed[key]
         if self._pending is not None and self._pending != key:
@@ -379,13 +430,12 @@ class ChatGPTBrowserClient:
     @contextmanager
     def automation(self) -> Iterator[ChatGPTBrowserClient]:
         with self._operations:
-            if self._status != "connected":
-                code = (
-                    DiscoveryErrorCode.INTERACTION_REQUIRED
-                    if self._status == "interaction_required"
-                    else DiscoveryErrorCode.AUTH_REQUIRED
+            if self._context is None:
+                raise TaxonomyDiscoveryError(
+                    DiscoveryErrorCode.AUTH_REQUIRED, "Conecta ChatGPT antes de generar."
                 )
-                raise TaxonomyDiscoveryError(code, "Conecta o verifica ChatGPT antes de generar.")
+            # Recheck the existing session after manual login; never relaunch Chrome here.
+            self._call(self._guard(self._verify()))
             try:
                 yield self
             except TaxonomyDiscoveryError as exc:

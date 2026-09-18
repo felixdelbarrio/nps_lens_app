@@ -96,6 +96,7 @@ src/nps_lens/services/dashboard_service.py
 src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
 src/nps_lens/services/taxonomy_discovery.py
+src/nps_lens/services/taxonomy_prompts.py
 src/nps_lens/services/taxonomy_service.py
 src/nps_lens/services/analytics/__init__.py
 src/nps_lens/services/analytics/insights_service.py

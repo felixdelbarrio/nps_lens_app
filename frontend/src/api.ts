@@ -673,7 +673,7 @@ export type TaxonomyDiscoverySettings = {
   method: "local" | "chatgpt_browser";
   designer_url: string;
   classifier_url: string;
-  session: "connected" | "not_connected" | "expired" | "interaction_required" | "unknown";
+  session: "connected" | "authenticated" | "not_connected" | "expired" | "interaction_required" | "unknown";
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

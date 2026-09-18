@@ -98,7 +98,7 @@ class TaxonomyService:
             self.discovery_provider.disconnect()
         self.discovery_provider = discovery_provider
 
-    def discovery_status(self, *, check_session: bool = False) -> dict[str, Any]:
+    def discovery_status(self) -> dict[str, Any]:
         if self.discovery_provider is None:
             return {"method": "local", "session": "not_connected"}
         return {
@@ -125,7 +125,7 @@ class TaxonomyService:
     def disconnect_discovery(self) -> dict[str, Any]:
         if self.discovery_provider is not None:
             self.discovery_provider.disconnect()
-        return self.discovery_status(check_session=True)
+        return self.discovery_status()
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)

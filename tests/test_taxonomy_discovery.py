@@ -35,19 +35,28 @@ class FakeRun:
         self.invalid_ids = invalid_ids
         self.designer_calls = 0
         self.classifier_calls = 0
+        self.designer_payloads = []
+        self.classifier_payloads = []
 
     def create_taxonomy(self, prompt: str, designer_url: str) -> str:
         self.designer_calls += 1
         assert designer_url == "https://chatgpt.com/g/designer"
         assert '"Comment"' in prompt
         payload = prompt_payload(prompt)
-        assert all(set(row) == {"id", "Comment"} for row in payload["comments"])
+        self.designer_payloads.append(payload)
+        if payload["task"] == "create_taxonomy":
+            assert all(set(row) == {"id", "Comment"} for row in payload["comments"])
+        else:
+            assert payload["task"] == "consolidate_taxonomies"
+            assert len(payload["taxonomy_candidates"]) >= 2
         return self.designer or json.dumps(taxonomy_payload())
 
     def classify_comments(self, prompt: str, classifier_url: str) -> str:
         self.classifier_calls += 1
         assert classifier_url == "https://chatgpt.com/g/classifier"
-        rows = prompt_payload(prompt)["comments"]
+        payload = prompt_payload(prompt)
+        self.classifier_payloads.append(payload)
+        rows = payload["comments"]
         ids = [row["id"] for row in rows]
         if self.invalid_ids:
             ids[-1] = "unknown"
@@ -57,8 +66,8 @@ class FakeRun:
                     {
                         "id": key,
                         "primary_classification": {
-                            "lever": "Pagos",
-                            "sublever": "Transferencias",
+                            "lever": payload["taxonomy"][0]["lever"],
+                            "sublever": payload["taxonomy"][0]["sublevers"][0],
                         },
                     }
                     for key in ids
@@ -178,7 +187,7 @@ def test_taxonomy_contract_rejects_missing_fallback_duplicates_and_excess_catego
     assert run.classifier_calls == 0
 
 
-def test_large_corpus_fails_before_opening_browser_without_truncation():
+def test_oversized_single_comment_fails_before_opening_browser_without_truncation():
     from nps_lens.services.taxonomy_prompts import MAX_PROMPT_CHARS
 
     run = FakeRun()
@@ -188,6 +197,69 @@ def test_large_corpus_fails_before_opening_browser_without_truncation():
     assert error.value.code == DiscoveryErrorCode.INPUT_TOO_LARGE
     assert discovery.browser.automation_runs == 0
     assert run.designer_calls == 0
+
+
+def test_large_corpus_is_fully_designed_consolidated_and_classified():
+    from nps_lens.services.taxonomy_prompts import MAX_PROMPT_CHARS, batch_prompt
+
+    class ConsolidatingRun(FakeRun):
+        def create_taxonomy(self, prompt, url):
+            response = super().create_taxonomy(prompt, url)
+            if prompt_payload(prompt)["task"] == "consolidate_taxonomies":
+                payload = json.loads(response)
+                payload["taxonomy"][0] = {"lever": "Global", "sublevers": ["Consolidada"]}
+                return json.dumps(payload)
+            return response
+
+    run = ConsolidatingRun()
+    comments = [(str(index), "comentario " + "x" * 5000) for index in range(40)]
+    result = provider(run).discover(comments)
+    partitions = [p for p in run.designer_payloads if p["task"] == "create_taxonomy"]
+    assert len(partitions) >= 3
+    assert [(r["id"], r["Comment"]) for p in partitions for r in p["comments"]] == comments
+    assert run.designer_payloads[-1]["task"] == "consolidate_taxonomies"
+    assert all(len(batch_prompt("designer", p)) <= MAX_PROMPT_CHARS for p in run.designer_payloads)
+    assert result["lever"] == ["Global"] * len(comments)
+    assert result["sublever"] == ["Consolidada"] * len(comments)
+    assert all(p["taxonomy"][0]["lever"] == "Global" for p in run.classifier_payloads)
+
+
+def test_hierarchical_consolidation_is_bounded_and_deterministic(monkeypatch):
+    from nps_lens.services.taxonomy_discovery import TaxonomyResponse
+    from nps_lens.services.taxonomy_prompts import batch_prompt
+
+    run = FakeRun()
+    discovery = provider(run)
+    taxonomy = TaxonomyResponse.model_validate(taxonomy_payload())
+    budget = max(
+        len(discovery._designer_prompt([])) + 500,
+        len(discovery._consolidation_prompt([taxonomy, taxonomy])),
+    )
+    monkeypatch.setattr("nps_lens.services.taxonomy_discovery.MAX_PROMPT_CHARS", budget)
+    comments = [(str(i), "x" * 450) for i in range(20)]
+    batches = list(discovery._designer_batches(comments))
+    assert batches == list(discovery._designer_batches(comments))
+    assert [row for batch in batches for row in batch] == comments
+    discovery.discover(comments)
+    merges = [p for p in run.designer_payloads if p["task"] == "consolidate_taxonomies"]
+    assert len(merges) > 1
+    assert all(len(batch_prompt("designer", p)) <= budget for p in run.designer_payloads)
+
+
+def test_consolidation_failure_never_starts_classifier():
+    class BrokenMerge(FakeRun):
+        def create_taxonomy(self, prompt, url):
+            response = super().create_taxonomy(prompt, url)
+            return (
+                "incomplete"
+                if prompt_payload(prompt)["task"] == "consolidate_taxonomies"
+                else response
+            )
+
+    run = BrokenMerge()
+    with pytest.raises(TaxonomyDiscoveryError):
+        provider(run).discover([(str(i), "x" * 5000) for i in range(40)])
+    assert run.classifier_calls == 0
 
 
 def test_output_budget_creates_deterministic_batches_with_every_id(monkeypatch):
@@ -246,6 +318,9 @@ class FakePage:
     async def goto(self, url, **kwargs):
         self.visited.append(url)
         self.responses = []
+
+    async def close(self):
+        self.closed = True
 
     async def evaluate(self, script):
         return self.state
@@ -347,7 +422,7 @@ def test_one_sandboxed_installed_chrome_for_whole_session(browser):
         client.designer_url,
         client.classifier_url,
     ]
-    assert context.windows == ["minimized"]
+    assert context.windows and set(context.windows) == {"minimized"}
     assert not context.closed
     client.disconnect()
     assert context.closed and driver.stopped
@@ -370,6 +445,75 @@ def test_challenge_keeps_same_window_without_reload(browser):
     page.state = "ready"
     assert client.verify_connection() == "connected"
     assert page.visited.count("https://chatgpt.com/") == 1
+
+
+def test_status_detects_completed_login_without_navigation_or_new_browser(browser):
+    client, context, launches, _ = browser
+    page = context.pages[0]
+    page.state = "interaction"
+    with pytest.raises(TaxonomyDiscoveryError):
+        client.connect()
+    page.state = "ready"
+    assert client.session_status() == "authenticated"
+    assert page.visited == ["https://chatgpt.com/"]
+    with client.automation():
+        pass
+    assert client.session_status() == "connected"
+    assert page.visited == ["https://chatgpt.com/", client.designer_url, client.classifier_url]
+    assert len(launches) == 1
+
+
+def test_generation_rechecks_login_even_without_manual_verify(browser):
+    client, context, launches, _ = browser
+    page = context.pages[0]
+    page.state = "interaction"
+    with pytest.raises(TaxonomyDiscoveryError):
+        client.connect()
+    page.state = "ready"
+    with client.automation() as run:
+        run.create_taxonomy("bulk", client.designer_url)
+    assert client.session_status() == "connected"
+    assert len(launches) == 1
+
+
+def test_login_completed_in_same_context_new_tab_is_adopted(browser):
+    client, context, launches, _ = browser
+    original = context.pages[0]
+    original.state = "interaction"
+    with pytest.raises(TaxonomyDiscoveryError):
+        client.connect()
+    authenticated = FakePage()
+    context.pages.append(authenticated)
+    assert client.session_status() == "authenticated"
+    assert client._page is authenticated
+    assert not authenticated.visited
+    client.verify_connection()
+    assert original.closed
+    assert authenticated.visited == [client.designer_url, client.classifier_url]
+    assert len(launches) == 1
+
+
+def test_disconnect_cancels_a_status_probe_without_restarting_worker(browser, monkeypatch):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    client, context, _, _ = browser
+    client.connect()
+    entered = Event()
+
+    async def waiting():
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client, "_adopt_authenticated_page", waiting)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        status = executor.submit(client.session_status)
+        assert entered.wait(timeout=5)
+        client.disconnect()
+        assert status.result(timeout=5) == "not_connected"
+    assert context.closed
+    assert client._loop is None
 
 
 def test_mid_response_challenge_resumes_without_resending(browser):

@@ -691,15 +691,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(
         request: Request,
-        check_session: bool = False,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
         current = cast(Settings, request.app.state.settings)
-        status = dashboard_layer.taxonomy.discovery_status(
-            check_session=check_session and current.taxonomy_discovery_method == "chatgpt_browser"
-        )
+        status = dashboard_layer.taxonomy.discovery_status()
         return {
             "method": current.taxonomy_discovery_method,
             "designer_url": current.taxonomy_designer_url,
@@ -724,7 +721,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             }
             persist_ui_prefs(current.dotenv_path, values)
             refresh_settings(request)
-            return taxonomy_discovery_settings(request, False, dashboard_layer)
+            return taxonomy_discovery_settings(request, dashboard_layer)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
