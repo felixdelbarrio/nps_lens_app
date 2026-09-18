@@ -670,10 +670,9 @@ export type TaxonomyProjectInstructions = {
   classifier: string;
 };
 export type TaxonomyDiscoverySettings = {
-  method: "local" | "chatgpt_browser";
+  method: "local" | "chatgpt_zip";
   designer_url: string;
   classifier_url: string;
-  session: "connected" | "not_connected" | "expired" | "interaction_required" | "unknown";
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

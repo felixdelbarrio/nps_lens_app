@@ -40,7 +40,7 @@ DEFAULT_SERVICE_ORIGIN_N1_MAP = {
     "BBVA España": ["ENTERPRISE MOBILE CHANNEL", "ENTERPRISES CHANNEL"],
     "BBVA Colombia": ["ENTERPRISE MOBILE (GEMA)", "ENTERPRISE WEB CHANNEL"],
     "BBVA Perú": ["ENTERPRISE BANKING CANALES WEB & MOBILE"],
-    "BBVA Argentina": ["AR44 PLATAFORMA SENDA ARG", "AR46 GEMA ARG"],
+    "BBVA Argentina": ["AR02 ENTERPRISE WEB CORE", "AR44 PLATAFORMA SENDA ARG", "AR46 GEMA ARG"],
 }
 BOOTSTRAP_CONTEXT_ENV_KEYS = {
     "NPS_LENS_SERVICE_ORIGIN_BUUG",
@@ -382,7 +382,7 @@ def normalize_report_dimension_analysis(value: object) -> str:
 
 def normalize_taxonomy_discovery_method(value: object) -> str:
     raw = str(value or "").strip().lower()
-    if raw not in {"local", "chatgpt_browser"}:
+    if raw not in {"local", "chatgpt_zip"}:
         raise ValueError("Método de descubrimiento desconocido.")
     return raw
 

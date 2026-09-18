@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import json
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 from urllib.parse import quote
 
 import pandas as pd
@@ -42,6 +40,7 @@ from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
+from nps_lens.services.taxonomy_exchange import MAX_ZIP_BYTES, TaxonomyExchange
 from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
 from nps_lens.settings import (
     Settings,
@@ -105,14 +104,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     service = NpsService(repository=repository, settings=app_settings)
     dashboard_service = DashboardService(repository=repository, settings=app_settings)
 
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        try:
-            yield
-        finally:
-            await asyncio.to_thread(dashboard_service.taxonomy.disconnect_discovery)
-
-    app = FastAPI(title="NPS Lens API", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="NPS Lens API", version="2.0.0")
     app.state.settings = app_settings
     app.state.repository = repository
     app.state.service = service
@@ -206,7 +198,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request.app.state.service.settings = reloaded
         request.app.state.dashboard_service.clear_caches()
         request.app.state.dashboard_service.settings = reloaded
-        request.app.state.dashboard_service.refresh_taxonomy_discovery()
         request.app.state.dashboard_service.helix_store = (
             request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
         )
@@ -691,20 +682,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(
         request: Request,
-        check_session: bool = False,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
         current = cast(Settings, request.app.state.settings)
-        status = dashboard_layer.taxonomy.discovery_status(
-            check_session=check_session and current.taxonomy_discovery_method == "chatgpt_browser"
-        )
         return {
             "method": current.taxonomy_discovery_method,
             "designer_url": current.taxonomy_designer_url,
             "classifier_url": current.taxonomy_classifier_url,
-            "session": status["session"],
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -724,45 +710,44 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             }
             persist_ui_prefs(current.dotenv_path, values)
             refresh_settings(request)
-            return taxonomy_discovery_settings(request, False, dashboard_layer)
+            return taxonomy_discovery_settings(request, dashboard_layer)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/taxonomy/discovery/connect")
-    def connect_taxonomy_discovery(
+    def exchange(request: Request, dashboard_layer: DashboardService) -> TaxonomyExchange:
+        require_admin(request)
+        require_local_taxonomy(request)
+        current = cast(Settings, request.app.state.settings)
+        downloads = Path(
+            normalize_downloads_path(current.ui_defaults()["downloads_path"], create=True)
+        )
+        return TaxonomyExchange(dashboard_layer.taxonomy, downloads)
+
+    @app.post("/api/taxonomy/discovery/export")
+    def export_taxonomy_zip(
         request: Request,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
-        require_admin(request)
-        require_local_taxonomy(request)
         try:
-            return dashboard_layer.taxonomy.connect_discovery()
-        except TaxonomyDiscoveryError as exc:
-            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
-        except ValueError as exc:
+            with dashboard_layer._analytics_lock:
+                return exchange(request, dashboard_layer).export(taxonomy_context(request))
+        except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/taxonomy/discovery/disconnect")
-    def disconnect_taxonomy_discovery(
+    @app.post("/api/taxonomy/discovery/import")
+    def import_taxonomy_zip(
         request: Request,
+        file: UploadFile = File(...),
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
-        require_admin(request)
-        require_local_taxonomy(request)
-        return dashboard_layer.taxonomy.disconnect_discovery()
-
-    @app.post("/api/taxonomy/discovery/verify")
-    def verify_taxonomy_discovery(
-        request: Request,
-        dashboard_layer: DashboardService = Depends(get_dashboard_service),
-    ) -> dict[str, Any]:
-        require_admin(request)
-        require_local_taxonomy(request)
+        handler = exchange(request, dashboard_layer)
+        content = file.file.read(MAX_ZIP_BYTES + 1)
         try:
-            return dashboard_layer.taxonomy.verify_discovery_connection()
-        except TaxonomyDiscoveryError as exc:
-            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
-        except ValueError as exc:
+            with dashboard_layer._analytics_lock:
+                result = handler.import_response(taxonomy_context(request), content)
+                dashboard_layer.clear_caches()
+                return result
+        except (ValueError, OSError, TaxonomyDiscoveryError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.put("/api/taxonomy/settings")
