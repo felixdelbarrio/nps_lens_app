@@ -382,7 +382,7 @@ def normalize_report_dimension_analysis(value: object) -> str:
 
 def normalize_taxonomy_discovery_method(value: object) -> str:
     raw = str(value or "").strip().lower()
-    if raw not in {"local", "chatgpt_browser"}:
+    if raw not in {"local", "chatgpt_zip"}:
         raise ValueError("Método de descubrimiento desconocido.")
     return raw
 

@@ -90,42 +90,7 @@ class TaxonomyService:
     def set_discovery_provider(
         self, discovery_provider: Optional[TaxonomyDiscoveryProvider]
     ) -> None:
-        if self.discovery_provider is not None:
-            if discovery_provider is not None and (
-                self.discovery_provider.signature_config() == discovery_provider.signature_config()
-            ):
-                return
-            self.discovery_provider.disconnect()
         self.discovery_provider = discovery_provider
-
-    def discovery_status(self) -> dict[str, Any]:
-        if self.discovery_provider is None:
-            return {"method": "local", "session": "not_connected"}
-        return {
-            **self.discovery_provider.signature_config(),
-            "session": self.discovery_provider.session_status(),
-        }
-
-    def connect_discovery(self) -> dict[str, Any]:
-        if self.discovery_provider is None:
-            raise ValueError("Selecciona ChatGPT automatizado antes de conectar.")
-        return {
-            **self.discovery_provider.signature_config(),
-            "session": self.discovery_provider.connect(),
-        }
-
-    def verify_discovery_connection(self) -> dict[str, Any]:
-        if self.discovery_provider is None:
-            raise ValueError("Selecciona ChatGPT automatizado antes de verificar.")
-        return {
-            **self.discovery_provider.signature_config(),
-            "session": self.discovery_provider.verify_connection(),
-        }
-
-    def disconnect_discovery(self) -> dict[str, Any]:
-        if self.discovery_provider is not None:
-            self.discovery_provider.disconnect()
-        return self.discovery_status()
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)

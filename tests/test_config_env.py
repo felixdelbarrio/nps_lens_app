@@ -191,16 +191,16 @@ def test_taxonomy_discovery_settings_are_local_and_validated(tmp_path: Path, mon
     persist_ui_prefs(
         dotenv_path,
         {
-            "taxonomy_discovery_method": "chatgpt_browser",
+            "taxonomy_discovery_method": "chatgpt_zip",
             "taxonomy_designer_url": "https://chatgpt.com/g/designer",
             "taxonomy_classifier_url": "https://chatgpt.com/g/classifier",
         },
     )
     settings = Settings.from_env()
-    assert settings.taxonomy_discovery_method == "chatgpt_browser"
+    assert settings.taxonomy_discovery_method == "chatgpt_zip"
     assert settings.taxonomy_designer_url == "https://chatgpt.com/g/designer"
     assert settings.taxonomy_classifier_url == "https://chatgpt.com/g/classifier"
-    assert settings.ui_defaults()["taxonomy_discovery_method"] == "chatgpt_browser"
+    assert settings.ui_defaults()["taxonomy_discovery_method"] == "chatgpt_zip"
     for key in (
         "NPS_LENS_TAXONOMY_DISCOVERY_METHOD",
         "NPS_LENS_TAXONOMY_DESIGNER_URL",
