@@ -42,7 +42,6 @@ export type DashboardConfig = {
   default_service_origin_n2: string;
   service_origins: string[];
   service_origin_n1_map: Record<string, string[]>;
-  service_origin_n2_values: string[];
   service_origin_n2_map: Record<string, Record<string, string[]>>;
   service_origin_n2_options: string[];
   available_years: string[];

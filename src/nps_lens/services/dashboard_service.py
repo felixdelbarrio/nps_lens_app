@@ -566,7 +566,6 @@ class DashboardService:
             "default_service_origin_n2": preferences["service_origin_n2"],
             "service_origins": self.settings.allowed_service_origins,
             "service_origin_n1_map": self.settings.allowed_service_origin_n1,
-            "service_origin_n2_values": self.settings.service_origin_n2_values,
             "service_origin_n2_map": self.settings.service_origin_n2_map,
             "service_origin_n2_options": self.settings.service_origin_n2_options(
                 context.service_origin,

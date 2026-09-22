@@ -59,7 +59,6 @@ class ContextOptionsResponse(BaseModel):
     default_service_origin_n2: str = ""
     service_origins: list[str]
     service_origin_n1_map: dict[str, list[str]]
-    service_origin_n2_values: list[str] = Field(default_factory=list)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     service_origin_n2_options: list[str] = Field(default_factory=list)
     available_years: list[str] = Field(default_factory=list)

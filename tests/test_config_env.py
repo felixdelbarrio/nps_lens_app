@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from dotenv import dotenv_values
 
 import nps_lens.config as config_module
@@ -19,10 +20,8 @@ DOTENV_TEST_KEYS = {
     "NPS_LENS_KNOWLEDGE_DIR",
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN",
     "NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1",
-    "NPS_LENS_SERVICE_ORIGIN",
     "NPS_LENS_SERVICE_ORIGIN_BUUG",
     "NPS_LENS_SERVICE_ORIGIN_N1",
-    "NPS_LENS_SERVICE_ORIGIN_N2",
     "NPS_LENS_SERVICE_ORIGIN_N2_MAP",
     "NPS_LENS_LOG_LEVEL",
     "NPS_LENS_UI_SERVICE_ORIGIN",
@@ -71,7 +70,10 @@ def test_settings_reads_context_values_from_env(monkeypatch):
         "NPS_LENS_SERVICE_ORIGIN_N1",
         '{"BBVA México": ["Senda", "Helix"], "BBVA España": ["Senda"]}',
     )
-    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", "SN2A, SN2B")
+    monkeypatch.setenv(
+        "NPS_LENS_SERVICE_ORIGIN_N2_MAP",
+        '{"BBVA México": {"Senda": ["SN2A", "SN2B"]}}',
+    )
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "BBVA México")
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "Senda")
     monkeypatch.setenv("NPS_LENS_UI_MIN_N_CROSS_COMPARISONS", "40")
@@ -80,60 +82,45 @@ def test_settings_reads_context_values_from_env(monkeypatch):
 
     assert s.allowed_service_origins == ["BBVA México", "BBVA España"]
     assert s.allowed_service_origin_n1["BBVA México"] == ["Senda", "Helix"]
-    assert s.service_origin_n2_values == ["SN2A", "SN2B"]
+    assert s.service_origin_n2_options("BBVA México", "Senda") == ["SN2A", "SN2B"]
     assert s.default_min_n_cross_comparisons == 40
     assert s.default_downloads_path.endswith("Downloads")
     assert s.default_helix_base_url == DEFAULT_UI_HELIX_BASE_URL
     assert s.default_report_dimension_analysis == DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
 
 
-def test_settings_accepts_compact_n1_format(monkeypatch):
+def test_settings_rejects_compact_n1_format(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", "BBVA México:Senda|Helix")
-    monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N2", raising=False)
-
-    s = Settings.from_env()
-    assert s.allowed_service_origin_n1["BBVA México"] == ["Senda", "Helix"]
+    with pytest.raises(ValueError, match="debe ser un JSON"):
+        Settings.from_env()
 
 
-def test_settings_uses_safe_defaults_when_context_env_missing(monkeypatch):
+def test_settings_requires_context_in_env(monkeypatch):
     clear_dotenv_test_keys(monkeypatch)
 
-    s = Settings.from_env()
-
-    assert "BBVA México" in s.allowed_service_origins
-    assert s.allowed_service_origin_n1["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
-    assert s.default_service_origin == "BBVA México"
-    assert s.default_service_origin_n1 == "ENTERPRISE WEB"
+    with pytest.raises(ValueError, match="NPS_LENS_SERVICE_ORIGIN_BUUG"):
+        Settings.from_env()
 
 
-def test_settings_repairs_missing_n1_map_from_defaults(monkeypatch):
+def test_settings_rejects_missing_n1_map(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México")
     monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N1", raising=False)
-    monkeypatch.delenv("SERVICE_ORIGIN_N1", raising=False)
-
-    s = Settings.from_env()
-
-    assert s.allowed_service_origin_n1["BBVA México"] == ["ENTERPRISE WEB", "MOBILE ENTERPRISE"]
+    with pytest.raises(ValueError, match="faltan: BBVA México"):
+        Settings.from_env()
 
 
-def test_settings_repairs_incomplete_n1_map_from_defaults(monkeypatch):
+def test_settings_rejects_incomplete_n1_map(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México, BBVA España")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"BBVA México": ["Senda"]}')
 
-    s = Settings.from_env()
-
-    assert s.allowed_service_origin_n1["BBVA México"] == ["Senda"]
-    assert s.allowed_service_origin_n1["BBVA España"] == [
-        "ENTERPRISE MOBILE CHANNEL",
-        "ENTERPRISES CHANNEL",
-    ]
+    with pytest.raises(ValueError, match="faltan: BBVA España"):
+        Settings.from_env()
 
 
 def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", '["MX", "ES"]')
-    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"MX": "Senda,Helix", "ES": ["Web"]}')
-    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", '["N2A", "N2B"]')
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"MX": ["Senda", "Helix"], "ES": ["Web"]}')
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "AR")
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "Otro")
     monkeypatch.setenv("NPS_LENS_UI_THEME_MODE", "SEPIA")
@@ -158,6 +145,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
 
 
 def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
+    clear_dotenv_test_keys(monkeypatch)
     dotenv_path = tmp_path / ".env"
     persist_ui_prefs(
         dotenv_path,
@@ -183,10 +171,14 @@ def test_ui_pref_and_persist_ui_prefs_roundtrip(tmp_path: Path, monkeypatch):
 
     monkeypatch.delenv("NPS_LENS_UI_SERVICE_ORIGIN", raising=False)
     persist_ui_prefs(None, {"service_origin": "No-op"})
+    for env_key in DOTENV_TEST_KEYS:
+        settings_module.os.environ.pop(env_key, None)
 
 
 def test_taxonomy_discovery_settings_are_local_and_validated(tmp_path: Path, monkeypatch) -> None:
     clear_dotenv_test_keys(monkeypatch)
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "Bank")
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"Bank": ["Web"]}')
     dotenv_path = tmp_path / ".env"
     persist_ui_prefs(
         dotenv_path,
@@ -211,12 +203,12 @@ def test_taxonomy_discovery_settings_are_local_and_validated(tmp_path: Path, mon
 
 def test_settings_parsers_ignore_invalid_and_blank_mapping_entries(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "MX")
-    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"": ["skip"], "MX": "Senda,Helix"}')
-    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2", '{"unexpected": "object"}')
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"": ["skip"], "MX": ["Senda", "Helix"]}')
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N2_MAP", '{"unexpected": "object"}')
 
     s = Settings.from_env()
     assert s.allowed_service_origin_n1 == {"MX": ["Senda", "Helix"]}
-    assert s.service_origin_n2_values == ['{"unexpected": "object"}']
+    assert s.service_origin_n2_options("MX", "Senda") == []
 
 
 def test_settings_uses_user_writable_dirs_for_relative_paths_in_frozen_mode(
@@ -272,19 +264,17 @@ def test_load_runtime_dotenv_repairs_existing_empty_context_keys(
     assert values["NPS_LENS_SERVICE_ORIGIN_N1"]
 
 
-def test_missing_dotenv_example_does_not_block_startup(monkeypatch, tmp_path: Path) -> None:
+def test_missing_dotenv_example_fails_without_context(monkeypatch, tmp_path: Path) -> None:
     clear_dotenv_test_keys(monkeypatch)
     dotenv_path = tmp_path / ".env"
     monkeypatch.setenv("NPS_LENS_DOTENV_PATH", str(dotenv_path))
     monkeypatch.setattr(settings_module, "resolve_dotenv_example_path", lambda: None)
 
     loaded_path = settings_module.load_runtime_dotenv()
-    settings = Settings.from_env()
-
     assert loaded_path == dotenv_path
     assert dotenv_path.exists()
-    assert settings.default_service_origin == "BBVA México"
-    assert settings.allowed_service_origin_n1["BBVA México"]
+    with pytest.raises(ValueError, match="NPS_LENS_SERVICE_ORIGIN_BUUG"):
+        Settings.from_env()
 
 
 def test_frozen_runtime_bootstraps_dotenv_in_user_app_home(monkeypatch, tmp_path: Path) -> None:
