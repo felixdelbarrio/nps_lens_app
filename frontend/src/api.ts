@@ -200,6 +200,16 @@ export type HelixUploadResult = {
   dataset: DatasetStatus;
 };
 
+export type HelixUploadHistoryItem = {
+  upload_id: string;
+  filename: string;
+  uploaded_at: string;
+  service_origin: string;
+  row_count: number;
+  column_count: number;
+  sheet_name: string;
+};
+
 export type UploadSelectionPayload = {
   file?: File;
   desktopFilePath?: string;
@@ -397,6 +407,12 @@ export async function fetchUploads(params: {
   return parseResponse<UploadResult[]>(await fetch(buildUrl("/api/uploads", params)));
 }
 
+export async function fetchHelixUploads(serviceOrigin: string): Promise<HelixUploadHistoryItem[]> {
+  return parseResponse<HelixUploadHistoryItem[]>(
+    await fetch(buildUrl("/api/uploads/helix", { service_origin: serviceOrigin }))
+  );
+}
+
 export async function fetchDashboard(params: DashboardQuery): Promise<DashboardPayload> {
   return parseResponse<DashboardPayload>(await fetch(buildUrl("/api/dashboard/nps", params)));
 }
@@ -473,6 +489,28 @@ export async function replaceNpsUpload(uploadId: string): Promise<UploadResult> 
     await fetch(`/api/uploads/nps/${encodeURIComponent(uploadId)}/replace`, {
       method: "POST"
     })
+  );
+}
+
+export async function deleteNpsUpload(uploadId: string, serviceOrigin: string): Promise<void> {
+  await parseResponse<Record<string, number>>(
+    await fetch(buildUrl(`/api/uploads/nps/${encodeURIComponent(uploadId)}`, {
+      service_origin: serviceOrigin
+    }), { method: "DELETE" })
+  );
+}
+
+export async function deleteHelixUpload(uploadId: string, serviceOrigin: string): Promise<void> {
+  await parseResponse<Record<string, number>>(
+    await fetch(buildUrl(`/api/uploads/helix/${encodeURIComponent(uploadId)}`, {
+      service_origin: serviceOrigin
+    }), { method: "DELETE" })
+  );
+}
+
+export async function deleteOwnerData(serviceOrigin: string): Promise<void> {
+  await parseResponse<Record<string, unknown>>(
+    await fetch(buildUrl("/api/data", { service_origin: serviceOrigin }), { method: "DELETE" })
   );
 }
 

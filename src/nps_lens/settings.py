@@ -100,9 +100,7 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
         normalized_key = str(key).strip()
         if not normalized_key or not isinstance(items, list):
             continue
-        output[normalized_key] = _dedupe(
-            [str(item).strip() for item in items if str(item).strip()]
-        )
+        output[normalized_key] = _dedupe([str(item).strip() for item in items if str(item).strip()])
     return output
 
 
@@ -445,13 +443,7 @@ def _service_origin_hierarchy_from_env() -> tuple[list[str], dict[str, list[str]
         )
 
     origin_n1_map = _parse_origin_map(os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", ""))
-    missing = [origin for origin in service_origins if not origin_n1_map.get(origin)]
-    if missing:
-        raise ValueError(
-            "NPS_LENS_SERVICE_ORIGIN_N1 debe ser un JSON con al menos un N1 para cada "
-            f"compañía configurada; faltan: {', '.join(missing)}."
-        )
-    return service_origins, {origin: origin_n1_map[origin] for origin in service_origins}
+    return service_origins, {origin: origin_n1_map.get(origin, []) for origin in service_origins}
 
 
 @dataclass(frozen=True)
@@ -519,10 +511,7 @@ class Settings:
         default_service_origin = os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "").strip()
         if default_service_origin not in allowed_service_origins:
             default_service_origin = allowed_service_origins[0]
-        default_n1_candidates = origin_n1_map[default_service_origin]
-        default_service_origin_n1 = os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "").strip()
-        if default_service_origin_n1 not in default_n1_candidates:
-            default_service_origin_n1 = default_n1_candidates[0]
+        default_service_origin_n1 = ""
         default_theme_mode = (
             os.getenv("NPS_LENS_UI_THEME_MODE", DEFAULT_UI_THEME_MODE).strip().lower()
             or DEFAULT_UI_THEME_MODE
@@ -658,12 +647,6 @@ class Settings:
         default_service_origin = ui_pref("service_origin", self.default_service_origin)
         if default_service_origin not in self.allowed_service_origins:
             default_service_origin = self.default_service_origin
-        available_n1 = self.allowed_service_origin_n1.get(default_service_origin) or [
-            self.default_service_origin_n1
-        ]
-        default_service_origin_n1 = ui_pref("service_origin_n1", self.default_service_origin_n1)
-        if default_service_origin_n1 not in available_n1:
-            default_service_origin_n1 = available_n1[0]
         theme_mode = (
             ui_pref("theme_mode", self.default_theme_mode).lower() or self.default_theme_mode
         )
@@ -723,8 +706,8 @@ class Settings:
         )
         return {
             "service_origin": default_service_origin,
-            "service_origin_n1": default_service_origin_n1,
-            "service_origin_n2": ui_pref("service_origin_n2", ""),
+            "service_origin_n1": "",
+            "service_origin_n2": "",
             "pop_year": ui_pref("pop_year", DEFAULT_UI_POP_VALUE) or DEFAULT_UI_POP_VALUE,
             "pop_month": ui_pref("pop_month", DEFAULT_UI_POP_VALUE) or DEFAULT_UI_POP_VALUE,
             "nps_group_choice": ui_pref("nps_group_choice", DEFAULT_UI_NPS_GROUP)

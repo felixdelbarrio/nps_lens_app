@@ -199,8 +199,8 @@ class ColumnAliasRegistry:
     ) -> None:
         origin = str(service_origin).strip()
         origin_n1 = str(service_origin_n1).strip()
-        if not origin or not origin_n1:
-            raise ValueError("La configuración de alias requiere BUUG y N1.")
+        if not origin:
+            raise ValueError("La configuración de alias requiere Owner Support Company.")
 
         default_registry = self.default()
         contexts: dict[tuple[str, str], ColumnAliasRegistry] = {}
@@ -257,8 +257,8 @@ class ColumnAliasRegistry:
                 raise ValueError("Cada contexto de alias de columnas debe ser un objeto.")
             origin = str(raw_context.get("service_origin", "")).strip()
             origin_n1 = str(raw_context.get("service_origin_n1", "")).strip()
-            if not origin or not origin_n1:
-                raise ValueError("Cada contexto de alias requiere BUUG y N1.")
+            if not origin:
+                raise ValueError("Cada contexto de alias requiere Owner Support Company.")
             key = (origin, origin_n1)
             if key in contexts:
                 raise ValueError(f"El contexto de alias '{origin} → {origin_n1}' está duplicado.")

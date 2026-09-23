@@ -10,11 +10,11 @@ WebApp estática en Google Apps Script. Publica el snapshot generado por la apli
 
 El HTML inicial solo contiene el contexto de acceso. El shell analítico y las tablas de datos se guardan comprimidos, se recuperan bajo demanda y se cachean por edición. La WebApp no recalcula dashboards ni causalidad; `snapshot_load` mide el tiempo completo de recuperación y descompresión en el navegador.
 
-Las acciones de **Newsletter**, **Importar** y **Configuración** solo se muestran al administrador. Newsletter mantiene destinatarios activos e inactivos y permite un envío de prueba al administrador conectado. Configuración reúne la descarga de telemetría y el análisis de adopción sobre un único registro de actividad por lotes, sin almacenar filtros ni datos de cliente.
+Las acciones de **Newsletter**, **Importar** y **Configuración** solo se muestran al administrador. Newsletter mantiene una audiencia independiente por Owner Support Company, con destinatarios activos e inactivos, y permite un envío de prueba al administrador conectado. Configuración reúne la descarga de telemetría y el análisis de adopción sobre un único registro de actividad por lotes, sin almacenar filtros ni datos de cliente.
 
 El snapshot Web fija el canal `Web`. El enlace de presentación de la newsletter es estable y resuelve en cada acceso la variante definida por el control global **Evolución NPS**.
 
-El contrato de publicación `3.0` incluye las pantallas ya calculadas y una sola página
+El contrato de publicación `5.0` identifica cada edición exclusivamente por Owner Support Company, periodo y método causal. Incluye las pantallas ya calculadas y una sola página
 acotada de NPS y Helix para las vistas de datos. Las taxonomías, modelos y corpus de
 restauración permanecen en el snapshot taxonómico local independiente y no se incluyen
 en el ZIP de la WebApp. El generador limita además `publication.json` a 20 MB antes de

@@ -791,6 +791,13 @@ class HelixIncidentStore:
             return None
         return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
 
+    def delete(self, ctx: DatasetContext) -> None:
+        data_path, meta_path, parquet_dir = self._paths_for(ctx)
+        data_path.unlink(missing_ok=True)
+        meta_path.unlink(missing_ok=True)
+        _clear_dir_tree(parquet_dir)
+        self._avail_year_month_cache.pop(ctx.key(), None)
+
     def available_periods(self, stored: StoredDataset) -> list[tuple[str, str]]:
         """Read temporal coverage without materializing the wide Helix dataset."""
         try:

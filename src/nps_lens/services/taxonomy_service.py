@@ -28,7 +28,7 @@ POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
 
 
 def context_key(context: UploadContext) -> str:
-    return json.dumps(asdict(context), sort_keys=True, ensure_ascii=False)
+    return context.service_origin
 
 
 class TaxonomyResolver:

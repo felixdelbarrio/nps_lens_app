@@ -148,31 +148,94 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
     assert any(issue["code"] == "missing_required_column" for issue in payload["issues"])
 
 
+def test_api_deletes_one_nps_ingestion_and_all_owner_data(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    source = tmp_path / "nps.xlsx"
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-09-01"],
+            "NPS": [9],
+            "Canal": ["App"],
+            "Comment": ["Correcto"],
+        }
+    ).to_excel(source, index=False)
+
+    with source.open("rb") as handle:
+        upload = client.post(
+            "/api/uploads/nps",
+            data={"service_origin": "BBVA México"},
+            files={"file": (source.name, handle, "application/vnd.ms-excel")},
+        ).json()
+    assert (
+        client.get("/api/summary", params={"service_origin": "BBVA México"}).json()["total_records"]
+        == 1
+    )
+
+    deleted = client.delete(
+        f"/api/uploads/nps/{upload['upload_id']}",
+        params={"service_origin": "BBVA México"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["removed_records"] == 1
+
+    cleared = client.delete("/api/data", params={"service_origin": "BBVA México"})
+    assert cleared.status_code == 200
+    assert cleared.json()["owner_support_company"] == "BBVA México"
+
+
+def test_api_deletes_a_specific_incident_ingestion(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    source = tmp_path / "helix.xlsx"
+    pd.DataFrame(
+        {
+            "Owner Support Company": ["BBVA México"],
+            "BBVA_SourceServiceN1": ["WEB"],
+            "Submit Date": ["2026-09-01"],
+            "Record ID": ["R1"],
+        }
+    ).to_excel(source, index=False)
+
+    with source.open("rb") as handle:
+        upload = client.post(
+            "/api/uploads/helix",
+            data={"service_origin": "BBVA México"},
+            files={"file": (source.name, handle, "application/vnd.ms-excel")},
+        ).json()
+    assert upload["status"] == "completed"
+    assert (
+        len(client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json()) == 1
+    )
+
+    deleted = client.delete(
+        f"/api/uploads/helix/{upload['upload_id']}",
+        params={"service_origin": "BBVA México"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["removed_uploads"] == 1
+    assert client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json() == []
+
+
 def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     client = TestClient(create_app(settings))
-    senda_context = {"service_origin": "BBVA México", "service_origin_n1": "Senda"}
-    web_context = {"service_origin": "BBVA México", "service_origin_n1": "Web"}
-    original = client.get("/api/settings/nps-column-aliases", params=senda_context)
+    company_context = {"service_origin": "BBVA México"}
+    original = client.get("/api/settings/nps-column-aliases", params=company_context)
     assert original.status_code == 200
     payload = original.json()
     canal = next(field for field in payload["fields"] if field["canonical"] == "Canal")
     canal["aliases"].append("Touch point")
 
-    saved = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    saved = client.put("/api/settings/nps-column-aliases", params=company_context, json=payload)
     assert saved.status_code == 200
     assert settings.column_aliases_path.exists()
     assert (
-        client.get("/api/settings/nps-column-aliases", params=senda_context).json() == saved.json()
+        client.get("/api/settings/nps-column-aliases", params=company_context).json()
+        == saved.json()
     )
-    other_context = client.get("/api/settings/nps-column-aliases", params=web_context).json()
-    assert "Touch point" not in next(
-        field["aliases"] for field in other_context["fields"] if field["canonical"] == "Canal"
-    )
-    assert other_context["service_origin_n1"] == "Web"
+    assert saved.json()["service_origin_n1"] == ""
 
     canal["aliases"].append("touch-point")
-    rejected = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    rejected = client.put("/api/settings/nps-column-aliases", params=company_context, json=payload)
     assert rejected.status_code == 400
     assert "duplicado" in rejected.json()["detail"]
 

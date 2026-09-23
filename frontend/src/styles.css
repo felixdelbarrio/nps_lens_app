@@ -825,6 +825,11 @@ input::placeholder {
   border: 1px solid transparent;
 }
 
+.danger-button {
+  border-color: var(--color-negative, #b92f2f);
+  color: var(--color-negative, #b92f2f);
+}
+
 .primary-button {
   background: var(--color-brand-strong);
   border-color: var(--color-brand-strong);

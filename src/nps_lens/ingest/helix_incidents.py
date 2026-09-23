@@ -19,7 +19,7 @@ from nps_lens.ingest.helix_dates import (
     looks_like_helix_datetime_column,
 )
 
-HELIX_REQUIRED = [OWNER_SUPPORT_COMPANY, SOURCE_SERVICE_N1]
+HELIX_REQUIRED = [OWNER_SUPPORT_COMPANY]
 
 
 def dataset_id_for(path: str, service_origin: str, service_origin_n1: str) -> str:
@@ -139,13 +139,8 @@ def read_helix_incidents_excel(
 ) -> IngestResult:
     """Read + filter Helix incidents Excel by selected context.
 
-    Contract (strict filtering):
-      - Always filter by:
-          service_origin == Owner Support Company
-          service_origin_n1 == BBVA_SourceServiceN1
-      - Only if the selected context has service_origin_n2 tokens (non-empty),
-        then ALSO filter by *strict token-set equality*: keep rows whose
-        BBVA_SourceServiceN2 token-set equals the selected token-set.
+    Contract: Owner Support Company is the only mandatory ingestion context.
+    Helix N1/N2 remain source attributes used later by optional channel attribution.
 
     If after filtering there are no rows, return empty df (ingestion is not performed).
     """
@@ -234,6 +229,8 @@ def read_helix_incidents_excel(
             df=df, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1)
         )
 
+    if SOURCE_SERVICE_N1 not in df.columns:
+        df[SOURCE_SERVICE_N1] = ""
     if SOURCE_SERVICE_N2 not in df.columns:
         df[SOURCE_SERVICE_N2] = ""
 
@@ -256,43 +253,6 @@ def read_helix_incidents_excel(
             )
         )
 
-    before = len(d)
-    selected_n1_key = equivalence_key(service_origin_n1)
-    d = d.loc[d[SOURCE_SERVICE_N1].map(equivalence_key) == selected_n1_key]
-    dropped = before - len(d)
-    if dropped:
-        issues.append(
-            ValidationIssue(
-                level="INFO",
-                message=f"Filtradas {dropped} filas fuera de {SOURCE_SERVICE_N1}={service_origin_n1}.",
-            )
-        )
-
-    # Optional N2 filter ONLY when selected context has tokens.
-    # Semantics: strict token-set equality (order-insensitive).
-    sel_n2 = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
-    if sel_n2:
-        sel = {equivalence_key(v) for v in sel_n2 if equivalence_key(v)}
-
-        def _row_matches_exact(v: object) -> bool:
-            toks = {
-                equivalence_key(part) for part in str(v or "").split(",") if equivalence_key(part)
-            }
-            return toks == sel
-
-        before = len(d)
-        d = d.loc[d[SOURCE_SERVICE_N2].apply(_row_matches_exact)]
-        dropped = before - len(d)
-        if dropped:
-            issues.append(
-                ValidationIssue(
-                    level="INFO",
-                    message=(
-                        f"Filtradas {dropped} filas fuera de {SOURCE_SERVICE_N2} == {{{', '.join(sorted(sel_n2))}}}."
-                    ),
-                )
-            )
-
     # If empty after filtering, signal to caller (no persistence)
     if d.empty:
         issues.append(
@@ -310,8 +270,8 @@ def read_helix_incidents_excel(
 
     # Attach selected context columns for downstream joins
     d["service_origin"] = str(service_origin)
-    d["service_origin_n1"] = str(service_origin_n1)
-    d["service_origin_n2_selected"] = ", ".join(sel_n2)
+    d["service_origin_n1"] = ""
+    d["service_origin_n2_selected"] = ""
 
     # Canonical Fecha (best-effort)
     fecha_col = _detect_fecha_column(d)

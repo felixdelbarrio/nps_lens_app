@@ -9,13 +9,12 @@ import pandas as pd
 
 from nps_lens import PIPELINE_VERSION
 from nps_lens.core.nps_math import classify_nps_scores, normalize_nps_scores
-from nps_lens.core.store import DatasetContext
 from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.record_identity import business_keys, hash_rows
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.09.16.column-aliases-by-context"
+PARSER_VERSION = "2026.09.23.owner-support-company-context"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -245,15 +244,12 @@ def read_nps_thermal_excel(
 
     service_origin, inferred_issues = _infer_context(df, "service_origin", service_origin)
     issues.extend(inferred_issues)
-    service_origin_n1, inferred_issues = _infer_context(df, "service_origin_n1", service_origin_n1)
-    issues.extend(inferred_issues)
-
-    if service_origin is None or service_origin_n1 is None:
+    if service_origin is None:
         issues.append(
             ValidationIssue(
                 level="ERROR",
                 code="missing_context",
-                message="Falta contexto: service_origin y/o service_origin_n1. Debes enviarlos en la carga o incluirlos como columnas únicas en el Excel.",
+                message="Falta Owner Support Company. Debes seleccionarlo antes de la carga.",
             )
         )
 
@@ -276,23 +272,10 @@ def read_nps_thermal_excel(
     work = df.copy()
     work["_source_row_number"] = work.index + 2
     work = _filter_context(work, "service_origin", str(service_origin), issues)
-    work = _filter_context(work, "service_origin_n1", str(service_origin_n1), issues)
     work["service_origin"] = str(service_origin)
-    work["service_origin_n1"] = str(service_origin_n1)
-    if "service_origin_n2" not in work.columns:
-        work["service_origin_n2"] = ""
-    work["service_origin_n2"] = work["service_origin_n2"].apply(
-        lambda value: ", ".join(_split_csvish(value))
-    )
-
-    if service_origin_n2 is not None:
-        work = _filter_context(
-            work,
-            "service_origin_n2",
-            ", ".join(_split_csvish(service_origin_n2)),
-            issues,
-            normalizer=DatasetContext._norm_n2,
-        )
+    # N1/N2 are optional Helix-to-channel attribution rules, never NPS context.
+    work["service_origin_n1"] = ""
+    work["service_origin_n2"] = ""
 
     for column in NPS_THERMAL_OPTIONAL:
         if column not in work.columns:

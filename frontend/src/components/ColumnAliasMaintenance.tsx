@@ -62,7 +62,7 @@ export function ColumnAliasMaintenance({
         Se busca primero el nombre estándar. Los alias solo identifican cabeceras y no cambian valores ni reglas NPS.
       </p>
       <p className="field-hint">
-        Configuración para: {registry.service_origin} → {registry.service_origin_n1}
+        Configuración para Owner Support Company: {registry.service_origin}
       </p>
       {registry.fields.map((field, index) => (
         <article className="settings-subsection" key={field.canonical}>

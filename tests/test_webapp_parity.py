@@ -64,6 +64,8 @@ def test_public_webapp_has_static_comment_filters_and_admin_is_explicit() -> Non
     assert "Newsletter" in web
     assert "Telemetría" in web
     assert "if(viewer.isAdmin)" in "".join(web.split())
+    assert "audiencia BUUG/N1" not in web
+    assert "Destinatarios del Owner Support Company seleccionado" in web
 
 
 def test_public_webapp_renders_every_local_rationale_from_the_snapshot() -> None:

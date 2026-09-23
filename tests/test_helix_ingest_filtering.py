@@ -3,7 +3,7 @@ import pandas as pd
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 
 
-def test_helix_ingest_filters_by_context_and_n2_strict(tmp_path):
+def test_helix_ingest_filters_only_by_owner_support_company(tmp_path):
     # Build a small incidents export
     df = pd.DataFrame(
         {
@@ -19,7 +19,7 @@ def test_helix_ingest_filters_by_context_and_n2_strict(tmp_path):
     p = tmp_path / "helix.xlsx"
     df.to_excel(p, index=False)
 
-    # With N2 selected, we require strict token-set equality.
+    # N1/N2 are source attributes for optional causal attribution, not ingestion context.
     res = read_helix_incidents_excel(
         str(p),
         service_origin="BBVA México",
@@ -29,12 +29,12 @@ def test_helix_ingest_filters_by_context_and_n2_strict(tmp_path):
     )
 
     assert res.df is not None
-    assert len(res.df) == 1
-    assert set(res.df["BBVA_SourceServiceN2"].iloc[0].split(", ")) == {"SN2X"}
+    assert len(res.df) == 2
+    assert res.df["BBVA_SourceServiceN2"].tolist() == ["SN2X", "SN2X, SN2Y"]
     assert res.df["BBVA_SourceServiceCompany"].iloc[0] == "Servicio Global"
 
 
-def test_helix_ingest_filters_without_n2(tmp_path):
+def test_helix_ingest_keeps_all_n1_values_for_owner(tmp_path):
     df = pd.DataFrame(
         {
             "Owner Support Company": ["BBVA México", "BBVA México"],
@@ -55,7 +55,7 @@ def test_helix_ingest_filters_without_n2(tmp_path):
         sheet_name=None,
     )
     assert res.df is not None
-    assert len(res.df) == 1
+    assert len(res.df) == 2
 
 
 def test_helix_ingest_rejects_file_without_owner_support_company(tmp_path):

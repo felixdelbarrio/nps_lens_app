@@ -533,6 +533,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_response.status_code == 200
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
+    assert "Canal: Todos" in linking_payload["context_pills"]
     assert linking_payload["kpis"]["incidents"] == 2
     assert linking_payload["causal_method"]["value"] == "executive_journeys"
     assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"

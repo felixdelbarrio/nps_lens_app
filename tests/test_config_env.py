@@ -89,11 +89,11 @@ def test_settings_reads_context_values_from_env(monkeypatch):
     assert s.default_report_dimension_analysis == DEFAULT_UI_REPORT_DIMENSION_ANALYSIS
 
 
-def test_settings_rejects_compact_n1_format(monkeypatch):
+def test_settings_ignores_obsolete_compact_channel_format(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", "BBVA México:Senda|Helix")
-    with pytest.raises(ValueError, match="debe ser un JSON"):
-        Settings.from_env()
+    settings = Settings.from_env()
+    assert settings.allowed_service_origin_n1 == {"BBVA México": []}
 
 
 def test_settings_requires_context_in_env(monkeypatch):
@@ -103,19 +103,22 @@ def test_settings_requires_context_in_env(monkeypatch):
         Settings.from_env()
 
 
-def test_settings_rejects_missing_n1_map(monkeypatch):
+def test_settings_allows_missing_optional_channel_map(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México")
     monkeypatch.delenv("NPS_LENS_SERVICE_ORIGIN_N1", raising=False)
-    with pytest.raises(ValueError, match="faltan: BBVA México"):
-        Settings.from_env()
+    settings = Settings.from_env()
+    assert settings.allowed_service_origin_n1 == {"BBVA México": []}
 
 
-def test_settings_rejects_incomplete_n1_map(monkeypatch):
+def test_settings_fills_missing_optional_channel_map(monkeypatch):
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "BBVA México, BBVA España")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"BBVA México": ["Senda"]}')
 
-    with pytest.raises(ValueError, match="faltan: BBVA España"):
-        Settings.from_env()
+    settings = Settings.from_env()
+    assert settings.allowed_service_origin_n1 == {
+        "BBVA México": ["Senda"],
+        "BBVA España": [],
+    }
 
 
 def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
@@ -134,7 +137,7 @@ def test_settings_normalizes_defaults_and_numeric_bounds(monkeypatch):
     s = Settings.from_env()
 
     assert s.default_service_origin == "MX"
-    assert s.default_service_origin_n1 == "Senda"
+    assert s.default_service_origin_n1 == ""
     assert s.default_theme_mode == "light"
     assert s.default_touchpoint_source
     assert s.default_report_dimension_analysis == "palanca"
