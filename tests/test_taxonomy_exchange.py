@@ -4,7 +4,6 @@ import io
 import json
 import zipfile
 from dataclasses import replace
-from pathlib import Path
 
 import pandas as pd
 import pytest
