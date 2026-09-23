@@ -26,6 +26,7 @@ class NpsService:
         self.repository.migrate_source_identity(
             settings.data_dir / "uploads", settings.column_aliases_path
         )
+        self.repository.migrate_owner_support_company_context()
         self.logger = logging.getLogger(__name__)
         repaired = self.repository.reconcile_processing_uploads()
         if repaired:

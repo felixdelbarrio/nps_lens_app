@@ -375,6 +375,7 @@ class DashboardService:
         self.settings = settings
         self.taxonomy = TaxonomyService(repository, settings.equivalences_path)
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
+        self._migrate_helix_owner_context()
         self.logger = logging.getLogger(__name__)
         # The analytical routes allocate large pandas/sklearn intermediates.  A single
         # bounded lock/cache prevents identical requests (and exports) from calculating
@@ -384,6 +385,41 @@ class DashboardService:
         self._result_cache: OrderedDict[tuple[object, ...], dict[str, object]] = OrderedDict()
         self._frame_cache_limit = 4
         self._result_cache_limit = 4
+
+    def _migrate_helix_owner_context(self) -> None:
+        contexts = self.helix_store.list_contexts()
+        owners = sorted(
+            {
+                context.service_origin
+                for context in contexts
+                if context.service_origin_n1 or context.service_origin_n2
+            }
+        )
+        for owner in owners:
+            owner_contexts = [context for context in contexts if context.service_origin == owner]
+            frames = [
+                self.helix_store.load_df(stored)
+                for context in owner_contexts
+                if (stored := self.helix_store.get(context)) is not None
+            ]
+            if not frames:
+                continue
+            combined = pd.concat(frames, ignore_index=True, sort=False)
+            identity_columns = [
+                column
+                for column in ("Record ID", "Incident Number", "ID")
+                if column in combined.columns
+            ]
+            combined = (
+                combined.drop_duplicates(identity_columns, keep="last")
+                if identity_columns
+                else combined.drop_duplicates(keep="last")
+            )
+            canonical = DatasetContext(owner, "", "")
+            self.helix_store.save_df(canonical, combined.reset_index(drop=True), "migración")
+            for context in owner_contexts:
+                if context != canonical:
+                    self.helix_store.delete(context)
 
     @staticmethod
     def _path_revision(path: Path) -> tuple[int, int]:

@@ -262,6 +262,47 @@ class SqliteNpsRepository:
                 )
             connection.execute("PRAGMA user_version = 2")
 
+    def migrate_owner_support_company_context(self) -> None:
+        """Collapse the obsolete BUUG/N1/N2 partition into company-only identity."""
+        with self._connect() as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version >= 3:
+                return
+            frame = pd.read_sql_query(
+                'SELECT business_key, external_id AS ID, response_at AS Fecha, nps_score AS NPS, comment_text AS Comment, decision_user AS "UsuarioDecisión", '
+                "service_origin, service_origin_n1, service_origin_n2, last_seen_at FROM records ORDER BY last_seen_at",
+                connection,
+            )
+            if not frame.empty:
+                frame["Fecha"] = pd.to_datetime(frame["Fecha"])
+                frame["service_origin_n1"] = ""
+                frame["service_origin_n2"] = ""
+                frame["new_key"] = business_keys(frame)
+                connection.execute(
+                    "CREATE TEMP TABLE owner_context_key_migration (old_key TEXT PRIMARY KEY, new_key TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO owner_context_key_migration VALUES (?, ?)",
+                    list(frame[["business_key", "new_key"]].itertuples(index=False, name=None)),
+                )
+                redundant = frame.loc[frame.duplicated("new_key", keep="last"), "business_key"]
+                connection.executemany(
+                    "DELETE FROM records WHERE business_key = ?", [(key,) for key in redundant]
+                )
+                connection.execute("UPDATE records SET business_key = 'owner-migrating:' || business_key")
+                connection.execute(
+                    "UPDATE records SET business_key = (SELECT new_key FROM owner_context_key_migration WHERE old_key = substr(records.business_key, 17)), service_origin_n1 = '', service_origin_n2 = ''"
+                )
+                connection.execute(
+                    "UPDATE OR REPLACE upload_records SET business_key = COALESCE((SELECT new_key FROM owner_context_key_migration WHERE old_key = upload_records.business_key), business_key)"
+                )
+            connection.execute(
+                "UPDATE uploads SET service_origin_n1 = '', service_origin_n2 = ''"
+            )
+            connection.execute("DELETE FROM taxonomy_artifacts")
+            connection.execute("DELETE FROM taxonomy_state")
+            connection.execute("PRAGMA user_version = 3")
+
     def find_completed_upload(
         self, file_hash: str, context: UploadContext
     ) -> Optional[dict[str, Any]]:
@@ -771,12 +812,12 @@ class SqliteNpsRepository:
                 "DELETE FROM uploads WHERE service_origin = ?", (owner_support_company,)
             ).rowcount
             connection.execute(
-                "DELETE FROM taxonomy_artifacts WHERE context LIKE ?",
-                (f'{owner_support_company}:%',),
+                "DELETE FROM taxonomy_artifacts WHERE context = ? OR context LIKE ?",
+                (owner_support_company, f"{owner_support_company}:%"),
             )
             connection.execute(
-                "DELETE FROM taxonomy_state WHERE context LIKE ?",
-                (f'{owner_support_company}:%',),
+                "DELETE FROM taxonomy_state WHERE context = ? OR context LIKE ?",
+                (owner_support_company, f"{owner_support_company}:%"),
             )
         return {
             "removed_records": max(0, removed_records),
