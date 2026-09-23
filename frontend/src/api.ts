@@ -164,7 +164,33 @@ export type DashboardPayload = {
   empty_state: string;
 };
 
+export type LinkingDiagnostics = {
+  nps_total: number;
+  nps_focus: number;
+  nps_matchable: number;
+  nps_non_matchable: number;
+  helix_total: number;
+  helix_after_scope: number;
+  helix_after_period: number;
+  helix_quality_eligible: number;
+  linked_incidents: number;
+  linked_nps_comments: number;
+  evidence_pairs: number;
+  nps_matchable_pct: number;
+  nps_coverage_pct: number;
+  matchable_coverage_pct: number;
+  helix_coverage_pct: number;
+  scope_requested_n1_n2: string[];
+  scope_found_n1: string[];
+  scope_found_n2: string[];
+  scope_available_n1: string[];
+  scope_available_n2: string[];
+  exclusions: Record<string, number>;
+  principal_exclusion_reason: string;
+};
+
 export type LinkingPayload = {
+  diagnostics?: LinkingDiagnostics;
   available: boolean;
   context_pills: string[];
   focus_group: string;

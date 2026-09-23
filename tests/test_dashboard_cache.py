@@ -122,3 +122,42 @@ def test_empty_causal_bundle_is_cached_with_explicit_scope(tmp_path: Path) -> No
     assert first["ready"] is False
     assert first["resolved_channel"] == "Todos"
     assert first["helix_window_rows"] == 0
+
+
+def test_empty_linking_dashboard_exposes_scope_funnel(tmp_path: Path, monkeypatch) -> None:
+    service = _service(tmp_path)
+    context = UploadContext("BBVA México", "Senda", "")
+    service.settings.service_origin_n2_map[context.service_origin] = {"App": ["Missing service"]}
+    nps = pd.DataFrame(
+        {
+            "ID": ["a", "b"],
+            "Fecha": pd.to_datetime(["2026-03-01"] * 2),
+            "NPS": [2, 3],
+            "Canal": ["App", "App"],
+            "Comment": ["error login", ""],
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["i1"],
+            "BBVA_SourceServiceN1": ["Other"],
+            "Fecha": pd.to_datetime(["2026-03-01"]),
+            "summary": ["error login"],
+        }
+    )
+    monkeypatch.setattr(service, "_load_nps_df", lambda _: nps)
+    monkeypatch.setattr(
+        service,
+        "_load_helix_df",
+        lambda _, score_channel=None: helix if not score_channel else helix.iloc[:0],
+    )
+    payload = service.linking_dashboard(context=context, score_channel="App")
+    diagnostics = payload["diagnostics"]
+    assert not payload["available"]
+    assert diagnostics["nps_total"] == 2
+    assert diagnostics["nps_matchable"] == 1
+    assert diagnostics["helix_total"] == 1
+    assert diagnostics["helix_after_scope"] == 0
+    assert diagnostics["scope_requested_n1_n2"] == ["Missing service"]
+    assert diagnostics["scope_available_n1"] == ["Other"]
+    assert diagnostics["scope_found_n1"] == []

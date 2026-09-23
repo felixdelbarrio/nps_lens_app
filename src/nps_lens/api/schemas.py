@@ -161,6 +161,7 @@ class DashboardResponse(BaseModel):
 
 
 class LinkingResponse(BaseModel):
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     available: bool = False
     context_pills: list[str] = Field(default_factory=list)
     focus_group: str = ""

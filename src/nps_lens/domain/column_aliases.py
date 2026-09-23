@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
+import pandas as pd
+
+from nps_lens.domain.normalization import semantic_series
+
 COLUMN_ALIAS_SCHEMA_VERSION = "1.0"
 COLUMN_ALIAS_STORAGE_SCHEMA_VERSION = "2.0"
 
@@ -286,7 +290,9 @@ class ColumnAliasRegistry:
             "fields": [field.to_dict() for field in self.fields],
         }
 
-    def resolve(self, columns: Iterable[object]) -> HeaderResolution:
+    def resolve(
+        self, columns: Iterable[object], frame: Optional[pd.DataFrame] = None
+    ) -> HeaderResolution:
         source_columns = tuple(columns)
         by_key: dict[str, list[object]] = {}
         by_exact: dict[str, list[object]] = {}
@@ -298,6 +304,28 @@ class ColumnAliasRegistry:
         applied: list[tuple[str, str]] = []
         ambiguities: list[tuple[str, tuple[str, ...]]] = []
         for field in self.fields:
+            if field.canonical == "Comment" and frame is not None:
+                keys = {
+                    normalize_column_header(value) for value in (field.canonical, *field.aliases)
+                }
+                candidates = [
+                    column for column in source_columns if normalize_column_header(column) in keys
+                ]
+                useful = [
+                    column for column in candidates if semantic_series(frame[column]).ne("").any()
+                ]
+                if len(useful) > 1:
+                    ambiguities.append((field.canonical, tuple(str(value) for value in useful)))
+                elif candidates:
+                    source = useful[0] if useful else candidates[0]
+                    # Preserve an empty canonical column if a useful alias takes its place.
+                    for column in candidates:
+                        if column != source and str(column).strip() == field.canonical:
+                            rename[column] = "_source_empty_comment"
+                    rename[source] = field.canonical
+                    if str(source) != field.canonical:
+                        applied.append((str(source), field.canonical))
+                continue
             exact_matches = by_exact.get(field.canonical, [])
             if exact_matches:
                 if len(exact_matches) > 1:

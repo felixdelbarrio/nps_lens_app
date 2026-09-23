@@ -76,6 +76,26 @@ DEFAULT_EQUIVALENCES: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
 }
 
 
+# Shared semantic normalization: sentinels must not become evidence or block fallbacks.
+SEMANTIC_EMPTY_MARKERS = _EMPTY_MARKERS | {
+    "n/a",
+    "na",
+    "0",
+    "1",
+    "0.0",
+    "1.0",
+    "-",
+    "sin clasificar",
+    "sin dato",
+    "sin datos",
+}
+
+
+def semantic_series(values: pd.Series[Any]) -> pd.Series[Any]:
+    text = values.astype("string").fillna("").str.strip()
+    return text.mask(text.str.casefold().isin(SEMANTIC_EMPTY_MARKERS), "")
+
+
 def clean_label(value: object) -> str:
     if value is None:
         return ""

@@ -10,11 +10,11 @@ import pandas as pd
 from nps_lens import PIPELINE_VERSION
 from nps_lens.core.nps_math import classify_nps_scores, normalize_nps_scores
 from nps_lens.domain.column_aliases import ColumnAliasRegistry
-from nps_lens.domain.record_identity import business_keys, hash_rows
+from nps_lens.domain.record_identity import business_keys, hash_rows, resolve_response_identity
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns
 from nps_lens.ingest.features import add_precomputed_features
 
-PARSER_VERSION = "2026.09.23.owner-support-company-context"
+PARSER_VERSION = "2026.09.23.ingestion-evidence-v26"
 
 NPS_THERMAL_REQUIRED = [
     "Fecha",
@@ -156,7 +156,7 @@ def read_nps_thermal_excel(
         column_aliases_path,
         service_origin or "",
         service_origin_n1 or "",
-    ).resolve(df.columns)
+    ).resolve(df.columns, frame=df)
     df = df.rename(columns=resolution.rename)
     applied_column_aliases = [
         {"source": source, "canonical": canonical}
@@ -370,6 +370,17 @@ def read_nps_thermal_excel(
             },
         )
 
+    work["_source_id"] = work["ID"]
+    work["ID"], identity_source = resolve_response_identity(work)
+    work["_identity_source"] = identity_source
+    issues.append(
+        ValidationIssue(
+            level="INFO",
+            code="response_identity_selected",
+            message=f"Identidad de respuesta: {identity_source}.",
+            details={"source": identity_source},
+        )
+    )
     work["_business_key"] = business_keys(work)
     fingerprint_columns = [
         "ID",
@@ -401,6 +412,9 @@ def read_nps_thermal_excel(
         )
         work = work.drop_duplicates(subset=["_business_key"], keep="last").copy()
 
+    from nps_lens.analytics.nps_helix_link import nps_matchable_mask
+
+    work["match_status"] = nps_matchable_mask(work).map({True: "matchable", False: "non_matchable"})
     work, added_features = add_precomputed_features(work)
     if added_features:
         issues.append(

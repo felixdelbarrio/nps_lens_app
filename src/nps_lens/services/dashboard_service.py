@@ -40,6 +40,7 @@ from nps_lens.analytics.incident_attribution import (
     summarize_attribution_chains,
 )
 from nps_lens.analytics.incident_rationale import build_incident_nps_rationale
+from nps_lens.analytics.linking_diagnostics import linking_diagnostics
 from nps_lens.analytics.linking_policy import (
     LINK_MAX_VISIBLE_COMMENTS,
     LINK_MAX_VISIBLE_INCIDENTS,
@@ -49,6 +50,7 @@ from nps_lens.analytics.nps_helix_link import (
     build_incident_display_text,
     daily_aggregates,
     link_incidents_to_nps_topics,
+    nps_matchable_mask,
     weekly_aggregates,
 )
 from nps_lens.analytics.text_mining import summarize_taxonomy
@@ -80,6 +82,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import equivalence_key
 from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
+from nps_lens.ingest.helix_dates import incident_occurrence_dates
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.platform.downloads import persist_download
 from nps_lens.platform.publication import (
@@ -499,6 +502,9 @@ class DashboardService:
                 self._frame_cache.move_to_end(key)
                 return cached
             frame = self.taxonomy.resolve(context)
+            frame["match_status"] = nps_matchable_mask(frame).map(
+                {True: "matchable", False: "non_matchable"}
+            )
             return cast(
                 pd.DataFrame,
                 self._remember_bounded(
@@ -1184,17 +1190,12 @@ class DashboardService:
     ) -> pd.DataFrame:
         """Apply the one causal time policy without pretending Helix is an NPS dataset."""
 
-        if (
-            helix_df.empty
-            or nps_df.empty
-            or "Fecha" not in helix_df.columns
-            or "Fecha" not in nps_df.columns
-        ):
+        if helix_df.empty or nps_df.empty or "Fecha" not in nps_df.columns:
             return helix_df.iloc[0:0].copy()
-        nps_dates = pd.to_datetime(nps_df["Fecha"], errors="coerce").dropna()
+        nps_dates = pd.to_datetime(nps_df["Fecha"], errors="coerce").dropna().dt.normalize()
         if nps_dates.empty:
             return helix_df.iloc[0:0].copy()
-        incident_dates = pd.to_datetime(helix_df["Fecha"], errors="coerce")
+        incident_dates = incident_occurrence_dates(helix_df)[0].dt.normalize()
         delta = pd.Timedelta(days=max(0, int(max_days_apart)))
         return helix_df.loc[
             incident_dates.between(nps_dates.min() - delta, nps_dates.max() + delta)
@@ -1245,6 +1246,7 @@ class DashboardService:
             )
             focus_group, focus_label = self._linking_focus_group(POP_ALL)
             focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
+            helix_total = self._load_helix_df(context)
             helix_history = self._load_helix_df(
                 context,
                 score_channel=requested_channel if assignments else None,
@@ -1268,6 +1270,16 @@ class DashboardService:
                 "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
                 "touchpoint_source": active_source,
             }
+            diagnostic_inputs: dict[str, Any] = dict(
+                nps=nps_slice,
+                focus=focus_df,
+                helix=helix_total,
+                scoped=helix_history,
+                period=helix_window,
+                eligible=helix_slice,
+                requested_scope=list(assignments),
+            )
+            base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
             if nps_slice.empty or focus_df.empty or helix_slice.empty:
                 return base
 
@@ -1284,6 +1296,7 @@ class DashboardService:
                 max_days_apart=max_days_apart,
             )
             links_df = cast(pd.DataFrame, core["links_df"])
+            base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=links_df)
             by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
             executive_journey_catalog = load_executive_journey_catalog(
                 self.settings.knowledge_dir,
@@ -1410,7 +1423,7 @@ class DashboardService:
         focus_group = str(analysis["focus_group"])
         focus_label = str(analysis["focus_label"])
         if not bool(analysis["ready"]):
-            return self._empty_linking_payload(
+            payload = self._empty_linking_payload(
                 context=context,
                 pop_year=pop_year,
                 pop_month=pop_month,
@@ -1423,6 +1436,8 @@ class DashboardService:
                     "contexto actual. Carga Helix y revisa el periodo activo."
                 ),
             )
+            payload["diagnostics"] = analysis["diagnostics"]
+            return payload
         nps_slice = cast(pd.DataFrame, analysis["nps_slice"])
         focus_df = cast(pd.DataFrame, analysis["focus_df"])
         helix_slice = cast(pd.DataFrame, analysis["helix_slice"])
@@ -1581,6 +1596,7 @@ class DashboardService:
                     topic_views[str(topic)] = topic_figure
         return {
             "available": True,
+            "diagnostics": analysis["diagnostics"],
             "context_pills": self._context_pills(
                 context,
                 pop_year,
@@ -1827,7 +1843,9 @@ class DashboardService:
         report_dimension_analysis: str = "",
     ) -> PublicationArtifact:
         with self._analytics_lock, self.taxonomy.snapshot_lens(context):
-            active_touchpoint_source = touchpoint_source or TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS
+            active_touchpoint_source = touchpoint_source or str(
+                self.settings.ui_defaults()["touchpoint_source"]
+            )
             scope = build_publication_scope(
                 owner_support_company=context.service_origin,
                 year=pop_year,

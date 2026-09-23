@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import nullcontext
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, ContextManager, Optional, cast
 
@@ -41,6 +42,14 @@ CORE_COLUMNS = {
     "_canal_key",
 }
 _SQLITE_IN_BATCH_SIZE = 900
+
+
+def _json_scalar(value: object) -> object:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if value is pd.NA or value is pd.NaT:
+        return None
+    raise TypeError(f"Unsupported source value: {type(value).__name__}")
 
 
 class SqliteNpsRepository:
@@ -541,7 +550,7 @@ class SqliteNpsRepository:
                     str(row.get("service_origin_n2", "")),
                     str(row.get("_text_norm", "")),
                     record_fingerprint,
-                    json.dumps(extra_payload, ensure_ascii=False),
+                    json.dumps(extra_payload, ensure_ascii=False, default=_json_scalar),
                     upload_id,
                     upload_id,
                     uploaded_at,
