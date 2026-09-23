@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 from contextlib import contextmanager
-from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import StringIO
@@ -28,7 +27,7 @@ POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
 
 
 def context_key(context: UploadContext) -> str:
-    return json.dumps(asdict(context), sort_keys=True, ensure_ascii=False)
+    return context.service_origin
 
 
 class TaxonomyResolver:
