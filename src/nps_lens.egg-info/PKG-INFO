@@ -25,15 +25,12 @@ Requires-Dist: networkx<3.4,>=3.1
 Requires-Dist: ruptures<2.0,>=1.1.8
 Requires-Dist: openpyxl<3.2,>=3.1
 Requires-Dist: typing_extensions<5.0,>=4.7
-Requires-Dist: playwright<2.0,>=1.54
-Requires-Dist: psutil<8,>=5.9
 Provides-Extra: dev
 Requires-Dist: pytest<9.0,>=8.0; extra == "dev"
 Requires-Dist: pytest-cov<6.0,>=5.0; extra == "dev"
 Requires-Dist: httpx<0.29,>=0.28; extra == "dev"
 Requires-Dist: mypy<1.12,>=1.8; extra == "dev"
 Requires-Dist: types-python-dateutil; extra == "dev"
-Requires-Dist: types-psutil; extra == "dev"
 Requires-Dist: pandas-stubs==2.2.2.240807; extra == "dev"
 Requires-Dist: ruff<0.7,>=0.3; extra == "dev"
 Requires-Dist: black<25.0,>=24.2; extra == "dev"

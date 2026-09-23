@@ -6,6 +6,12 @@ from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 
+from nps_lens.domain.helix import (
+    OWNER_SUPPORT_COMPANY,
+    SOURCE_SERVICE_COMPANY,
+    SOURCE_SERVICE_N1,
+    SOURCE_SERVICE_N2,
+)
 from nps_lens.domain.normalization import equivalence_key
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.ingest.helix_dates import (
@@ -13,12 +19,7 @@ from nps_lens.ingest.helix_dates import (
     looks_like_helix_datetime_column,
 )
 
-# Canonical context columns used by the app.
-# We require N1 (channel) to be present. Company/N2 are optional because some
-# Helix extracts are already pre-filtered or omit those fields.
-HELIX_REQUIRED = [
-    "BBVA_SourceServiceN1",
-]
+HELIX_REQUIRED = [OWNER_SUPPORT_COMPANY]
 
 
 def dataset_id_for(path: str, service_origin: str, service_origin_n1: str) -> str:
@@ -138,13 +139,8 @@ def read_helix_incidents_excel(
 ) -> IngestResult:
     """Read + filter Helix incidents Excel by selected context.
 
-    Contract (strict filtering):
-      - Always filter by:
-          service_origin == BBVA_SourceServiceCompany
-          service_origin_n1 == BBVA_SourceServiceN1
-      - Only if the selected context has service_origin_n2 tokens (non-empty),
-        then ALSO filter by *strict token-set equality*: keep rows whose
-        BBVA_SourceServiceN2 token-set equals the selected token-set.
+    Contract: Owner Support Company is the only mandatory ingestion context.
+    Helix N1/N2 remain source attributes used later by optional channel attribution.
 
     If after filtering there are no rows, return empty df (ingestion is not performed).
     """
@@ -207,18 +203,21 @@ def read_helix_incidents_excel(
     df = standardize_columns(
         df,
         mapping={
-            "BBVA_SourceServiceCompany": "BBVA_SourceServiceCompany",
-            "BBVA Source Service Company": "BBVA_SourceServiceCompany",
-            "SourceServiceCompany": "BBVA_SourceServiceCompany",
-            "Servicio Origen - BU/UG": "BBVA_SourceServiceCompany",
-            "BBVA_SourceServiceN1": "BBVA_SourceServiceN1",
-            "BBVA Source Service N1": "BBVA_SourceServiceN1",
-            "SourceServiceN1": "BBVA_SourceServiceN1",
-            "Servicio Origen - Servicio N1": "BBVA_SourceServiceN1",
-            "BBVA_SourceServiceN2": "BBVA_SourceServiceN2",
-            "BBVA Source Service N2": "BBVA_SourceServiceN2",
-            "SourceServiceN2": "BBVA_SourceServiceN2",
-            "Servicio Origen - Servicio N2": "BBVA_SourceServiceN2",
+            OWNER_SUPPORT_COMPANY: OWNER_SUPPORT_COMPANY,
+            "OwnerSupportCompany": OWNER_SUPPORT_COMPANY,
+            "Owner SupportCompany": OWNER_SUPPORT_COMPANY,
+            SOURCE_SERVICE_COMPANY: SOURCE_SERVICE_COMPANY,
+            "BBVA Source Service Company": SOURCE_SERVICE_COMPANY,
+            "SourceServiceCompany": SOURCE_SERVICE_COMPANY,
+            "Servicio Origen - BU/UG": SOURCE_SERVICE_COMPANY,
+            SOURCE_SERVICE_N1: SOURCE_SERVICE_N1,
+            "BBVA Source Service N1": SOURCE_SERVICE_N1,
+            "SourceServiceN1": SOURCE_SERVICE_N1,
+            "Servicio Origen - Servicio N1": SOURCE_SERVICE_N1,
+            SOURCE_SERVICE_N2: SOURCE_SERVICE_N2,
+            "BBVA Source Service N2": SOURCE_SERVICE_N2,
+            "SourceServiceN2": SOURCE_SERVICE_N2,
+            "Servicio Origen - Servicio N2": SOURCE_SERVICE_N2,
         },
     )
 
@@ -230,80 +229,29 @@ def read_helix_incidents_excel(
             df=df, issues=issues, dataset_id=dataset_id_for(path, service_origin, service_origin_n1)
         )
 
-    # Ensure optional canonical context columns exist.
-    if "BBVA_SourceServiceCompany" not in df.columns:
-        df["BBVA_SourceServiceCompany"] = str(service_origin)
-        issues.append(
-            ValidationIssue(
-                level="WARN",
-                message=(
-                    "Columna de contexto 'BBVA_SourceServiceCompany' no encontrada en el fichero Helix. "
-                    "Se asume que el fichero ya viene filtrado para el service_origin seleccionado."
-                ),
-            )
-        )
-    if "BBVA_SourceServiceN2" not in df.columns:
-        df["BBVA_SourceServiceN2"] = ""
+    if SOURCE_SERVICE_N1 not in df.columns:
+        df[SOURCE_SERVICE_N1] = ""
+    if SOURCE_SERVICE_N2 not in df.columns:
+        df[SOURCE_SERVICE_N2] = ""
 
     # Normalize N2 column to stable CSV-ish string
     d = df.copy()
-    d["BBVA_SourceServiceCompany"] = d["BBVA_SourceServiceCompany"].astype(str).str.strip()
-    d["BBVA_SourceServiceN1"] = d["BBVA_SourceServiceN1"].astype(str).str.strip()
-    d["BBVA_SourceServiceN2"] = d["BBVA_SourceServiceN2"].apply(
-        lambda v: ", ".join(_split_csvish(v))
-    )
+    d[OWNER_SUPPORT_COMPANY] = d[OWNER_SUPPORT_COMPANY].astype(str).str.strip()
+    d[SOURCE_SERVICE_N1] = d[SOURCE_SERVICE_N1].astype(str).str.strip()
+    d[SOURCE_SERVICE_N2] = d[SOURCE_SERVICE_N2].apply(lambda v: ", ".join(_split_csvish(v)))
 
     # Context filters
-    # Company filter is best-effort: if the column was missing we filled it with the selected origin.
-    if "BBVA_SourceServiceCompany" in d.columns:
-        before = len(d)
-        selected_company_key = equivalence_key(service_origin)
-        d = d.loc[d["BBVA_SourceServiceCompany"].map(equivalence_key) == selected_company_key]
-        dropped = before - len(d)
-        if dropped:
-            issues.append(
-                ValidationIssue(
-                    level="INFO",
-                    message=f"Filtradas {dropped} filas fuera de BBVA_SourceServiceCompany={service_origin}.",
-                )
-            )
-
     before = len(d)
-    selected_n1_key = equivalence_key(service_origin_n1)
-    d = d.loc[d["BBVA_SourceServiceN1"].map(equivalence_key) == selected_n1_key]
+    selected_company_key = equivalence_key(service_origin)
+    d = d.loc[d[OWNER_SUPPORT_COMPANY].map(equivalence_key) == selected_company_key]
     dropped = before - len(d)
     if dropped:
         issues.append(
             ValidationIssue(
                 level="INFO",
-                message=f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN1={service_origin_n1}.",
+                message=f"Filtradas {dropped} filas fuera de {OWNER_SUPPORT_COMPANY}={service_origin}.",
             )
         )
-
-    # Optional N2 filter ONLY when selected context has tokens.
-    # Semantics: strict token-set equality (order-insensitive).
-    sel_n2 = [v.strip() for v in (service_origin_n2 or "").split(",") if v.strip()]
-    if sel_n2:
-        sel = {equivalence_key(v) for v in sel_n2 if equivalence_key(v)}
-
-        def _row_matches_exact(v: object) -> bool:
-            toks = {
-                equivalence_key(part) for part in str(v or "").split(",") if equivalence_key(part)
-            }
-            return toks == sel
-
-        before = len(d)
-        d = d.loc[d["BBVA_SourceServiceN2"].apply(_row_matches_exact)]
-        dropped = before - len(d)
-        if dropped:
-            issues.append(
-                ValidationIssue(
-                    level="INFO",
-                    message=(
-                        f"Filtradas {dropped} filas fuera de BBVA_SourceServiceN2 == {{{', '.join(sorted(sel_n2))}}}."
-                    ),
-                )
-            )
 
     # If empty after filtering, signal to caller (no persistence)
     if d.empty:
@@ -322,8 +270,8 @@ def read_helix_incidents_excel(
 
     # Attach selected context columns for downstream joins
     d["service_origin"] = str(service_origin)
-    d["service_origin_n1"] = str(service_origin_n1)
-    d["service_origin_n2_selected"] = ", ".join(sel_n2)
+    d["service_origin_n1"] = ""
+    d["service_origin_n2_selected"] = ""
 
     # Canonical Fecha (best-effort)
     fecha_col = _detect_fecha_column(d)

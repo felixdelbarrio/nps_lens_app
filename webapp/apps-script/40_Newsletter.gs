@@ -1,12 +1,12 @@
 const NEWSLETTER_RECIPIENT_HEADERS = Object.freeze([
-  'audience_key', 'buug', 'n1', 'email', 'active', 'created_at', 'created_by', 'updated_at', 'updated_by'
+  'audience_key', 'owner_support_company', 'email', 'active', 'created_at', 'created_by', 'updated_at', 'updated_by'
 ]);
 
 function _newsletterRecipients_(audienceKey) {
   const sheet = _sheet_(NPS_LENS.recipientsSheet);
   if (sheet.getLastRow() <= 1) return [];
   return sheet.getRange(2, 1, sheet.getLastRow() - 1, NEWSLETTER_RECIPIENT_HEADERS.length).getValues()
-    .map((row, index) => ({row:index+2,audienceKey:String(row[0]),buug:String(row[1]),n1:String(row[2]),email:String(row[3]||'').toLowerCase(),active:row[4]===true}))
+    .map((row, index) => ({row:index+2,audienceKey:String(row[0]),ownerSupportCompany:String(row[1]),email:String(row[2]||'').toLowerCase(),active:row[3]===true}))
     .filter(item => !audienceKey || item.audienceKey === audienceKey);
 }
 
@@ -69,7 +69,7 @@ function getNewsletterWorkspace() {
 
 function _newsletterSubject_(publication) {
   const monthNames = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  return 'NPS e incidencias relacionadas - ' + publication.buug + ' ' + publication.n1 +
+  return 'NPS e incidencias relacionadas - ' + publication.ownerSupportCompany +
     ' - ' + publication.year + ' ' + (monthNames[publication.month] || publication.month) + ' - ' + publication.causalMethodLabel;
 }
 
@@ -87,10 +87,10 @@ function saveNewsletterRecipient(payload) {
   const existing = _newsletterRecipients_(publication.audienceKey).find(item => item.email === email);
   const now = new Date();
   if (existing) {
-    const created = sheet.getRange(existing.row, 6, 1, 2).getValues()[0];
-    sheet.getRange(existing.row, 5, 1, 5).setValues([[active, created[0], created[1], now, viewer.email]]);
+    const created = sheet.getRange(existing.row, 5, 1, 2).getValues()[0];
+    sheet.getRange(existing.row, 4, 1, 5).setValues([[active, created[0], created[1], now, viewer.email]]);
   } else {
-    sheet.appendRow([publication.audienceKey,publication.buug,publication.n1,email,active,now,viewer.email,now,viewer.email]);
+    sheet.appendRow([publication.audienceKey,publication.ownerSupportCompany,email,active,now,viewer.email,now,viewer.email]);
   }
   return {email, active};
 }

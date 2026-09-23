@@ -89,6 +89,7 @@ def _upload_nps_jan_feb(client: TestClient) -> dict[str, object]:
 def _build_helix_fixture(path: Path) -> Path:
     pd.DataFrame(
         {
+            "Owner Support Company": ["BBVA México", "BBVA México", "BBVA España"],
             "BBVA_SourceServiceCompany": ["BBVA México", "BBVA México", "BBVA España"],
             "BBVA_SourceServiceN1": ["Senda", "Senda", "Senda"],
             "BBVA_SourceServiceN2": ["", "", ""],
@@ -109,6 +110,7 @@ def _build_helix_fixture(path: Path) -> Path:
 def _build_helix_out_of_period_fixture(path: Path) -> Path:
     pd.DataFrame(
         {
+            "Owner Support Company": ["BBVA México", "BBVA México"],
             "BBVA_SourceServiceCompany": ["BBVA México", "BBVA México"],
             "BBVA_SourceServiceN1": ["Senda", "Senda"],
             "BBVA_SourceServiceN2": ["", ""],
@@ -128,6 +130,7 @@ def _build_helix_out_of_period_fixture(path: Path) -> Path:
 def _build_helix_mixed_dates_fixture(path: Path) -> Path:
     pd.DataFrame(
         {
+            "Owner Support Company": ["BBVA México", "BBVA México", "BBVA México"],
             "BBVA_SourceServiceCompany": ["BBVA México", "BBVA México", "BBVA México"],
             "BBVA_SourceServiceN1": ["Senda", "Senda", "Senda"],
             "BBVA_SourceServiceN2": ["", "", ""],
@@ -485,6 +488,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert data_payload["dataset_kind"] == "helix"
     assert data_payload["total_rows"] == 2
     assert data_payload["columns"][:8] == [
+        "Owner Support Company",
         "BBVA_SourceServiceCompany",
         "BBVA_SourceServiceN1",
         "BBVA_SourceServiceN2",
@@ -492,7 +496,6 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Incident Number",
         "Record ID",
         "Detailed Description",
-        "Short Description",
     ]
     assert data_payload["rows"][0]["BBVA_SourceServiceN1"] == "Senda"
     assert (
@@ -530,6 +533,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_response.status_code == 200
     linking_payload = linking_response.json()
     assert linking_payload["available"] is True
+    assert "Canal: Todos" in linking_payload["context_pills"]
     assert linking_payload["kpis"]["incidents"] == 2
     assert linking_payload["causal_method"]["value"] == "executive_journeys"
     assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"

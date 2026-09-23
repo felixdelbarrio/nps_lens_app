@@ -61,6 +61,29 @@ def test_parser_returns_clear_error_when_critical_columns_are_missing(tmp_path: 
     assert "Canal" in missing_columns
 
 
+def test_parser_uses_owner_company_as_context_and_keeps_file_channels(tmp_path: Path) -> None:
+    path = tmp_path / "owner-context.xlsx"
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-09-01", "2026-09-02"],
+            "NPS": [9, 5],
+            "Canal": ["App", "Web"],
+            "service_origin_n1": ["LEGACY A", "LEGACY B"],
+        }
+    ).to_excel(path, index=False)
+
+    result = read_nps_thermal_excel(
+        str(path),
+        service_origin="BBVA México",
+        service_origin_n1="IGNORED",
+    )
+
+    assert not any(issue.level == "ERROR" for issue in result.issues)
+    assert result.df["Canal"].tolist() == ["App", "Web"]
+    assert result.df["service_origin"].unique().tolist() == ["BBVA México"]
+    assert result.df["service_origin_n1"].unique().tolist() == [""]
+
+
 def test_parser_fingerprint_business_key_ignores_non_business_schema_drift(
     tmp_path: Path,
 ) -> None:

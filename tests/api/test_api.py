@@ -29,51 +29,15 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
-def test_application_shutdown_disconnects_discovery(tmp_path: Path, monkeypatch) -> None:
-    from unittest.mock import Mock
-
-    app = create_app(_settings(tmp_path))
-    disconnect = Mock()
-    monkeypatch.setattr(app.state.dashboard_service.taxonomy, "disconnect_discovery", disconnect)
-    with TestClient(app) as client:
-        assert client.get("/api/health").status_code == 200
-        disconnect.assert_not_called()
-    disconnect.assert_called_once()
-
-
-def test_discovery_provider_survives_unrelated_settings_refresh(tmp_path: Path) -> None:
-    settings = replace(_settings(tmp_path), taxonomy_discovery_method="chatgpt_browser")
-    app = create_app(settings)
-    dashboard = app.state.dashboard_service
-    provider = dashboard.taxonomy.discovery_provider
-    dashboard.refresh_taxonomy_discovery()
-    assert dashboard.taxonomy.discovery_provider is provider
-    assert provider.session_status() == "not_connected"
-
-
-def test_local_discovery_never_constructs_browser(tmp_path: Path, monkeypatch) -> None:
-    from unittest.mock import Mock
-
-    browser = Mock(side_effect=AssertionError("must not open Chrome"))
-    monkeypatch.setattr("nps_lens.services.dashboard_service.ChatGPTBrowserClient", browser)
-    app = create_app(replace(_settings(tmp_path), taxonomy_discovery_method="local"))
-    with TestClient(app) as client:
-        assert client.post("/api/taxonomy/discovery/connect").status_code == 400
-    browser.assert_not_called()
-
-
-def test_project_instructions_are_local_read_only_and_match_batch_templates(tmp_path, monkeypatch):
-    from unittest.mock import Mock
-
+def test_project_instructions_are_local_read_only(tmp_path):
     from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
 
-    browser = Mock(side_effect=AssertionError("instructions must not launch Chrome"))
-    monkeypatch.setattr("nps_lens.services.dashboard_service.ChatGPTBrowserClient", browser)
     with TestClient(create_app(_settings(tmp_path))) as client:
         response = client.get("/api/taxonomy/discovery/instructions")
+        assert client.post("/api/taxonomy/discovery/connect").status_code == 404
     assert response.status_code == 200
     assert response.json() == {"version": INSTRUCTIONS_VERSION, **PROJECT_INSTRUCTIONS}
-    browser.assert_not_called()
+    assert "manifest.json" in response.json()["designer"]
 
 
 def test_telemetry_excludes_unknown_paths_and_parameter_values(tmp_path: Path) -> None:
@@ -184,31 +148,94 @@ def test_api_returns_clear_failure_for_missing_critical_columns(tmp_path: Path) 
     assert any(issue["code"] == "missing_required_column" for issue in payload["issues"])
 
 
+def test_api_deletes_one_nps_ingestion_and_all_owner_data(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    source = tmp_path / "nps.xlsx"
+    pd.DataFrame(
+        {
+            "Fecha": ["2026-09-01"],
+            "NPS": [9],
+            "Canal": ["App"],
+            "Comment": ["Correcto"],
+        }
+    ).to_excel(source, index=False)
+
+    with source.open("rb") as handle:
+        upload = client.post(
+            "/api/uploads/nps",
+            data={"service_origin": "BBVA México"},
+            files={"file": (source.name, handle, "application/vnd.ms-excel")},
+        ).json()
+    assert (
+        client.get("/api/summary", params={"service_origin": "BBVA México"}).json()["total_records"]
+        == 1
+    )
+
+    deleted = client.delete(
+        f"/api/uploads/nps/{upload['upload_id']}",
+        params={"service_origin": "BBVA México"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["removed_records"] == 1
+
+    cleared = client.delete("/api/data", params={"service_origin": "BBVA México"})
+    assert cleared.status_code == 200
+    assert cleared.json()["owner_support_company"] == "BBVA México"
+
+
+def test_api_deletes_a_specific_incident_ingestion(tmp_path: Path) -> None:
+    client = TestClient(create_app(_settings(tmp_path)))
+    source = tmp_path / "helix.xlsx"
+    pd.DataFrame(
+        {
+            "Owner Support Company": ["BBVA México"],
+            "BBVA_SourceServiceN1": ["WEB"],
+            "Submit Date": ["2026-09-01"],
+            "Record ID": ["R1"],
+        }
+    ).to_excel(source, index=False)
+
+    with source.open("rb") as handle:
+        upload = client.post(
+            "/api/uploads/helix",
+            data={"service_origin": "BBVA México"},
+            files={"file": (source.name, handle, "application/vnd.ms-excel")},
+        ).json()
+    assert upload["status"] == "completed"
+    assert (
+        len(client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json()) == 1
+    )
+
+    deleted = client.delete(
+        f"/api/uploads/helix/{upload['upload_id']}",
+        params={"service_origin": "BBVA México"},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["removed_uploads"] == 1
+    assert client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json() == []
+
+
 def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     client = TestClient(create_app(settings))
-    senda_context = {"service_origin": "BBVA México", "service_origin_n1": "Senda"}
-    web_context = {"service_origin": "BBVA México", "service_origin_n1": "Web"}
-    original = client.get("/api/settings/nps-column-aliases", params=senda_context)
+    company_context = {"service_origin": "BBVA México"}
+    original = client.get("/api/settings/nps-column-aliases", params=company_context)
     assert original.status_code == 200
     payload = original.json()
     canal = next(field for field in payload["fields"] if field["canonical"] == "Canal")
     canal["aliases"].append("Touch point")
 
-    saved = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    saved = client.put("/api/settings/nps-column-aliases", params=company_context, json=payload)
     assert saved.status_code == 200
     assert settings.column_aliases_path.exists()
     assert (
-        client.get("/api/settings/nps-column-aliases", params=senda_context).json() == saved.json()
+        client.get("/api/settings/nps-column-aliases", params=company_context).json()
+        == saved.json()
     )
-    other_context = client.get("/api/settings/nps-column-aliases", params=web_context).json()
-    assert "Touch point" not in next(
-        field["aliases"] for field in other_context["fields"] if field["canonical"] == "Canal"
-    )
-    assert other_context["service_origin_n1"] == "Web"
+    assert saved.json()["service_origin_n1"] == ""
 
     canal["aliases"].append("touch-point")
-    rejected = client.put("/api/settings/nps-column-aliases", params=senda_context, json=payload)
+    rejected = client.put("/api/settings/nps-column-aliases", params=company_context, json=payload)
     assert rejected.status_code == 400
     assert "duplicado" in rejected.json()["detail"]
 

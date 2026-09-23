@@ -253,15 +253,15 @@ export function ServiceOriginMaintenance({
     <section className="maintenance-shell">
       <div className="metric-grid maintenance-metrics">
         <article className="metric-card">
-          <span>BUUG activas</span>
+          <span>Compañías activas</span>
           <strong>{originOptions.length}</strong>
         </article>
         <article className="metric-card">
-          <span>N1 configurados</span>
+          <span>Canales configurados</span>
           <strong>{totalN1}</strong>
         </article>
         <article className="metric-card">
-          <span>N2 disponibles</span>
+          <span>Asignaciones Helix</span>
           <strong>{totalN2}</strong>
         </article>
       </div>
@@ -270,9 +270,9 @@ export function ServiceOriginMaintenance({
         <section className="surface-card maintenance-column">
           <div className="section-heading">
             <div>
-              <h3>BUUG</h3>
+              <h3>Owner Support Company</h3>
               <p className="secondary-copy">
-                Define las unidades disponibles para el contexto de servicio.
+                Define las compañías disponibles como contexto transversal.
               </p>
             </div>
           </div>
@@ -303,7 +303,7 @@ export function ServiceOriginMaintenance({
           <div className="inline-editor">
             <input
               onChange={(event) => setNewOrigin(event.target.value)}
-              placeholder="Añadir BUUG"
+              placeholder="Añadir compañía"
               value={newOrigin}
             />
             <button className="secondary-button" onClick={handleAddOrigin} type="button">
@@ -315,11 +315,11 @@ export function ServiceOriginMaintenance({
         <section className="surface-card maintenance-column">
           <div className="section-heading">
             <div>
-              <h3>N1</h3>
+              <h3>Canal</h3>
               <p className="secondary-copy">
                 {selectedOrigin
-                  ? `Catálogo operativo asociado a ${selectedOrigin}.`
-                  : "Selecciona una BUUG para editar su catálogo N1."}
+                  ? `Canales con atribución causal opcional para ${selectedOrigin}.`
+                  : "Selecciona una compañía para editar sus canales."}
               </p>
             </div>
           </div>
@@ -348,7 +348,7 @@ export function ServiceOriginMaintenance({
             <input
               disabled={!selectedOrigin}
               onChange={(event) => setNewN1(event.target.value)}
-              placeholder="Añadir N1"
+              placeholder="Añadir canal"
               value={newN1}
             />
             <button className="secondary-button" onClick={handleAddN1} type="button">
@@ -361,15 +361,15 @@ export function ServiceOriginMaintenance({
       <section className="surface-card maintenance-column">
         <div className="section-heading section-heading-inline">
           <div>
-            <h3>N2 por combinación</h3>
+            <h3>N1 y N2 de Helix asignados al canal</h3>
             <p className="secondary-copy">
               {selectedOrigin && selectedN1
-                ? `Define los N2 disponibles para ${selectedOrigin} · ${selectedN1}.`
-                : "Selecciona BUUG y N1 para editar el catálogo N2."}
+                ? `Asigna valores exactos de N1 o N2 a ${selectedOrigin} · ${selectedN1}. Si no añades ninguno, la causalidad aplicará a todos los comentarios y canales.`
+                : "Selecciona compañía y canal para configurar la atribución opcional."}
             </p>
           </div>
           <button className="primary-button" onClick={() => void handleSave()} type="button">
-            {saving ? "Guardando..." : "Guardar jerarquía"}
+            {saving ? "Guardando..." : "Guardar canales"}
           </button>
         </div>
 
@@ -392,7 +392,7 @@ export function ServiceOriginMaintenance({
           <input
             disabled={!selectedOrigin || !selectedN1}
             onChange={(event) => setNewN2(event.target.value)}
-            placeholder="Añadir N2"
+            placeholder="Añadir valor N1 o N2"
             value={newN2}
           />
           <button className="secondary-button" onClick={handleAddN2} type="button">

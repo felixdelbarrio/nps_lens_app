@@ -27,7 +27,7 @@
 - Añadir docs cuando se añadan módulos/capacidades.
 
 ## Reglas de dominio vigentes
-- `SERVICE CONTAINER` gobierna `service_origin`, `service_origin_n1` y `service_origin_n2`.
+- `Owner Support Company` es el único contexto transversal; N1/N2 son atributos Helix para atribución opcional a Canal.
 - `PERIOD CONTAINER` gobierna `pop_year` y `pop_month` para toda la app.
 - `Canal` y `Grupo Score` se aplican a Analítica NPS, Incidencias ↔ NPS, tablas y reportes causales; no deben alterar el Ámbito de Análisis del Sumario del Periodo.
 - Usar `Score` para medias/valores 0-10 y reservar `NPS clásico` para `% promotores - % detractores`.

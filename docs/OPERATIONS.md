@@ -35,7 +35,7 @@
 - Variables típicas:
   - `NPS_LENS_SERVICE_ORIGIN_BUUG=...`
   - `NPS_LENS_SERVICE_ORIGIN_N1=...` (map JSON)
-  - `NPS_LENS_SERVICE_ORIGIN_N2=...` (opcional)
+  - `NPS_LENS_SERVICE_ORIGIN_N2_MAP=...` (map JSON opcional por compañía y N1)
   - `NPS_LENS_UI_POP_YEAR=...` / `NPS_LENS_UI_POP_MONTH=...`
   - `NPS_LENS_UI_SCORE_CHANNEL=...`
   - `NPS_LENS_UI_NPS_GROUP=...` (persistencia interna del Grupo Score)
@@ -64,7 +64,7 @@
 ### “No hay registros para el contexto” al ingestar Helix
 - Verifica que `service_origin_n1_map` está bien parseado (valores sin `[` `]`).
 - Revisa que el Excel trae columnas `Servicio Origen - Servicio N1` (se mapea).
-- Si el extract ya viene filtrado y no trae Company, se ingesta con WARN.
+- Verifica que el Excel trae `Owner Support Company`; es el criterio obligatorio de compañía/geografía.
 
 ### Enlaces Helix abren la base sin incidencia
 - Revisa que el extract Helix traiga `Record ID`, `workItemId` o `InstanceId`.

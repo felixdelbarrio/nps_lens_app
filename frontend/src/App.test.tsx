@@ -12,7 +12,6 @@ const contextPayload = {
   default_service_origin_n1: "ENTERPRISE WEB",
   service_origins: ["BBVA México"],
   service_origin_n1_map: { "BBVA México": ["ENTERPRISE WEB"] },
-  service_origin_n2_values: [],
   service_origin_n2_map: { "BBVA México": { "ENTERPRISE WEB": [] } },
   service_origin_n2_options: [],
   available_years: ["Todos", "2026"],
@@ -529,7 +528,7 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "Evolución NPS" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Comentarios" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Insights operativos" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Service Origin/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Owner Support Company/i })).toBeInTheDocument();
     expect(screen.getByText("PERIOD CONTAINER")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();
     expect(screen.queryByRole("listbox", { name: "N2" })).not.toBeInTheDocument();
@@ -584,7 +583,7 @@ describe("App", () => {
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
     await user.click(screen.getByRole("tab", { name: "Causalidad" }));
-    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("App");
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));

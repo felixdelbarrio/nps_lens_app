@@ -9,7 +9,7 @@ from nps_lens.ingest.base import ValidationIssue
 @dataclass(frozen=True)
 class UploadContext:
     service_origin: str
-    service_origin_n1: str
+    service_origin_n1: str = ""
     service_origin_n2: str = ""
 
 

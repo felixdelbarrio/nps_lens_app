@@ -17,8 +17,6 @@ networkx<3.4,>=3.1
 ruptures<2.0,>=1.1.8
 openpyxl<3.2,>=3.1
 typing_extensions<5.0,>=4.7
-playwright<2.0,>=1.54
-psutil<8,>=5.9
 
 [build]
 pywebview<6.0,>=5.1
@@ -31,7 +29,6 @@ pytest-cov<6.0,>=5.0
 httpx<0.29,>=0.28
 mypy<1.12,>=1.8
 types-python-dateutil
-types-psutil
 pandas-stubs==2.2.2.240807
 ruff<0.7,>=0.3
 black<25.0,>=24.2

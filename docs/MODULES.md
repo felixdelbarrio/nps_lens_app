@@ -93,8 +93,8 @@ Este documento explica el **paquete `src/nps_lens/`** y cómo navegarlo sin perd
 
 ### `nps_lens.services.dashboard_service`
 - Fachada de dominio para la app React/FastAPI.
-- Centraliza Service Container, Period Container, filtro Canal, Grupo Score, KPIs, payloads de Sumario/Analítica/Linking, tablas y generación PPT.
-- El Sumario del Periodo usa solo Service + Period. Analítica NPS usa Canal + Grupo Score. Incidencias ↔ NPS fija Canal=`Web`, Método causal=`Por Palanca` y usa el histórico completo de incidencias.
+- Centraliza Owner Support Company, Period Container, filtro Canal, Grupo Score, KPIs, payloads de Sumario/Analítica/Linking, tablas y generación PPT.
+- El Sumario del Periodo usa Owner Support Company + Period y siempre calcula NPS sobre todos los canales. Analítica usa Canal + Grupo Score para exploración. Incidencias ↔ NPS aplica la asignación N1/N2 del Canal cuando existe y, si no, usa todos los comentarios y canales.
 
 ### `nps_lens.domain.helix_links`
 - Resuelve enlaces Helix desde columnas de incidencia y `Record ID`.

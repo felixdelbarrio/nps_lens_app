@@ -52,7 +52,7 @@ const SETTINGS_TABS = [
   { id: "equivalences", label: "Equivalencias" },
   { id: "snapshots", label: "Snapshots" },
   { id: "telemetry", label: "Telemetría" },
-  { id: "maintenance", label: "Mantenimiento Service Origin" }
+  { id: "maintenance", label: "Mantenimiento del Canal" }
 ] as const;
 
 export function SettingsSheet({
@@ -358,9 +358,9 @@ export function SettingsSheet({
           <section className="settings-group">
             <div className="section-heading">
               <div>
-                <h3>Mantenimiento Service Origin</h3>
+                <h3>Mantenimiento del Canal</h3>
                 <p className="secondary-copy">
-                  Gestiona jerarquías BUUG → N1 → N2 y persístelas en la configuración del producto.
+                  Gestiona compañías y la asignación opcional de N1/N2 de Helix a cada Canal.
                 </p>
               </div>
             </div>

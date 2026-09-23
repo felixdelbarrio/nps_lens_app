@@ -11,6 +11,7 @@ from typing import Optional, Sequence, Tuple
 
 import pandas as pd
 
+from nps_lens.domain.helix import OWNER_SUPPORT_COMPANY, SOURCE_SERVICE_N1
 from nps_lens.ingest.helix_dates import (
     coerce_helix_datetime_series,
     looks_like_helix_datetime_column,
@@ -790,6 +791,13 @@ class HelixIncidentStore:
             return None
         return StoredDataset(context=ctx, path=data_path, meta_path=meta_path)
 
+    def delete(self, ctx: DatasetContext) -> None:
+        data_path, meta_path, parquet_dir = self._paths_for(ctx)
+        data_path.unlink(missing_ok=True)
+        meta_path.unlink(missing_ok=True)
+        _clear_dir_tree(parquet_dir)
+        self._avail_year_month_cache.pop(ctx.key(), None)
+
     def available_periods(self, stored: StoredDataset) -> list[tuple[str, str]]:
         """Read temporal coverage without materializing the wide Helix dataset."""
         try:
@@ -961,8 +969,8 @@ class HelixIncidentStore:
             d["Fecha_day"] = pd.to_datetime(d["Fecha"], errors="coerce").dt.date.astype("string")
             partition_cols.append("Fecha_day")
 
-        # Optional partition by BBVA_SourceServiceCompany/N1 (low cardinality)
-        for c in ["BBVA_SourceServiceCompany", "BBVA_SourceServiceN1"]:
+        # Company geography comes from Owner Support Company; service origin is not a geo proxy.
+        for c in [OWNER_SUPPORT_COMPANY, SOURCE_SERVICE_N1]:
             if c in d.columns:
                 nunique = int(d[c].astype("string").nunique(dropna=True))
                 if nunique <= 50:
