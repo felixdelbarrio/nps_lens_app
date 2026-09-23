@@ -81,9 +81,10 @@ Soportadas (mapeadas a canónico):
   - epochs ms/us/ns/s detectados por magnitud
 
 ### Reglas de filtrado por contexto
-- Filtrar siempre la compañía/geografía por `Owner Support Company` y el canal por N1.
-- `Owner Support Company` y N1 son obligatorios; no se deduce la compañía desde Servicio Origen ni desde el contexto seleccionado.
-- Si hay N2 seleccionado, se exige igualdad estricta del conjunto de tokens de Servicio Origen N2.
+- Filtrar la ingesta exclusivamente por `Owner Support Company`, único contexto obligatorio.
+- N1 y N2 se conservan como atributos fuente de Helix y nunca particionan el histórico.
+- Configuración puede asignar valores N1/N2 a un Canal para la causalidad. La asignación es opcional; sin ella, la causalidad usa todos los comentarios y canales de la compañía.
+- El Canal NPS procede del fichero y se resuelve mediante las equivalencias configuradas.
 
 ### Enlaces Helix
 - La URL visible de una incidencia se resuelve por `Record ID`, no por el número `INC...`.

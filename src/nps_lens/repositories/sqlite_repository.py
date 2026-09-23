@@ -701,16 +701,8 @@ class SqliteNpsRepository:
         if context is not None:
             query += """
                 WHERE service_origin = ?
-                  AND service_origin_n1 = ?
-                  AND service_origin_n2 = ?
             """
-            params.extend(
-                [
-                    context.service_origin,
-                    context.service_origin_n1,
-                    context.service_origin_n2,
-                ]
-            )
+            params.append(context.service_origin)
         query += """
             ORDER BY uploaded_at DESC
             LIMIT ?
@@ -720,6 +712,76 @@ class SqliteNpsRepository:
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [self._serialize_upload_row(row) for row in rows]
+
+    def delete_upload(self, upload_id: str, owner_support_company: str) -> dict[str, int]:
+        """Delete one NPS ingestion and the records whose current version came from it."""
+        with self._connect() as connection:
+            upload = connection.execute(
+                "SELECT service_origin FROM uploads WHERE upload_id = ?", (upload_id,)
+            ).fetchone()
+            if upload is None or str(upload["service_origin"]) != owner_support_company:
+                raise ValueError("La ingesta NPS no existe para el Owner Support Company activo.")
+            removed_records = connection.execute(
+                "DELETE FROM records WHERE service_origin = ? AND last_upload_id = ?",
+                (owner_support_company, upload_id),
+            ).rowcount
+            removed_uploads = connection.execute(
+                "DELETE FROM uploads WHERE upload_id = ?", (upload_id,)
+            ).rowcount
+        return {
+            "removed_records": max(0, removed_records),
+            "removed_uploads": max(0, removed_uploads),
+        }
+
+    def rebuild_owner_records(
+        self,
+        owner_support_company: str,
+        uploads: list[tuple[str, str, pd.DataFrame]],
+    ) -> int:
+        """Replay retained NPS ingestions so deleting one upload restores prior versions."""
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM records WHERE service_origin = ?", (owner_support_company,)
+            )
+            connection.execute(
+                """
+                DELETE FROM upload_records
+                WHERE upload_id IN (
+                    SELECT upload_id FROM uploads WHERE service_origin = ?
+                )
+                """,
+                (owner_support_company,),
+            )
+            for upload_id, uploaded_at, frame in uploads:
+                self.upsert_records(
+                    upload_id=upload_id,
+                    uploaded_at=uploaded_at,
+                    frame=frame,
+                    _connection=connection,
+                )
+        return len(uploads)
+
+    def delete_owner_data(self, owner_support_company: str) -> dict[str, int]:
+        """Delete all NPS records and ingestion history for one owner company."""
+        with self._connect() as connection:
+            removed_records = connection.execute(
+                "DELETE FROM records WHERE service_origin = ?", (owner_support_company,)
+            ).rowcount
+            removed_uploads = connection.execute(
+                "DELETE FROM uploads WHERE service_origin = ?", (owner_support_company,)
+            ).rowcount
+            connection.execute(
+                "DELETE FROM taxonomy_artifacts WHERE context LIKE ?",
+                (f'{owner_support_company}:%',),
+            )
+            connection.execute(
+                "DELETE FROM taxonomy_state WHERE context LIKE ?",
+                (f'{owner_support_company}:%',),
+            )
+        return {
+            "removed_records": max(0, removed_records),
+            "removed_uploads": max(0, removed_uploads),
+        }
 
     def get_upload_issues(self, upload_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -770,16 +832,8 @@ class SqliteNpsRepository:
         if context is not None:
             query += """
                 WHERE service_origin = ?
-                  AND service_origin_n1 = ?
-                  AND service_origin_n2 = ?
             """
-            params.extend(
-                [
-                    context.service_origin,
-                    context.service_origin_n1,
-                    context.service_origin_n2,
-                ]
-            )
+            params.append(context.service_origin)
         query += " ORDER BY response_at ASC"
 
         with self._connect() as connection:
@@ -821,16 +875,10 @@ class SqliteNpsRepository:
                     COUNT(*) AS row_count
                 FROM records
                 WHERE service_origin = ?
-                  AND service_origin_n1 = ?
-                  AND service_origin_n2 = ?
                 GROUP BY year, month, channel
                 ORDER BY year, month, channel
                 """,
-                (
-                    context.service_origin,
-                    context.service_origin_n1,
-                    context.service_origin_n2,
-                ),
+                (context.service_origin,),
             ).fetchall()
 
         periods: set[tuple[str, str]] = set()
@@ -853,6 +901,29 @@ class SqliteNpsRepository:
             "score_channels": channels,
         }
 
+    def channels_by_owner(self, owners: list[str]) -> dict[str, list[str]]:
+        """Return the source NPS channels observed for each Owner Support Company."""
+        result = {owner: [] for owner in owners}
+        if not owners:
+            return result
+        placeholders = ",".join("?" for _ in owners)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT service_origin, source_channel
+                FROM records
+                WHERE service_origin IN ({placeholders}) AND trim(source_channel) <> ''
+                GROUP BY service_origin, source_channel
+                ORDER BY service_origin, source_channel
+                """,
+                owners,
+            ).fetchall()
+        for row in rows:
+            owner = str(row["service_origin"])
+            if owner in result:
+                result[owner].append(str(row["source_channel"]))
+        return result
+
     def build_summary(self, context: Optional[UploadContext] = None) -> SummarySnapshot:
         records = self.load_records_df(context)
         uploads = self.list_uploads(limit=10, context=context)
@@ -866,16 +937,8 @@ class SqliteNpsRepository:
             if context is not None:
                 query += """
                     WHERE service_origin = ?
-                      AND service_origin_n1 = ?
-                      AND service_origin_n2 = ?
                 """
-                params.extend(
-                    [
-                        context.service_origin,
-                        context.service_origin_n1,
-                        context.service_origin_n2,
-                    ]
-                )
+                params.append(context.service_origin)
             duplicates_prevented_row = connection.execute(query, params).fetchone()
         duplicates_prevented = (
             int(duplicates_prevented_row["duplicates"]) if duplicates_prevented_row else 0

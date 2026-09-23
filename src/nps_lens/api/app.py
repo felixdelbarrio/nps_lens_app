@@ -66,12 +66,8 @@ def _resolve_context(
         service_origin=str(
             service_origin or preferences["service_origin"] or settings.default_service_origin
         ),
-        service_origin_n1=str(
-            service_origin_n1
-            or preferences["service_origin_n1"]
-            or settings.default_service_origin_n1
-        ),
-        service_origin_n2=str(service_origin_n2 or preferences["service_origin_n2"] or ""),
+        service_origin_n1="",
+        service_origin_n2="",
     )
 
 
@@ -80,12 +76,12 @@ def _optional_context(
     service_origin_n1: Optional[str],
     service_origin_n2: Optional[str],
 ) -> Optional[UploadContext]:
-    if not service_origin or not service_origin_n1:
+    if not service_origin:
         return None
     return UploadContext(
         service_origin=service_origin,
-        service_origin_n1=service_origin_n1,
-        service_origin_n2=service_origin_n2 or "",
+        service_origin_n1="",
+        service_origin_n2="",
     )
 
 
@@ -267,8 +263,67 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return payload
 
     @app.get("/api/uploads", response_model=list[UploadResponse])
-    def list_uploads(service_layer: NpsService = Depends(get_service)) -> list[dict[str, object]]:
-        return service_layer.list_uploads()
+    def list_uploads(
+        service_origin: Optional[str] = None,
+        service_layer: NpsService = Depends(get_service),
+    ) -> list[dict[str, object]]:
+        uploads = service_layer.list_uploads()
+        if service_origin:
+            return [
+                upload
+                for upload in uploads
+                if str(upload.get("service_origin", "")) == service_origin
+            ]
+        return uploads
+
+    @app.get("/api/uploads/helix")
+    def list_helix_uploads(
+        service_origin: str,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> list[dict[str, object]]:
+        return dashboard_layer.list_helix_uploads(service_origin)
+
+    @app.delete("/api/uploads/nps/{upload_id}")
+    def delete_nps_upload(
+        upload_id: str,
+        service_origin: str,
+        request: Request,
+        service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, int]:
+        require_admin(request)
+        try:
+            result = service_layer.delete_upload(upload_id, service_origin)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        dashboard_layer.clear_caches()
+        return result
+
+    @app.delete("/api/uploads/helix/{upload_id}")
+    def delete_helix_upload(
+        upload_id: str,
+        service_origin: str,
+        request: Request,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, int]:
+        require_admin(request)
+        try:
+            return dashboard_layer.delete_helix_upload(upload_id, service_origin)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.delete("/api/data")
+    def delete_owner_data(
+        service_origin: str,
+        request: Request,
+        service_layer: NpsService = Depends(get_service),
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> dict[str, object]:
+        require_admin(request)
+        nps = service_layer.delete_owner_data(service_origin)
+        helix = dashboard_layer.delete_owner_helix_data(service_origin)
+        dashboard_layer.clear_caches()
+        return {"owner_support_company": service_origin, "nps": nps, "helix": helix}
 
     @app.get("/api/summary", response_model=SummaryResponse)
     def summary(
@@ -299,7 +354,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request: Request,
         file: UploadFile = File(...),
         service_origin: str = Form(...),
-        service_origin_n1: str = Form(...),
+        service_origin_n1: str = Form(""),
         service_origin_n2: str = Form(""),
         sheet_name: str = Form(""),
         service_layer: NpsService = Depends(get_service),
@@ -320,16 +375,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             payload=payload,
             context=UploadContext(
                 service_origin=service_origin,
-                service_origin_n1=service_origin_n1,
-                service_origin_n2=service_origin_n2,
+                service_origin_n1="",
+                service_origin_n2="",
             ),
             sheet_name=sheet_name,
         )
         if result["status"] == "completed" and dashboard_layer.taxonomy.state(
-            UploadContext(service_origin, service_origin_n1, service_origin_n2)
+            UploadContext(service_origin)
         ).get("restored"):
             dashboard_layer.taxonomy.resume_local(
-                UploadContext(service_origin, service_origin_n1, service_origin_n2)
+                UploadContext(service_origin)
             )
         dashboard_layer.clear_caches()
         return result
@@ -362,7 +417,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request: Request,
         file: UploadFile = File(...),
         service_origin: str = Form(...),
-        service_origin_n1: str = Form(...),
+        service_origin_n1: str = Form(""),
         service_origin_n2: str = Form(""),
         sheet_name: str = Form(""),
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
@@ -382,8 +437,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             payload=payload,
             context=UploadContext(
                 service_origin=service_origin,
-                service_origin_n1=service_origin_n1,
-                service_origin_n2=service_origin_n2,
+                service_origin_n1="",
+                service_origin_n2="",
             ),
             sheet_name=sheet_name,
         )
@@ -445,7 +500,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not service_origins:
             raise HTTPException(
                 status_code=400,
-                detail="Debe existir al menos un Service Origin BUUG.",
+                detail="Debe existir al menos un Owner Support Company.",
             )
 
         service_origin_n1_map: dict[str, list[str]] = {}
@@ -456,11 +511,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 for value in payload.service_origin_n1_map.get(origin, [])
                 if value.strip()
             ]
-            if not n1_values:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"El origen '{origin}' debe incluir al menos un N1.",
-                )
             service_origin_n1_map[origin] = list(dict.fromkeys(n1_values))
             origin_n2_map = payload.service_origin_n2_map.get(origin, {})
             service_origin_n2_map[origin] = {
@@ -477,9 +527,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         default_service_origin = str(current_preferences["service_origin"])
         if default_service_origin not in service_origins:
             default_service_origin = service_origins[0]
-        default_service_origin_n1 = str(current_preferences["service_origin_n1"])
-        if default_service_origin_n1 not in service_origin_n1_map.get(default_service_origin, []):
-            default_service_origin_n1 = service_origin_n1_map[default_service_origin][0]
+        default_service_origin_n1 = ""
 
         persist_service_origin_hierarchy(
             current_settings.dotenv_path,
@@ -594,7 +642,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         context = taxonomy_context(request)
         try:
             if payload.service_origin and payload.service_origin != context.service_origin:
-                raise ValueError("El BUUG del payload no coincide con el contexto seleccionado.")
+                raise ValueError("El Owner Support Company del payload no coincide con el contexto seleccionado.")
             if payload.service_origin_n1 and payload.service_origin_n1 != context.service_origin_n1:
                 raise ValueError("El N1 del payload no coincide con el contexto seleccionado.")
             registry = ColumnAliasRegistry.from_dict(

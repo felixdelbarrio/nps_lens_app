@@ -70,12 +70,14 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
+from nps_lens.domain.helix import SOURCE_SERVICE_N1, SOURCE_SERVICE_N2
 from nps_lens.domain.helix_links import (
     build_helix_incident_url_lookup,
     enrich_helix_incident_links,
     resolve_helix_incident_url,
 )
 from nps_lens.domain.models import UploadContext
+from nps_lens.domain.normalization import equivalence_key
 from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -393,11 +395,7 @@ class DashboardService:
 
     @staticmethod
     def _context_key(context: UploadContext) -> tuple[str, str, str]:
-        return (
-            context.service_origin,
-            context.service_origin_n1,
-            context.service_origin_n2,
-        )
+        return (context.service_origin, "", "")
 
     def _data_revision(self, context: UploadContext) -> tuple[object, ...]:
         dataset_context = DatasetContext(*self._context_key(context))
@@ -502,15 +500,10 @@ class DashboardService:
         origin = str(
             service_origin or preferences["service_origin"] or self.settings.default_service_origin
         )
-        origin_n1 = str(
-            service_origin_n1
-            or preferences["service_origin_n1"]
-            or self.settings.default_service_origin_n1
-        )
         return UploadContext(
             service_origin=origin,
-            service_origin_n1=origin_n1,
-            service_origin_n2=str(service_origin_n2 or preferences["service_origin_n2"] or ""),
+            service_origin_n1="",
+            service_origin_n2="",
         )
 
     def context_options(
@@ -560,12 +553,15 @@ class DashboardService:
             "status": latest_upload[0]["status"] if latest_upload else "missing",
         }
         helix_dataset = self._helix_dataset_status(context)
+        channels_by_owner = self.repository.channels_by_owner(
+            self.settings.allowed_service_origins
+        )
         return {
             "default_service_origin": preferences["service_origin"],
-            "default_service_origin_n1": preferences["service_origin_n1"],
-            "default_service_origin_n2": preferences["service_origin_n2"],
+            "default_service_origin_n1": "",
+            "default_service_origin_n2": "",
             "service_origins": self.settings.allowed_service_origins,
-            "service_origin_n1_map": self.settings.allowed_service_origin_n1,
+            "service_origin_n1_map": channels_by_owner,
             "service_origin_n2_map": self.settings.service_origin_n2_map,
             "service_origin_n2_options": self.settings.service_origin_n2_options(
                 context.service_origin,
@@ -613,10 +609,34 @@ class DashboardService:
         if not has_errors:
             dataset_context = DatasetContext(
                 service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
+                service_origin_n1="",
+                service_origin_n2="",
             )
-            self.helix_store.save_df(dataset_context, result.df, source=filename)
+            snapshots_dir = self.settings.data_dir / "helix" / "uploads"
+            snapshots_dir.mkdir(parents=True, exist_ok=True)
+            snapshot_path = snapshots_dir / f"{upload_id}.jsonl"
+            result.df.to_json(
+                snapshot_path,
+                orient="records",
+                lines=True,
+                force_ascii=False,
+                date_format="iso",
+            )
+            history = self._helix_upload_history()
+            history.append(
+                {
+                    "upload_id": upload_id,
+                    "filename": Path(filename).name,
+                    "uploaded_at": uploaded_at,
+                    "service_origin": context.service_origin,
+                    "row_count": int(len(result.df)),
+                    "column_count": int(len(result.df.columns)),
+                    "sheet_name": sheet_name or "",
+                    "snapshot": str(snapshot_path),
+                }
+            )
+            self._write_helix_upload_history(history)
+            self._rebuild_helix_dataset(dataset_context)
             self.logger.info(
                 "Helix upload processed",
                 extra={
@@ -641,6 +661,91 @@ class DashboardService:
             "sheet_name": sheet_name or "",
             "issues": issues,
             "dataset": self._helix_dataset_status(context),
+        }
+
+    def _helix_history_path(self) -> Path:
+        return self.settings.data_dir / "helix" / "uploads.json"
+
+    def _helix_upload_history(self) -> list[dict[str, object]]:
+        try:
+            payload = json.loads(self._helix_history_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return []
+        return [dict(item) for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def _write_helix_upload_history(self, history: list[dict[str, object]]) -> None:
+        path = self._helix_history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def list_helix_uploads(self, owner_support_company: str) -> list[dict[str, object]]:
+        return sorted(
+            [
+                item
+                for item in self._helix_upload_history()
+                if str(item.get("service_origin", "")) == owner_support_company
+            ],
+            key=lambda item: str(item.get("uploaded_at", "")),
+            reverse=True,
+        )
+
+    def _rebuild_helix_dataset(self, context: DatasetContext) -> None:
+        frames: list[pd.DataFrame] = []
+        for item in self.list_helix_uploads(context.service_origin):
+            snapshot = Path(str(item.get("snapshot", "")))
+            if snapshot.is_file():
+                with contextlib.suppress(ValueError):
+                    frames.append(pd.read_json(snapshot, orient="records", lines=True, dtype=False))
+        if not frames:
+            self.helix_store.delete(context)
+            return
+        combined = pd.concat(frames, ignore_index=True, sort=False)
+        identity_columns = [
+            column
+            for column in ("Record ID", "Incident Number", "ID")
+            if column in combined.columns
+        ]
+        combined = (
+            combined.drop_duplicates(identity_columns, keep="last")
+            if identity_columns
+            else combined.drop_duplicates(keep="last")
+        )
+        self.helix_store.save_df(context, combined.reset_index(drop=True), source="histórico Helix")
+
+    def delete_helix_upload(self, upload_id: str, owner_support_company: str) -> dict[str, int]:
+        history = self._helix_upload_history()
+        target = next(
+            (
+                item
+                for item in history
+                if str(item.get("upload_id", "")) == upload_id
+                and str(item.get("service_origin", "")) == owner_support_company
+            ),
+            None,
+        )
+        if target is None:
+            raise ValueError("La ingesta de incidencias no existe para el Owner Support Company activo.")
+        Path(str(target.get("snapshot", ""))).unlink(missing_ok=True)
+        self._write_helix_upload_history([item for item in history if item is not target])
+        self._rebuild_helix_dataset(DatasetContext(owner_support_company, "", ""))
+        self.clear_caches()
+        return {"removed_uploads": 1, "removed_records": int(target.get("row_count", 0) or 0)}
+
+    def delete_owner_helix_data(self, owner_support_company: str) -> dict[str, int]:
+        history = self._helix_upload_history()
+        targets = [
+            item
+            for item in history
+            if str(item.get("service_origin", "")) == owner_support_company
+        ]
+        for item in targets:
+            Path(str(item.get("snapshot", ""))).unlink(missing_ok=True)
+        self._write_helix_upload_history([item for item in history if item not in targets])
+        self.helix_store.delete(DatasetContext(owner_support_company, "", ""))
+        self.clear_caches()
+        return {
+            "removed_uploads": len(targets),
+            "removed_records": sum(int(item.get("row_count", 0) or 0) for item in targets),
         }
 
     def nps_dashboard(
@@ -1060,6 +1165,7 @@ class DashboardService:
         context: UploadContext,
         pop_year: str,
         pop_month: str,
+        score_channel: str,
         min_similarity: float,
         max_days_apart: int,
         touchpoint_source: str,
@@ -1077,7 +1183,7 @@ class DashboardService:
             self._data_revision(context),
             pop_year,
             pop_month,
-            _PREFERRED_SCORE_CHANNEL,
+            score_channel,
             min_similarity,
             max_days_apart,
             active_source,
@@ -1086,7 +1192,11 @@ class DashboardService:
 
         def _build() -> dict[str, object]:
             nps_frame = self._load_nps_df(context)
-            resolved_channel = self._resolve_score_channel(nps_frame, _PREFERRED_SCORE_CHANNEL)
+            requested_channel = self._resolve_score_channel(nps_frame, score_channel)
+            assignments = self.settings.service_origin_n2_map.get(
+                context.service_origin, {}
+            ).get(requested_channel, [])
+            resolved_channel = requested_channel if assignments else POP_ALL
             nps_slice = self._apply_population_filters(
                 self._apply_score_channel_filter(nps_frame, resolved_channel),
                 pop_year,
@@ -1094,7 +1204,10 @@ class DashboardService:
             )
             focus_group, focus_label = self._linking_focus_group(POP_ALL)
             focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
-            helix_history = self._load_helix_df(context)
+            helix_history = self._load_helix_df(
+                context,
+                score_channel=requested_channel if assignments else None,
+            )
             helix_window = self._causal_helix_window(
                 helix_history,
                 nps_slice,
@@ -1204,10 +1317,8 @@ class DashboardService:
             self._data_revision(context),
             pop_year,
             pop_month,
-            # The causal view deliberately analyses the full NPS population on Web.
-            # Do not fragment the cache with caller values that the calculation ignores.
             POP_ALL,
-            _PREFERRED_SCORE_CHANNEL,
+            str(score_channel or POP_ALL),
             min_similarity,
             max_days_apart,
             touchpoint_source,
@@ -1244,12 +1355,12 @@ class DashboardService:
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
         del nps_group
-        del score_channel
         resolved_group = POP_ALL
         analysis = self._causal_analysis_bundle(
             context=context,
             pop_year=pop_year,
             pop_month=pop_month,
+            score_channel=str(score_channel or POP_ALL),
             min_similarity=min_similarity,
             max_days_apart=max_days_apart,
             touchpoint_source=touchpoint_source,
@@ -1596,6 +1707,7 @@ class DashboardService:
                 context=context,
                 pop_year=pop_year,
                 pop_month=pop_month,
+                score_channel=topic_channel,
                 min_similarity=min_similarity,
                 max_days_apart=max_days_apart,
                 touchpoint_source=active_touchpoint_source,
@@ -2333,11 +2445,7 @@ class DashboardService:
 
     def _helix_dataset_status(self, context: UploadContext) -> dict[str, object]:
         stored = self.helix_store.get(
-            DatasetContext(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-            )
+            DatasetContext(*self._context_key(context))
         )
         if stored is None:
             return {
@@ -2368,26 +2476,33 @@ class DashboardService:
             "source": meta.get("source"),
         }
 
-    def _load_helix_df(self, context: UploadContext) -> pd.DataFrame:
+    def _load_helix_df(
+        self,
+        context: UploadContext,
+        *,
+        score_channel: Optional[str] = None,
+    ) -> pd.DataFrame:
         restored = self.taxonomy.state(context).get("restored")
         if restored and restored.get("helix") is not None:
             from io import StringIO
 
             return pd.read_json(StringIO(json.dumps(restored["helix"])), orient="table")
         stored = self.helix_store.get(
-            DatasetContext(
-                service_origin=context.service_origin,
-                service_origin_n1=context.service_origin_n1,
-                service_origin_n2=context.service_origin_n2,
-            )
+            DatasetContext(*self._context_key(context))
         )
         if stored is None:
             return pd.DataFrame()
         key = (
             "helix-frame",
             *self._context_key(context),
+            str(score_channel or ""),
             self._path_revision(stored.path),
             self.taxonomy.registry(context).signature("helix"),
+            tuple(
+                self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
+                    str(score_channel or ""), []
+                )
+            ),
         )
         with self._analytics_lock:
             cached = self._frame_cache.get(key)
@@ -2395,6 +2510,20 @@ class DashboardService:
                 self._frame_cache.move_to_end(key)
                 return cached
             frame = self.taxonomy.registry(context).apply("helix", self.helix_store.load_df(stored))
+            assignments = self.settings.service_origin_n2_map.get(
+                context.service_origin, {}
+            ).get(str(score_channel or ""), [])
+            assignment_keys = {equivalence_key(value) for value in assignments if equivalence_key(value)}
+            if assignment_keys:
+                n1 = frame.get(SOURCE_SERVICE_N1, pd.Series("", index=frame.index)).map(equivalence_key)
+                n2 = frame.get(SOURCE_SERVICE_N2, pd.Series("", index=frame.index)).astype(str).map(
+                    lambda value: {
+                        equivalence_key(token)
+                        for token in value.split(",")
+                        if equivalence_key(token)
+                    }
+                )
+                frame = frame.loc[n1.isin(assignment_keys) | n2.map(lambda keys: bool(keys & assignment_keys))].copy()
             return cast(
                 pd.DataFrame,
                 self._remember_bounded(
@@ -2419,9 +2548,7 @@ class DashboardService:
             else MONTH_LABELS_ES.get(_MONTH_LABEL_TO_NUMBER.get(pop_month, pop_month), pop_month)
         )
         return [
-            f"Service origin: {context.service_origin}",
-            f"N1: {context.service_origin_n1}",
-            f"N2: {context.service_origin_n2 or '-'}",
+            f"Owner Support Company: {context.service_origin}",
             f"Año: {pop_year}",
             f"Mes: {month_label or POP_ALL}",
             f"Canal: {score_channel or POP_ALL}",

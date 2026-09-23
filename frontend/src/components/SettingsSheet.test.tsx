@@ -79,6 +79,6 @@ it("edits NPS column aliases while keeping required status read-only", async () 
     }),
     { service_origin: "Bank", service_origin_n1: "Web" }
   );
-  expect(screen.getByText("Configuración para: Bank → Web")).toBeInTheDocument();
+  expect(screen.getByText("Configuración para Owner Support Company: Bank")).toBeInTheDocument();
   expect(await screen.findByText("Alias de columnas NPS guardados.")).toBeInTheDocument();
 });

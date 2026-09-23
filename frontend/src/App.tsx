@@ -1,13 +1,17 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
 
 import {
   downloadExecutiveReport,
   downloadWebPublication,
+  deleteHelixUpload,
+  deleteNpsUpload,
+  deleteOwnerData,
   fetchConfig,
   fetchDashboard,
   fetchDatasetTable,
   fetchLinkingDashboard,
+  fetchHelixUploads,
   fetchUploads,
   persistPreferences,
   replaceNpsUpload,
@@ -19,6 +23,7 @@ import {
 import type {
   DashboardPayload,
   DatasetStatus,
+  HelixUploadHistoryItem,
   HelixUploadResult,
   KpiDelta,
   LinkingPayload,
@@ -39,6 +44,7 @@ import { RecordTable } from "./components/RecordTable";
 import { SettingsSheet } from "./components/SettingsSheet";
 import type { SettingsTab } from "./components/SettingsSheet";
 import { UploadsTable } from "./components/UploadsTable";
+import { HelixUploadsTable } from "./components/HelixUploadsTable";
 import { Icon } from "./components/Icon";
 import {
   applyDocumentTheme,
@@ -109,7 +115,6 @@ const DATA_TABS = [
 ];
 
 const SAMPLE_SIZES = [50, 100, 200, 500, 1000];
-const LINKING_SCORE_CHANNEL = "Web";
 const LINKING_NPS_GROUP = "Todos";
 type OperationalState = "operativo" | "sincronizando" | "generando";
 
@@ -155,14 +160,6 @@ function formatDateLabel(value: string | null | undefined, locale = "es-ES") {
     return "—";
   }
   return parsed.toLocaleDateString(locale);
-}
-
-function parseServiceOriginN2(value: string) {
-  return Array.from(new Set(value.split(",").map((token) => token.trim()).filter(Boolean)));
-}
-
-function serializeServiceOriginN2(values: string[]) {
-  return parseServiceOriginN2(values.join(", ")).join(", ");
 }
 
 function getLatestAvailableYear(years: string[]) {
@@ -225,8 +222,8 @@ function formatKpiValue(
 
 export function App() {
   const [serviceOrigin, setServiceOrigin] = useState("");
-  const [serviceOriginN1, setServiceOriginN1] = useState("");
-  const [serviceOriginN2, setServiceOriginN2] = useState("");
+  const serviceOriginN1 = "";
+  const serviceOriginN2 = "";
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
   const [npsGroup, setNpsGroup] = useState("Detractores");
@@ -266,11 +263,11 @@ export function App() {
   const didHydrate = useRef(false);
   const initialContextKey = useRef("");
 
-  const selectedContextKey = `${serviceOrigin}\u0000${serviceOriginN1}\u0000${serviceOriginN2}`;
+  const selectedContextKey = serviceOrigin;
   const configKey =
-    !serviceOrigin || !serviceOriginN1 || selectedContextKey === initialContextKey.current
+    !serviceOrigin || selectedContextKey === initialContextKey.current
       ? ["dashboard-context-initial"]
-      : ["dashboard-context", serviceOrigin, serviceOriginN1, serviceOriginN2];
+      : ["dashboard-context", serviceOrigin];
 
   const {
     data: config,
@@ -294,14 +291,12 @@ export function App() {
       return;
     }
     didHydrate.current = true;
-    initialContextKey.current = `${config.default_service_origin}\u0000${config.default_service_origin_n1}\u0000${config.default_service_origin_n2 || ""}`;
+    initialContextKey.current = config.default_service_origin;
     const latestYear = getLatestAvailableYear(config.available_years || []);
     const latestMonth = getLatestAvailableMonth(
       config.available_months_by_year[latestYear] || config.available_months_by_year.Todos || []
     );
     setServiceOrigin(config.default_service_origin);
-    setServiceOriginN1(config.default_service_origin_n1);
-    setServiceOriginN2(config.default_service_origin_n2 || "");
     setPopYear(latestYear);
     setPopMonth(latestMonth);
     setScoreChannel(
@@ -388,7 +383,7 @@ export function App() {
   );
 
   const dashboardKey =
-    serviceOrigin && serviceOriginN1 ? ["dashboard", ...Object.values(dashboardQuery)] : null;
+    serviceOrigin ? ["dashboard", ...Object.values(dashboardQuery)] : null;
   const {
     data: dashboard,
     error: dashboardError,
@@ -401,7 +396,7 @@ export function App() {
   });
 
   const linkingKey =
-    mainArea === "insights" && insightTab === "linking" && serviceOrigin && serviceOriginN1
+    mainArea === "insights" && insightTab === "linking" && serviceOrigin
       ? [
           "linking",
           serviceOrigin,
@@ -409,7 +404,7 @@ export function App() {
           serviceOriginN2,
           popYear,
           popMonth,
-          LINKING_SCORE_CHANNEL,
+          scoreChannel,
           LINKING_NPS_GROUP,
           minSimilarity,
           maxDaysApart,
@@ -431,7 +426,7 @@ export function App() {
       pop_year: popYear,
       pop_month: popMonth,
       nps_group: LINKING_NPS_GROUP,
-      score_channel: LINKING_SCORE_CHANNEL,
+      score_channel: scoreChannel,
       min_similarity: minSimilarity,
       max_days_apart: maxDaysApart,
       touchpoint_source: touchpointSource,
@@ -441,7 +436,7 @@ export function App() {
   );
 
   const uploadsKey =
-    serviceOrigin && serviceOriginN1 ? ["uploads", serviceOrigin, serviceOriginN1, serviceOriginN2] : null;
+    serviceOrigin ? ["uploads", serviceOrigin] : null;
   const {
     data: uploads = [],
     error: uploadsError,
@@ -457,8 +452,14 @@ export function App() {
     { keepPreviousData: true, revalidateOnFocus: false }
   );
 
+  const { data: helixUploads = [], mutate: mutateHelixUploads } = useSWR<HelixUploadHistoryItem[]>(
+    serviceOrigin ? ["helix-uploads", serviceOrigin] : null,
+    () => fetchHelixUploads(serviceOrigin),
+    { keepPreviousData: true, revalidateOnFocus: false }
+  );
+
   const datasetKey =
-    mainArea === "data" && serviceOrigin && serviceOriginN1
+    mainArea === "data" && serviceOrigin
       ? [
           "dataset",
           dataTab,
@@ -541,7 +542,7 @@ export function App() {
       return;
     }
     if (isSavingHierarchy) {
-      setStatusCopy("Persistiendo la jerarquía de Service Origin...");
+      setStatusCopy("Persistiendo la configuración de canales...");
       return;
     }
     if (isMutating) {
@@ -561,20 +562,8 @@ export function App() {
     stableError
   ]);
 
-  const n1Options = config?.service_origin_n1_map[serviceOrigin] || [];
   const isAdmin = config?.access?.is_admin ?? true;
-  const n2Options = config?.service_origin_n2_map[serviceOrigin]?.[serviceOriginN1] || [];
-  const hasConfiguredN2 = n2Options.length > 0;
   const causalMethodOptions = config?.causal_method_options || [];
-  const selectedN2Values = useMemo(() => parseServiceOriginN2(serviceOriginN2), [serviceOriginN2]);
-  useEffect(() => {
-    if (!n1Options.length) {
-      return;
-    }
-    if (!n1Options.includes(serviceOriginN1)) {
-      setServiceOriginN1(n1Options[0]);
-    }
-  }, [n1Options, serviceOriginN1]);
 
   useEffect(() => {
     if (!config) {
@@ -584,19 +573,6 @@ export function App() {
       setPopYear(getLatestAvailableYear(config.available_years));
     }
   }, [config, popYear]);
-
-  useEffect(() => {
-    if (!n2Options.length) {
-      if (serviceOriginN2) {
-        setServiceOriginN2("");
-      }
-      return;
-    }
-    const nextSelectedValues = selectedN2Values.filter((value) => n2Options.includes(value));
-    if (nextSelectedValues.length !== selectedN2Values.length) {
-      setServiceOriginN2(serializeServiceOriginN2(nextSelectedValues));
-    }
-  }, [n2Options, selectedN2Values, serviceOriginN2]);
 
   useEffect(() => {
     if (!causalMethodOptions.length) {
@@ -656,7 +632,7 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!didHydrate.current || !serviceOrigin || !serviceOriginN1) {
+    if (!didHydrate.current || !serviceOrigin) {
       return undefined;
     }
     const timeoutId = window.setTimeout(() => {
@@ -723,12 +699,59 @@ export function App() {
         serviceOriginN2
       });
       setLatestHelixUpload(result);
-      await Promise.all([mutateConfig(), mutateDataset(), mutateLinking()]);
+      await Promise.all([mutateConfig(), mutateDataset(), mutateLinking(), mutateHelixUploads()]);
       startTransition(() => {
         setMainArea("ingest");
         setIngestTab("new");
         setDataTab("helix");
       });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function handleDeleteNpsUpload(upload: UploadResult) {
+    if (!globalThis.confirm(`¿Borrar definitivamente la ingesta NPS “${toBusinessCopy(upload.filename)}”?`)) {
+      return;
+    }
+    setIsMutating(true);
+    try {
+      await deleteNpsUpload(upload.upload_id, serviceOrigin);
+      await Promise.all([mutateConfig(), mutateUploads(), mutateDashboard(), mutateDataset(), mutateLinking()]);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function handleDeleteHelixUpload(upload: HelixUploadHistoryItem) {
+    if (!globalThis.confirm(`¿Borrar definitivamente la ingesta de incidencias “${toBusinessCopy(upload.filename)}”?`)) {
+      return;
+    }
+    setIsMutating(true);
+    try {
+      await deleteHelixUpload(upload.upload_id, serviceOrigin);
+      await Promise.all([mutateConfig(), mutateHelixUploads(), mutateDataset(), mutateLinking()]);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function handleDeleteOwnerData() {
+    if (!globalThis.confirm(`¿Borrar COMPLETAMENTE todos los datos NPS e incidencias de ${serviceOrigin}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+    setIsMutating(true);
+    try {
+      await deleteOwnerData(serviceOrigin);
+      setLatestNpsUpload(null);
+      setLatestHelixUpload(null);
+      await Promise.all([mutateConfig(), mutateUploads(), mutateHelixUploads(), mutateDashboard(), mutateDataset(), mutateLinking()]);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Error desconocido");
     } finally {
@@ -783,7 +806,7 @@ export function App() {
         pop_year: popYear,
         pop_month: popMonth,
         nps_group: LINKING_NPS_GROUP,
-        score_channel: LINKING_SCORE_CHANNEL,
+        score_channel: scoreChannel,
         min_similarity: minSimilarity,
         max_days_apart: maxDaysApart,
         touchpoint_source: touchpointSource,
@@ -844,18 +867,13 @@ export function App() {
     };
   const selectedUpload = uploads.find((upload) => upload.upload_id === activeUploadId) || latestNpsUpload;
 
-  function handleServiceOriginN2Select(event: ChangeEvent<HTMLSelectElement>) {
-    const nextValues = Array.from(event.target.selectedOptions, (option) => option.value);
-    setServiceOriginN2(serializeServiceOriginN2(nextValues));
-  }
-
   function renderServiceContainer() {
     return (
       <section className="surface-card context-strip-card sidebar-service-card">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Service Container</p>
-            <h2>Service Origin</h2>
+            <p className="eyebrow">Contexto de compañía</p>
+            <h2>Owner Support Company</h2>
             <p className="secondary-copy">
               Contexto activo para Insights, Ingesta y Datos
             </p>
@@ -863,7 +881,7 @@ export function App() {
         </div>
         <div className="field-grid single-column">
           <label>
-            <span>BUUG</span>
+            <span>Owner Support Company</span>
             <select
               disabled={actionsDisabled}
               onChange={(event) => setServiceOrigin(event.target.value)}
@@ -876,39 +894,6 @@ export function App() {
               ))}
             </select>
           </label>
-          <label>
-            <span>N1</span>
-            <select
-              disabled={actionsDisabled}
-              onChange={(event) => setServiceOriginN1(event.target.value)}
-              value={serviceOriginN1}
-            >
-              {n1Options.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          {hasConfiguredN2 ? (
-            <label className="field-span-2">
-              <span>N2</span>
-              <select
-                className="multi-select-control"
-                disabled={actionsDisabled}
-                multiple
-                onChange={handleServiceOriginN2Select}
-                value={selectedN2Values}
-              >
-                {n2Options.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-              <span className="field-hint">Pulsa Ctrl/Cmd para seleccionar varios N2.</span>
-            </label>
-          ) : null}
         </div>
       </section>
     );
@@ -982,11 +967,11 @@ export function App() {
             <span>Canal</span>
             <select
               data-testid="score-channel-select"
-              disabled={actionsDisabled || showCausalMethodFilter}
+              disabled={actionsDisabled}
               onChange={(event) => setScoreChannel(event.target.value)}
-              value={showCausalMethodFilter ? LINKING_SCORE_CHANNEL : scoreChannel}
+              value={scoreChannel}
             >
-              {(showCausalMethodFilter ? [LINKING_SCORE_CHANNEL] : config?.score_channels || ["Todos"]).map((channel) => (
+              {(config?.score_channels || ["Todos"]).map((channel) => (
                 <option key={channel} value={channel}>
                   {channel}
                 </option>
@@ -1487,20 +1472,34 @@ export function App() {
               title="Dataset Helix"
               uploading={isMutating}
             />
+            <section className="panel sidebar-panel">
+              <div className="panel-heading"><div><p className="eyebrow">Zona de borrado</p><h2>Datos de la compañía</h2></div></div>
+              <p className="panel-copy">Elimina todo el histórico NPS e incidencias del Owner Support Company activo.</p>
+              <button className="secondary-button danger-button" disabled={actionsDisabled} onClick={() => void handleDeleteOwnerData()} type="button">
+                Borrar completamente {serviceOrigin}
+              </button>
+            </section>
           </section>
         ) : null}
 
         {ingestTab === "history" ? (
-          <UploadsTable
-            activeUploadId={activeUploadId}
-            filter={historyFilter}
-            onFilterChange={setHistoryFilter}
-            onSelectUpload={(uploadId) => {
-              setActiveUploadId(uploadId);
-              setIngestTab("traceability");
-            }}
-            uploads={uploads}
-          />
+          <div className="settings-section-stack">
+            <UploadsTable
+              activeUploadId={activeUploadId}
+              filter={historyFilter}
+              onFilterChange={setHistoryFilter}
+              onSelectUpload={(uploadId) => {
+                setActiveUploadId(uploadId);
+                setIngestTab("traceability");
+              }}
+              onDeleteUpload={(upload) => void handleDeleteNpsUpload(upload)}
+              uploads={uploads}
+            />
+            <HelixUploadsTable
+              onDeleteUpload={(upload) => void handleDeleteHelixUpload(upload)}
+              uploads={helixUploads}
+            />
+          </div>
         ) : null}
 
         {ingestTab === "traceability" ? (
@@ -1517,6 +1516,7 @@ export function App() {
                 filter={historyFilter}
                 onFilterChange={setHistoryFilter}
                 onSelectUpload={setActiveUploadId}
+                onDeleteUpload={(upload) => void handleDeleteNpsUpload(upload)}
                 uploads={uploads}
               />
             </section>

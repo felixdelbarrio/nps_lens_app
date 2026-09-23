@@ -10,6 +10,7 @@ type UploadsTableProps = {
   onFilterChange: (value: string) => void;
   activeUploadId: string | null;
   onSelectUpload: (uploadId: string) => void;
+  onDeleteUpload?: (upload: UploadResult) => void;
 };
 
 export function UploadsTable({
@@ -17,7 +18,8 @@ export function UploadsTable({
   filter,
   onFilterChange,
   activeUploadId,
-  onSelectUpload
+  onSelectUpload,
+  onDeleteUpload
 }: UploadsTableProps) {
   const deferredFilter = useDeferredValue(filter);
   const normalizedFilter = deferredFilter.trim().toLowerCase();
@@ -87,6 +89,15 @@ export function UploadsTable({
                     >
                       Ver issues
                     </button>
+                    {onDeleteUpload ? (
+                      <button
+                        className="secondary-button danger-button"
+                        onClick={() => onDeleteUpload(upload)}
+                        type="button"
+                      >
+                        Borrar ingesta
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               );

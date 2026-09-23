@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
+import pandas as pd
+
 from nps_lens.domain.models import UploadAttempt, UploadContext
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.nps_thermal import PARSER_VERSION, read_nps_thermal_excel
@@ -306,6 +308,54 @@ class NpsService:
 
     def list_uploads(self) -> list[dict[str, object]]:
         return self.repository.list_uploads()
+
+    def delete_upload(self, upload_id: str, owner_support_company: str) -> dict[str, int]:
+        target = self.repository.get_upload(upload_id)
+        if target is None or str(target["service_origin"]) != owner_support_company:
+            raise ValueError("La ingesta NPS no existe para el Owner Support Company activo.")
+        retained: list[tuple[str, str, pd.DataFrame]] = []
+        for upload in reversed(self.repository.list_uploads(limit=100_000)):
+            retained_id = str(upload["upload_id"])
+            if (
+                retained_id == upload_id
+                or str(upload["service_origin"]) != owner_support_company
+                or str(upload["status"]) != "completed"
+            ):
+                continue
+            paths = list((self.settings.data_dir / "uploads").glob(f"{retained_id}__*"))
+            if len(paths) != 1:
+                raise ValueError(
+                    "No se puede borrar la ingesta porque falta un fichero histórico necesario para reconstruir el corpus."
+                )
+            parsed = read_nps_thermal_excel(
+                str(paths[0]),
+                service_origin=owner_support_company,
+                service_origin_n1="",
+                service_origin_n2="",
+                column_aliases_path=self.settings.column_aliases_path,
+            )
+            if any(issue.level == "ERROR" for issue in parsed.issues):
+                raise ValueError(
+                    "No se puede borrar la ingesta porque un fichero histórico ya no cumple el contrato actual."
+                )
+            retained.append((retained_id, str(upload["uploaded_at"]), parsed.df))
+        result = self.repository.delete_upload(upload_id, owner_support_company)
+        for path in (self.settings.data_dir / "uploads").glob(f"{upload_id}__*"):
+            path.unlink(missing_ok=True)
+        self.repository.rebuild_owner_records(owner_support_company, retained)
+        return result
+
+    def delete_owner_data(self, owner_support_company: str) -> dict[str, int]:
+        upload_ids = [
+            str(upload["upload_id"])
+            for upload in self.repository.list_uploads(limit=100_000)
+            if str(upload["service_origin"]) == owner_support_company
+        ]
+        result = self.repository.delete_owner_data(owner_support_company)
+        for upload_id in upload_ids:
+            for path in (self.settings.data_dir / "uploads").glob(f"{upload_id}__*"):
+                path.unlink(missing_ok=True)
+        return result
 
     def summary(self, context: Optional[UploadContext] = None) -> dict[str, object]:
         snapshot = self.repository.build_summary(context)
