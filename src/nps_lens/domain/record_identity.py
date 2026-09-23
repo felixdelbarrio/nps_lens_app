@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from nps_lens.domain.column_aliases import normalize_column_header
+
 
 def hash_rows(frame: pd.DataFrame, columns: list[str], prefix: str = "") -> pd.Series[Any]:
     """Hash normalized rows in native pandas code instead of Python per-row callbacks."""
@@ -35,3 +37,40 @@ def business_keys(frame: pd.DataFrame) -> pd.Series[Any]:
     if (~external).any():
         keys.loc[~external] = hash_rows(frame.loc[~external], fallback, "fp:")
     return keys
+
+
+def resolve_response_identity(frame: pd.DataFrame) -> tuple[pd.Series[Any], str]:
+    """Choose the most complete, unique response identifier; never trust a shared Id.
+
+    Repeated identical responses are allowed. Conflicting legacy IDs get a content
+    fingerprint, so they cannot overwrite another response during ingestion.
+    """
+    priorities = ("Opinion Identifier", "Opinion Unique Code", "ID", "GF CUST SURVEY OPINION ID")
+    candidates = []
+    for priority, name in enumerate(priorities):
+        for column in frame.columns:
+            if normalize_column_header(column) != normalize_column_header(name):
+                continue
+            values = frame[column].astype("string").fillna("").str.strip()
+            values = values.mask(
+                values.str.casefold().isin({"nan", "none", "null", "nat", "<na>"}), ""
+            )
+            populated = values.ne("")
+            count = int(populated.sum())
+            unique = int(values[populated].nunique())
+            candidates.append(
+                (unique / count if count else 0, count, -priority, str(column), values)
+            )
+    fallback = hash_rows(frame, ["Fecha", "NPS", "Comment", "UsuarioDecisión"], "fp:")
+    if not candidates:
+        return fallback, "fingerprint"
+    _, _, _, source, values = max(candidates, key=lambda item: item[:3])
+    # Detect shared identifiers against immutable response content, not taxonomy.
+    conflicts = (
+        pd.DataFrame({"id": values, "content": fallback})
+        .groupby("id")["content"]
+        .transform("nunique")
+        .gt(1)
+    )
+    invalid = values.eq("") | conflicts
+    return values.mask(invalid, fallback), source

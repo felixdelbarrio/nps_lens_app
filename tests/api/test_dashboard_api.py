@@ -204,10 +204,9 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         == "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
     )
     assert context_payload["preferences"]["report_dimension_analysis"] == "palanca"
-    assert context_payload["preferences"]["touchpoint_source"] == "executive_journeys"
+    assert context_payload["preferences"]["touchpoint_source"] == "broken_journeys"
     assert any(
-        option["value"] == "executive_journeys"
-        for option in context_payload["causal_method_options"]
+        option["value"] == "broken_journeys" for option in context_payload["causal_method_options"]
     )
 
     dashboard_response = client.get(
@@ -430,7 +429,7 @@ def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_bounda
     assert report.slide_count > 0
     texts = _ppt_texts(report.content)
     assert not any("Análisis causal no concluyente" in text for text in texts)
-    assert any("Journeys de detracción" in text for text in texts)
+    assert any("Journeys rotos" in text for text in texts)
 
 
 def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) -> None:
@@ -535,8 +534,10 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_payload["available"] is True
     assert "Canal: Todos" in linking_payload["context_pills"]
     assert linking_payload["kpis"]["incidents"] == 2
-    assert linking_payload["causal_method"]["value"] == "executive_journeys"
-    assert linking_payload["navigation"][1]["label"] == "Journeys de detracción"
+    assert linking_payload["causal_method"]["value"] == "broken_journeys"
+    assert linking_payload["navigation"][1]["label"] == "Journeys rotos"
+    assert linking_payload["diagnostics"]["helix_quality_eligible"] == 2
+    assert linking_payload["diagnostics"]["evidence_pairs"] > 0
     assert "situation" in linking_payload
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
@@ -771,7 +772,8 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
     assert Path(report_response.headers["x-nps-lens-saved-path"]).exists()
 
     presentation = Presentation(BytesIO(report_response.content))
-    assert len(presentation.slides) >= 8
+    # A valid report retains its seven core slides even without enough causal evidence.
+    assert len(presentation.slides) >= 7
 
 
 def test_publication_embeds_the_executive_report_with_causal_slides(
@@ -848,7 +850,7 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
         nps_group="Promotores",
     )
 
-    assert captured["touchpoint_source"] == "executive_journeys"
+    assert captured["touchpoint_source"] == "broken_journeys"
     assert captured["report_dimension_analysis"] == ""
     assert dashboard_request["nps_group"] == "Promotores"
     assert dashboard_request["score_channel"] == "Web"

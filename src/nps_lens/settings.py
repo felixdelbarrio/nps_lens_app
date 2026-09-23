@@ -13,7 +13,7 @@ from dotenv import dotenv_values, load_dotenv, set_key
 from nps_lens.platform.resources import resource_root
 
 DEFAULT_UI_THEME_MODE = "light"
-DEFAULT_UI_TOUCHPOINT_SOURCE = "executive_journeys"
+DEFAULT_UI_TOUCHPOINT_SOURCE = "broken_journeys"
 DEFAULT_UI_REPORT_DIMENSION_ANALYSIS = "palanca"
 DEFAULT_UI_HELIX_BASE_URL = "https://itsmhelixbbva-smartit.onbmc.com/smartit/app/#/incidentPV/"
 DEFAULT_UI_MIN_SIMILARITY = 0.15

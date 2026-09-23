@@ -44,7 +44,7 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         "schema_version": "5.0",
         "screens": {
             "dashboard": {"kpis": {"samples": 800, "delta_nps": float("nan")}},
-            "linking": {},
+            "linking": {"diagnostics": {"nps_total": 800, "nps_non_matchable": 123}},
             "data": {"nps": {"deferred": True}, "helix": {"deferred": True}},
         },
         "snapshots": {
@@ -78,8 +78,42 @@ def test_publication_is_self_contained_and_never_exceeds_budget() -> None:
         assert b"Infinity" not in publication_json
         contract = json.loads(publication_json)
         assert contract["screens"]["dashboard"]["kpis"]["delta_nps"] is None
+        assert contract["screens"]["linking"]["diagnostics"]["nps_non_matchable"] == 123
         assert set(contract["snapshots"]) == {"data"}
         assert contract["manifest"]["size_budget_bytes"] == 25_000
         assert contract["manifest"]["publication_json_bytes"] < 100_000
         assert contract["manifest"]["truncated"] is True
         assert b"Banca de Empresas e Instituciones" in archive.read("newsletter.html")
+
+
+def test_wide_exports_retain_ingestion_provenance_in_publication() -> None:
+    extra = {f"raw_{index}": index for index in range(30)}
+    nps = {
+        **extra,
+        "ID": "opinion-42",
+        "Comment": "",
+        "NPS": 4,
+        "match_status": "non_matchable",
+        "_source_id": "duplicate-id",
+        "_identity_source": "Opinion Identifier",
+    }
+    helix = {
+        **extra,
+        "Incident Number": "INC42",
+        "_source_sheet": "Argentina",
+        "incident_occurred_at": "2026-09-01",
+        "incident_registered_at": "2026-09-03",
+        "incident_occurred_at_source": "bbva_startdatetime",
+    }
+    snapshot = build_static_data_snapshot(
+        {"columns": list(nps), "rows": [nps], "total_rows": 1000},
+        {"columns": list(helix), "rows": [helix]},
+    )
+    for kind, original in [("nps", nps), ("helix", helix)]:
+        dataset = snapshot["datasets"][kind]
+        assert len(dataset["columns"]) == 14
+        published = dataset["page"]["rows"][0]
+        for key, value in original.items():
+            if not key.startswith("raw_"):
+                assert published[key] == value
+    assert snapshot["datasets"]["nps"]["total_rows"] == 1000

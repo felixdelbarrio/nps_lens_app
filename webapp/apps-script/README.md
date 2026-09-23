@@ -21,3 +21,13 @@ en el ZIP de la WebApp. El generador limita además `publication.json` a 20 MB a
 crear el archivo, por debajo del límite de contenido descomprimido de Apps Script.
 
 En local: `make WebApp` abre la última edición disponible en Descargas en `http://127.0.0.1:8625`.
+
+### Alineación con la iteración 26
+
+Las nuevas publicaciones incluyen el diagnóstico de población en **Causalidad → Situación del periodo**, también si el cruce no está disponible. Las cifras, coberturas, N1/N2 y motivos de exclusión se leen de `screens.linking.diagnostics`; la WebApp no recalcula matches ni porcentajes. Las ediciones antiguas sin este campo siguen mostrándose sin inventar valores.
+
+Las páginas de Datos priorizan la identidad y el estado `match_status` de NPS, así como las fechas de ocurrencia/registro, el campo de origen de la fecha, la hoja y la elegibilidad de Helix, dentro del límite existente de 14 columnas y 500 filas. Las respuestas `non_matchable` no desaparecen del NPS global; la página conserva los filtros publicados.
+
+El método publicado sigue siendo inmutable: las nuevas ediciones usan la preferencia local (por defecto `broken_journeys`), y `executive_journeys` continúa disponible cuando se publica expresamente. No se reclasifican las ediciones existentes.
+
+Para aplicar los cambios en Google Apps Script, actualizar `App.html` y volver a desplegar. Para incorporar los datos corregidos y su trazabilidad, generar e importar un ZIP nuevo desde la aplicación local; actualizar el HTML no reprocesa snapshots antiguos. El contrato aditivo sigue siendo `5.0`.
