@@ -12,6 +12,43 @@ MAX_PUBLICATION_JSON_BYTES = 20 * 1024 * 1024
 PUBLICATION_SCHEMA_VERSION = "5.0"
 DATA_PAGE_SIZE = 500
 DATA_VISIBLE_COLUMNS = 14
+# Keep evidence provenance visible even when raw exports have hundreds of columns.
+DATA_PRIORITY_COLUMNS = {
+    "nps": (
+        "ID",
+        "Fecha",
+        "NPS",
+        "NPS Group",
+        "Canal",
+        "Palanca",
+        "Subpalanca",
+        "Comment",
+        "match_status",
+        "_identity_source",
+        "_source_id",
+    ),
+    "helix": (
+        "Incident Number",
+        "Record ID",
+        "incident_occurred_at",
+        "incident_occurred_at_source",
+        "incident_registered_at",
+        "_source_sheet",
+        "Causal Match Eligible",
+        "Causal Exclusion Reason",
+        "summary",
+        "Description",
+        "BBVA_SourceServiceN1",
+        "BBVA_SourceServiceN2",
+    ),
+}
+
+
+def _visible_columns(kind: str, columns: list[str]) -> list[str]:
+    priority = [column for column in DATA_PRIORITY_COLUMNS[kind] if column in columns]
+    return (priority + [column for column in columns if column not in priority])[
+        :DATA_VISIBLE_COLUMNS
+    ]
 
 
 @dataclass(frozen=True)
@@ -54,8 +91,8 @@ def build_static_data_snapshot(
 
     nps_columns, nps_rows, nps_total = source(nps)
     helix_columns, helix_rows, helix_total = source(helix)
-    nps_visible_columns = nps_columns[:DATA_VISIBLE_COLUMNS]
-    helix_visible_columns = helix_columns[:DATA_VISIBLE_COLUMNS]
+    nps_visible_columns = _visible_columns("nps", nps_columns)
+    helix_visible_columns = _visible_columns("helix", helix_columns)
     return {
         "schema_version": PUBLICATION_SCHEMA_VERSION,
         "datasets": {

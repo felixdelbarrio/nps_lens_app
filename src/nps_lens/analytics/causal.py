@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings as py_warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -57,11 +58,11 @@ def best_effort_ate_logit(
     y = pd.to_numeric(data[outcome_col], errors="coerce")
     t = _prepare_binary_treatment(data, treatment_col, treatment_value)
     X_parts: list[pd.Series] = [t.rename("treat")]
-    warnings: list[str] = []
+    messages: list[str] = []
 
     for c in control_cols:
         if c not in data.columns:
-            warnings.append(f"Control column missing: {c}")
+            messages.append(f"Control column missing: {c}")
             continue
         # one-hot for categoricals (limit cardinality)
         if data[c].dtype == "object" or str(data[c].dtype).startswith("category"):
@@ -80,12 +81,12 @@ def best_effort_ate_logit(
     X2 = X.loc[mask].astype(float)
 
     if len(y2) < 500:
-        warnings.append("Low sample size for stable estimates (<500).")
+        messages.append("Low sample size for stable estimates (<500).")
 
     try:
         # Statsmodels may emit ConvergenceWarning for difficult fits; treat as a soft signal.
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        with py_warnings.catch_warnings():
+            py_warnings.filterwarnings("ignore", category=ConvergenceWarning)
             model = sm.Logit(y2, X2).fit(disp=False, maxiter=400)
         coef = float(model.params["treat"])
         pval = float(model.pvalues["treat"])
@@ -106,10 +107,10 @@ def best_effort_ate_logit(
                 "Correct model specification (logit).",
                 "SUTVA / no interference.",
             ],
-            warnings=warnings,
+            warnings=messages,
         )
     except Exception as e:  # noqa: BLE001
-        warnings.append(f"Model failed: {e}")
+        messages.append(f"Model failed: {e}")
         return CausalHypothesis(
             treatment=f"{treatment_col} == {treatment_value}",
             outcome=outcome_col,
@@ -119,5 +120,5 @@ def best_effort_ate_logit(
             n=int(len(y2)),
             method="logit_failed",
             assumptions=["Best-effort only."],
-            warnings=warnings,
+            warnings=messages,
         )

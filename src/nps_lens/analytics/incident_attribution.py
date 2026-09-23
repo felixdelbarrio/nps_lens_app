@@ -25,6 +25,7 @@ from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     TOUCHPOINT_SOURCE_PALANCA,
 )
+from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 EXECUTIVE_JOURNEY_CATALOG = (
     {
@@ -732,7 +733,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .astype(str)
         .str.strip()
     )
-    df["incident_date"] = pd.to_datetime(df.get("Fecha"), errors="coerce")
+    df["incident_date"] = incident_occurrence_dates(df)[0]
     df["incident_summary"] = build_incident_display_text(df).fillna("").astype(str).str.strip()
     url_candidates = [
         "Incident URL",

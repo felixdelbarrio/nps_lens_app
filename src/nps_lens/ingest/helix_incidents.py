@@ -16,6 +16,7 @@ from nps_lens.domain.normalization import equivalence_key
 from nps_lens.ingest.base import IngestResult, ValidationIssue, require_columns, standardize_columns
 from nps_lens.ingest.helix_dates import (
     coerce_helix_datetime_series,
+    incident_occurrence_dates,
     looks_like_helix_datetime_column,
 )
 
@@ -34,37 +35,6 @@ def _split_csvish(value: object) -> List[str]:
     if not s:
         return []
     return [p.strip() for p in s.split(",") if p.strip()]
-
-
-def _detect_fecha_column(df: pd.DataFrame) -> Optional[str]:
-    """Best-effort date column detection for Helix incident exports.
-
-    We normalize to a canonical `Fecha` used by storage partitioning.
-    """
-    candidates = [
-        "Fecha",
-        "Fecha apertura",
-        "Fecha Apertura",
-        "Fecha creación",
-        "Fecha creacion",
-        "Submit Date",
-        "SubmitDate",
-        "Submitted Date",
-        "SubmittedDate",
-        "CreatedDate",
-        "Created Date",
-        "Open Date",
-        "Date",
-    ]
-    for c in candidates:
-        if c in df.columns:
-            return c
-    # fallback: first column that contains 'fecha' or 'date'
-    for c in df.columns:
-        lc = str(c).lower()
-        if "fecha" in lc or "date" in lc:
-            return c
-    return None
 
 
 def _parse_helix_datetime(series: pd.Series) -> pd.Series:
@@ -88,7 +58,7 @@ def _auto_parse_epoch_datetime_columns(
     We preserve non-date columns and avoid coercing small numeric fields.
     """
 
-    out = d.copy()
+    out = d.copy(deep=False)
     converted: List[str] = []
     for c in list(out.columns):
         if c == "Fecha":
@@ -130,50 +100,10 @@ def _workbook_has_external_hyperlinks(path: str) -> bool:
     return False
 
 
-def read_helix_incidents_excel(
-    path: str,
-    service_origin: str,
-    service_origin_n1: str,
-    service_origin_n2: str,
-    sheet_name: Optional[Union[str, int]] = None,
-) -> IngestResult:
-    """Read + filter Helix incidents Excel by selected context.
-
-    Contract: Owner Support Company is the only mandatory ingestion context.
-    Helix N1/N2 remain source attributes used later by optional channel attribution.
-
-    If after filtering there are no rows, return empty df (ingestion is not performed).
-    """
-
-    # Prefer Helix_Raw / Helix raw sheet as source of truth (not "Issues oficial").
-    if sheet_name is None:
-        try:
-            import openpyxl  # type: ignore
-
-            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-            sheetnames = list(wb.sheetnames)
-        except Exception:
-            sheetnames = []
-        candidates = ["Helix_Raw", "Helix raw", "Helix Raw", "helix_raw", "helix raw"]
-        picked = None
-        lower_map = {s.lower(): s for s in sheetnames}
-        for c in candidates:
-            if c.lower() in lower_map:
-                picked = lower_map[c.lower()]
-                break
-        sn: Union[str, int] = picked if picked is not None else 0
-    else:
-        sn = sheet_name
-    df = pd.read_excel(path, sheet_name=sn, engine="openpyxl")
-    if isinstance(df, dict):
-        df = list(df.values())[0]
-    try:
-        if not _workbook_has_external_hyperlinks(path):
-            raise LookupError("workbook_without_external_hyperlinks")
-        import openpyxl  # type: ignore
-
-        wb_links = openpyxl.load_workbook(path, read_only=False, data_only=False)
-        ws = wb_links[sn] if isinstance(sn, str) else wb_links.worksheets[int(sn)]
+def _read_sheet(sheet: Union[str, int], excel: pd.ExcelFile, wb_links: object) -> pd.DataFrame:
+    df = pd.read_excel(excel, sheet_name=sheet)
+    if wb_links is not None:
+        ws = wb_links[sheet] if isinstance(sheet, str) else wb_links.worksheets[int(sheet)]
         header_row = next(ws.iter_rows(min_row=1, max_row=1))
         hyperlink_payload: dict[str, list[str]] = {}
         for col_idx, cell in enumerate(header_row, start=1):
@@ -196,8 +126,50 @@ def read_helix_incidents_excel(
                 hyperlink_payload[f"{header}__hyperlink"] = values
         if hyperlink_payload:
             df = pd.concat([df, pd.DataFrame(hyperlink_payload, index=df.index)], axis=1)
-    except (Exception, LookupError):
-        pass
+
+    df["_source_sheet"] = excel.sheet_names[sheet] if isinstance(sheet, int) else sheet
+    return df
+
+
+def read_helix_incidents_excel(
+    path: str,
+    service_origin: str,
+    service_origin_n1: str,
+    service_origin_n2: str,
+    sheet_name: Optional[Union[str, int]] = None,
+) -> IngestResult:
+    """Read + filter Helix incidents Excel by selected context.
+
+    Contract: Owner Support Company is the only mandatory ingestion context.
+    Helix N1/N2 remain source attributes used later by optional channel attribution.
+
+    If after filtering there are no rows, return empty df (ingestion is not performed).
+    """
+
+    with pd.ExcelFile(path, engine="openpyxl") as excel:
+        if sheet_name is not None:
+            sheets = [sheet_name]
+        else:
+            sheets = []
+            for name in excel.sheet_names:
+                columns = pd.read_excel(excel, sheet_name=name, nrows=0).columns
+                keys = {str(c).replace(" ", "").casefold() for c in columns}
+                if "ownersupportcompany" in keys:
+                    sheets.append(name)
+            if not sheets:
+                sheets = [excel.sheet_names[0]]  # Let contract validation report missing fields.
+        wb_links = None
+        try:
+            if _workbook_has_external_hyperlinks(path):
+                import openpyxl
+
+                wb_links = openpyxl.load_workbook(path, read_only=False, data_only=False)
+            df = pd.concat(
+                [_read_sheet(sheet, excel, wb_links) for sheet in sheets], ignore_index=True
+            )
+        finally:
+            if wb_links is not None:
+                wb_links.close()
 
     # Canonicalize / robust column names (tolerate minor variants)
     df = standardize_columns(
@@ -273,23 +245,18 @@ def read_helix_incidents_excel(
     d["service_origin_n1"] = ""
     d["service_origin_n2_selected"] = ""
 
-    # Canonical Fecha (best-effort)
-    fecha_col = _detect_fecha_column(d)
-    if fecha_col is not None:
-        d["Fecha"] = _parse_helix_datetime(d[fecha_col])
-        bad = int(d["Fecha"].isna().sum())
-        if bad:
-            issues.append(
-                ValidationIssue(
-                    level="WARN", message=f"{bad} filas con Fecha inválida (columna '{fecha_col}')"
-                )
-            )
-    else:
-        d["Fecha"] = pd.NaT
+    d["incident_occurred_at"], d["incident_occurred_at_source"] = incident_occurrence_dates(d)
+    d["incident_registered_at"] = coerce_helix_datetime_series(
+        d.get("Submit Date", pd.Series(pd.NaT, index=d.index))
+    )
+    d["Fecha"] = d["incident_occurred_at"]
+    bad = int(d["Fecha"].isna().sum())
+    if bad:
         issues.append(
             ValidationIssue(
                 level="WARN",
-                message="No se detectó columna de fecha. Se guardará Fecha=NaT (sin particionado temporal).",
+                code="invalid_incident_dates",
+                message=f"{bad} filas sin fecha de ocurrencia ni registro válida.",
             )
         )
 

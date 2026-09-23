@@ -232,7 +232,7 @@ export function App() {
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
   const [reportDimensionAnalysis, setReportDimensionAnalysis] = useState<"palanca" | "subpalanca">("palanca");
-  const [touchpointSource, setTouchpointSource] = useState("executive_journeys");
+  const [touchpointSource, setTouchpointSource] = useState("broken_journeys");
   const [gapDimension, setGapDimension] = useState("Palanca");
   const [cohortRow, setCohortRow] = useState("Palanca");
   const [cohortCol, setCohortCol] = useState("Canal");
@@ -309,7 +309,7 @@ export function App() {
     setDownloadsPath(config.preferences.downloads_path || "");
     setHelixBaseUrl(config.preferences.helix_base_url || "");
     setReportDimensionAnalysis(config.preferences.report_dimension_analysis || "palanca");
-    setTouchpointSource(config.preferences.touchpoint_source || "executive_journeys");
+    setTouchpointSource(config.preferences.touchpoint_source || "broken_journeys");
     setMinSimilarity(config.preferences.min_similarity ?? 0.15);
     setMaxDaysApart(config.preferences.max_days_apart ?? 90);
     setMinN(config.preferences.min_n_nps_gaps ?? 200);
@@ -580,12 +580,13 @@ export function App() {
     }
     if (!causalMethodOptions.some((option) => option.value === touchpointSource)) {
       setTouchpointSource(
-        causalMethodOptions.find((option) => option.value === "executive_journeys")?.value ||
+        causalMethodOptions.find((option) => option.value === config?.preferences.touchpoint_source)?.value ||
+        causalMethodOptions.find((option) => option.value === "broken_journeys")?.value ||
           causalMethodOptions[0]?.value ||
-          "executive_journeys"
+          "broken_journeys"
       );
     }
-  }, [causalMethodOptions, touchpointSource]);
+  }, [causalMethodOptions, touchpointSource, config?.preferences.touchpoint_source]);
 
   useEffect(() => {
     applyDocumentTheme(themeMode);

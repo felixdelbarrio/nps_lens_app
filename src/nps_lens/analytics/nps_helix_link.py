@@ -16,6 +16,8 @@ from nps_lens.analytics.linking_policy import (
 )
 from nps_lens.analytics.text_mining import preprocess_text
 from nps_lens.core.nps_math import focus_mask, normalize_focus_group
+from nps_lens.domain.normalization import semantic_series
+from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 
 def _split_csvish(value: object) -> List[str]:
@@ -34,7 +36,7 @@ def tokenset(value: object) -> Tuple[str, ...]:
 
 def build_nps_topic(df: pd.DataFrame) -> pd.Series:
     parts = [
-        df.get(column, pd.Series("", index=df.index)).fillna("").astype(str).str.strip()
+        semantic_series(df.get(column, pd.Series("", index=df.index)))
         for column in ("Palanca", "Subpalanca")
     ]
     return (parts[0] + " > " + parts[1]).str.strip().str.replace(r"^>\s*|\s*>$", "", regex=True)
@@ -59,8 +61,7 @@ def _ordered_cols_ci(df: pd.DataFrame, candidates: list[str]) -> list[str]:
 def _txt_series(df: pd.DataFrame, col: str) -> pd.Series:
     if not col or col not in df.columns:
         return pd.Series([""] * len(df), index=df.index)
-    s = df[col].astype(str).fillna("").str.strip()
-    return s.replace({"nan": "", "NaN": "", "None": "", "NaT": ""})
+    return semantic_series(df[col])
 
 
 def build_incident_display_text(df: pd.DataFrame) -> pd.Series:
@@ -97,87 +98,104 @@ def build_incident_display_text(df: pd.DataFrame) -> pd.Series:
 
 
 def build_incident_topic(df: pd.DataFrame) -> pd.Series:
-    # Fill missing values before casting to string. Casting NaN first produces
-    # the literal text "nan", which prevents the fallback to service/summary.
-    tiers = pd.concat(
+    base = pd.Series("", index=df.index, dtype="string")
+    for column in _ordered_cols_ci(
+        df, [f"Product Categorization Tier {tier}" for tier in (1, 2, 3)]
+    ):
+        part = _txt_series(df, column)
+        base = base + (" > " + part).where(base.ne("") & part.ne(""), part)
+    for column in _ordered_cols_ci(
+        df,
         [
-            df.get(column, pd.Series([""] * len(df), index=df.index))
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            for column in (
-                "Product Categorization Tier 1",
-                "Product Categorization Tier 2",
-                "Product Categorization Tier 3",
-            )
+            "BBVA_SourceServiceN2",
+            "BBVA_SourceServiceN1",
+            "SourceService",
+            "service",
+            "summary",
+            "Description",
         ],
-        axis=1,
-    )
-    base = tiers.apply(lambda row: " > ".join(value for value in row.tolist() if value), axis=1)
-    # fallback to service / summary
-    svc = (
-        df.get("service", pd.Series([""] * len(df), index=df.index))
-        .fillna("")
-        .astype(str)
-        .str.strip()
-    )
-    desc = build_incident_display_text(df)
-    base = base.where(base.str.len() > 0, svc.where(svc.str.len() > 0, desc))
-    return base.fillna("")
+    ):
+        base = base.mask(base.eq(""), _txt_series(df, column))
+    return base.mask(base.eq(""), build_incident_display_text(df))
 
 
 def build_nps_text(df: pd.DataFrame) -> pd.Series:
-    comment = df.get("Comment", pd.Series([""] * len(df), index=df.index)).astype(str).fillna("")
-    pal = df.get("Palanca", pd.Series([""] * len(df), index=df.index)).astype(str).fillna("")
-    sub = df.get("Subpalanca", pd.Series([""] * len(df), index=df.index)).astype(str).fillna("")
-    return (pal + " " + sub + " " + comment).str.replace(r"\s+", " ", regex=True).str.strip()
+    parts = [_txt_series(df, column) for column in ("Palanca", "Subpalanca", "Comment")]
+    return (
+        (parts[0] + " " + parts[1] + " " + parts[2])
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
+
+
+def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
+    return build_nps_text(df).str.contains(r"[^\W\d_]", regex=True, na=False)
+
+
+_DETAIL_LABEL = re.compile(
+    r"(?im)^[ \t]*(?:[-*•][ \t]*)?(?:\d+[.)][ \t]*)?([^:\n]{2,65})[ \t]*:[ \t]*"
+)
+_SIGNAL_LABEL = re.compile(
+    r"s[ií]ntoma|impacto|error|causa|resoluci[oó]n|soluci[oó]n|descripci[oó]n|problema|symptom|impact|resolution|description|cause",
+    re.IGNORECASE,
+)
+
+
+def _detail_signal(text: str) -> str:
+    labels = list(_DETAIL_LABEL.finditer(text))
+    if not labels:
+        return text[:320]
+    parts = []
+    for index, match in enumerate(labels):
+        if _SIGNAL_LABEL.search(match.group(1)):
+            end = labels[index + 1].start() if index + 1 < len(labels) else len(text)
+            value = text[match.end() : end].strip()
+            if value:
+                parts.append(value[:240])
+    return " ".join(parts)[:640]
 
 
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
-    """Build a compact, high-signal semantic document for each Helix incident.
-
-    Helix narratives contain long resolution templates and operational boilerplate.  Concatenating
-    them without bounds dilutes the few words that a short customer comment can share with an
-    incident.  The field order and per-field limits below preserve business meaning while keeping
-    vectorisation cost proportional and scores comparable across exports.
-    """
-
-    signal_cols = _ordered_cols_ci(
-        df,
-        [
-            "Description",
-            "summary",
-            "BBVA_SourceServiceN2",
-            "service",
-            "BBVA_RootCauseMain",
-            "BBVA_RootCause1",
-            "BBVA_RootCauseExecutive",
-            "BBVA_FinalImpact",
-            "BBVA_ExecutiveDescription",
-            "Detailed Description",
-            "Detailed Decription",
-            "Resolution",
-        ],
-    )
-    if not signal_cols:
-        return pd.Series([""] * len(df), index=df.index)
-    limits = [180, 180, 100, 100, 160, 240, 260, 320, 320, 240]
-    parts = []
-    for position, column in enumerate(signal_cols):
-        limit = limits[min(position, len(limits) - 1)]
-        cleaned = (
-            _txt_series(df, column)
-            .str.replace(r"<[^>]+>", " ", regex=True)
-            .str.replace(r"https?://\S+|www\.\S+", " ", regex=True)
-            .str.replace(r"\b(?:INC|WO|REQ)\d{5,}\b", " ", regex=True, flags=0)
-            .str.replace(r"\s+", " ", regex=True)
-            .str.strip()
-            .str.slice(0, limit)
-        )
-        parts.append(cleaned)
-    compact = parts[0]
-    for part in parts[1:]:
-        compact = compact + " " + part
+    """Compact semantic evidence, with field-specific limits and no repeated values."""
+    fields = [
+        ("BBVA_SourceServiceN2", 100),
+        ("BBVA_SourceServiceN1", 100),
+        ("SourceService", 100),
+        ("service", 100),
+        ("summary", 180),
+        ("Description", 180),
+        ("Short Description", 180),
+        ("BBVA_ExecutiveDescription", 320),
+        ("BBVA_FinalImpact", 320),
+        ("BBVA_RootCauseMain", 160),
+        ("BBVA_RootCause1", 240),
+        ("BBVA_RootCauseExecutive", 260),
+        ("Resolution", 240),
+        ("Detailed Description", 640),
+        ("Detailed Decription", 640),
+    ]
+    compact = pd.Series("", index=df.index, dtype="string")
+    seen = []
+    for name, limit in fields:
+        for column in _ordered_cols_ci(df, [name]):
+            part = _txt_series(df, column)
+            if name.startswith("Detailed"):
+                # Parse each distinct template once, retaining labelled narrative only.
+                lookup = {value: _detail_signal(value) for value in part.unique()}
+                part = part.map(lookup).astype("string")
+            part = (
+                part.str.replace(r"<[^>]+>", " ", regex=True)
+                .str.replace(r"https?://\S+|www\.\S+", " ", regex=True)
+                .str.replace(r"\b(?:INC|WO|REQ)\d{5,}\b", " ", regex=True)
+                .str.replace(r"\s+", " ", regex=True)
+                .str.strip()
+            )
+            key = part.str.casefold()
+            duplicate = pd.Series(False, index=df.index)
+            for previous in seen:
+                duplicate |= key.eq(previous)
+            seen.append(key)
+            compact = compact + " " + part.mask(duplicate, "").str.slice(0, limit)
     return compact.str.replace(r"\s+", " ", regex=True).str.strip()
 
 
@@ -186,36 +204,24 @@ _PLACEHOLDER_INCIDENT_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _WORD_RE = re.compile(r"[a-záéíóúüñ]{3,}", flags=re.IGNORECASE)
-_VOWEL_RE = re.compile(r"[aeiouáéíóúü]", flags=re.IGNORECASE)
 
 
 def _incident_link_quality_columns(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    semantic_text = build_incident_text(df).fillna("").astype(str).str.strip()
-    display_text = build_incident_display_text(df).fillna("").astype(str).str.strip()
+    semantic_text = df.get("_incident_semantic_text")
+    if semantic_text is None:
+        semantic_text = build_incident_text(df)
+    display_text = build_incident_display_text(df)
     title_columns = _ordered_cols_ci(df, ["Description", "summary", "Short Description"])
     description = _txt_series(df, title_columns[0] if title_columns else "")
-
-    eligible: list[bool] = []
-    reasons: list[str] = []
-    for semantic, display, title in zip(semantic_text, display_text, description):
-        combined = " ".join((str(title), str(display))).strip()
-        words = _WORD_RE.findall(str(semantic))
-        informative = [word for word in words if _VOWEL_RE.search(word)]
-        placeholder = bool(_PLACEHOLDER_INCIDENT_RE.search(combined))
-        if not str(semantic).strip() or not informative:
-            eligible.append(False)
-            reasons.append("Texto operativo vacío o no interpretable")
-        elif placeholder and len(informative) <= 4:
-            eligible.append(False)
-            reasons.append("Registro de ejemplo o placeholder")
-        else:
-            eligible.append(True)
-            reasons.append("")
-
-    return (
-        pd.Series(eligible, index=df.index, dtype=bool),
-        pd.Series(reasons, index=df.index, dtype="string"),
-    )
+    words = semantic_text.str.findall(_WORD_RE).str.join(" ")
+    informative = words.str.count(r"\b[^\W\d_]*[aeiouáéíóúü][^\W\d_]*\b", flags=re.IGNORECASE)
+    placeholder = (description + " " + display_text).str.contains(_PLACEHOLDER_INCIDENT_RE)
+    empty = semantic_text.eq("") | informative.eq(0)
+    synthetic = placeholder & informative.le(4)
+    reasons = pd.Series("", index=df.index, dtype="string")
+    reasons.loc[synthetic] = "Registro de ejemplo o placeholder"
+    reasons.loc[empty] = "Texto operativo vacío o no interpretable"
+    return ~(empty | synthetic), reasons
 
 
 def annotate_incident_link_quality(df: pd.DataFrame) -> pd.DataFrame:
@@ -225,8 +231,9 @@ def annotate_incident_link_quality(df: pd.DataFrame) -> pd.DataFrame:
     placeholder or effectively empty narratives are kept out of semantic linking.
     """
 
-    out = df.copy()
-    eligible, reasons = _incident_link_quality_columns(df)
+    out = df.copy(deep=False)
+    out["_incident_semantic_text"] = build_incident_text(df)
+    eligible, reasons = _incident_link_quality_columns(out)
     out["Causal Match Eligible"] = eligible
     out["Causal Exclusion Reason"] = reasons
     return out
@@ -238,8 +245,8 @@ def filter_linkable_incidents(df: pd.DataFrame) -> pd.DataFrame:
     if "Causal Match Eligible" in df.columns:
         eligible = df["Causal Match Eligible"].fillna(False).astype(bool)
         return df.loc[eligible].copy()
-    eligible, _ = _incident_link_quality_columns(df)
-    return df.loc[eligible].copy()
+    annotated = annotate_incident_link_quality(df)
+    return annotated.loc[annotated["Causal Match Eligible"]].copy()
 
 
 @dataclass(frozen=True)
@@ -301,9 +308,12 @@ def link_incidents_to_nps_topics(
             ),
         )
 
-    nps = nps_detractors.copy()
+    nps_text = build_nps_text(nps_detractors)
+    matchable = nps_text.str.contains(r"[^\W\d_]", regex=True, na=False)
+    nps = nps_detractors.loc[matchable].copy()
+    nps_text = nps_text.loc[matchable].map(preprocess_text)
     helix = filter_linkable_incidents(helix_incidents)
-    if helix.empty:
+    if helix.empty or nps.empty:
         return (
             pd.DataFrame(columns=["incident_id", "nps_topic", "similarity"]),
             pd.DataFrame(
@@ -322,10 +332,7 @@ def link_incidents_to_nps_topics(
         nps.get("Fecha", pd.Series([pd.NaT] * len(nps), index=nps.index)),
         errors="coerce",
     ).dt.normalize()
-    helix["incident_date"] = pd.to_datetime(
-        helix.get("Fecha", pd.Series([pd.NaT] * len(helix), index=helix.index)),
-        errors="coerce",
-    ).dt.normalize()
+    helix["incident_date"] = incident_occurrence_dates(helix)[0].dt.normalize()
 
     # Restrict the semantic search space before vectorisation.  Previously every incident in the
     # historical export competed for a period even when it could never pass the temporal policy.
@@ -356,8 +363,10 @@ def link_incidents_to_nps_topics(
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
 
-    nps_text = build_nps_text(nps).fillna("").map(preprocess_text)
-    helix_text = build_incident_text(helix).fillna("").map(preprocess_text)
+    helix_text = helix.get("_incident_semantic_text")
+    if helix_text is None:
+        helix_text = build_incident_text(helix)
+    helix_text = helix_text.map(preprocess_text)
     corpus = nps_text.tolist() + helix_text.tolist()
     if not any(str(t).strip() for t in corpus):
         return (
@@ -422,6 +431,9 @@ def link_incidents_to_nps_topics(
 
     # Assignment incident -> topic with sparse similarity (no dense NxM matrix).
     sim_topic = (word_inc @ word_topics.T) * 0.35 + (char_inc @ char_topics.T) * 0.65
+    incident_ids = helix["incident_id"].to_numpy()
+    incident_topics = helix["incident_topic"].to_numpy()
+    incident_dates = helix["incident_date"].to_numpy(dtype="datetime64[ns]")
     assign_rows: list[dict[str, object]] = []
     for i in range(sim_topic.shape[0]):
         idx, vals = _sparse_row_topk(sim_topic.getrow(i), 1)
@@ -431,10 +443,10 @@ def link_incidents_to_nps_topics(
         sim = float(vals[0])
         assign_rows.append(
             {
-                "incident_id": str(helix.iloc[i]["incident_id"]),
+                "incident_id": str(incident_ids[i]),
                 "nps_topic": str(topics[topic_idx]),
                 "similarity": sim,
-                "incident_topic": str(helix.iloc[i]["incident_topic"]),
+                "incident_topic": str(incident_topics[i]),
             }
         )
     assign_df = pd.DataFrame(assign_rows)
@@ -449,7 +461,9 @@ def link_incidents_to_nps_topics(
     nps_pos = _sample_positions(int(len(nps)), int(max_nps_rows_for_evidence))
     word_nps_ev = word_nps[nps_pos]
     char_nps_ev = char_nps[nps_pos]
-    nps_ev = nps.iloc[nps_pos].copy()
+    nps_ids = nps["nps_id"].to_numpy()[nps_pos]
+    nps_topics = nps["nps_topic"].to_numpy()[nps_pos]
+    nps_dates = nps["nps_date"].to_numpy(dtype="datetime64[ns]")[nps_pos]
 
     word_features = word_vec.get_feature_names_out()
     char_features = char_vec.get_feature_names_out()
@@ -465,22 +479,17 @@ def link_incidents_to_nps_topics(
         ) * 0.65
         for bi in range(sim_block.shape[0]):
             inc_row = start + bi
-            inc_id = str(helix.iloc[inc_row]["incident_id"])
-            inc_topic = str(helix.iloc[inc_row]["incident_topic"])
-            inc_date = pd.to_datetime(helix.iloc[inc_row].get("incident_date"), errors="coerce")
+            inc_id = str(incident_ids[inc_row])
+            inc_topic = str(incident_topics[inc_row])
+            inc_date = incident_dates[inc_row]
             row = sim_block.getrow(bi)
             candidate_idx = row.indices
             candidate_vals = row.data
             if max_days is not None:
                 if pd.isna(inc_date):
                     continue
-                candidate_dates = pd.to_datetime(
-                    nps_ev.iloc[candidate_idx]["nps_date"], errors="coerce"
-                ).to_numpy(dtype="datetime64[ns]")
-                day_delta = np.abs(
-                    (candidate_dates - np.datetime64(inc_date.to_datetime64()))
-                    / np.timedelta64(1, "D")
-                )
+                candidate_dates = nps_dates[candidate_idx]
+                day_delta = np.abs((candidate_dates - inc_date) / np.timedelta64(1, "D"))
                 valid = np.isfinite(day_delta) & (day_delta <= max_days)
                 candidate_idx = candidate_idx[valid]
                 candidate_vals = candidate_vals[valid]
@@ -497,13 +506,12 @@ def link_incidents_to_nps_topics(
                 s = float(sim)
                 if s < float(min_similarity):
                     continue
-                nps_row = nps_ev.iloc[int(j)]
                 links.append(
                     EvidenceLink(
-                        nps_id=str(nps_row["nps_id"]),
+                        nps_id=str(nps_ids[j]),
                         incident_id=inc_id,
                         similarity=s,
-                        nps_topic=str(nps_row["nps_topic"]),
+                        nps_topic=str(nps_topics[j]),
                         incident_topic=inc_topic,
                         matched_terms=contributing_terms(
                             incident_display[inc_row],
@@ -548,7 +556,11 @@ def weekly_aggregates(
     helix = helix_df.copy()
 
     nps[date_col_nps] = pd.to_datetime(nps[date_col_nps], errors="coerce")
-    helix[date_col_helix] = pd.to_datetime(helix[date_col_helix], errors="coerce")
+    helix[date_col_helix] = (
+        incident_occurrence_dates(helix)[0]
+        if date_col_helix == "Fecha"
+        else pd.to_datetime(helix[date_col_helix], errors="coerce")
+    )
 
     nps = nps.dropna(subset=[date_col_nps])
     helix = helix.dropna(subset=[date_col_helix])
@@ -634,7 +646,11 @@ def daily_aggregates(
     nps = nps_df.copy()
     helix = helix_df.copy()
     nps[date_col_nps] = pd.to_datetime(nps[date_col_nps], errors="coerce")
-    helix[date_col_helix] = pd.to_datetime(helix[date_col_helix], errors="coerce")
+    helix[date_col_helix] = (
+        incident_occurrence_dates(helix)[0]
+        if date_col_helix == "Fecha"
+        else pd.to_datetime(helix[date_col_helix], errors="coerce")
+    )
     nps = nps.dropna(subset=[date_col_nps])
     helix = helix.dropna(subset=[date_col_helix])
     nps["date"] = nps[date_col_nps].dt.normalize()

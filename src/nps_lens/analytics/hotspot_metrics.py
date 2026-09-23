@@ -16,6 +16,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
 )
 from nps_lens.analytics.nps_helix_link import build_incident_display_text, build_nps_topic
+from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 HOTSPOT_EVIDENCE_COLUMNS = [
     "incident_id",
@@ -253,7 +254,7 @@ def _prepare_helix_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         "Incident Number", helix_ref.get("ID de la Incidencia", helix_ref.index)
     ).astype(str)
     helix_ref["incident_id"] = helix_ref["incident_id"].astype(str).str.strip()
-    helix_ref["incident_date"] = pd.to_datetime(helix_ref.get("Fecha"), errors="coerce")
+    helix_ref["incident_date"] = incident_occurrence_dates(helix_ref)[0]
     helix_ref = helix_ref[helix_ref["incident_id"] != ""].copy()
     if helix_ref.empty:
         return pd.DataFrame(

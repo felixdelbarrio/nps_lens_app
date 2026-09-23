@@ -175,3 +175,53 @@ def coerce_helix_datetime_series(series: pd.Series) -> pd.Series:
         out.loc[date_index] = _parse_text_datetimes(text.loc[date_index])
 
     return out.astype("datetime64[ns]")
+
+
+# Actual occurrence/start precedes detection, legacy canonical dates and registration.
+INCIDENT_DATE_PRIORITY = (
+    "BBVA_StartDateTime",
+    "BBVA_IncidentStartDate",
+    "Incident Start Date",
+    "Start Date",
+    "Occurred Date",
+    "Occurrence Date",
+    "Fecha inicio",
+    "Fecha ocurrencia",
+    "BBVA_DetectionDate",
+    "Reported Date",
+    "Fecha",
+    "Fecha apertura",
+    "Open Date",
+    "Submit Date",
+    "SubmitDate",
+    "Submitted Date",
+    "SubmittedDate",
+    "CreatedDate",
+    "Created Date",
+    "Fecha creación",
+    "Fecha creacion",
+    "Date",
+)
+
+
+def incident_occurrence_dates(frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Resolve dates per row and retain the source field, including partial fallbacks."""
+    dates = _empty_datetime(frame.index)
+    sources = pd.Series("", index=frame.index, dtype="string")
+    if "incident_occurred_at" in frame:
+        dates = coerce_helix_datetime_series(frame["incident_occurred_at"])
+        sources = frame.get("incident_occurred_at_source", sources).astype("string").fillna("")
+        sources = sources.mask(dates.notna() & sources.eq(""), "incident_occurred_at")
+    for candidate in INCIDENT_DATE_PRIORITY:
+        for column in frame.columns:
+            if str(column).casefold() != candidate.casefold():
+                continue
+            missing = dates.isna()
+            if not missing.any():
+                return dates, sources
+            parsed = coerce_helix_datetime_series(frame.loc[missing, column])
+            valid = parsed.notna()
+            indices = parsed.index[valid]
+            dates.loc[indices] = parsed.loc[indices]
+            sources.loc[indices] = str(column)
+    return dates, sources
