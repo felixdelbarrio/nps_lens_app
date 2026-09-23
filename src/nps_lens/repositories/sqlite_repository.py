@@ -289,16 +289,16 @@ class SqliteNpsRepository:
                 connection.executemany(
                     "DELETE FROM records WHERE business_key = ?", [(key,) for key in redundant]
                 )
-                connection.execute("UPDATE records SET business_key = 'owner-migrating:' || business_key")
+                connection.execute(
+                    "UPDATE records SET business_key = 'owner-migrating:' || business_key"
+                )
                 connection.execute(
                     "UPDATE records SET business_key = (SELECT new_key FROM owner_context_key_migration WHERE old_key = substr(records.business_key, 17)), service_origin_n1 = '', service_origin_n2 = ''"
                 )
                 connection.execute(
                     "UPDATE OR REPLACE upload_records SET business_key = COALESCE((SELECT new_key FROM owner_context_key_migration WHERE old_key = upload_records.business_key), business_key)"
                 )
-            connection.execute(
-                "UPDATE uploads SET service_origin_n1 = '', service_origin_n2 = ''"
-            )
+            connection.execute("UPDATE uploads SET service_origin_n1 = '', service_origin_n2 = ''")
             connection.execute("DELETE FROM taxonomy_artifacts")
             connection.execute("DELETE FROM taxonomy_state")
             connection.execute("PRAGMA user_version = 3")
@@ -944,7 +944,7 @@ class SqliteNpsRepository:
 
     def channels_by_owner(self, owners: list[str]) -> dict[str, list[str]]:
         """Return the source NPS channels observed for each Owner Support Company."""
-        result = {owner: [] for owner in owners}
+        result: dict[str, list[str]] = {owner: [] for owner in owners}
         if not owners:
             return result
         placeholders = ",".join("?" for _ in owners)

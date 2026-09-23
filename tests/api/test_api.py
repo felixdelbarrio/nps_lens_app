@@ -166,9 +166,10 @@ def test_api_deletes_one_nps_ingestion_and_all_owner_data(tmp_path: Path) -> Non
             data={"service_origin": "BBVA México"},
             files={"file": (source.name, handle, "application/vnd.ms-excel")},
         ).json()
-    assert client.get("/api/summary", params={"service_origin": "BBVA México"}).json()[
-        "total_records"
-    ] == 1
+    assert (
+        client.get("/api/summary", params={"service_origin": "BBVA México"}).json()["total_records"]
+        == 1
+    )
 
     deleted = client.delete(
         f"/api/uploads/nps/{upload['upload_id']}",
@@ -201,11 +202,9 @@ def test_api_deletes_a_specific_incident_ingestion(tmp_path: Path) -> None:
             files={"file": (source.name, handle, "application/vnd.ms-excel")},
         ).json()
     assert upload["status"] == "completed"
-    assert len(
-        client.get(
-            "/api/uploads/helix", params={"service_origin": "BBVA México"}
-        ).json()
-    ) == 1
+    assert (
+        len(client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json()) == 1
+    )
 
     deleted = client.delete(
         f"/api/uploads/helix/{upload['upload_id']}",
@@ -213,9 +212,7 @@ def test_api_deletes_a_specific_incident_ingestion(tmp_path: Path) -> None:
     )
     assert deleted.status_code == 200
     assert deleted.json()["removed_uploads"] == 1
-    assert client.get(
-        "/api/uploads/helix", params={"service_origin": "BBVA México"}
-    ).json() == []
+    assert client.get("/api/uploads/helix", params={"service_origin": "BBVA México"}).json() == []
 
 
 def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -> None:
@@ -232,7 +229,8 @@ def test_nps_column_alias_settings_are_validated_and_persisted(tmp_path: Path) -
     assert saved.status_code == 200
     assert settings.column_aliases_path.exists()
     assert (
-        client.get("/api/settings/nps-column-aliases", params=company_context).json() == saved.json()
+        client.get("/api/settings/nps-column-aliases", params=company_context).json()
+        == saved.json()
     )
     assert saved.json()["service_origin_n1"] == ""
 

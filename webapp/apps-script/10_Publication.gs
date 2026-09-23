@@ -1,5 +1,5 @@
 const PUBLICATION_HEADERS = Object.freeze([
-  'scope_key', 'audience_key', 'buug', 'n1', 'n2', 'year', 'month', 'causal_method',
+  'scope_key', 'audience_key', 'owner_support_company', 'year', 'month', 'causal_method',
   'causal_method_label', 'edition_file_id', 'pptx_file_id', 'slides_file_id',
   'newsletter_insight', 'generated_at', 'imported_at', 'imported_by'
 ]);
@@ -37,10 +37,10 @@ function _publicationRows_() {
   if (sheet.getLastRow() <= 1) return [];
   publicationRowsCache = sheet.getRange(2, 1, sheet.getLastRow() - 1, PUBLICATION_HEADERS.length).getValues()
     .map((row, index) => ({row: index + 2, scopeKey: String(row[0]), audienceKey: String(row[1]),
-      buug: String(row[2]), n1: String(row[3]), n2: String(row[4]), year: String(row[5]),
-      month: String(row[6]), causalMethod: String(row[7]), causalMethodLabel: String(row[8]),
-      snapshotFileId: String(row[9]), pptxFileId: String(row[10]), slidesFileId: String(row[11]),
-      newsletterInsight:String(row[12]||''),generatedAt:String(row[13]),importedAt:row[14],importedBy:String(row[15])}));
+      ownerSupportCompany: String(row[2]), year: String(row[3]), month: String(row[4]),
+      causalMethod: String(row[5]), causalMethodLabel: String(row[6]), snapshotFileId: String(row[7]),
+      pptxFileId: String(row[8]), slidesFileId: String(row[9]), newsletterInsight:String(row[10]||''),
+      generatedAt:String(row[11]),importedAt:row[12],importedBy:String(row[13])}));
   const serialized = JSON.stringify(publicationRowsCache);
   if (serialized.length < 90000) CacheService.getScriptCache().put(cacheKey, serialized, 300);
   return publicationRowsCache;
@@ -57,13 +57,13 @@ function _publicationByKey_(scopeKey) {
 function _selectedPublication_() { return _publicationByKey_(_property_(NPS_LENS.selectedScopeProperty)); }
 
 function _validateEdition_(payload) {
-  if (!payload || payload.schema_version !== '4.0' || !payload.manifest || !payload.screens || !payload.scope) {
-    throw new Error('La edición no cumple el contrato NPS Lens 4.0 con ámbito inmutable.');
+  if (!payload || payload.schema_version !== '5.0' || !payload.manifest || !payload.screens || !payload.scope) {
+    throw new Error('La edición no cumple el contrato NPS Lens 5.0 con ámbito inmutable.');
   }
   ['dashboard', 'linking', 'data'].forEach(name => {
     if (!payload.screens[name] || typeof payload.screens[name] !== 'object') throw new Error('Falta la pantalla requerida: ' + name + '.');
   });
-  ['key','audience_key','buug','n1','year','month','causal_method','causal_method_label'].forEach(name => {
+  ['key','audience_key','owner_support_company','year','month','causal_method','causal_method_label'].forEach(name => {
     if (!String(payload.scope[name] || '').trim()) throw new Error('Falta el dato de ámbito: ' + name + '.');
   });
   return payload;
@@ -73,7 +73,7 @@ function _validateArchive_(payload) {
   _validateEdition_(payload);
   const snapshot = payload.snapshots && payload.snapshots.data;
   const datasets = snapshot && snapshot.datasets;
-  if (!snapshot || snapshot.schema_version !== '4.0' || !datasets || !datasets.nps || !datasets.helix) {
+  if (!snapshot || snapshot.schema_version !== '5.0' || !datasets || !datasets.nps || !datasets.helix) {
     throw new Error('La edición no incluye los snapshots estáticos calculados por la aplicación local.');
   }
   if (!datasets.nps.page || !datasets.helix.page) {
@@ -129,7 +129,7 @@ function _loadSnapshot_(fileId) {
 
 function _publishedShell_(scopeKey) {
   const publication = _publicationByKey_(scopeKey);
-  if (!publication) return {schema_version:'4.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
+  if (!publication) return {schema_version:'5.0',generated_at:'',screens:{},scope:{},manifest:{status:'Sin edición publicada'}};
   const fileId = _property_(_publicationShellProperty_(publication.scopeKey));
   if (!fileId) throw new Error('Esta edición debe volver a publicarse para aplicar la carga optimizada.');
   return _validateEdition_(_loadSnapshot_(fileId));
@@ -181,8 +181,8 @@ function _publicationFolder_() {
 function _publicationCatalog_() {
   const showEvolutionNps = _evolutionNpsVisible_();
   return _publicationRows_().map(item => ({
-    scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.buug,item.n1,item.year,item.month,item.causalMethodLabel].join(' · '),
-    buug:item.buug,n1:item.n1,n2:item.n2,year:item.year,month:item.month,causalMethod:item.causalMethod,
+    scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.ownerSupportCompany,item.year,item.month,item.causalMethodLabel].join(' · '),
+    ownerSupportCompany:item.ownerSupportCompany,year:item.year,month:item.month,causalMethod:item.causalMethod,
     causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_reportUrl_(item.scopeKey,showEvolutionNps)
   }));
 }
@@ -313,7 +313,7 @@ function _importPublicationArchiveBlob_(archiveBlob) {
     compactPptxFileId = String(Drive.Files.create({name:compactReportBlob.getName(),mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',parents:[destination.id]},compactReportBlob,{supportsAllDrives:true,fields:'id'}).id);
     compactSlidesFileId = String(Drive.Files.create({name:compactReportBlob.getName().replace(/\.pptx$/i,''),mimeType:'application/vnd.google-apps.presentation',parents:[destination.id]},compactReportBlob,{supportsAllDrives:true,fields:'id'}).id);
     if (!compactSlidesFileId) throw new Error('Google Drive no ha confirmado la presentación compacta.');
-    const s=edition.scope,row=[s.key,s.audience_key,s.buug,s.n1,s.n2||'',s.year,s.month,s.causal_method,s.causal_method_label,snapshotFileId,pptxFileId,slidesFileId,newsletterInsight,edition.generated_at,new Date(),viewer.email];
+    const s=edition.scope,row=[s.key,s.audience_key,s.owner_support_company,s.year,s.month,s.causal_method,s.causal_method_label,snapshotFileId,pptxFileId,slidesFileId,newsletterInsight,edition.generated_at,new Date(),viewer.email];
     const sheet=_sheet_(NPS_LENS.publicationsSheet);
     const properties = PropertiesService.getScriptProperties();
     properties.setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});

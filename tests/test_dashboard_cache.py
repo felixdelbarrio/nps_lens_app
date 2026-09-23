@@ -101,19 +101,19 @@ def test_empty_causal_bundle_is_cached_with_explicit_scope(tmp_path: Path) -> No
 
     first = service._causal_analysis_bundle(
         context=context,
-            pop_year="2026",
-            pop_month="03",
-            score_channel="Todos",
-            min_similarity=0.15,
+        pop_year="2026",
+        pop_month="03",
+        score_channel="Todos",
+        min_similarity=0.15,
         max_days_apart=90,
         touchpoint_source="domain_touchpoint",
     )
     second = service._causal_analysis_bundle(
         context=context,
-            pop_year="2026",
-            pop_month="03",
-            score_channel="Todos",
-            min_similarity=0.15,
+        pop_year="2026",
+        pop_month="03",
+        score_channel="Todos",
+        min_similarity=0.15,
         max_days_apart=90,
         touchpoint_source="domain_touchpoint",
     )

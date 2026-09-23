@@ -100,9 +100,7 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
         normalized_key = str(key).strip()
         if not normalized_key or not isinstance(items, list):
             continue
-        output[normalized_key] = _dedupe(
-            [str(item).strip() for item in items if str(item).strip()]
-        )
+        output[normalized_key] = _dedupe([str(item).strip() for item in items if str(item).strip()])
     return output
 
 

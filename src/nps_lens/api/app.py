@@ -383,9 +383,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if result["status"] == "completed" and dashboard_layer.taxonomy.state(
             UploadContext(service_origin)
         ).get("restored"):
-            dashboard_layer.taxonomy.resume_local(
-                UploadContext(service_origin)
-            )
+            dashboard_layer.taxonomy.resume_local(UploadContext(service_origin))
         dashboard_layer.clear_caches()
         return result
 
@@ -642,7 +640,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         context = taxonomy_context(request)
         try:
             if payload.service_origin and payload.service_origin != context.service_origin:
-                raise ValueError("El Owner Support Company del payload no coincide con el contexto seleccionado.")
+                raise ValueError(
+                    "El Owner Support Company del payload no coincide con el contexto seleccionado."
+                )
             if payload.service_origin_n1 and payload.service_origin_n1 != context.service_origin_n1:
                 raise ValueError("El N1 del payload no coincide con el contexto seleccionado.")
             registry = ColumnAliasRegistry.from_dict(

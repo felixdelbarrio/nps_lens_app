@@ -10,7 +10,7 @@ from nps_lens.platform.webapp_preview import build_preview, extract_report, load
 def test_webapp_preview_loads_publication_and_embedded_report(tmp_path: Path) -> None:
     archive_path = tmp_path / "nps-lens-publicacion-20260827-100000.zip"
     publication = {
-        "schema_version": "4.0",
+        "schema_version": "5.0",
         "generated_at": "2026-08-27T08:00:00Z",
         "filters": {"service_origin": "BBVA México", "month": "03"},
         "screens": {"dashboard": {}, "linking": {}, "data": {}},
@@ -43,6 +43,8 @@ def test_apps_script_uses_archive_import_without_manual_drive_ids() -> None:
     assert "setPublishedEditionFiles" not in publication_source
     assert "edition-file" not in app_source
     assert "report-file" not in app_source
+    assert "'owner_support_company'" in publication_source
+    assert "'buug'" not in publication_source
 
 
 def test_apps_script_converts_report_and_supports_admin_operations() -> None:
@@ -89,7 +91,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '2.9.17'" in config
+    assert "version: '3.0.0'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
