@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import StringIO
