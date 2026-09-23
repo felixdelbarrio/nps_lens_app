@@ -44,6 +44,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     await action(async () => {
       const config = mode === "COMPLETED" ? { certainty_threshold: certaintyThreshold, min_f1: minF1 } : {};
       const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config }));
+      if (mode === "DISCOVERED") await mutateDiscovery();
       setMessage(result.cache_hit ? "Resultado reutilizado de la caché local." : "Taxonomía calculada y guardada en local.");
     });
   }
@@ -54,26 +55,23 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       setMessage("Configuración de descubrimiento guardada.");
     }, false);
   }
-  async function connectDiscovery() {
+  function exchangeMessage(result: { stage: string; saved_path?: string; received?: number; batches?: number; pending?: string[] }) {
+    if (result.stage === "complete") return "Todos los lotes validados. Taxonomía descubierta guardada; ya puedes usarla como lente.";
+    if (result.saved_path) return `ZIP guardado en ${result.saved_path}. Súbelo a ${result.stage === "designer" ? "Crea Taxonomía" : "Clasifica taxonomía"} e importa aquí el ZIP de respuesta.`;
+    return `Lotes recibidos: ${result.received}/${result.batches}. Pendientes: ${result.pending?.join(", ")}. Aún no se publica la taxonomía.`;
+  }
+  async function exportZip() {
     await action(async () => {
-      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/connect", context, { method: "POST" });
-      await mutateDiscovery(result, { revalidate: false });
-      setMessage("ChatGPT conectado.");
+      const result = await taxonomyRequest<{ stage: string; saved_path: string }>("/discovery/export", context, { method: "POST" });
+      setMessage(exchangeMessage(result));
     }, false);
   }
-  async function disconnectDiscovery() {
+  async function importZip(file: File) {
     await action(async () => {
-      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/disconnect", context, { method: "POST" });
-      await mutateDiscovery(result, { revalidate: false });
-      setMessage("Sesión local de ChatGPT eliminada.");
-    }, false);
-  }
-  async function verifyDiscovery() {
-    await action(async () => {
-      const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery/verify", context, { method: "POST" });
-      await mutateDiscovery(result, { revalidate: false });
-      setMessage("Conexión con ChatGPT verificada.");
-    }, false);
+      const form = new FormData(); form.append("file", file);
+      const result = await taxonomyRequest<{ stage: string; saved_path?: string; received?: number; batches?: number; pending?: string[] }>("/discovery/import", context, { method: "POST", body: form });
+      setMessage(exchangeMessage(result));
+    });
   }
   async function explore(next: typeof view) {
     setView(next);
@@ -95,16 +93,19 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     </div>
     {data.discovery_local_available && discovery ? <article className="settings-subsection taxonomy-discovery-settings">
       <h3>Método de descubrimiento</h3>
-      <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="local">Local</option><option value="chatgpt_browser">ChatGPT automatizado</option></select></label>
-      {discoveryMethod === "chatgpt_browser" ? <>
+      <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="local">Local</option><option value="chatgpt_zip">ChatGPT · archivos ZIP</option></select></label>
+      {discoveryMethod === "chatgpt_zip" ? <>
         <div className="field-grid">
           <div><label>Designer URL · Crea Taxonomía<input value={designerUrl} disabled={locked} onChange={e => setDesignerUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="designer" context={context} /></div>
           <div><label>Classifier URL · Clasifica taxonomía<input value={classifierUrl} disabled={locked} onChange={e => setClassifierUrl(e.target.value)} /></label><TaxonomyProjectInstructions role="classifier" context={context} /></div>
         </div>
-        <p className="field-hint">Copia cada plantilla en las instrucciones de su proyecto, sustituyendo reglas anteriores incompatibles. Copiar no modifica ChatGPT ni inicia una sesión. El diseño usa el corpus completo; los lotes de clasificación respetan límites de filas y tamaño sin truncar comentarios.</p>
-        <p role="status">{discovery.session === "connected" ? "Conectado" : discovery.session === "interaction_required" ? "Interacción requerida" : discovery.session === "expired" ? "Sesión caducada" : discovery.session === "unknown" ? "Estado no comprobado" : "No conectado"}</p>
-        <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button><button className="primary-button" disabled={locked || discovery.session === "connected"} onClick={() => void connectDiscovery()}>Conectar con ChatGPT</button><button className="secondary-button" disabled={locked} onClick={() => void verifyDiscovery()}>Verificar conexión</button><button className="secondary-button" disabled={locked || discovery.session === "not_connected"} onClick={() => void disconnectDiscovery()}>Desconectar</button></div>
-        <p className="field-hint">Se requiere Google Chrome instalado. Inicia sesión y completa MFA o Cloudflare directamente en esa ventana; después pulsa Verificar conexión. No cierres ni recargues la ventana ante un challenge. NPS Lens reutiliza la misma sesión y minimiza Chrome durante la generación. Al desconectar o cerrar NPS Lens se elimina el perfil temporal; el siguiente inicio puede requerir autenticación.</p>
+        <p className="field-hint">1. Copia las instrucciones actualizadas a ambos proyectos. 2. Exporta el ZIP a Descargas y súbelo a Crea Taxonomía en tu navegador habitual. 3. Importa su respuesta: se generará el ZIP de clasificación. 4. Súbelo a Clasifica taxonomía e importa su respuesta. No se controla el navegador ni se solicitan permisos de macOS. Los proyectos necesitan herramientas para leer y crear archivos ZIP.</p>
+        <div className="inline-actions">
+          <button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button>
+          <button className="primary-button" disabled={locked || data.restored || !data.detection.rows} onClick={() => void exportZip()}>Exportar ZIP a Descargas</button>
+          <label>Importar ZIP de respuesta<input type="file" accept=".zip,application/zip" disabled={locked || data.restored} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importZip(file); }} /></label>
+        </div>
+        <p className="field-hint">Los ZIP contienen los comentarios originales: compártelos solo en el espacio corporativo autorizado. Importaciones parciales se conservan, pero no se publica nada hasta validar todos los lotes. Puedes importar de nuevo el ZIP de Designer para recuperar el ZIP de clasificación.</p>
       </> : null}
     </article> : null}
     <div className="taxonomy-cards">{data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>
@@ -112,7 +113,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       {item.available ? <><p>{item.levers} Palancas · {item.sublevers} Subpalancas</p><p>{((item.coverage || 0) * 100).toFixed(1)}% cobertura{item.macro_f1 != null ? ` · Macro F1 ${item.macro_f1.toFixed(2)}` : ""}</p>{item.mode === "NORMALIZED" ? <p>{item.equivalence_groups} grupos de equivalencias</p> : null}</> : <p>{item.stale ? "Corpus o configuración modificados; requiere regeneración." : "Aún no creada."}</p>}
       <div className="inline-actions">
         {item.available ? <><button className="secondary-button" disabled={locked} onClick={() => void explore({ mode: item.mode, offset: 0 })}>Explorar {NAMES[item.mode]}</button><button className="primary-button" disabled={locked || data.active === item.mode} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: item.mode })))}>Usar como lente</button></> : null}
-        {(item.mode === "COMPLETED" || item.mode === "DISCOVERED") && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || (item.mode === "COMPLETED" && data.detection.state === "MISSING") || (item.mode === "DISCOVERED" && discoveryMethod !== "chatgpt_browser")} onClick={() => void generate(item.mode, item.available || Boolean(item.stale))}>{item.available || item.stale ? "Regenerar" : item.mode === "COMPLETED" ? "Completar" : "Descubrir"}</button> : null}
+        {(item.mode === "COMPLETED" || item.mode === "DISCOVERED") && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || (item.mode === "COMPLETED" && data.detection.state === "MISSING") || (item.mode === "DISCOVERED" && discoveryMethod !== "chatgpt_zip")} onClick={() => void (item.mode === "DISCOVERED" ? exportZip() : generate(item.mode, item.available || Boolean(item.stale)))}>{item.available || item.stale ? "Regenerar" : item.mode === "COMPLETED" ? "Completar" : "Descubrir"}</button> : null}
       </div>
     </article>)}</div>
     <div className="field-grid">

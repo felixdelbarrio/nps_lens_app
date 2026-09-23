@@ -29,8 +29,6 @@ dependencies = [
   "ruptures>=1.1.8,<2.0",
   "openpyxl>=3.1,<3.2",
   "typing_extensions>=4.7,<5.0",
-  "playwright>=1.54,<2.0",
-  "psutil>=5.9,<8",
 ]
 [[project.authors]]
 name = "NPS Lens"
@@ -45,7 +43,6 @@ dev = [
   "httpx>=0.28,<0.29",
   "mypy>=1.8,<1.12",
   "types-python-dateutil",
-  "types-psutil",
   "pandas-stubs==2.2.2.240807",
   "ruff>=0.3,<0.7",
   "black>=24.2,<25.0",

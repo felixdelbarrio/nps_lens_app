@@ -26,22 +26,6 @@ DEFAULT_UI_POP_VALUE = "Todos"
 DEFAULT_TAXONOMY_DISCOVERY_METHOD = "local"
 DEFAULT_TAXONOMY_DESIGNER_URL = "https://chatgpt.com/g/g-p-6aaabb05fd0881a49965c28ef21333a9"
 DEFAULT_TAXONOMY_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aaab79eb94481a498b0b2bb6ba2cb2a"
-DEFAULT_SERVICE_ORIGINS = [
-    "BBVA México",
-    "BBVA España",
-    "BBVA Colombia",
-    "BBVA Perú",
-    "BBVA Argentina",
-]
-DEFAULT_SERVICE_ORIGIN = DEFAULT_SERVICE_ORIGINS[0]
-DEFAULT_SERVICE_ORIGIN_N1 = "ENTERPRISE WEB"
-DEFAULT_SERVICE_ORIGIN_N1_MAP = {
-    "BBVA México": ["ENTERPRISE WEB", "MOBILE ENTERPRISE"],
-    "BBVA España": ["ENTERPRISE MOBILE CHANNEL", "ENTERPRISES CHANNEL"],
-    "BBVA Colombia": ["ENTERPRISE MOBILE (GEMA)", "ENTERPRISE WEB CHANNEL"],
-    "BBVA Perú": ["ENTERPRISE BANKING CANALES WEB & MOBILE"],
-    "BBVA Argentina": ["AR44 PLATAFORMA SENDA ARG", "AR46 GEMA ARG"],
-}
 BOOTSTRAP_CONTEXT_ENV_KEYS = {
     "NPS_LENS_SERVICE_ORIGIN_BUUG",
     "NPS_LENS_SERVICE_ORIGIN_N1",
@@ -108,30 +92,16 @@ def _parse_origin_map(value: str) -> dict[str, list[str]]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        parsed = None
-    if isinstance(parsed, dict):
-        output: dict[str, list[str]] = {}
-        for key, items in parsed.items():
-            normalized_key = str(key).strip()
-            if not normalized_key:
-                continue
-            if isinstance(items, list):
-                output[normalized_key] = _dedupe(
-                    [str(item).strip() for item in items if str(item).strip()]
-                )
-            else:
-                output[normalized_key] = _dedupe(_split_csv(str(items)))
-        return output
-    output = {}
-    for chunk in [item.strip() for item in raw.split(";") if item.strip()]:
-        if ":" not in chunk:
-            continue
-        key, payload = chunk.split(":", 1)
-        normalized_key = key.strip()
-        if not normalized_key:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    output: dict[str, list[str]] = {}
+    for key, items in parsed.items():
+        normalized_key = str(key).strip()
+        if not normalized_key or not isinstance(items, list):
             continue
         output[normalized_key] = _dedupe(
-            [item.strip() for item in payload.split("|") if item.strip()]
+            [str(item).strip() for item in items if str(item).strip()]
         )
     return output
 
@@ -382,7 +352,7 @@ def normalize_report_dimension_analysis(value: object) -> str:
 
 def normalize_taxonomy_discovery_method(value: object) -> str:
     raw = str(value or "").strip().lower()
-    if raw not in {"local", "chatgpt_browser"}:
+    if raw not in {"local", "chatgpt_zip"}:
         raise ValueError("Método de descubrimiento desconocido.")
     return raw
 
@@ -466,19 +436,22 @@ def persist_service_origin_hierarchy(
         set_key(str(dotenv_path), env_key, value, quote_mode="auto")
 
 
-def _fallback_n1_values(service_origin: str) -> list[str]:
-    configured = DEFAULT_SERVICE_ORIGIN_N1_MAP.get(str(service_origin).strip())
-    return list(configured) if configured else [DEFAULT_SERVICE_ORIGIN_N1]
+def _service_origin_hierarchy_from_env() -> tuple[list[str], dict[str, list[str]]]:
+    origins_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "")
+    service_origins = _parse_json_list(origins_raw) or _dedupe(_split_csv(origins_raw))
+    if not service_origins:
+        raise ValueError(
+            "Falta NPS_LENS_SERVICE_ORIGIN_BUUG en .env; configura al menos una compañía."
+        )
 
-
-def _complete_origin_n1_map(
-    service_origins: list[str], origin_n1_map: dict[str, list[str]]
-) -> dict[str, list[str]]:
-    completed: dict[str, list[str]] = {}
-    for origin in service_origins:
-        values = origin_n1_map.get(origin) or _fallback_n1_values(origin)
-        completed[origin] = _dedupe(values) or _fallback_n1_values(origin)
-    return completed
+    origin_n1_map = _parse_origin_map(os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", ""))
+    missing = [origin for origin in service_origins if not origin_n1_map.get(origin)]
+    if missing:
+        raise ValueError(
+            "NPS_LENS_SERVICE_ORIGIN_N1 debe ser un JSON con al menos un N1 para cada "
+            f"compañía configurada; faltan: {', '.join(missing)}."
+        )
+    return service_origins, {origin: origin_n1_map[origin] for origin in service_origins}
 
 
 @dataclass(frozen=True)
@@ -501,7 +474,6 @@ class Settings:
     knowledge_dir: Path = Path("./knowledge")
     equivalences_path: Path = Path("./data/config/equivalences.json")
     column_aliases_path: Path = Path("./data/config/nps_column_aliases.json")
-    service_origin_n2_values: list[str] = field(default_factory=list)
     service_origin_n2_map: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     default_theme_mode: str = DEFAULT_UI_THEME_MODE
     default_touchpoint_source: str = DEFAULT_UI_TOUCHPOINT_SOURCE
@@ -542,38 +514,13 @@ class Settings:
                 str(data_dir / "config" / "nps_column_aliases.json"),
             )
         ).expanduser()
-        origins_raw = os.getenv(
-            "NPS_LENS_SERVICE_ORIGIN_BUUG",
-            os.getenv("NPS_LENS_SERVICE_ORIGIN", ", ".join(DEFAULT_SERVICE_ORIGINS)),
-        )
-        allowed_service_origins = (
-            _parse_json_list(origins_raw)
-            or _dedupe(_split_csv(origins_raw))
-            or DEFAULT_SERVICE_ORIGINS
-        )
-        origin_n1_raw = os.getenv("NPS_LENS_SERVICE_ORIGIN_N1", "")
-        origin_n1_map = _complete_origin_n1_map(
-            allowed_service_origins,
-            _parse_origin_map(origin_n1_raw),
-        )
-
-        service_origin_n2_values = _parse_json_list(
-            os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")
-        ) or _dedupe(_split_csv(os.getenv("NPS_LENS_SERVICE_ORIGIN_N2", "")))
+        allowed_service_origins, origin_n1_map = _service_origin_hierarchy_from_env()
         service_origin_n2_map = _parse_origin_n2_map(os.getenv(SERVICE_ORIGIN_N2_MAP_ENV_KEY, ""))
-        default_service_origin = (
-            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", DEFAULT_SERVICE_ORIGIN).strip()
-            or allowed_service_origins[0]
-        )
+        default_service_origin = os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "").strip()
         if default_service_origin not in allowed_service_origins:
             default_service_origin = allowed_service_origins[0]
-        default_n1_candidates = origin_n1_map.get(default_service_origin) or _fallback_n1_values(
-            default_service_origin
-        )
-        default_service_origin_n1 = (
-            os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", DEFAULT_SERVICE_ORIGIN_N1).strip()
-            or default_n1_candidates[0]
-        )
+        default_n1_candidates = origin_n1_map[default_service_origin]
+        default_service_origin_n1 = os.getenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "").strip()
         if default_service_origin_n1 not in default_n1_candidates:
             default_service_origin_n1 = default_n1_candidates[0]
         default_theme_mode = (
@@ -686,7 +633,6 @@ class Settings:
             knowledge_dir=knowledge_dir,
             equivalences_path=equivalences_path,
             column_aliases_path=column_aliases_path,
-            service_origin_n2_values=service_origin_n2_values,
             service_origin_n2_map=service_origin_n2_map,
             default_theme_mode=default_theme_mode,
             default_touchpoint_source=default_touchpoint_source,
@@ -706,10 +652,7 @@ class Settings:
     def service_origin_n2_options(self, service_origin: str, service_origin_n1: str) -> list[str]:
         origin = str(service_origin or "").strip()
         n1 = str(service_origin_n1 or "").strip()
-        mapped = self.service_origin_n2_map.get(origin, {}).get(n1, [])
-        if mapped:
-            return mapped
-        return self.service_origin_n2_values
+        return list(self.service_origin_n2_map.get(origin, {}).get(n1, []))
 
     def ui_defaults(self) -> dict[str, object]:
         default_service_origin = ui_pref("service_origin", self.default_service_origin)

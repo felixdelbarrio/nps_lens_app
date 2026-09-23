@@ -42,7 +42,6 @@ export type DashboardConfig = {
   default_service_origin_n2: string;
   service_origins: string[];
   service_origin_n1_map: Record<string, string[]>;
-  service_origin_n2_values: string[];
   service_origin_n2_map: Record<string, Record<string, string[]>>;
   service_origin_n2_options: string[];
   available_years: string[];
@@ -670,10 +669,9 @@ export type TaxonomyProjectInstructions = {
   classifier: string;
 };
 export type TaxonomyDiscoverySettings = {
-  method: "local" | "chatgpt_browser";
+  method: "local" | "chatgpt_zip";
   designer_url: string;
   classifier_url: string;
-  session: "connected" | "not_connected" | "expired" | "interaction_required" | "unknown";
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

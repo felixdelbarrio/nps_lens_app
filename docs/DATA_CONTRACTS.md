@@ -68,7 +68,8 @@ El `NPS clásico` ejecutivo se calcula siempre sobre el conjunto agregado de res
 
 ### Columnas típicas (varían por export)
 Soportadas (mapeadas a canónico):
-- `BBVA_SourceServiceCompany` (o `Servicio Origen - BU/UG`)
+- `Owner Support Company` (compañía/geografía obligatoria)
+- `BBVA_SourceServiceCompany` (o `Servicio Origen - BU/UG`, conservado como dato de servicio)
 - `BBVA_SourceServiceN1` (o `Servicio Origen - Servicio N1`)
 - `BBVA_SourceServiceN2` (o `Servicio Origen - Servicio N2`)
 - `incident_id` / `ID incidencia` (si existe)
@@ -80,8 +81,9 @@ Soportadas (mapeadas a canónico):
   - epochs ms/us/ns/s detectados por magnitud
 
 ### Reglas de filtrado por contexto
-- Si existen columnas Company/N1/N2: filtrar estrictamente por contexto.
-- Si el extract ya viene filtrado y faltan columnas: se ingesta bajo el contexto seleccionado con WARN (para no mezclar).
+- Filtrar siempre la compañía/geografía por `Owner Support Company` y el canal por N1.
+- `Owner Support Company` y N1 son obligatorios; no se deduce la compañía desde Servicio Origen ni desde el contexto seleccionado.
+- Si hay N2 seleccionado, se exige igualdad estricta del conjunto de tokens de Servicio Origen N2.
 
 ### Enlaces Helix
 - La URL visible de una incidencia se resuelve por `Record ID`, no por el número `INC...`.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -23,40 +24,8 @@ from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
-from nps_lens.services.taxonomy_service import TaxonomyService
+from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 from nps_lens.settings import Settings
-
-
-class FakeDiscoveryProvider:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def signature_config(self) -> dict[str, object]:
-        return {
-            "engine": "fake-v1",
-            "method": "chatgpt_browser",
-            "designer_url": "designer",
-            "classifier_url": "classifier",
-            "batch_size": 500,
-        }
-
-    def discover(self, comments: list[tuple[str, str]]) -> dict[str, object]:
-        self.calls += 1
-        return {
-            "lever": ["ChatGPT"] * len(comments),
-            "sublever": ["Clasificado"] * len(comments),
-            "provenance": ["chatgpt"] * len(comments),
-            "nodes": [],
-        }
-
-    def session_status(self) -> str:
-        return "connected"
-
-    def connect(self) -> str:
-        return "connected"
-
-    def disconnect(self) -> None:
-        return None
 
 
 def corpus() -> pd.DataFrame:
@@ -108,7 +77,43 @@ def service(settings: Settings) -> tuple[TaxonomyService, UploadContext]:
         filename="test.xlsx", payload=content.getvalue(), context=context
     )
     assert result["status"] == "completed", result
-    return TaxonomyService(repo, settings.equivalences_path, FakeDiscoveryProvider()), context
+    return TaxonomyService(repo, settings.equivalences_path), context
+
+
+def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
+    """Install a ZIP-equivalent artifact; ZIP protocol itself has dedicated E2E tests."""
+    frame = (
+        tax.resolver.resolve(tax.source(ctx), "NORMALIZED", tax.registry(ctx))
+        .sort_values("_business_key")
+        .reset_index(drop=True)
+    )
+    config = {"method": "chatgpt_zip", "taxonomy_sha256": "test", "instructions_version": "test"}
+    sig = signature(frame, "DISCOVERED", config, tax.registry(ctx).signature("nps"))
+    artifact = {
+        "mode": "DISCOVERED",
+        "signature": sig,
+        "keys": frame["_business_key"].tolist(),
+        "config": config,
+        "created_at": "2026-09-18T00:00:00+00:00",
+        "lever": ["ChatGPT"] * len(frame),
+        "sublever": ["Clasificado"] * len(frame),
+        "provenance": ["chatgpt_zip"] * len(frame),
+        "nodes": [],
+        "equivalences": {},
+    }
+    state = tax.state(ctx)
+    state.setdefault("artifacts", {})["DISCOVERED"] = sig
+    with tax.repository._connect() as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+            (sig, context_key(ctx), "DISCOVERED", json.dumps(artifact)),
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
+            (context_key(ctx), json.dumps(state)),
+        )
+    tax._state_cache.clear()
+    tax._cache.clear()
 
 
 @pytest.mark.parametrize("state", ["COMPLETE", "PARTIAL", "MISSING", "NO_TEXT"])
@@ -224,19 +229,16 @@ def test_resolver_all_modes_and_cached_generation(service) -> None:
     before = source.copy()
     assert tax.resolve(ctx, mode="SOURCE").Canal.iloc[0] == "Otros"
     assert tax.resolve(ctx, mode="NORMALIZED").Canal.iloc[0] == "Otros Canales"
+    first = tax.generate(ctx, "COMPLETED", TaxonomyConfig())
+    assert not first["cache_hit"]
+    seed_discovered(tax, ctx)
     for mode in ["COMPLETED", "DISCOVERED"]:
-        first = tax.generate(ctx, mode, TaxonomyConfig())
-        assert not first["cache_hit"]
-        with (
-            patch(
-                "nps_lens.services.taxonomy_service.complete",
-                side_effect=AssertionError("retrained"),
-            ),
-            patch.object(
-                tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")
-            ),
+        with patch(
+            "nps_lens.services.taxonomy_service.complete",
+            side_effect=AssertionError("retrained"),
         ):
-            assert tax.generate(ctx, mode, TaxonomyConfig())["cache_hit"]
+            if mode == "COMPLETED":
+                assert tax.generate(ctx, mode, TaxonomyConfig())["cache_hit"]
             tax.configure(ctx, {"active": mode})
             assert len(tax.resolve(ctx)) == len(source)
             assert tax.explore(ctx, mode)["total"] > 0
@@ -246,8 +248,8 @@ def test_resolver_all_modes_and_cached_generation(service) -> None:
 
 def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     tax, ctx = service
-    for mode in ["COMPLETED", "DISCOVERED"]:
-        tax.generate(ctx, mode, TaxonomyConfig())
+    tax.generate(ctx, "COMPLETED", TaxonomyConfig())
+    seed_discovered(tax, ctx)
     registry = EquivalenceRegistry.load(tax.equivalences_path).to_dict()
     registry["dimensions"]["helix.Service"] = [{"canonical": "Banco", "aliases": ["Bank"]}]
     EquivalenceRegistry.from_dict(registry).save(tax.equivalences_path)
@@ -263,28 +265,9 @@ def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     ]
 
 
-def test_discovered_regenerate_and_failure_are_atomic(service) -> None:
+def test_discovered_cannot_use_obsolete_direct_generation(service) -> None:
     tax, ctx = service
-    provider = tax.discovery_provider
-    assert isinstance(provider, FakeDiscoveryProvider)
-    first = tax.generate(ctx, "DISCOVERED")
-    assert provider.calls == 1
-    tax.generate(ctx, "DISCOVERED", regenerate=True)
-    assert provider.calls == 2
-
-    with (
-        patch.object(provider, "discover", side_effect=RuntimeError("classifier failed")),
-        pytest.raises(RuntimeError, match="classifier failed"),
-    ):
-        tax.generate(ctx, "DISCOVERED", regenerate=True)
-    assert tax.state(ctx)["artifacts"]["DISCOVERED"] == first["signature"]
-    assert tax.artifact(first["signature"]) is not None
-
-
-def test_discovered_is_disabled_without_selected_provider(service) -> None:
-    tax, ctx = service
-    tax.set_discovery_provider(None)
-    with pytest.raises(ValueError, match="Selecciona ChatGPT"):
+    with pytest.raises(ValueError, match="intercambio ZIP"):
         tax.generate(ctx, "DISCOVERED")
 
 
@@ -294,17 +277,14 @@ def test_discovered_is_disabled_without_selected_provider(service) -> None:
 def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, number) -> None:
     tax, ctx = service
     tax.generate(ctx, "COMPLETED", TaxonomyConfig())
-    tax.generate(ctx, "DISCOVERED", TaxonomyConfig())
+    seed_discovered(tax, ctx)
     tax.configure(ctx, {"active": "DISCOVERED", "default": "DISCOVERED", "policy": policy})
     before = tax.resolve(ctx)
     snapshot = tax.snapshot(ctx)
     assert len(snapshot["taxonomies"]) == number
-    with patch.object(
-        tax.discovery_provider, "discover", side_effect=AssertionError("rediscovered")
-    ):
-        tax.restore(ctx, snapshot)
-        pd.testing.assert_series_equal(tax.resolve(ctx).Palanca, before.Palanca, check_dtype=False)
-        assert tax.studio(ctx)["restored"]
+    tax.restore(ctx, snapshot)
+    pd.testing.assert_series_equal(tax.resolve(ctx).Palanca, before.Palanca, check_dtype=False)
+    assert tax.studio(ctx)["restored"]
     tax.resume_local(ctx)
     assert not tax.studio(ctx)["restored"]
 
@@ -312,8 +292,10 @@ def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, n
 @pytest.mark.parametrize("mode", ["SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED"])
 def test_causal_path_accepts_every_lens(service, mode) -> None:
     tax, ctx = service
-    if mode in ("COMPLETED", "DISCOVERED"):
+    if mode == "COMPLETED":
         tax.generate(ctx, mode, TaxonomyConfig())
+    elif mode == "DISCOVERED":
+        seed_discovered(tax, ctx)
     frame = tax.resolve(ctx, mode=mode)
     helix = pd.DataFrame(
         {
@@ -334,19 +316,18 @@ def test_causal_path_accepts_every_lens(service, mode) -> None:
 def test_taxonomy_api_round_trip(settings, service) -> None:
     _, ctx = service
     app = create_app(settings)
-    app.state.dashboard_service.taxonomy.set_discovery_provider(FakeDiscoveryProvider())
     client = TestClient(app)
     params = {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1}
     assert client.get("/api/taxonomy", params=params).status_code == 200
     generated = client.post(
         "/api/taxonomy/generate",
         params=params,
-        json={"mode": "DISCOVERED", "config": {}},
+        json={"mode": "COMPLETED", "config": {}},
     )
     assert generated.status_code == 200, generated.text
     assert (
         client.put(
-            "/api/taxonomy/settings", params=params, json={"default": "DISCOVERED"}
+            "/api/taxonomy/settings", params=params, json={"default": "COMPLETED"}
         ).status_code
         == 200
     )
@@ -358,7 +339,7 @@ def test_taxonomy_api_round_trip(settings, service) -> None:
         files={"file": ("snapshot.json", snapshot.content, "application/json")},
     )
     assert restored.status_code == 200, restored.text
-    assert restored.json()["active"] == "DISCOVERED"
+    assert restored.json()["active"] == "COMPLETED"
     assert client.get("/api/settings/equivalences", params=params).status_code == 200
 
 
@@ -381,8 +362,10 @@ def test_migration_recovers_source_and_preserves_record_identity(service, settin
 @pytest.mark.parametrize("mode", ["SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED"])
 def test_snapshot_default_resolves_without_changing_active(service, mode) -> None:
     tax, ctx = service
-    if mode in ("COMPLETED", "DISCOVERED"):
+    if mode == "COMPLETED":
         tax.generate(ctx, mode, TaxonomyConfig())
+    elif mode == "DISCOVERED":
+        seed_discovered(tax, ctx)
     tax.configure(ctx, {"active": "SOURCE", "default": mode})
     with tax.snapshot_lens(ctx):
         assert tax.resolve(ctx).attrs["taxonomy_mode"] == mode

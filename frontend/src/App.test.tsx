@@ -12,7 +12,6 @@ const contextPayload = {
   default_service_origin_n1: "ENTERPRISE WEB",
   service_origins: ["BBVA México"],
   service_origin_n1_map: { "BBVA México": ["ENTERPRISE WEB"] },
-  service_origin_n2_values: [],
   service_origin_n2_map: { "BBVA México": { "ENTERPRISE WEB": [] } },
   service_origin_n2_options: [],
   available_years: ["Todos", "2026"],
