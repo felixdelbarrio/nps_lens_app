@@ -17,6 +17,7 @@ from nps_lens.analytics.linking_policy import (
 from nps_lens.analytics.text_mining import preprocess_text
 from nps_lens.core.nps_math import focus_mask, normalize_focus_group
 from nps_lens.domain.normalization import semantic_series
+from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 
@@ -321,7 +322,7 @@ def link_incidents_to_nps_topics(
             ),
         )
 
-    nps["nps_id"] = _safe_id(nps.get("ID", pd.Series(nps.index, index=nps.index)))
+    nps["nps_id"] = analytical_response_ids(nps)
     helix["incident_id"] = _safe_id(
         helix.get(
             "Incident Number",

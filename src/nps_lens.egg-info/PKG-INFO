@@ -162,11 +162,11 @@ make build
 
 La experiencia operativa se organiza así:
 
-- **SERVICE CONTAINER**: contexto de servicio (`BUUG`, `N1`, `N2`).
+- **OWNER SUPPORT COMPANY**: único contexto transversal para Insights, Ingesta y Datos.
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
 - **Evolución NPS**: KPIs, evolución temporal y comparativas cruzadas afectados por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
 - **Comentarios**: filtros sincronizados de `Canal` y `Grupo Score`; contiene comentarios, cambios históricos y brechas.
-- **Causalidad**: conecta incidencias Helix y comentarios NPS mediante el método causal configurado; fija `Canal=Web` y oculta `Grupo Score`.
+- **Causalidad**: conecta incidencias Helix y comentarios NPS mediante el método causal configurado; usa la atribución opcional N1/N2 del Canal y oculta `Grupo Score`.
 - **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
 
 Semántica:
@@ -175,7 +175,7 @@ Semántica:
 - **NPS clásico** es el índice `% promotores - % detractores`.
 - **NPS** se mantiene como nombre de fuente/dominio.
 
-El canal selecciona `Web` por defecto si existe; si no, `Todos`. El grupo selecciona `Detractores` si existe; si no, `Todos`. En Causalidad el canal queda fijado a `Web` y el histórico Helix no se recorta por la fecha NPS. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
+Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se calculan siempre sobre todas las opiniones; Canal solo selecciona los tópicos o el ámbito causal. En Causalidad, una asignación opcional permite vincular valores N1/N2 de Helix a un Canal y, sin asignación, se utilizan todos los comentarios, canales e incidencias de la compañía. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
 
 ---
 

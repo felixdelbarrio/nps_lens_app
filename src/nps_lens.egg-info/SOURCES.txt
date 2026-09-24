@@ -23,6 +23,7 @@ src/nps_lens/analytics/hotspot_metrics.py
 src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/journey.py
+src/nps_lens/analytics/linking_diagnostics.py
 src/nps_lens/analytics/linking_policy.py
 src/nps_lens/analytics/nps_gaps.py
 src/nps_lens/analytics/nps_helix_link.py
@@ -47,6 +48,7 @@ src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
 src/nps_lens/domain/column_aliases.py
+src/nps_lens/domain/helix.py
 src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
@@ -133,6 +135,7 @@ tests/test_incident_attribution.py
 tests/test_incident_rationale.py
 tests/test_ingest_contracts.py
 tests/test_ingest_features.py
+tests/test_iteration26_ingestion_evidence.py
 tests/test_knowledge_cache.py
 tests/test_llm_insight_response.py
 tests/test_local_processes.py
@@ -158,6 +161,7 @@ tests/test_ui_business_periods.py
 tests/test_ui_charts.py
 tests/test_ui_population.py
 tests/test_upload_service.py
+tests/test_webapp_linking_diagnostics.py
 tests/test_webapp_parity.py
 tests/test_webapp_publication.py
 tests/test_webapp_telemetry_privacy.py

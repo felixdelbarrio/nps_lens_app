@@ -81,6 +81,7 @@ from nps_lens.domain.helix_links import (
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import equivalence_key
 from nps_lens.domain.publication_scope import build_publication_scope
+from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.base import ValidationIssue
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
@@ -472,6 +473,7 @@ class DashboardService:
         with self._analytics_lock:
             self._frame_cache.clear()
             self._result_cache.clear()
+            self.taxonomy.clear_source_cache()
 
     def _cached_result(
         self,
@@ -1365,6 +1367,11 @@ class DashboardService:
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
+        touchpoint_source = str(
+            touchpoint_source
+            or self.settings.ui_defaults()["touchpoint_source"]
+            or TOUCHPOINT_SOURCE_DOMAIN
+        ).strip()
         key = (
             "linking-dashboard",
             *self._context_key(context),
@@ -2633,7 +2640,7 @@ class DashboardService:
             return pd.DataFrame()
 
         focus_copy = focus_df.copy()
-        focus_copy["nps_id"] = focus_copy.get("ID", focus_copy.index).astype(str)
+        focus_copy["nps_id"] = analytical_response_ids(focus_copy)
         comment_column = "Comment" if "Comment" in focus_copy.columns else "Comentario"
         if comment_column not in focus_copy.columns:
             focus_copy[comment_column] = ""

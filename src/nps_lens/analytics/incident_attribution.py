@@ -25,6 +25,7 @@ from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     TOUCHPOINT_SOURCE_PALANCA,
 )
+from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 EXECUTIVE_JOURNEY_CATALOG = (
@@ -673,7 +674,7 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
         )
 
     df = nps_focus_df.copy()
-    df["nps_id"] = df.get("ID", df.index).fillna("").astype(str).str.strip()
+    df["nps_id"] = analytical_response_ids(df)
     df["nps_score"] = pd.to_numeric(df.get("NPS"), errors="coerce")
     comment_series = df.get("Comment")
     if comment_series is None:

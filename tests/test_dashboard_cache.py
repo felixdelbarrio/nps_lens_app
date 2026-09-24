@@ -161,3 +161,115 @@ def test_empty_linking_dashboard_exposes_scope_funnel(tmp_path: Path, monkeypatc
     assert diagnostics["scope_requested_n1_n2"] == ["Missing service"]
     assert diagnostics["scope_available_n1"] == ["Other"]
     assert diagnostics["scope_found_n1"] == []
+
+
+def test_preferences_do_not_wait_for_analysis_or_discard_cached_results(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from nps_lens.api.app import create_app
+
+    service = _service(tmp_path)
+    app = create_app(service.settings)
+    dashboard = app.state.dashboard_service
+    context = UploadContext("BBVA México")
+    monkeypatch.setattr(dashboard, "_build_nps_dashboard", lambda **_: {"cached": True})
+    first = dashboard.nps_dashboard(context=context)
+    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls: service.settings))
+    monkeypatch.setattr("nps_lens.api.app.persist_ui_prefs", lambda *_: None)
+    # The request executes in another thread. Holding the analysis lock reproduces
+    # the expensive linking calculation without running it or relying on timings.
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as executor:
+        with dashboard._analytics_lock:
+            request = executor.submit(
+                client.put, "/api/preferences", json=service.settings.ui_defaults()
+            )
+            response = request.result(timeout=3)
+        assert response.status_code == 200
+    assert dashboard.nps_dashboard(context=context) is first
+
+
+def test_linking_cache_tracks_implicit_touchpoint_preference(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    context = UploadContext("BBVA México")
+    preferences = {"touchpoint_source": "broken_journeys", "helix_base_url": ""}
+    monkeypatch.setattr(Settings, "ui_defaults", lambda _: preferences)
+    monkeypatch.setattr(
+        service, "_build_linking_dashboard", lambda **kw: {"mode": kw["touchpoint_source"]}
+    )
+    first = service.linking_dashboard(context=context)
+    preferences["touchpoint_source"] = "domain_touchpoint"
+    second = service.linking_dashboard(context=context)
+    assert first == {"mode": "broken_journeys"}
+    assert second == {"mode": "domain_touchpoint"}
+    assert service.linking_dashboard(context=context) is second
+
+
+def test_taxonomy_source_load_is_shared_isolated_and_invalidated(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    taxonomy = service.taxonomy
+    context = UploadContext("BBVA México")
+    calls = []
+
+    def load(owner):
+        calls.append(owner.service_origin)
+        return pd.DataFrame({"ID": [owner.service_origin], "Comment": ["original"]})
+
+    monkeypatch.setattr(service.repository, "load_records_df", load)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: taxonomy.source(context), range(2)))
+    assert calls == [context.service_origin]
+    results[0].loc[0, "Comment"] = "changed"
+    assert taxonomy.source(context).iloc[0].Comment == "original"
+    taxonomy.save_state(context, {"active": "SOURCE"})
+    taxonomy.source(context)
+    assert len(calls) == 2
+    taxonomy.source(UploadContext("Other owner"))
+    assert calls[-1] == "Other owner"
+    assert context.service_origin == taxonomy.source(context).iloc[0].ID
+    assert len(calls) == 4  # Only one owner's source is retained.
+
+
+def test_taxonomy_state_observes_wal_changes(tmp_path):
+    service = _service(tmp_path)
+    context = UploadContext("BBVA México")
+    with service.repository._connect() as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        assert service.taxonomy.state(context)["active"] == "NORMALIZED"
+        service.taxonomy.save_state(context, {"active": "SOURCE"})
+        assert service.taxonomy.state(context)["active"] == "SOURCE"
+
+
+def test_explicit_invalidation_releases_source_cache(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    context = UploadContext("BBVA México")
+    monkeypatch.setattr(
+        service.repository, "load_records_df", lambda _: pd.DataFrame({"ID": ["a"]})
+    )
+    service.taxonomy.source(context)
+    service.clear_caches()
+    assert service.taxonomy._source_frame.empty
+    assert service.taxonomy._source_key is None
+
+
+def test_conflicting_link_references_return_actionable_error_without_private_details(
+    tmp_path, monkeypatch
+):
+    from fastapi.testclient import TestClient
+
+    from nps_lens.api.app import create_app
+
+    app = create_app(_service(tmp_path).settings)
+
+    def conflicting(**_):
+        raise pd.errors.MergeError("private-source-identifier")
+
+    monkeypatch.setattr(app.state.dashboard_service, "linking_dashboard", conflicting)
+    with TestClient(app) as client:
+        response = client.get("/api/dashboard/linking")
+    assert response.status_code == 409
+    assert "duplicados" in response.json()["detail"]
+    assert "private-source-identifier" not in response.text
+    event = app.state.telemetry.snapshot()["events"][-1]
+    assert event["status"] == 409
+    assert event["error_type"] == "MergeError"
+    assert "private-source-identifier" not in str(event)
