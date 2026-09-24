@@ -74,3 +74,14 @@ def resolve_response_identity(frame: pd.DataFrame) -> tuple[pd.Series[Any], str]
     )
     invalid = values.eq("") | conflicts
     return values.mask(invalid, fallback), source
+
+
+def analytical_response_ids(frame: pd.DataFrame) -> pd.Series[Any]:
+    """Use persisted response identity consistently in links and evidence references.
+
+    External IDs can repeat in legacy/restored corpora. Never collapse distinct
+    business keys or choose an arbitrary response when enriching a link.
+    """
+    column = "_business_key" if "_business_key" in frame else "ID"
+    values = frame.get(column, pd.Series(frame.index, index=frame.index))
+    return values.fillna("").astype(str).str.strip()

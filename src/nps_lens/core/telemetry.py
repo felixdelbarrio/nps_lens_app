@@ -111,6 +111,10 @@ class TelemetryCollector:
                 "platform": platform.platform(),
                 "started_at": self.started_at,
             },
+            "metric_semantics": {
+                "rss_mb": "process_peak_resident_memory_mb",
+                "cpu_ms": "process_cpu_delta_including_concurrent_requests",
+            },
             "privacy": {
                 "query_parameters_recorded": False,
                 "request_bodies_recorded": False,

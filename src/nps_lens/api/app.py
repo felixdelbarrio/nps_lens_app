@@ -9,7 +9,7 @@ from urllib.parse import quote
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from nps_lens.analytics.taxonomy import TaxonomyConfig
@@ -115,6 +115,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.exception_handler(pd.errors.MergeError)
+    async def conflicting_analytical_identity(request: Request, _exc: Exception) -> JSONResponse:
+        request.state.telemetry_error_type = "MergeError"
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": (
+                    "No se puede completar el análisis: hay identificadores con referencias "
+                    "incompatibles en los datos NPS o Helix. Revisa los duplicados en Datos "
+                    "y corrige o sustituye la carga afectada."
+                )
+            },
+        )
+
     @app.middleware("http")
     async def enforce_domain_access(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -159,7 +173,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     duration_ms=duration_ms,
                     cpu_ms=cpu_ms,
                     response_bytes=response_bytes,
-                    error_type=error_type,
+                    error_type=error_type or getattr(request.state, "telemetry_error_type", ""),
                 )
 
     def get_service(request: Request) -> NpsService:
@@ -188,11 +202,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "allowed_domain": current.allowed_email_domain,
         }
 
-    def refresh_settings(request: Request) -> Settings:
+    def refresh_settings(request: Request, *, invalidate_analytics: bool = True) -> Settings:
         reloaded = Settings.from_env()
         request.app.state.settings = reloaded
         request.app.state.service.settings = reloaded
-        request.app.state.dashboard_service.clear_caches()
+        if invalidate_analytics:
+            request.app.state.dashboard_service.clear_caches()
         request.app.state.dashboard_service.settings = reloaded
         request.app.state.dashboard_service.helix_store = (
             request.app.state.dashboard_service.helix_store.__class__(reloaded.data_dir / "helix")
@@ -350,7 +365,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     @app.post("/api/uploads/nps", response_model=UploadResponse)
-    async def upload_nps(
+    def upload_nps(
         request: Request,
         file: UploadFile = File(...),
         service_origin: str = Form(...),
@@ -366,7 +381,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if suffix not in {".xlsx", ".xlsm", ".xls"}:
             raise HTTPException(status_code=400, detail="Solo se admiten ficheros Excel.")
 
-        payload = await file.read()
+        payload = file.file.read()
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
@@ -411,7 +426,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return result
 
     @app.post("/api/uploads/helix", response_model=HelixUploadResponse)
-    async def upload_helix(
+    def upload_helix(
         request: Request,
         file: UploadFile = File(...),
         service_origin: str = Form(...),
@@ -426,7 +441,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if suffix not in {".xlsx", ".xlsm", ".xls"}:
             raise HTTPException(status_code=400, detail="Solo se admiten ficheros Excel.")
 
-        payload = await file.read()
+        payload = file.file.read()
         if not payload:
             raise HTTPException(status_code=400, detail="El fichero está vacío.")
 
@@ -485,7 +500,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         persist_ui_prefs(current_settings.dotenv_path, next_values)
-        return refresh_settings(request).ui_defaults()
+        return refresh_settings(request, invalidate_analytics=False).ui_defaults()
 
     @app.put("/api/settings/service-origins", response_model=ContextOptionsResponse)
     def update_service_origins(
