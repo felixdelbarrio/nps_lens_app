@@ -372,3 +372,18 @@ def test_snapshot_default_resolves_without_changing_active(service, mode) -> Non
         snapshot = tax.snapshot(ctx)
         assert snapshot["active"] == mode
     assert tax.resolve(ctx).attrs["taxonomy_mode"] == "SOURCE"
+
+
+def test_studio_validates_available_artifacts_once_per_request(service, monkeypatch):
+    taxonomy, context = service
+    original = taxonomy.available
+    calls = []
+
+    def available(*args):
+        calls.append(True)
+        return original(*args)
+
+    monkeypatch.setattr(taxonomy, "available", available)
+    result = taxonomy.studio(context)
+    assert sum(card["available"] for card in result["taxonomies"]) >= 2
+    assert len(calls) == 1

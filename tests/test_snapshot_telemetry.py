@@ -21,6 +21,7 @@ def test_telemetry_is_bounded_and_does_not_export_payloads() -> None:
             response_bytes=42,
         )
     payload = json.loads(collector.to_json_bytes())
+    assert payload["metric_semantics"]["rss_mb"] == "process_peak_resident_memory_mb"
     assert len(payload["events"]) == 100
     assert payload["privacy"]["query_parameters_recorded"] is False
     assert "query" not in payload["events"][0]

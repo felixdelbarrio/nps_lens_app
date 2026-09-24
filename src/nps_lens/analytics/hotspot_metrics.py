@@ -16,6 +16,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
 )
 from nps_lens.analytics.nps_helix_link import build_incident_display_text, build_nps_topic
+from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
 HOTSPOT_EVIDENCE_COLUMNS = [
@@ -228,7 +229,7 @@ def _prepare_nps_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         )
 
     nps_ref = nps_focus_df.copy()
-    nps_ref["nps_id"] = nps_ref.get("ID", nps_ref.index).astype(str)
+    nps_ref["nps_id"] = analytical_response_ids(nps_ref)
     nps_ref["date"] = pd.to_datetime(nps_ref.get("Fecha"), errors="coerce").dt.normalize()
     comment_col = _comment_column(nps_ref)
     nps_ref["comment_txt"] = (

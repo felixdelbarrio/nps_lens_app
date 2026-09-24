@@ -7,6 +7,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import StringIO
+from pathlib import Path
+from threading import RLock
 from typing import Any, Iterator, Optional, cast
 
 import pandas as pd
@@ -81,12 +83,25 @@ class TaxonomyService:
         self.resolver = TaxonomyResolver()
         EquivalenceRegistry.load(equivalences_path)
         self.lens_override: Optional[str] = None
-        self._state_cache: dict[str, tuple[int, dict[str, Any]]] = {}
+        self._state_cache: dict[str, tuple[tuple[object, ...], dict[str, Any]]] = {}
+        self._source_lock = RLock()
+        self._source_key: Optional[tuple[object, ...]] = None
+        self._source_frame = pd.DataFrame()
         self._cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+    def _source_revision(self) -> tuple[object, ...]:
+        revisions = []
+        for path in (self.repository.db_path, Path(f"{self.repository.db_path}-wal")):
+            try:
+                stat = path.stat()
+                revisions.append((stat.st_mtime_ns, stat.st_size))
+            except FileNotFoundError:
+                revisions.append((0, 0))
+        return tuple(revisions)
 
     def state(self, context: UploadContext) -> dict[str, Any]:
         key = context_key(context)
-        revision = self.repository.db_path.stat().st_mtime_ns
+        revision = self._source_revision()
         cached = self._state_cache.get(key)
         if cached and cached[0] == revision:
             return dict(cached[1])
@@ -125,13 +140,26 @@ class TaxonomyService:
             else EquivalenceRegistry.load(self.equivalences_path)
         )
 
+    def clear_source_cache(self) -> None:
+        with self._source_lock:
+            self._source_key = None
+            self._source_frame = pd.DataFrame()
+
     def source(self, context: UploadContext) -> pd.DataFrame:
-        restored = self.state(context).get("restored")
-        if restored:
-            frame = pd.read_json(StringIO(json.dumps(restored["records"])), orient="table")
-            frame["Fecha"] = pd.to_datetime(frame["Fecha"], errors="coerce")
-            return frame
-        return self.repository.load_records_df(context)
+        # Share one corpus load across dashboard, Studio and equivalence requests.
+        # Keep only the latest owner/revision; callers receive independent frames.
+        with self._source_lock:
+            key = (context_key(context), self._source_revision())
+            if key != self._source_key:
+                restored = self.state(context).get("restored")
+                if restored:
+                    frame = pd.read_json(StringIO(json.dumps(restored["records"])), orient="table")
+                    frame["Fecha"] = pd.to_datetime(frame["Fecha"], errors="coerce")
+                else:
+                    frame = self.repository.load_records_df(context)
+                self._source_frame = frame
+                self._source_key = key
+            return self._source_frame.copy()
 
     def artifact(self, sig: str) -> Optional[dict[str, Any]]:
         if sig in self._cache:
@@ -179,7 +207,17 @@ class TaxonomyService:
         frame = self.source(context) if frame is None else frame
         registry = self.registry(context)
         available = self.available(context, frame, registry)
-        selected = mode or self.lens_override or self.state(context)["active"]
+        return self._resolve_available(frame, mode, registry, available, self.state(context))
+
+    def _resolve_available(
+        self,
+        frame: pd.DataFrame,
+        mode: Optional[str],
+        registry: EquivalenceRegistry,
+        available: dict[str, Optional[dict[str, Any]]],
+        state: dict[str, Any],
+    ) -> pd.DataFrame:
+        selected = mode or self.lens_override or state["active"]
         if selected not in available:
             if mode:
                 raise ValueError(
@@ -188,7 +226,7 @@ class TaxonomyService:
             selected = "NORMALIZED"
         item = available[selected]
         # Frozen SOURCE/NORMALIZED also carry assignments, independent of current equivalences.
-        if self.state(context).get("restored") and item:
+        if state.get("restored") and item:
             out = self.resolver.resolve(frame, "COMPLETED", registry, item)
             if "channel" in item:
                 lookup = pd.Series(item["channel"], index=item["keys"])
@@ -287,7 +325,7 @@ class TaxonomyService:
                     {"mode": mode, "available": False, "stale": mode in state.get("artifacts", {})}
                 )
                 continue
-            resolved = self.resolve(context, frame, mode)
+            resolved = self._resolve_available(frame, mode, registry, available, state)
             classified = labels(resolved, "Palanca").str.strip().ne("") & labels(
                 resolved, "Subpalanca"
             ).str.strip().ne("")
@@ -443,7 +481,7 @@ class TaxonomyService:
         )
         taxonomies = {}
         for mode in modes:
-            resolved = self.resolve(context, frame, mode)
+            resolved = self._resolve_available(frame, mode, registry, available, state)
             item = dict(available[mode] or {})
             item.update(
                 {

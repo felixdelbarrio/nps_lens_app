@@ -255,3 +255,24 @@ def test_null_ids_never_link_to_each_other():
     catalog, evidence = build_broken_journey_catalog(links, nps, helix)
     assert len(evidence) == 1
     assert catalog.iloc[0].linked_comments == 1
+
+
+def test_persisted_identity_keeps_shared_external_ids_distinct_through_causal_flow():
+    from nps_lens.analytics.hotspot_metrics import _prepare_nps_ref
+    from nps_lens.analytics.nps_helix_link import link_incidents_to_nps_topics
+
+    _, nps, helix = frames()
+    nps["_business_key"] = ["response-a", "response-b"]
+    nps["ID"] = "shared-external-id"
+    _, links = link_incidents_to_nps_topics(nps, helix, min_similarity=0.0)
+    assert set(links.nps_id) == {"response-a", "response-b"}
+    catalog, evidence = build_broken_journey_catalog(links, nps, helix)
+    assert evidence.nps_id.nunique() == 2
+    assert catalog.linked_comments.sum() == 2
+    assert catalog.iloc[0].avg_nps == 3
+    assert set(_prepare_nps_ref(nps).nps_id) == set(links.nps_id)
+    # Subsetting must not change the key used for matching or evidence enrichment.
+    from nps_lens.domain.record_identity import analytical_response_ids
+
+    assert analytical_response_ids(nps.iloc[1:]).tolist() == ["response-b"]
+    assert nps.ID.tolist() == ["shared-external-id"] * 2
