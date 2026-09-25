@@ -559,7 +559,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
     assert [row["label"] for row in identity] == [
         "Tópico NPS ancla",
-        "Organizaciones responsables observadas",
+        "Organizaciones de las incidencias enlazadas",
         "Duración media histórica de resolución (semanas)",
     ]
     assert len({row["NPS Topic"] for row in evidence_rows}) <= 10

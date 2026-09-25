@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_MIN_SIMILARITY
+
 
 class IssueResponse(BaseModel):
     level: str
@@ -87,8 +89,8 @@ class PreferencesResponse(BaseModel):
     helix_base_url: str = ""
     report_dimension_analysis: str = "palanca"
     touchpoint_source: str = "executive_journeys"
-    min_similarity: float = 0.15
-    max_days_apart: int = 90
+    min_similarity: float = LINK_MIN_SIMILARITY
+    max_days_apart: int = LINK_MAX_DAYS_APART
     min_n_nps_gaps: int = 200
     min_n_cross_comparisons: int = 30
 

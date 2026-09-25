@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from nps_lens.core.metrics import summarize
+from nps_lens.core.nps_math import valid_nps_scores
+
 
 @dataclass(frozen=True)
 class DriverStat:
@@ -21,12 +24,8 @@ class DriverStat:
 
 
 def compute_nps_from_scores(scores: pd.Series) -> float:
-    s = pd.to_numeric(scores, errors="coerce").dropna()
-    if s.empty:
-        return float("nan")
-    promoters = (s >= 9).mean()
-    detractors = (s <= 6).mean()
-    return float((promoters - detractors) * 100.0)
+    summary = summarize(pd.DataFrame({"NPS": scores}))
+    return summary.nps_classic_pp if summary.n else float("nan")
 
 
 def grouped_driver_stats(
@@ -50,7 +49,7 @@ def grouped_driver_stats(
         )
 
     work = pd.DataFrame(
-        {dimension: df[dimension], "_score": pd.to_numeric(df[survey_score_col], errors="coerce")}
+        {dimension: df[dimension], "_score": valid_nps_scores(df[survey_score_col])}
     )
     work["_valid"] = work["_score"].notna()
     work["_det"] = work["_score"] <= 6.0

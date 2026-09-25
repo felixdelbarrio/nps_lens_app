@@ -262,6 +262,7 @@ def test_persisted_identity_keeps_shared_external_ids_distinct_through_causal_fl
     from nps_lens.analytics.nps_helix_link import link_incidents_to_nps_topics
 
     _, nps, helix = frames()
+    helix.loc[0, "Detailed Description"] = "Firma de transferencias rechazada"
     nps["_business_key"] = ["response-a", "response-b"]
     nps["ID"] = "shared-external-id"
     _, links = link_incidents_to_nps_topics(nps, helix, min_similarity=0.0)

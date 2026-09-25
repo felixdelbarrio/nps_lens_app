@@ -6,33 +6,20 @@ from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, strip_accents_unicode
 
-from nps_lens.analytics.evidence_highlights import contributing_terms
 from nps_lens.analytics.linking_policy import (
+    LINK_CONTEXT_TERMS,
     LINK_MAX_DAYS_APART,
+    LINK_MIN_SHARED_TERMS,
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
 )
-from nps_lens.analytics.text_mining import preprocess_text
-from nps_lens.core.nps_math import focus_mask, normalize_focus_group
+from nps_lens.analytics.text_mining import STOPWORDS_ES, preprocess_text
+from nps_lens.core.nps_math import focus_mask, normalize_focus_group, valid_nps_scores
 from nps_lens.domain.normalization import semantic_series
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
-
-
-def _split_csvish(value: object) -> List[str]:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return []
-    s = str(value).strip()
-    if not s:
-        return []
-    return [p.strip() for p in s.split(",") if p.strip()]
-
-
-def tokenset(value: object) -> Tuple[str, ...]:
-    toks = _split_csvish(value)
-    return tuple(sorted({t for t in toks if t}))
 
 
 def build_nps_topic(df: pd.DataFrame) -> pd.Series:
@@ -121,12 +108,8 @@ def build_incident_topic(df: pd.DataFrame) -> pd.Series:
 
 
 def build_nps_text(df: pd.DataFrame) -> pd.Series:
-    parts = [_txt_series(df, column) for column in ("Palanca", "Subpalanca", "Comment")]
-    return (
-        (parts[0] + " " + parts[1] + " " + parts[2])
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-    )
+    # Taxonomy describes the response; it is not evidence supplied by the customer.
+    return _txt_series(df, "Comment")
 
 
 def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
@@ -159,10 +142,6 @@ def _detail_signal(text: str) -> str:
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
     """Compact semantic evidence, with field-specific limits and no repeated values."""
     fields = [
-        ("BBVA_SourceServiceN2", 100),
-        ("BBVA_SourceServiceN1", 100),
-        ("SourceService", 100),
-        ("service", 100),
         ("summary", 180),
         ("Description", 180),
         ("Short Description", 180),
@@ -264,35 +243,12 @@ def _safe_id(series: pd.Series) -> pd.Series:
     return series.astype(str).fillna("").replace({"nan": ""})
 
 
-def _sparse_row_topk(row, k: int) -> tuple[np.ndarray, np.ndarray]:
-    """Return top-k indices/values from a sparse row (descending by value)."""
-    if row is None or row.nnz == 0:
-        return np.array([], dtype=int), np.array([], dtype=float)
-    idx = row.indices
-    vals = row.data
-    if len(vals) <= int(k):
-        order = np.argsort(-vals)
-        return idx[order], vals[order]
-    pick = np.argpartition(vals, -int(k))[-int(k) :]
-    order = pick[np.argsort(-vals[pick])]
-    return idx[order], vals[order]
-
-
-def _sample_positions(total: int, target: int) -> np.ndarray:
-    if total <= target:
-        return np.arange(total, dtype=int)
-    # Deterministic down-sampling spread across the full index range.
-    pos = np.linspace(0, total - 1, num=target, dtype=int)
-    return np.unique(pos)
-
-
 def link_incidents_to_nps_topics(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
     min_similarity: float = LINK_MIN_SIMILARITY,
     max_features: int = 50000,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
-    max_nps_rows_for_evidence: int = 12000,
     evidence_chunk_size: int = 128,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -377,44 +333,61 @@ def link_incidents_to_nps_topics(
             ),
         )
 
-    # Build topic docs from concatenated detractor text.
-    topic_docs = (
-        nps.assign(_txt=nps_text)
-        .groupby("nps_topic", dropna=False)["_txt"]
-        .apply(lambda s: " ".join([t for t in s.tolist() if t]))
+    # Literal narrative evidence only. Character fragments inflated similarity on
+    # unrelated words and accounted for most of the vectorizer's memory footprint.
+    stopwords = sorted(
+        {strip_accents_unicode(word) for word in STOPWORDS_ES}
+        | {
+            "error",
+            "falla",
+            "fallo",
+            "problema",
+            "incidencia",
+            "incidente",
+            "cliente",
+            "clientes",
+            "usuario",
+            "usuarios",
+            "sistema",
+            "servicio",
+            "bbva",
+            "app",
+            "aplicacion",
+            "empresas",
+            "empresa",
+            "banca",
+            "banco",
+            "web",
+            "portal",
+            "puedo",
+            "puede",
+            "hacer",
+            "realizar",
+            "funciona",
+            "funcionar",
+            "tengo",
+            "tiene",
+            "tener",
+            "hoy",
+            "datos",
+            "titulo",
+            "descripcion",
+            "pyme",
+        }
     )
-    topics = topic_docs.index.tolist()
-    if not topics:
-        return (
-            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
-            pd.DataFrame(
-                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-            ),
-        )
-
-    # Vectorize once for NPS comments + incidents. Dynamic min_df keeps small extracts valid.
-    min_df = 1 if len(corpus) < 250 else 2
     word_vec = TfidfVectorizer(
         lowercase=True,
         strip_accents="unicode",
         sublinear_tf=True,
         max_features=max_features,
         ngram_range=(1, 2),
-        min_df=min_df,
-        stop_words=None,
-    )
-    char_vec = TfidfVectorizer(
-        lowercase=True,
-        strip_accents="unicode",
-        sublinear_tf=True,
-        analyzer="char_wb",
-        ngram_range=(3, 5),
-        min_df=min_df,
-        max_features=min(max_features, 60_000),
+        min_df=1,
+        token_pattern=r"(?u)\b[^\W\d_]{3,}\b",
+        stop_words=stopwords,
+        dtype=np.float32,
     )
     try:
         word_matrix = word_vec.fit_transform(corpus)
-        char_matrix = char_vec.fit_transform(corpus)
     except ValueError:
         # Empty vocabulary after cleaning
         return (
@@ -426,58 +399,41 @@ def link_incidents_to_nps_topics(
 
     split = len(nps)
     word_nps, word_inc = word_matrix[:split], word_matrix[split:]
-    char_nps, char_inc = char_matrix[:split], char_matrix[split:]
-    word_topics = word_vec.transform(topic_docs.values.tolist())
-    char_topics = char_vec.transform(topic_docs.values.tolist())
-
-    # Assignment incident -> topic with sparse similarity (no dense NxM matrix).
-    sim_topic = (word_inc @ word_topics.T) * 0.35 + (char_inc @ char_topics.T) * 0.65
     incident_ids = helix["incident_id"].to_numpy()
     incident_topics = helix["incident_topic"].to_numpy()
     incident_dates = helix["incident_date"].to_numpy(dtype="datetime64[ns]")
-    assign_rows: list[dict[str, object]] = []
-    for i in range(sim_topic.shape[0]):
-        idx, vals = _sparse_row_topk(sim_topic.getrow(i), 1)
-        if len(idx) == 0:
-            continue
-        topic_idx = int(idx[0])
-        sim = float(vals[0])
-        assign_rows.append(
-            {
-                "incident_id": str(incident_ids[i]),
-                "nps_topic": str(topics[topic_idx]),
-                "similarity": sim,
-                "incident_topic": str(incident_topics[i]),
-            }
-        )
-    assign_df = pd.DataFrame(assign_rows)
-    if assign_df.empty:
-        assign_df = pd.DataFrame(
-            columns=["incident_id", "nps_topic", "similarity", "incident_topic"]
-        )
-    assign_df = assign_df[assign_df["similarity"] >= float(min_similarity)].reset_index(drop=True)
-
     # Evidence links: incident -> top detractor comments with sparse/chunked similarity.
-    # Optional deterministic down-sampling keeps worst-case memory/CPU bounded.
-    nps_pos = _sample_positions(int(len(nps)), int(max_nps_rows_for_evidence))
-    word_nps_ev = word_nps[nps_pos]
-    char_nps_ev = char_nps[nps_pos]
-    nps_ids = nps["nps_id"].to_numpy()[nps_pos]
-    nps_topics = nps["nps_topic"].to_numpy()[nps_pos]
-    nps_dates = nps["nps_date"].to_numpy(dtype="datetime64[ns]")[nps_pos]
+    nps_ids = nps["nps_id"].to_numpy()
+    nps_topics = nps["nps_topic"].to_numpy()
+    nps_dates = nps["nps_date"].to_numpy(dtype="datetime64[ns]")
 
     word_features = word_vec.get_feature_names_out()
-    char_features = char_vec.get_feature_names_out()
-    incident_display = build_incident_display_text(helix).tolist()
+    # Gate before top-k: two distinct shared content words, not a bigram counted twice.
+    unigram_columns = np.flatnonzero(np.char.find(word_features.astype(str), " ") < 0)
+    incidence = word_inc[:, unigram_columns].astype(bool).astype(np.int32)
+    responses = word_nps[:, unigram_columns].astype(bool).astype(np.int32)
+    specific_columns = [
+        i
+        for i, column in enumerate(unigram_columns)
+        if word_features[column] not in LINK_CONTEXT_TERMS
+    ]
+    specific_incidence = incidence[:, specific_columns]
+    specific_responses = responses[:, specific_columns]
     links: List[EvidenceLink] = []
     chunk = max(1, int(evidence_chunk_size))
     per_incident_k = max(1, int(top_k_per_incident))
     max_days = int(max_days_apart) if max_days_apart is not None else None
     for start in range(0, word_inc.shape[0], chunk):
         end = min(start + chunk, word_inc.shape[0])
-        sim_block = (word_inc[start:end] @ word_nps_ev.T) * 0.35 + (
-            char_inc[start:end] @ char_nps_ev.T
-        ) * 0.65
+        shared = incidence[start:end] @ responses.T
+        specific = specific_incidence[start:end] @ specific_responses.T
+        sim_block = (
+            (word_inc[start:end] @ word_nps.T)
+            .multiply(shared >= LINK_MIN_SHARED_TERMS)
+            .multiply(specific > 0)
+            .tocsr()
+        )
+        sim_block.eliminate_zeros()
         for bi in range(sim_block.shape[0]):
             inc_row = start + bi
             inc_id = str(incident_ids[inc_row])
@@ -514,45 +470,43 @@ def link_incidents_to_nps_topics(
                         similarity=s,
                         nps_topic=str(nps_topics[j]),
                         incident_topic=inc_topic,
-                        matched_terms=contributing_terms(
-                            incident_display[inc_row],
-                            set(
-                                word_features[
+                        matched_terms=tuple(
+                            sorted(
+                                feature
+                                for feature in word_features[
                                     word_inc.getrow(inc_row)
-                                    .multiply(word_nps_ev.getrow(int(j)))
+                                    .multiply(word_nps.getrow(int(j)))
                                     .indices
                                 ]
-                            ),
-                            set(
-                                char_features[
-                                    char_inc.getrow(inc_row)
-                                    .multiply(char_nps_ev.getrow(int(j)))
-                                    .indices
-                                ]
-                            ),
+                                if " " not in feature
+                            )
                         ),
                     )
                 )
 
-    links_df = pd.DataFrame([e.__dict__ for e in links])
-    if not links_df.empty:
-        links_df = links_df.sort_values(["similarity"], ascending=False).reset_index(drop=True)
-
+    links_df = pd.DataFrame([e.__dict__ for e in links], columns=EvidenceLink.__dataclass_fields__)
+    links_df = (
+        links_df.sort_values("similarity", ascending=False)
+        .drop_duplicates(["incident_id", "nps_id"])
+        .reset_index(drop=True)
+    )
+    # Every assignment must have an accepted, dated comment as its evidence.
+    assign_df = links_df.drop_duplicates("incident_id")[
+        ["incident_id", "nps_topic", "similarity", "incident_topic"]
+    ].reset_index(drop=True)
     return assign_df, links_df
 
 
-def weekly_aggregates(
+def _period_aggregates(
     nps_df: pd.DataFrame,
     helix_df: pd.DataFrame,
     incident_assignments: pd.DataFrame,
     date_col_nps: str = "Fecha",
     date_col_helix: str = "Fecha",
     focus_group: str = "detractor",
+    *,
+    frequency: str,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Return weekly aggregates:
-    - overall: detractor_rate + incidents
-    - by_topic: detractor_rate + incidents (incidents mapped to NPS topic)
-    """
     nps = nps_df.copy()
     helix = helix_df.copy()
 
@@ -563,20 +517,21 @@ def weekly_aggregates(
         else pd.to_datetime(helix[date_col_helix], errors="coerce")
     )
 
-    nps = nps.dropna(subset=[date_col_nps])
+    nps["NPS"] = valid_nps_scores(nps["NPS"])
+    nps = nps.dropna(subset=[date_col_nps, "NPS"])
     helix = helix.dropna(subset=[date_col_helix])
 
-    nps["week"] = nps[date_col_nps].dt.to_period("W").dt.start_time
-    helix["week"] = helix[date_col_helix].dt.to_period("W").dt.start_time
+    bucket = "week" if frequency == "W" else "date"
+    for frame, column in ((nps, date_col_nps), (helix, date_col_helix)):
+        frame[bucket] = frame[column].dt.to_period(frequency).dt.start_time
 
     group = normalize_focus_group(focus_group)
     nps["is_focus"] = focus_mask(nps, focus_group=group)
 
-    count_col = "ID" if "ID" in nps.columns else date_col_nps
     overall_voc = (
-        nps.groupby("week")
+        nps.groupby(bucket)
         .agg(
-            responses=(count_col, "count"),
+            responses=("NPS", "size"),
             focus_count=("is_focus", "sum"),
             nps_mean=("NPS", "mean"),
         )
@@ -586,17 +541,21 @@ def weekly_aggregates(
         {0: np.nan}
     )
 
-    overall_helix = helix.groupby("week").agg(incidents=("Incident Number", "count")).reset_index()
-    overall = (
-        pd.merge(overall_voc, overall_helix, on="week", how="outer").sort_values("week").fillna(0)
+    overall_helix = (
+        helix.groupby(bucket).agg(incidents=("Incident Number", "nunique")).reset_index()
     )
+    overall = pd.merge(overall_voc, overall_helix, on=bucket, how="outer").sort_values(bucket)
+
+    overall[["responses", "focus_count", "incidents"]] = overall[
+        ["responses", "focus_count", "incidents"]
+    ].fillna(0)
 
     # By topic (NPS topics)
     nps["nps_topic"] = build_nps_topic(nps)
     by_topic_nps = (
-        nps.groupby(["week", "nps_topic"])
+        nps.groupby([bucket, "nps_topic"])
         .agg(
-            responses=(count_col, "count"),
+            responses=("NPS", "size"),
             focus_count=("is_focus", "sum"),
             nps_mean=("NPS", "mean"),
         )
@@ -611,15 +570,19 @@ def weekly_aggregates(
         ia = incident_assignments.copy()
         # merge incident dates
         ia = ia.merge(
-            helix[["Incident Number", "week"]].astype({"Incident Number": str}),
+            helix[["Incident Number", bucket]]
+            .drop_duplicates("Incident Number")
+            .astype({"Incident Number": str}),
             left_on="incident_id",
             right_on="Incident Number",
             how="left",
         )
         by_topic_inc = (
-            ia.groupby(["week", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
+            ia.groupby([bucket, "nps_topic"])
+            .agg(incidents=("incident_id", "nunique"))
+            .reset_index()
         )
-        by_topic = by_topic.merge(by_topic_inc, on=["week", "nps_topic"], how="left")
+        by_topic = by_topic.merge(by_topic_inc, on=[bucket, "nps_topic"], how="left")
     # Ensure incidents column exists even when there are no incident assignments.
     # NOTE: DataFrame.get("incidents", 0) returns an int when missing, which does not
     # support .fillna; hence this explicit branch.
@@ -630,6 +593,25 @@ def weekly_aggregates(
     return overall, by_topic
 
 
+def weekly_aggregates(
+    nps_df: pd.DataFrame,
+    helix_df: pd.DataFrame,
+    incident_assignments: pd.DataFrame,
+    date_col_nps: str = "Fecha",
+    date_col_helix: str = "Fecha",
+    focus_group: str = "detractor",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    return _period_aggregates(
+        nps_df,
+        helix_df,
+        incident_assignments,
+        date_col_nps,
+        date_col_helix,
+        focus_group,
+        frequency="W",
+    )
+
+
 def daily_aggregates(
     nps_df: pd.DataFrame,
     helix_df: pd.DataFrame,
@@ -638,77 +620,12 @@ def daily_aggregates(
     date_col_helix: str = "Fecha",
     focus_group: str = "detractor",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Daily aggregates analogous to weekly_aggregates.
-
-    Returns:
-      - overall_daily: date, responses, detractors, detractor_rate, incidents
-      - by_topic_daily: date, nps_topic, responses, detractors, detractor_rate, incidents
-    """
-    nps = nps_df.copy()
-    helix = helix_df.copy()
-    nps[date_col_nps] = pd.to_datetime(nps[date_col_nps], errors="coerce")
-    helix[date_col_helix] = (
-        incident_occurrence_dates(helix)[0]
-        if date_col_helix == "Fecha"
-        else pd.to_datetime(helix[date_col_helix], errors="coerce")
+    return _period_aggregates(
+        nps_df,
+        helix_df,
+        incident_assignments,
+        date_col_nps,
+        date_col_helix,
+        focus_group,
+        frequency="D",
     )
-    nps = nps.dropna(subset=[date_col_nps])
-    helix = helix.dropna(subset=[date_col_helix])
-    nps["date"] = nps[date_col_nps].dt.normalize()
-    helix["date"] = helix[date_col_helix].dt.normalize()
-
-    group = normalize_focus_group(focus_group)
-    nps["is_focus"] = focus_mask(nps, focus_group=group)
-
-    count_col = "ID" if "ID" in nps.columns else date_col_nps
-    overall_voc = (
-        nps.groupby("date")
-        .agg(
-            responses=(count_col, "count"),
-            focus_count=("is_focus", "sum"),
-            nps_mean=("NPS", "mean"),
-        )
-        .reset_index()
-    )
-    overall_voc["focus_rate"] = overall_voc["focus_count"] / overall_voc["responses"].replace(
-        {0: np.nan}
-    )
-    overall_helix = helix.groupby("date").agg(incidents=("Incident Number", "count")).reset_index()
-    overall = (
-        pd.merge(overall_voc, overall_helix, on="date", how="outer").sort_values("date").fillna(0)
-    )
-
-    nps["nps_topic"] = build_nps_topic(nps)
-    by_topic_nps = (
-        nps.groupby(["date", "nps_topic"])
-        .agg(
-            responses=(count_col, "count"),
-            focus_count=("is_focus", "sum"),
-            nps_mean=("NPS", "mean"),
-        )
-        .reset_index()
-    )
-    by_topic_nps["focus_rate"] = by_topic_nps["focus_count"] / by_topic_nps["responses"].replace(
-        {0: np.nan}
-    )
-    by_topic = by_topic_nps.copy()
-    if not incident_assignments.empty:
-        ia = incident_assignments.copy()
-        ia = ia.merge(
-            helix[["Incident Number", "date"]].astype({"Incident Number": str}),
-            left_on="incident_id",
-            right_on="Incident Number",
-            how="left",
-        )
-        by_topic_inc = (
-            ia.groupby(["date", "nps_topic"]).agg(incidents=("incident_id", "count")).reset_index()
-        )
-        by_topic = by_topic.merge(by_topic_inc, on=["date", "nps_topic"], how="left")
-    # Defensive: if there are no Helix incidents (or linking is disabled), the
-    # merge above won't create an "incidents" column. Ensure it always exists
-    # and is numeric to keep downstream charts stable.
-    if "incidents" not in by_topic.columns:
-        by_topic["incidents"] = 0
-    else:
-        by_topic["incidents"] = by_topic["incidents"].fillna(0)
-    return overall, by_topic
