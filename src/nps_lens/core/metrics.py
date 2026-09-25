@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
+from nps_lens.core.nps_math import valid_nps_scores
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ def summarize(df: pd.DataFrame, score_col: str = "NPS") -> NpsSummary:
             detractor_rate=0.0,
         )
 
-    s = pd.to_numeric(df[score_col], errors="coerce").dropna()
+    s = valid_nps_scores(df[score_col]).dropna()
     n = int(len(s))
     if n == 0:
         return NpsSummary(

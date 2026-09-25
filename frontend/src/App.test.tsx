@@ -730,8 +730,8 @@ describe("App", () => {
     expect(screen.getAllByText("Operativa crítica fallida").length).toBeGreaterThan(0);
     expect(screen.getByText(/VoC \+ Analitica/i)).toBeInTheDocument();
     expect(screen.queryByText("Escenario activo")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "1 incidencia enlazada" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "1 comentario enlazado" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "12 incidencias enlazadas" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "12 comentarios enlazados" })).toBeInTheDocument();
     expect(screen.queryByText(/Los IDs abren la incidencia original en Helix/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tabla" })).toHaveClass("is-active");
     expect(screen.getAllByRole("link", { name: "INC000104355468" })).toEqual(

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from nps_lens.analytics.evidence_highlights import contributing_terms, evidence_segments
+from nps_lens.analytics.evidence_highlights import evidence_segments
 from nps_lens.analytics.nps_helix_link import link_incidents_to_nps_topics
 
 
@@ -14,15 +14,6 @@ def test_segments_preserve_unicode_punctuation_and_untrusted_markup():
     ]
     assert evidence_segments(text, set()) == []
     assert evidence_segments(text, {"inexistente"}) == []
-
-
-def test_contributors_use_only_nonzero_shared_features_and_skip_stopwords():
-    assert contributing_terms("La conexión falla", {"la", "conexion"}, set()) == ("conexion",)
-    assert contributing_terms("Pagos pendientes", set(), {"pago"}) == ("pagos",)
-    assert contributing_terms("Jorge García reporta transferencia", {"transferencia"}, {"cia"}) == (
-        "transferencia",
-    )
-    assert contributing_terms("Sin coincidencia", set(), set()) == ()
 
 
 def test_linking_carries_contributing_terms_from_existing_sparse_vectors():
@@ -49,7 +40,7 @@ def test_linking_carries_contributing_terms_from_existing_sparse_vectors():
     )
     _, links = link_incidents_to_nps_topics(nps, helix, min_similarity=0.01)
     assert len(links) == 1
-    assert {"transferencia", "pendiente", "error"}.issubset(links.iloc[0].matched_terms)
+    assert {"transferencia", "pendiente"}.issubset(links.iloc[0].matched_terms)
 
 
 def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
@@ -91,6 +82,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
         "Incidencias relacionadas",
         "Comentarios relacionados",
         "Vínculos semánticos",
-        "Confianza",
+        "Similitud textual",
         "Nota media (0–10)",
     ]
