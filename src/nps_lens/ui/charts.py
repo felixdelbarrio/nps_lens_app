@@ -987,7 +987,7 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="Confianza (%)",
+                title="Similitud textual (%)",
                 tickfont=dict(size=10),
             )
         ),

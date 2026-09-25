@@ -404,8 +404,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         )
     )
     causal_slide = prs.slides[6]
-    assert causal_slide.shapes[4].text == "NOTA MEDIA DEL TÓPICO"
-    assert causal_slide.shapes[7].text == "CONFIANZA"
+    assert causal_slide.shapes[4].text == "SCORE MEDIO ENLAZADO"
+    assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
     assert causal_slide.shapes[2].text == ""
     assert causal_slide.shapes[5].text == ""
     evidence_paragraphs = [
@@ -1083,3 +1083,27 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
     assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)
+
+
+def test_scenario_many_incidents_use_one_bounded_id_bullet():
+    from pptx.util import Inches
+
+    from nps_lens.reports.presentation_context import CausalEvidenceRecord, CausalScenarioViewModel
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = slide.shapes.add_textbox(Inches(0), Inches(0), Inches(5.83), Inches(1.5))
+    records = [
+        CausalEvidenceRecord(
+            f"INC{i:015d}", "Descripción extensa " * 100, f"https://helix.example/INC{i:015d}"
+        )
+        for i in range(50)
+    ]
+    scenario = CausalScenarioViewModel(1, pd.Series(dtype=object), [], [], [], [], records)
+    executive_ppt._scenario_evidence(shape, scenario)
+    paragraphs = shape.text_frame.paragraphs
+    assert len(paragraphs) == 3
+    assert paragraphs[-1].text.endswith("…")
+    assert "Descripción" not in paragraphs[-1].text
+    assert all(len(p.text) < 165 for p in paragraphs)
+    assert any(r.hyperlink.address for r in paragraphs[-1].runs)

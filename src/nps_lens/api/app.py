@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_MIN_SIMILARITY
 from nps_lens.analytics.taxonomy import TaxonomyConfig
 from nps_lens.api.schemas import (
     ColumnAliasRegistryRequest,
@@ -930,8 +931,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pop_month: str = "Todos",
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         theme_mode: str = "light",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
@@ -963,8 +964,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pop_month: str = "Todos",
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
@@ -1014,8 +1015,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pop_month: str = "Todos",
         nps_group: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
         dashboard_layer: DashboardService = Depends(get_dashboard_service),

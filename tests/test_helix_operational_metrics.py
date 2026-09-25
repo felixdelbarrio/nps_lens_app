@@ -141,7 +141,7 @@ def test_enrich_rationale_with_operational_metrics_overrides_heuristic_values_wh
     assert math.isclose(float(enriched.iloc[0]["historical_resolution_weeks"]), 3.0)
 
 
-def test_enrich_chain_with_operational_metrics_uses_incident_records() -> None:
+def test_enrich_chain_with_operational_metrics_uses_all_linked_incidents() -> None:
     helix = pd.DataFrame(
         {
             "Incident Number": ["INC-20", "INC-21"],
@@ -154,7 +154,8 @@ def test_enrich_chain_with_operational_metrics_uses_incident_records() -> None:
     chain_df = pd.DataFrame(
         [
             {
-                "incident_records": [{"incident_id": "INC-20"}, {"incident_id": "INC-21"}],
+                "incident_records": [{"incident_id": "INC-20"}],
+                "evidence_pairs": [("INC-20", "n1"), ("INC-21", "n1")],
                 "support_organizations": "",
                 "historical_resolution_weeks": float("nan"),
             }

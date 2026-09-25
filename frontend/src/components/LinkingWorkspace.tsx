@@ -397,7 +397,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
                   <div className="scenario-evidence-stack">
                     <article className="scenario-fact-sheet">
-                      <h4>{linkedCountHeading(activeHelixRecords.length, "incidencia enlazada", "incidencias enlazadas")}</h4>
+                      <h4>{linkedCountHeading(Number(activeCard.linked_incidents ?? activeHelixRecords.length), "incidencia enlazada", "incidencias enlazadas")}</h4>
                       <div className="evidence-pill-row">
                         {activeHelixRecords.length ? (
                           activeHelixRecords.slice(0, 6).map((record, index) => {
@@ -426,7 +426,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     </article>
 
                     <article className="scenario-fact-sheet">
-                      <h4>{linkedCountHeading(activeVocRecords.length, "comentario enlazado", "comentarios enlazados")}</h4>
+                      <h4>{linkedCountHeading(Number(activeCard.linked_comments ?? activeVocRecords.length), "comentario enlazado", "comentarios enlazados")}</h4>
                       <div className="evidence-pill-row">
                         {activeVocRecords.length ? (
                           activeVocRecords.slice(0, 6).map((record, index) => (

@@ -151,6 +151,7 @@ CHAIN_COLUMNS = [
     "linked_incidents",
     "linked_comments",
     "linked_pairs",
+    "evidence_pairs",
     "avg_similarity",
     "avg_nps",
     "focus_rate_high_incidence",
@@ -183,37 +184,13 @@ def summarize_attribution_chains(attribution_df: Optional[pd.DataFrame]) -> dict
     if attribution_df is None or attribution_df.empty:
         return empty
 
-    df = attribution_df.copy()
-
-    def _sum_metric(column: str, *, fallback_column: str = "") -> int:
-        if column in df.columns:
-            values = pd.to_numeric(df[column], errors="coerce")
-            if values.notna().any():
-                return int(values.fillna(0).clip(lower=0).sum())
-        if fallback_column and fallback_column in df.columns:
-            return int(
-                df[fallback_column]
-                .map(lambda value: len(value) if isinstance(value, list) else 0)
-                .fillna(0)
-                .sum()
-            )
-        return 0
-
-    topics = (
-        df.get("nps_topic", pd.Series([""] * len(df), index=df.index))
-        .astype(str)
-        .str.strip()
-        .replace("", np.nan)
-        .dropna()
-    )
+    pairs = {tuple(pair) for values in attribution_df["evidence_pairs"] for pair in values}
     return {
-        "chains_total": int(len(df)),
-        "topics_total": int(topics.nunique()),
-        "linked_incidents_total": _sum_metric(
-            "linked_incidents", fallback_column="incident_records"
-        ),
-        "linked_comments_total": _sum_metric("linked_comments", fallback_column="comment_records"),
-        "linked_pairs_total": _sum_metric("linked_pairs"),
+        "chains_total": len(attribution_df),
+        "topics_total": int(attribution_df["nps_topic"].nunique()),
+        "linked_incidents_total": len({pair[0] for pair in pairs}),
+        "linked_comments_total": len({pair[1] for pair in pairs}),
+        "linked_pairs_total": len(pairs),
     }
 
 
@@ -1929,6 +1906,9 @@ def build_incident_attribution_chains(
                 "linked_incidents": linked_incidents,
                 "linked_comments": linked_comments,
                 "linked_pairs": linked_pairs,
+                "evidence_pairs": list(
+                    grp[["incident_id", "nps_id"]].itertuples(index=False, name=None)
+                ),
                 "avg_similarity": avg_similarity,
                 "avg_nps": avg_nps,
                 "focus_rate_high_incidence": focus_rate_high_incidence,
@@ -1942,11 +1922,7 @@ def build_incident_attribution_chains(
                 "responses": responses_total,
                 "support_organizations": support_organizations,
                 "historical_resolution_weeks": historical_resolution_weeks,
-                "presentation_mode": (
-                    str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
-                    if (is_executive_mode or is_broken_mode)
-                    else str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN)
-                ),
+                "presentation_mode": source_mode,
                 "journey_route": journey_route,
                 "journey_evidence_pattern": journey_evidence_pattern,
                 "journey_cx_readout": journey_cx_readout,
