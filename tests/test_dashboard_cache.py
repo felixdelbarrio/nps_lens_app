@@ -234,7 +234,7 @@ def test_taxonomy_state_observes_wal_changes(tmp_path):
     context = UploadContext("BBVA México")
     with service.repository._connect() as connection:
         connection.execute("PRAGMA journal_mode=WAL")
-        assert service.taxonomy.state(context)["active"] == "NORMALIZED"
+        assert service.taxonomy.state(context)["active"] == "SOURCE"
         service.taxonomy.save_state(context, {"active": "SOURCE"})
         assert service.taxonomy.state(context)["active"] == "SOURCE"
 

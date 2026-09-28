@@ -24,7 +24,7 @@ function fixtureExcel(name: string) {
 const marchFixture = fixtureExcel("NPS Térmico Senda - 03Marzo.xlsx");
 const marchFixtureSuffix = /03Marzo\.xlsx/;
 
-function responseZip(input: string, output: string, stage: "designer" | "classifier") {
+function responseJson(input: string, output: string, stage: "designer" | "classifier") {
   const script = `
 import json, sys, zipfile
 source, target, stage = sys.argv[1:]
@@ -35,21 +35,19 @@ taxonomy = {"taxonomy": [
     {"lever": "Atención", "sublevers": ["Resolución"]},
     {"lever": "Sin clasificación temática", "sublevers": ["Información insuficiente", "Tema no cubierto"]},
 ]}
-with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-    archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, separators=(",", ":")))
-    if stage == "designer":
-        archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False, separators=(",", ":")))
-    else:
-        for name, payload in comments.items():
-            result = {"classifications": [{"id": row["id"], "primary_classification": {"lever": "Atención", "sublever": "Resolución"}} for row in payload["comments"]]}
-            archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+result = taxonomy if stage == "designer" else {"manifest": manifest, "results": {
+    name.removeprefix("comments/").removesuffix(".json"): {"classifications": [{"id": row["id"], "primary_classification": {"lever": "Atención", "sublever": "Resolución"}} for row in payload["comments"]]}
+    for name, payload in comments.items()
+}}
+with open(target, "w") as stream:
+    json.dump(result, stream, ensure_ascii=False)
 `;
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
 }
 
-async function exportedPath(page: import("@playwright/test").Page) {
-  const message = await page.getByText(/ZIP guardado en .*\.zip/).textContent();
-  const match = message?.match(/ZIP guardado en (.+?\.zip)\./);
+async function exportedPath(page: import("@playwright/test").Page, title: string) {
+  const message = await page.locator("article").filter({has:page.getByRole("heading", {name:title,exact:true})}).last().getByText(/ZIP guardado en .*\.zip/).textContent();
+  const match = message?.match(/ZIP guardado en (.+?\.zip)/);
   if (!match) throw new Error(`No se encontró la ruta del ZIP en: ${message}`);
   return match[1];
 }
@@ -87,19 +85,22 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
   await page.getByRole("button", { name: /Taxonomy Studio/i }).click();
-  await expect(page.getByRole("combobox", { name: "Método", exact: true })).toHaveValue(
-    "chatgpt_zip"
-  );
-  await page.getByRole("button", { name: "Exportar ZIP a Descargas" }).click();
-  const designerInput = await exportedPath(page);
-  const designerOutput = path.join(path.dirname(designerInput), "designer-response.zip");
-  responseZip(designerInput, designerOutput, "designer");
-  await page.getByLabel("Importar ZIP de respuesta").setInputFiles(designerOutput);
-  const classifierInput = await exportedPath(page);
-  const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
-  responseZip(classifierInput, classifierOutput, "classifier");
-  await page.getByLabel("Importar ZIP de respuesta").setInputFiles(classifierOutput);
+  await expect(page.getByLabel("Lente activa")).toHaveValue("SOURCE");
+  await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
+  const designerInput = await exportedPath(page, "Crea Taxonomía");
+  const designerOutput = path.join(path.dirname(designerInput), "designer-response.json");
+  responseJson(designerInput, designerOutput, "designer");
+  await page.getByLabel("Importar JSON de taxonomía", {exact:true}).setInputFiles(designerOutput);
+  await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
+  await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
+  const classifierInput = await exportedPath(page, "Clasifica taxonomía");
+  const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.json");
+  responseJson(classifierInput, classifierOutput, "classifier");
+  await page.getByLabel("Importar JSON de comentarios clasificados").setInputFiles(classifierOutput);
   await expect(page.getByText(/Todos los lotes validados/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Explorar Descubierta por LLM" })).toBeVisible();
+  await page.getByLabel("Lente activa").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 });

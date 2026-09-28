@@ -1282,8 +1282,7 @@ class DashboardService:
                 inputs = handler.inputs(
                     context,
                     helix_total,
-                    str(nps_frame.attrs.get("taxonomy_mode", state["active"])),
-                    active_source,
+                    [str(nps_frame.attrs.get("taxonomy_mode", state["active"]))],
                 )
                 imported_links = handler.links(context, inputs, focus_df, helix_slice)
             base: dict[str, object] = {
@@ -1678,7 +1677,7 @@ class DashboardService:
                     ),
                     "summary": (
                         (
-                            "Asociaciones importadas de Helix Classifier para la taxonomía y método actuales. "
+                            "Asociaciones importadas de Helix Classifier para la lente activa. "
                             "La confianza del LLM es semántica; no demuestra causalidad. "
                             "Se conservan los filtros de periodo, ámbito y población."
                         )
@@ -2123,37 +2122,6 @@ class DashboardService:
         by_topic_weekly: pd.DataFrame,
         executive_journey_catalog: Optional[list[dict[str, object]]] = None,
     ) -> dict[str, pd.DataFrame]:
-        if "llm_entity" in links_df:
-            mapping = (
-                links_df.sort_values("similarity", ascending=False)
-                .drop_duplicates("nps_topic")
-                .rename(columns={"nps_topic": "source_nps_topic", "llm_entity": "entity_label"})
-            )
-            mapping["entity_id"] = mapping["entity_label"]
-            mapping["touchpoint"] = mapping["subpalanca"]
-            mapping["helix_source_service_n2"] = ""
-            mapping = mapping[
-                [
-                    "source_nps_topic",
-                    "entity_id",
-                    "entity_label",
-                    "touchpoint",
-                    "palanca",
-                    "subpalanca",
-                    "helix_source_service_n2",
-                ]
-            ]
-            return {
-                "broken_journeys_df": pd.DataFrame(),
-                "broken_journey_links_df": pd.DataFrame(),
-                "causal_topic_map_df": mapping,
-                "links_mode_df": remap_links_to_causal_entities(
-                    links_df.drop(columns=["palanca", "subpalanca"]), mapping
-                ),
-                "by_topic_weekly_mode": remap_topic_timeseries_to_causal_entities(
-                    by_topic_weekly, mapping
-                ),
-            }
         broken_journeys_df, broken_journey_links_df = pd.DataFrame(), pd.DataFrame()
         if touchpoint_source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             broken_journeys_df, broken_journey_links_df = build_broken_journey_catalog(

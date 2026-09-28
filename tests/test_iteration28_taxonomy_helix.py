@@ -4,29 +4,35 @@ import copy
 
 import pandas as pd
 import pytest
-from test_taxonomy_exchange import TAXONOMY, classifier_files, exported, zipped
+from test_taxonomy_exchange import (
+    TAXONOMY,
+    classifier_files,
+    exported,
+    zipped,
+)
+from test_taxonomy_exchange import exchange as exchange
 
 from nps_lens.domain.models import UploadContext
 from nps_lens.services.helix_exchange import HelixExchange
-from nps_lens.services.taxonomy_exchange import encode
-
-pytest_plugins = ["test_taxonomy_exchange"]
+from nps_lens.services.taxonomy_exchange import TaxonomyExchange, encode
 
 
 def discover(handler, context):
-    result = handler.import_response(context, encode(TAXONOMY))
-    files = exported(result["saved_path"])
-    handler.import_response(context, zipped(classifier_files(files["manifest.json"], files)))
+    handler.import_response(context, encode(TAXONOMY), "designer")
+    files = exported(handler.export(context, "classifier")["saved_path"])
+    handler.import_response(
+        context, encode(classifier_files(files["manifest.json"], files)), "classifier"
+    )
 
 
 def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exchange):
     handler, context, frame, _ = exchange
     discover(handler, context)
     with pytest.raises(ValueError, match="comentarios"):
-        handler.export(context, pending=True)
+        handler.export(context, stage="classifier")
     frame.loc[0, "Comment"] = "Ahora no funciona"
     frame.loc[len(frame)] = ["new-key", "Otra incidencia", "", "", "Web"]
-    pending = exported(handler.export(context, pending=True)["saved_path"])
+    pending = exported(handler.export(context, stage="classifier")["saved_path"])
     sent = [
         row
         for name, batch in pending.items()
@@ -36,7 +42,7 @@ def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exc
     assert len(sent) == 2
     assert {row["Comment"] for row in sent} == {"Ahora no funciona", "Otra incidencia"}
     response = classifier_files(pending["manifest.json"], pending)
-    handler.import_response(context, zipped(response))
+    handler.import_response(context, encode(response), "classifier")
     resolved = handler.taxonomy.resolve(context, mode="DISCOVERED")
     assert len(resolved) == 406
     assert resolved.Palanca.eq("Atención").all()
@@ -62,9 +68,7 @@ def test_manual_origin_priority_renames_deletes_and_empty_categories(exchange):
     )
     assert tax.resolve(context, mode="COMPLETED").Palanca.eq("Nueva").all()
     assert tax.resolve(context, mode="SOURCE").Palanca.eq("Origen").all()
-    assert (
-        "Sin respuestas" in tax.catalog(context, "COMPLETED_NORMALIZED")["taxonomy"][0]["sublevers"]
-    )
+    assert "Sin respuestas" in tax.catalog(context, "COMPLETED")["taxonomy"][0]["sublevers"]
     tax.save_manual(context, [{"lever": "Nueva", "sublevers": ["Sin respuestas"]}])
     assert tax.resolve(context, mode="COMPLETED").Palanca.eq("").all()
 
@@ -100,11 +104,16 @@ def helix_response(request, nps_id, entity="Resolución"):
                 "classifications": [
                     {
                         "id": row["id"],
-                        "lever": "Atención",
-                        "sublever": "Resolución",
-                        "entity": entity,
-                        "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
-                        "links": [{"nps_id": nps_id, "confidence": 0.9}],
+                        "assignments": [
+                            {
+                                "taxonomy_mode": mode,
+                                "lever": "Atención",
+                                "sublever": "Resolución",
+                                "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
+                                "links": [{"nps_id": nps_id, "confidence": 0.9}],
+                            }
+                            for mode in row["pending_taxonomies"]
+                        ],
                     }
                     for row in payload["incidents"]
                 ]
@@ -117,7 +126,7 @@ def helix_response(request, nps_id, entity="Resolución"):
 
 def test_helix_partial_pending_atomic_and_stale(helix):
     handler, ctx, frame, incidents, _ = helix
-    inputs = handler.inputs(ctx, incidents, "SOURCE", "domain_touchpoint")
+    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
     with pytest.raises(ValueError, match="Importa"):
         handler.links(ctx, inputs, frame, incidents)
     request = exported(handler.export(ctx, inputs)["saved_path"])
@@ -131,7 +140,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     pending = exported(handler.export(ctx, inputs)["saved_path"])
     assert pending["incidents/000001.json"]["incidents"][0]["id"] == "INC-200"
     invalid = copy.deepcopy(response)
-    invalid["results/000002.json"]["classifications"][0]["lever"] = "Inventada"
+    invalid["results/000002.json"]["classifications"][0]["assignments"][0]["lever"] = "Inventada"
     with pytest.raises(ValueError, match="taxonomía"):
         handler.import_response(ctx, inputs, zipped(invalid))
     assert handler.status(ctx, inputs)["pending"] == 1
@@ -139,14 +148,15 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
     links = handler.links(ctx, inputs, frame, incidents)
     assert len(links) == 201
-    assert links.llm_entity.eq("Resolución").all()
+    assert links.incident_topic.eq("Atención > Resolución").all()
     with pytest.raises(ValueError, match="dataset"):
         handler.import_response(UploadContext("Foreign", "", ""), inputs, zipped(response))
-    altered = handler.inputs(ctx, incidents, "NORMALIZED", "domain_touchpoint")
+    handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
+    altered = handler.inputs(ctx, incidents, ["COMPLETED"])
     with pytest.raises(ValueError, match="cambiado"):
         handler.import_response(ctx, altered, zipped(response))
     incidents.loc[0, "Detailed Description"] = "Otro síntoma"
-    updated = handler.inputs(ctx, incidents, "SOURCE", "domain_touchpoint")
+    updated = handler.inputs(ctx, incidents, ["SOURCE"])
     assert handler.status(ctx, updated)["pending"] == 1
     with pytest.raises(ValueError, match="cambiado"):
         handler.import_response(ctx, updated, zipped(response))
@@ -164,7 +174,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
 )
 def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monkeypatch):
     handler, ctx, frame, incidents, client = helix
-    inputs = handler.inputs(ctx, incidents, "SOURCE", method)
+    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
     request = exported(handler.export(ctx, inputs)["saved_path"])
     response = helix_response(request, inputs["comments"][0]["id"], entity)
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
@@ -181,7 +191,7 @@ def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monk
         helix_df=incidents,
         by_topic_weekly=pd.DataFrame(),
     )
-    assert payload["links_mode_df"].nps_topic.eq(entity).all()
+    assert not payload["links_mode_df"].empty
     frame.loc[0, "Comment"] = "Changed comment"
     blocked = client.put("/api/taxonomy/helix/engine", params=params)
     assert blocked.status_code == 409
@@ -196,7 +206,7 @@ def test_local_endpoints_are_unavailable_on_webapp(helix):
     from dataclasses import replace
 
     client.app.state.settings = replace(client.app.state.settings, auth_mode="iap")
-    for path in ("/manual", "/helix?mode=SOURCE&method=domain_touchpoint"):
+    for path in ("/manual", "/helix"):
         result = client.get("/api/taxonomy" + path)
         assert result.status_code in (401, 403, 404)
 
@@ -222,14 +232,14 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     frame["Fecha"] = pd.Timestamp("2026-09-01")
     frame["NPS"] = 2
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
-    inputs = handler.inputs(ctx, incidents, "SOURCE", "domain_touchpoint")
+    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
     request = exported(handler.export(ctx, inputs)["saved_path"])
     handler.import_response(
         ctx, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))
     )
     handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     state = handler.taxonomy.state(ctx)
-    state.update(causal_engine="llm", causal_method="domain_touchpoint")
+    state.update(causal_engine="llm")
     handler.taxonomy.save_state(ctx, state)
     dashboard = client.app.state.dashboard_service
     monkeypatch.setattr(dashboard, "_load_helix_df", lambda *args, **kwargs: incidents)
@@ -255,3 +265,65 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     assert result["ready"]
     assert len(result["core"]["links_df"]) == 201
     assert result["mode_payload"]["links_mode_df"].nps_topic.eq("Resolución").all()
+
+
+def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix):
+    handler, ctx, frame, incidents, _ = helix
+    exchange = TaxonomyExchange(handler.taxonomy, handler.downloads)
+    discover(exchange, ctx)
+    handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
+    source = handler.inputs(ctx, incidents, ["SOURCE"])
+    request = exported(handler.export(ctx, source)["saved_path"])
+    handler.import_response(
+        ctx, source, zipped(helix_response(request, source["comments"][0]["id"]))
+    )
+    all_inputs = handler.inputs(ctx, incidents, ["SOURCE", "COMPLETED", "DISCOVERED"])
+    assert all_inputs["scopes"]["SOURCE"] == source["scopes"]["SOURCE"]
+    request = exported(handler.export(ctx, all_inputs)["saved_path"])
+    assert request["incidents/000001.json"]["incidents"][0]["pending_taxonomies"] == [
+        "COMPLETED",
+        "DISCOVERED",
+    ]
+    assert "method" not in request["manifest.json"]
+    response = helix_response(request, all_inputs["comments"][0]["id"])
+    assert handler.import_response(ctx, all_inputs, zipped(response))["ready"]
+    for mode in ["SOURCE", "COMPLETED", "DISCOVERED"]:
+        current = handler.inputs(ctx, incidents, [mode])
+        assert handler.status(ctx, current)["ready"]
+        assert len(handler.current(ctx, current)[mode]) == 201
+    handler.taxonomy.save_manual(
+        ctx,
+        [
+            {
+                "lever": "Manual",
+                "sublevers": ["Propia"],
+                "previous_lever": "Atención",
+                "previous_sublevers": ["Resolución"],
+            }
+        ],
+    )
+    changed = handler.inputs(ctx, incidents, ["SOURCE", "COMPLETED", "DISCOVERED"])
+    counts = handler.status(ctx, changed)["taxonomies"]
+    assert counts["SOURCE"]["pending"] == counts["DISCOVERED"]["pending"] == 0
+    assert counts["COMPLETED"]["pending"] == 201
+
+
+def test_partial_classifier_export_omits_already_imported_comments(exchange):
+    handler, ctx, _, _ = exchange
+    handler.import_response(ctx, encode(TAXONOMY), "designer")
+    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    response = classifier_files(request["manifest.json"], request)
+    handler.import_response(
+        ctx,
+        encode(
+            {"manifest": response["manifest"], "results": {"000001": response["results"]["000001"]}}
+        ),
+        "classifier",
+    )
+    for _ in range(5):
+        pending = exported(handler.export(ctx, "classifier")["saved_path"])
+    assert sum(batch["count"] for batch in pending["manifest.json"]["batches"]) == 205
+    handler.import_response(
+        ctx, encode(classifier_files(pending["manifest.json"], pending)), "classifier"
+    )
+    assert handler.taxonomy.resolve(ctx, mode="DISCOVERED").Palanca.eq("Atención").all()

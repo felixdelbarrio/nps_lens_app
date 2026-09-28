@@ -13,7 +13,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_MIN_SIMILARITY
-from nps_lens.analytics.taxonomy import TaxonomyConfig
 from nps_lens.api.schemas import (
     ColumnAliasRegistryRequest,
     ContextOptionsResponse,
@@ -27,7 +26,6 @@ from nps_lens.api.schemas import (
     ServiceOriginHierarchyRequest,
     SummaryResponse,
     TaxonomyDiscoverySettingsRequest,
-    TaxonomyGenerateRequest,
     TaxonomySettingsRequest,
     UploadResponse,
 )
@@ -39,7 +37,7 @@ from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceReg
 from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
-from nps_lens.services.helix_exchange import HELIX_CLASSIFIER_URL, HelixExchange
+from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.services.taxonomy_exchange import MAX_ZIP_BYTES, TaxonomyExchange
@@ -50,7 +48,6 @@ from nps_lens.settings import (
     normalize_chatgpt_project_url,
     normalize_downloads_path,
     normalize_helix_base_url,
-    normalize_taxonomy_discovery_method,
     persist_service_origin_hierarchy,
     persist_ui_prefs,
     safe_normalize_downloads_path,
@@ -198,6 +195,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         email = _authenticated_email(request)
         is_admin = current.auth_mode != "gcp_iap" or email in current.admin_emails
         return {
+            "local": current.auth_mode == "local",
             "email": email,
             "role": "admin" if is_admin else "viewer",
             "is_admin": is_admin,
@@ -711,32 +709,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
-    @app.post("/api/taxonomy/generate")
-    def taxonomy_generate(
-        payload: TaxonomyGenerateRequest,
-        request: Request,
-        dashboard_layer: DashboardService = Depends(get_dashboard_service),
-    ) -> dict[str, Any]:
-        require_admin(request)
-        try:
-            with dashboard_layer._analytics_lock:
-                config = TaxonomyConfig(**payload.config) if payload.mode == "COMPLETED" else None
-                result = dashboard_layer.taxonomy.generate(
-                    taxonomy_context(request),
-                    payload.mode,
-                    config,
-                    payload.regenerate,
-                )
-                dashboard_layer.clear_caches()
-                return result
-        except TaxonomyDiscoveryError as exc:
-            raise HTTPException(409, f"{exc.code.value}: {exc}") from exc
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(400, str(exc)) from exc
-
     def require_local_taxonomy(request: Request) -> None:
         if cast(Settings, request.app.state.settings).auth_mode != "local":
-            raise HTTPException(404, "La automatización de ChatGPT solo existe en la app local.")
+            raise HTTPException(404, "El intercambio con los proyectos GPT solo existe en la app local.")
 
     @app.get("/api/taxonomy/discovery/instructions")
     def taxonomy_project_instructions(request: Request) -> dict[str, Any]:
@@ -753,10 +728,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_local_taxonomy(request)
         current = cast(Settings, request.app.state.settings)
         return {
-            "method": current.taxonomy_discovery_method,
             "designer_url": current.taxonomy_designer_url,
             "classifier_url": current.taxonomy_classifier_url,
-            "helix_classifier_url": HELIX_CLASSIFIER_URL,
+            "helix_classifier_url": current.helix_classifier_url,
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -769,10 +743,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_local_taxonomy(request)
         current = cast(Settings, request.app.state.settings)
         try:
+            fields = {
+                "designer_url": "taxonomy_designer_url",
+                "classifier_url": "taxonomy_classifier_url",
+                "helix_classifier_url": "helix_classifier_url",
+            }
             values = {
-                "taxonomy_discovery_method": normalize_taxonomy_discovery_method(payload.method),
-                "taxonomy_designer_url": normalize_chatgpt_project_url(payload.designer_url),
-                "taxonomy_classifier_url": normalize_chatgpt_project_url(payload.classifier_url),
+                fields[key]: normalize_chatgpt_project_url(value)
+                for key, value in payload.model_dump(exclude_none=True).items()
             }
             persist_ui_prefs(current.dotenv_path, values)
             refresh_settings(request)
@@ -789,23 +767,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
         return TaxonomyExchange(dashboard_layer.taxonomy, downloads)
 
-    @app.post("/api/taxonomy/discovery/export")
+    @app.post("/api/taxonomy/discovery/{stage}/export")
     def export_taxonomy_zip(
         request: Request,
-        pending: bool = False,
+        stage: str,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                return exchange(request, dashboard_layer).export(
-                    taxonomy_context(request), pending=pending
-                )
+                return exchange(request, dashboard_layer).export(taxonomy_context(request), stage)
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.post("/api/taxonomy/discovery/import")
+    @app.post("/api/taxonomy/discovery/{stage}/import")
     def import_taxonomy_zip(
         request: Request,
+        stage: str,
         file: UploadFile = File(...),
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
@@ -813,7 +790,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         content = file.file.read(MAX_ZIP_BYTES + 1)
         try:
             with dashboard_layer._analytics_lock:
-                result = handler.import_response(taxonomy_context(request), content)
+                result = handler.import_response(taxonomy_context(request), content, stage)
                 dashboard_layer.clear_caches()
                 return result
         except (ValueError, OSError, TaxonomyDiscoveryError) as exc:
@@ -849,37 +826,32 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
     def helix_exchange(
-        request: Request, dashboard_layer: DashboardService, mode: str, method: str
+        request: Request, dashboard_layer: DashboardService, *, active_only: bool = False
     ) -> tuple[HelixExchange, UploadContext, dict[str, Any]]:
         handler = exchange(request, dashboard_layer)
         context = taxonomy_context(request)
+        state = dashboard_layer.taxonomy.state(context)
+        modes = [state["active"]] if active_only else dashboard_layer.taxonomy.helix_modes(context)
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
-        inputs = helix.inputs(context, dashboard_layer._load_helix_df(context), mode, method)
-        return helix, context, inputs
+        return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), modes)
 
     @app.get("/api/taxonomy/helix")
     def helix_exchange_status(
-        request: Request,
-        mode: str,
-        method: str,
-        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, Any]:
         try:
-            handler, context, inputs = helix_exchange(request, dashboard_layer, mode, method)
+            handler, context, inputs = helix_exchange(request, dashboard_layer)
             return handler.status(context, inputs)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @app.post("/api/taxonomy/helix/export")
     def export_helix_zip(
-        request: Request,
-        mode: str,
-        method: str,
-        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                handler, context, inputs = helix_exchange(request, dashboard_layer, mode, method)
+                handler, context, inputs = helix_exchange(request, dashboard_layer)
                 return handler.export(context, inputs)
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -887,14 +859,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/api/taxonomy/helix/import")
     def import_helix_zip(
         request: Request,
-        mode: str,
-        method: str,
         file: UploadFile = File(...),
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                handler, context, inputs = helix_exchange(request, dashboard_layer, mode, method)
+                handler, context, inputs = helix_exchange(request, dashboard_layer)
                 result = handler.import_response(context, inputs, file.file.read(MAX_ZIP_BYTES + 1))
                 dashboard_layer.clear_caches()
                 return result
@@ -908,17 +878,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_admin(request)
         require_local_taxonomy(request)
         state = dashboard_layer.taxonomy.state(taxonomy_context(request))
+        ready, reason = False, ""
+        try:
+            handler, context, inputs = helix_exchange(request, dashboard_layer, active_only=True)
+            ready = handler.status(context, inputs)["ready"]
+        except ValueError as exc:
+            reason = str(exc)
         return {
             "engine": state.get("causal_engine", "rules"),
-            "method": state.get("causal_method", "domain_touchpoint"),
+            "ready": ready,
+            "reason": reason,
+            "active": state["active"],
         }
 
     @app.put("/api/taxonomy/helix/engine")
     def set_causal_engine(
         request: Request,
         engine: str,
-        mode: str,
-        method: str,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
@@ -931,14 +907,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 state = dashboard_layer.taxonomy.state(context)
                 if engine == "llm":
                     handler, context, inputs = helix_exchange(
-                        request, dashboard_layer, mode, method
+                        request, dashboard_layer, active_only=True
                     )
                     if not handler.status(context, inputs)["ready"]:
                         raise ValueError(
-                            "Importa primero todos los lotes del ZIP Helix de respuesta."
+                            "Importa primero todos los lotes Helix de la lente activa."
                         )
-                    state["active"] = mode
-                    state["causal_method"] = method
                 state["causal_engine"] = engine
                 dashboard_layer.taxonomy.save_state(context, state)
                 dashboard_layer.clear_caches()

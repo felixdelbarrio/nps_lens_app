@@ -54,7 +54,7 @@ export type DashboardConfig = {
   preferences: PreferencesPayload;
   nps_dataset: DatasetStatus;
   helix_dataset: DatasetStatus;
-  access?: { email: string; role: "admin" | "viewer"; is_admin: boolean; allowed_domain: string };
+  access?: { email: string; role: "admin" | "viewer"; is_admin: boolean; allowed_domain: string; local?: boolean };
 };
 
 export type CausalMethodOption = {
@@ -715,7 +715,7 @@ export function downloadExecutiveReport(params: {
   return downloadArtifact("/api/dashboard/report/pptx", params, "reporte-ejecutivo.pptx");
 }
 
-export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "COMPLETED_NORMALIZED" | "DISCOVERED";
+export type TaxonomyMode = "SOURCE" | "COMPLETED" | "DISCOVERED";
 export type TaxonomyContext = Record<string, string>;
 export type TaxonomyStatus = {
   detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number; originals_unavailable?: number };
@@ -725,7 +725,9 @@ export type TaxonomyStatus = {
   policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
   restored: boolean;
   discovery_local_available?: boolean;
-  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; macro_f1?: number | null; equivalence_groups?: number }>;
+  helix_modes: TaxonomyMode[];
+  discovered_catalog_available: boolean;
+  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number }>;
 };
 export type TaxonomyProjectInstructions = {
   version: string;
@@ -734,7 +736,6 @@ export type TaxonomyProjectInstructions = {
   helix: string;
 };
 export type TaxonomyDiscoverySettings = {
-  method: "local" | "chatgpt_zip";
   designer_url: string;
   classifier_url: string;
   helix_classifier_url: string;

@@ -16,8 +16,6 @@ import pandas as pd
 from nps_lens.analytics.taxonomy import (
     MODES,
     SOURCE_COLUMNS,
-    TaxonomyConfig,
-    complete,
     detect_taxonomy,
     labels,
     signature,
@@ -33,6 +31,13 @@ def context_key(context: UploadContext) -> str:
     return context.service_origin
 
 
+def original_labels(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy(deep=False)
+    for column, source in SOURCE_COLUMNS.items():
+        out[column] = labels(frame, source if source in frame else column)
+    return out
+
+
 class TaxonomyResolver:
     """The only boundary replacing categorical columns before analytics. Never fits models."""
 
@@ -45,12 +50,8 @@ class TaxonomyResolver:
     ) -> pd.DataFrame:
         if mode not in MODES:
             raise ValueError("Taxonomía desconocida.")
-        out = frame.copy(deep=False)
-        for column, source in SOURCE_COLUMNS.items():
-            out[column] = labels(frame, source if source in frame else column)
-        if mode == "NORMALIZED":
-            out = registry.apply("nps", out)
-        elif mode in ("COMPLETED", "COMPLETED_NORMALIZED", "DISCOVERED"):
+        out = original_labels(frame)
+        if mode in ("COMPLETED", "DISCOVERED"):
             if artifact is None:
                 raise ValueError("Primero crea esta taxonomía desde Taxonomy Studio.")
             assignments = pd.DataFrame(
@@ -67,8 +68,9 @@ class TaxonomyResolver:
                 )
             out["Palanca"] = keys.map(assignments["lever"]).fillna("")
             out["Subpalanca"] = keys.map(assignments["sublever"]).fillna("")
-            out["Canal"] = registry.normalize_series("nps.Canal", out["Canal"])
-        if mode == "COMPLETED_NORMALIZED":
+            if mode == "DISCOVERED":
+                out["Canal"] = registry.normalize_series("nps.Canal", out["Canal"])
+        if mode in ("SOURCE", "COMPLETED"):
             out = registry.apply("nps", out)
         out.attrs["taxonomy_mode"] = mode
         return out
@@ -115,13 +117,16 @@ class TaxonomyService:
             cast(dict[str, Any], json.loads(row[0]))
             if row
             else {
-                "active": "NORMALIZED",
-                "default": "NORMALIZED",
+                "active": "SOURCE",
+                "default": "SOURCE",
                 "policy": "ACTIVE_ONLY",
                 "artifacts": {},
             }
         )
 
+        for field in ("active", "default"):
+            if state.get(field) not in MODES:
+                state[field] = "SOURCE"
         if len(self._state_cache) >= 4:
             self._state_cache.clear()
         self._state_cache[key] = (revision, state)
@@ -185,24 +190,16 @@ class TaxonomyService:
         state = self.state(context)
         if state.get("restored"):
             return cast(dict[str, Optional[dict[str, Any]]], state["restored"]["taxonomies"])
-        available: dict[str, Optional[dict[str, Any]]] = {"SOURCE": None, "NORMALIZED": None}
+        available: dict[str, Optional[dict[str, Any]]] = {"SOURCE": None}
         for mode, sig in state.get("artifacts", {}).items():
+            if mode not in MODES:
+                continue
             item = self.artifact(sig)
             if item:
-                manual = item["config"].get("method") == "manual"
-                base = self.resolver.resolve(frame, "SOURCE" if manual else "NORMALIZED", registry)
-                config: TaxonomyConfig | dict[str, Any] = (
-                    TaxonomyConfig(**item["config"])
-                    if mode == "COMPLETED" and item["config"].get("method") != "manual"
-                    else cast(dict[str, Any], item["config"])
-                )
-                expected = signature(
-                    base, mode, config, "" if manual else registry.signature("nps")
-                )
+                base = original_labels(frame)
+                expected = signature(base, mode, item["config"], "")
                 if sig == expected:
                     available[mode] = item
-        if "COMPLETED" in available:
-            available["COMPLETED_NORMALIZED"] = available["COMPLETED"]
         return available
 
     def resolve(
@@ -230,11 +227,11 @@ class TaxonomyService:
                 raise ValueError(
                     "Taxonomía ausente o desactualizada: crea o regenera antes de usarla."
                 )
-            selected = "NORMALIZED"
+            selected = "SOURCE"
         item = available[selected]
-        # Frozen SOURCE/NORMALIZED also carry assignments, independent of current equivalences.
+        # Frozen lenses carry their own assignments and equivalences.
         if state.get("restored") and item:
-            out = self.resolver.resolve(frame, "COMPLETED", registry, item)
+            out = self.resolver.resolve(frame, "DISCOVERED", registry, item)
             if "channel" in item:
                 lookup = pd.Series(item["channel"], index=item["keys"])
                 out["Canal"] = frame["_business_key"].map(lookup)
@@ -242,108 +239,56 @@ class TaxonomyService:
             return out
         return self.resolver.resolve(frame, selected, registry, item)
 
-    def generate(
-        self,
-        context: UploadContext,
-        mode: str,
-        config: Optional[TaxonomyConfig] = None,
-        regenerate: bool = False,
+    def catalog(
+        self, context: UploadContext, mode: str, *, normalized: bool = True
     ) -> dict[str, Any]:
-        if mode != "COMPLETED":
-            raise ValueError("La taxonomía descubierta se crea mediante intercambio ZIP.")
+        if mode not in MODES:
+            raise ValueError("Taxonomía desconocida.")
         state = self.state(context)
-        if state.get("restored"):
-            raise ValueError("Snapshot inmutable: vuelve al dataset local antes de generar.")
-        registry = self.registry(context)
-        frame = (
-            self.resolver.resolve(self.source(context), "NORMALIZED", registry)
-            .sort_values("_business_key")
-            .reset_index(drop=True)
-        )
-        artifact_config: dict[str, Any] = asdict(config or TaxonomyConfig())
-        sig = signature(frame, mode, artifact_config, registry.signature("nps"))
-        artifact = None if regenerate else self.artifact(sig)
-        hit = artifact is not None
-        if artifact is None:
-            artifact = complete(frame, config or TaxonomyConfig())
-            artifact.update(
-                {
-                    "mode": mode,
-                    "signature": sig,
-                    "keys": frame["_business_key"].tolist(),
-                    "config": artifact_config,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "equivalences": registry.to_dict(),
-                }
-            )
-            state.setdefault("artifacts", {})[mode] = sig
-            # Artifact and active state become visible in the same SQLite transaction.
-            with self.repository._connect() as connection:
-                connection.execute(
-                    "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
-                    (
-                        sig,
-                        context_key(context),
-                        mode,
-                        json.dumps(artifact, ensure_ascii=False, allow_nan=False),
-                    ),
-                )
-                connection.execute(
-                    "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
-                    (context_key(context), json.dumps(state, ensure_ascii=False, allow_nan=False)),
-                )
-            self._cache[sig] = artifact
+        item = self.artifact(state.get("artifacts", {}).get(mode, ""))
+        if item and item.get("taxonomy"):
+            catalog = item["taxonomy"]
+        elif mode == "DISCOVERED" and state.get("discovered_taxonomy"):
+            catalog = state["discovered_taxonomy"]
         else:
-            state.setdefault("artifacts", {})[mode] = sig
-            self.save_state(context, state)
-        return {
-            "mode": mode,
-            "signature": sig,
-            "cache_hit": hit,
-            "quality": artifact.get("quality", []),
-        }
-
-    def catalog(self, context: UploadContext, mode: str) -> dict[str, Any]:
-        if mode in ("NORMALIZED", "COMPLETED_NORMALIZED"):
-            base = self.catalog(context, "SOURCE" if mode == "NORMALIZED" else "COMPLETED")
-            pairs = pd.DataFrame(
-                [
-                    (branch["lever"], sub)
-                    for branch in base["taxonomy"]
-                    for sub in branch["sublevers"]
-                ],
-                columns=["Palanca", "Subpalanca"],
+            frame = (
+                original_labels(self.source(context))
+                if mode == "SOURCE"
+                else self.resolve(context, mode=mode)
             )
-            pairs = self.registry(context).apply("nps", pairs).drop_duplicates()
-            return {
+            pairs = frame.loc[
+                labels(frame, "Palanca").ne("") & labels(frame, "Subpalanca").ne(""),
+                ["Palanca", "Subpalanca"],
+            ].drop_duplicates()
+            catalog = {
                 "taxonomy": [
                     {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
                     for lever, group in pairs.groupby("Palanca", sort=True)
                 ]
             }
-        state = self.state(context)
-        item = self.artifact(state.get("artifacts", {}).get(mode, ""))
-        if item and item.get("taxonomy"):
-            return cast(dict[str, Any], item["taxonomy"])
-        if mode == "DISCOVERED" and state.get("discovered_taxonomy"):
-            return cast(dict[str, Any], state["discovered_taxonomy"])
-        frame = self.resolve(context, mode=mode)
-        pairs = frame.loc[
-            labels(frame, "Palanca").ne("") & labels(frame, "Subpalanca").ne(""),
-            ["Palanca", "Subpalanca"],
-        ].drop_duplicates()
-        return {
-            "taxonomy": [
-                {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
-                for lever, group in pairs.groupby("Palanca", sort=True)
-            ]
-        }
+        if normalized and mode in ("SOURCE", "COMPLETED"):
+            pairs = pd.DataFrame(
+                [
+                    (branch["lever"], sub)
+                    for branch in catalog["taxonomy"]
+                    for sub in branch["sublevers"]
+                ],
+                columns=["Palanca", "Subpalanca"],
+            )
+            pairs = self.registry(context).apply("nps", pairs).drop_duplicates()
+            catalog = {
+                "taxonomy": [
+                    {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
+                    for lever, group in pairs.groupby("Palanca", sort=True)
+                ]
+            }
+        return cast(dict[str, Any], catalog)
 
     def manual_draft(self, context: UploadContext) -> dict[str, Any]:
         state = self.state(context)
         if state.get("artifacts", {}).get("COMPLETED"):
-            return self.catalog(context, "COMPLETED")
-        source = self.catalog(context, "SOURCE")
+            return self.catalog(context, "COMPLETED", normalized=False)
+        source = self.catalog(context, "SOURCE", normalized=False)
         return (
             source
             if source["taxonomy"]
@@ -367,15 +312,13 @@ class TaxonomyService:
             ):
                 raise ValueError("Cada Palanca requiere un nombre y al menos una Subpalanca.")
             lever = lever.strip()
-            if lever.casefold() in seen:
+            if lever in seen:
                 raise ValueError("Palancas duplicadas.")
-            seen.add(lever.casefold())
+            seen.add(lever)
             if not all(isinstance(sub, str) for sub in subs):
                 raise ValueError("Las Subpalancas deben ser texto.")
             cleaned = [sub.strip() for sub in subs]
-            if any(not sub for sub in cleaned) or len({sub.casefold() for sub in cleaned}) != len(
-                cleaned
-            ):
+            if any(not sub for sub in cleaned) or len(set(cleaned)) != len(cleaned):
                 raise ValueError("Subpalancas vacías o duplicadas.")
             pairs.update((lever, sub) for sub in cleaned)
             old = branch.get("previous_lever", lever)
@@ -398,7 +341,7 @@ class TaxonomyService:
             raise ValueError("Crea al menos una Palanca/Subpalanca.")
         registry = self.registry(context)
         frame = (
-            self.resolver.resolve(self.source(context), "SOURCE", registry)
+            original_labels(self.source(context))
             .sort_values("_business_key")
             .reset_index(drop=True)
         )
@@ -410,7 +353,17 @@ class TaxonomyService:
             and "DISCOVERED" in available
         ):
             base_mode = "DISCOVERED"
-        base = self.resolve(context, frame, base_mode)
+        # Editing operates on raw assignments; normalization is only a lens operation.
+        base = (
+            original_labels(frame)
+            if base_mode == "SOURCE"
+            else self.resolver.resolve(
+                frame,
+                base_mode,
+                EquivalenceRegistry.from_dict({"dimensions": {}}),
+                available[base_mode],
+            )
+        )
         assigned = [
             mapping.get(pair, pair)
             for pair in zip(labels(base, "Palanca"), labels(base, "Subpalanca"))
@@ -468,12 +421,32 @@ class TaxonomyService:
                         "La taxonomía seleccionada debe estar disponible y actualizada."
                     )
                 state[field] = changes[field]
+        if "helix_modes" in changes:
+            modes = changes["helix_modes"]
+            if (
+                not modes
+                or len(modes) != len(set(modes))
+                or any(mode not in available for mode in modes)
+            ):
+                raise ValueError("Selecciona taxonomías disponibles para Helix.")
+            state["helix_modes"] = modes
         if "policy" in changes:
             if changes["policy"] not in POLICIES:
                 raise ValueError("Política de snapshot desconocida.")
             state["policy"] = changes["policy"]
         self.save_state(context, state)
         return {key: state[key] for key in ("active", "default", "policy")}
+
+    def helix_modes(
+        self, context: UploadContext, available: Optional[dict[str, Any]] = None
+    ) -> list[str]:
+        state = self.state(context)
+        if available is None:
+            available = self.available(context, self.source(context), self.registry(context))
+        selected = state["active"] if state["active"] in available else "SOURCE"
+        return [mode for mode in state.get("helix_modes", [selected]) if mode in available] or [
+            selected
+        ]
 
     def studio(self, context: UploadContext) -> dict[str, Any]:
         frame, registry = self.source(context), self.registry(context)
@@ -491,12 +464,11 @@ class TaxonomyService:
                 resolved, "Subpalanca"
             ).str.strip().ne("")
             item = available[mode] or {}
-            quality = item.get("quality", [])
-            scores = [q["macro_f1"] for q in quality if q.get("macro_f1") is not None]
             cards.append(
                 {
                     "mode": mode,
                     "available": True,
+                    "selectable": mode != "SOURCE" or bool(classified.any()),
                     "levers": (
                         len(item["taxonomy"]["taxonomy"])
                         if item.get("taxonomy")
@@ -512,8 +484,6 @@ class TaxonomyService:
                         )
                     ),
                     "coverage": float(classified.mean()) if len(frame) else 0,
-                    "macro_f1": sum(scores) / len(scores) if scores else None,
-                    "quality": quality,
                     "equivalence_groups": sum(
                         len(v)
                         for k, v in registry.to_dict()["dimensions"].items()
@@ -522,7 +492,7 @@ class TaxonomyService:
                     "created_at": item.get("created_at"),
                 }
             )
-        selected = state["active"] if state["active"] in available else "NORMALIZED"
+        selected = state["active"] if state["active"] in available else "SOURCE"
         return {
             "detection": {
                 **detect_taxonomy(frame),
@@ -536,6 +506,8 @@ class TaxonomyService:
             "default": state["default"],
             "policy": state["policy"],
             "restored": bool(state.get("restored")),
+            "helix_modes": self.helix_modes(context, available),
+            "discovered_catalog_available": bool(state.get("discovered_taxonomy")),
         }
 
     def explore(
@@ -590,7 +562,7 @@ class TaxonomyService:
                 "note": "Indicios para revisar; no son errores confirmados.",
             },
             "equivalences": item.get(
-                "equivalences", self.registry(context).to_dict() if mode == "NORMALIZED" else {}
+                "equivalences", self.registry(context).to_dict() if mode == "SOURCE" else {}
             ),
         }
 
@@ -700,7 +672,7 @@ class TaxonomyService:
         for mode, item in payload["taxonomies"].items():
             if mode not in MODES:
                 raise ValueError("Taxonomía desconocida en snapshot.")
-            self.resolver.resolve(frame, "COMPLETED", registry, item)
+            self.resolver.resolve(frame, "DISCOVERED", registry, item)
         state = self.state(context)
         state.update(
             {
@@ -715,7 +687,7 @@ class TaxonomyService:
     def resume_local(self, context: UploadContext) -> None:
         state = self.state(context)
         state.pop("restored", None)
-        state["active"] = state["default"] = "NORMALIZED"
+        state["active"] = state["default"] = "SOURCE"
         self.save_state(context, state)
 
     @contextmanager

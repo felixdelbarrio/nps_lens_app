@@ -4,17 +4,13 @@ import json
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from nps_lens.analytics.nps_helix_link import build_nps_text, link_incidents_to_nps_topics
 from nps_lens.analytics.taxonomy import (
-    TaxonomyConfig,
-    complete,
     detect_taxonomy,
     signature,
 )
@@ -83,12 +79,12 @@ def service(settings: Settings) -> tuple[TaxonomyService, UploadContext]:
 def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
     """Install a ZIP-equivalent artifact; ZIP protocol itself has dedicated E2E tests."""
     frame = (
-        tax.resolver.resolve(tax.source(ctx), "NORMALIZED", tax.registry(ctx))
+        tax.resolver.resolve(tax.source(ctx), "SOURCE", tax.registry(ctx))
         .sort_values("_business_key")
         .reset_index(drop=True)
     )
     config = {"method": "chatgpt_zip", "taxonomy_sha256": "test", "instructions_version": "test"}
-    sig = signature(frame, "DISCOVERED", config, tax.registry(ctx).signature("nps"))
+    sig = signature(frame, "DISCOVERED", config, "")
     artifact = {
         "mode": "DISCOVERED",
         "signature": sig,
@@ -176,32 +172,6 @@ def test_scoped_equivalences_are_explicit_and_never_touch_free_text() -> None:
     assert registry.collision_report("nps.Canal", ["OTROS", "Otros"])
 
 
-def test_completed_preserves_humans_and_learns_separable_comments() -> None:
-    frame = corpus()
-    original = frame.Palanca.ne("")
-    result = complete(frame, TaxonomyConfig())
-    assert np.array(result["lever"])[original].tolist() == frame.loc[original, "Palanca"].tolist()
-    assert (
-        np.array(result["sublever"])[original].tolist()
-        == frame.loc[original, "Subpalanca"].tolist()
-    )
-    assert all(result["lever"])
-    assert all(result["sublever"])
-    assert all(row["macro_f1"] == 1 for row in result["quality"])
-    changed = frame.copy()
-    changed.NPS = 10 - changed.NPS
-    assert complete(changed, TaxonomyConfig()) == result
-
-
-def test_completed_rejects_uncertain_unseen_and_insufficient_training() -> None:
-    frame = corpus()
-    frame.loc[frame.Palanca.eq(""), "Comment"] = "astronomia saturno galaxia"
-    result = complete(frame, TaxonomyConfig())
-    assert np.array(result["lever"])[frame.Palanca.eq("")].tolist() == [""] * 16
-    tiny = complete(frame.iloc[:3], TaxonomyConfig())
-    assert tiny["quality"][0]["macro_f1"] is None
-
-
 def test_discovered_signature_is_independent_of_score_and_equivalences() -> None:
     frame = corpus()
     config = {"engine": "fake-v1", "designer_url": "designer", "classifier_url": "classifier"}
@@ -219,36 +189,26 @@ def test_discovered_signature_is_independent_of_score_and_equivalences() -> None
     ],
 )
 def test_empty_small_engines(frame: pd.DataFrame) -> None:
-    assert len(complete(frame, TaxonomyConfig())["lever"]) == len(frame)
     assert detect_taxonomy(frame)["rows"] == len(frame)
 
 
-def test_resolver_all_modes_and_cached_generation(service) -> None:
+def test_resolver_all_modes_preserve_raw_data(service) -> None:
     tax, ctx = service
-    source = tax.source(ctx)
-    before = source.copy()
-    assert tax.resolve(ctx, mode="SOURCE").Canal.iloc[0] == "Otros"
-    assert tax.resolve(ctx, mode="NORMALIZED").Canal.iloc[0] == "Otros Canales"
-    first = tax.generate(ctx, "COMPLETED", TaxonomyConfig())
-    assert not first["cache_hit"]
+    before = tax.source(ctx).copy()
+    assert tax.resolve(ctx, mode="SOURCE").Canal.iloc[0] == "Otros Canales"
+    tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     seed_discovered(tax, ctx)
-    for mode in ["COMPLETED", "DISCOVERED"]:
-        with patch(
-            "nps_lens.services.taxonomy_service.complete",
-            side_effect=AssertionError("retrained"),
-        ):
-            if mode == "COMPLETED":
-                assert tax.generate(ctx, mode, TaxonomyConfig())["cache_hit"]
-            tax.configure(ctx, {"active": mode})
-            assert len(tax.resolve(ctx)) == len(source)
-            assert tax.explore(ctx, mode)["total"] > 0
+    for mode in ["SOURCE", "COMPLETED", "DISCOVERED"]:
+        tax.configure(ctx, {"active": mode})
+        assert len(tax.resolve(ctx)) == len(before)
+        assert tax.explore(ctx, mode)["total"] > 0
     pd.testing.assert_frame_equal(tax.source(ctx), before)
     assert tax.compare(ctx, "COMPLETED", "DISCOVERED")["rows"]
 
 
 def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     tax, ctx = service
-    tax.generate(ctx, "COMPLETED", TaxonomyConfig())
+    tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     seed_discovered(tax, ctx)
     registry = EquivalenceRegistry.load(tax.equivalences_path).to_dict()
     registry["dimensions"]["helix.Service"] = [{"canonical": "Banco", "aliases": ["Bank"]}]
@@ -257,7 +217,10 @@ def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     registry["dimensions"]["nps.Palanca"] = [{"canonical": "Pagos Nuevo", "aliases": ["Pagos"]}]
     EquivalenceRegistry.from_dict(registry).save(tax.equivalences_path)
     available = {t["mode"]: t["available"] for t in tax.studio(ctx)["taxonomies"]}
-    assert not available["COMPLETED"] and available["DISCOVERED"]
+    assert available["COMPLETED"] and available["DISCOVERED"]
+    assert "Pagos Nuevo" in tax.resolve(ctx, mode="COMPLETED").Palanca.values
+    assert "Pagos Nuevo" in tax.resolve(ctx, mode="SOURCE").Palanca.values
+    assert tax.resolve(ctx, mode="DISCOVERED").Palanca.eq("ChatGPT").all()
     with tax.repository._connect() as connection:
         connection.execute("UPDATE records SET comment_text = 'changed'")
     assert not next(t for t in tax.studio(ctx)["taxonomies"] if t["mode"] == "DISCOVERED")[
@@ -265,18 +228,12 @@ def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     ]
 
 
-def test_discovered_cannot_use_obsolete_direct_generation(service) -> None:
-    tax, ctx = service
-    with pytest.raises(ValueError, match="intercambio ZIP"):
-        tax.generate(ctx, "DISCOVERED")
-
-
 @pytest.mark.parametrize(
-    "policy,number", [("ACTIVE_ONLY", 1), ("SOURCE_AND_ACTIVE", 2), ("ALL_AVAILABLE", 5)]
+    "policy,number", [("ACTIVE_ONLY", 1), ("SOURCE_AND_ACTIVE", 2), ("ALL_AVAILABLE", 3)]
 )
 def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, number) -> None:
     tax, ctx = service
-    tax.generate(ctx, "COMPLETED", TaxonomyConfig())
+    tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     seed_discovered(tax, ctx)
     tax.configure(ctx, {"active": "DISCOVERED", "default": "DISCOVERED", "policy": policy})
     before = tax.resolve(ctx)
@@ -289,11 +246,11 @@ def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, n
     assert not tax.studio(ctx)["restored"]
 
 
-@pytest.mark.parametrize("mode", ["SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED"])
+@pytest.mark.parametrize("mode", ["SOURCE", "COMPLETED", "DISCOVERED"])
 def test_causal_path_accepts_every_lens(service, mode) -> None:
     tax, ctx = service
     if mode == "COMPLETED":
-        tax.generate(ctx, mode, TaxonomyConfig())
+        tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     elif mode == "DISCOVERED":
         seed_discovered(tax, ctx)
     frame = tax.resolve(ctx, mode=mode)
@@ -319,10 +276,10 @@ def test_taxonomy_api_round_trip(settings, service) -> None:
     client = TestClient(app)
     params = {"service_origin": ctx.service_origin, "service_origin_n1": ctx.service_origin_n1}
     assert client.get("/api/taxonomy", params=params).status_code == 200
-    generated = client.post(
-        "/api/taxonomy/generate",
+    generated = client.put(
+        "/api/taxonomy/manual",
         params=params,
-        json={"mode": "COMPLETED", "config": {}},
+        json=client.get("/api/taxonomy/manual", params=params).json(),
     )
     assert generated.status_code == 200, generated.text
     assert (
@@ -359,11 +316,11 @@ def test_migration_recovers_source_and_preserves_record_identity(service, settin
     assert recovered.source_preserved.eq(1).all()
 
 
-@pytest.mark.parametrize("mode", ["SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED"])
+@pytest.mark.parametrize("mode", ["SOURCE", "COMPLETED", "DISCOVERED"])
 def test_snapshot_default_resolves_without_changing_active(service, mode) -> None:
     tax, ctx = service
     if mode == "COMPLETED":
-        tax.generate(ctx, mode, TaxonomyConfig())
+        tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     elif mode == "DISCOVERED":
         seed_discovered(tax, ctx)
     tax.configure(ctx, {"active": "SOURCE", "default": mode})
@@ -385,5 +342,34 @@ def test_studio_validates_available_artifacts_once_per_request(service, monkeypa
 
     monkeypatch.setattr(taxonomy, "available", available)
     result = taxonomy.studio(context)
-    assert sum(card["available"] for card in result["taxonomies"]) >= 2
+    assert sum(card["available"] for card in result["taxonomies"]) >= 1
     assert len(calls) == 1
+
+
+def test_manual_keeps_case_variants_until_explicit_normalization(service):
+    tax, ctx = service
+    with tax.repository._connect() as db:
+        db.execute(
+            "UPDATE records SET source_lever = 'PAGOS' WHERE rowid IN (SELECT rowid FROM records LIMIT 1)"
+        )
+    draft = tax.manual_draft(ctx)
+    tax.save_manual(ctx, draft["taxonomy"])
+    assert {"Pagos", "PAGOS"}.issubset(set(tax.resolve(ctx, mode="COMPLETED").Palanca))
+    registry = EquivalenceRegistry.load(tax.equivalences_path).to_dict()
+    registry["dimensions"]["nps.Palanca"] = [{"canonical": "Pagos", "aliases": ["PAGOS"]}]
+    EquivalenceRegistry.from_dict(registry).save(tax.equivalences_path)
+    assert "PAGOS" not in set(tax.resolve(ctx, mode="COMPLETED").Palanca)
+    assert "PAGOS" in set(tax.source(ctx).source_lever)
+
+
+def test_unsupported_saved_lens_falls_back_and_only_three_modes_are_exposed(service):
+    tax, ctx = service
+    state = tax.state(ctx)
+    state.update(active="retired", default="retired")
+    tax.save_state(ctx, state)
+    assert tax.state(ctx)["active"] == tax.state(ctx)["default"] == "SOURCE"
+    assert [item["mode"] for item in tax.studio(ctx)["taxonomies"]] == [
+        "SOURCE",
+        "COMPLETED",
+        "DISCOVERED",
+    ]

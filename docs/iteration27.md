@@ -1,3 +1,5 @@
+> Documento histórico. El flujo vigente se describe en [iteración 28](iteration28.md).
+
 # Iteración 27: taxonomías y causalidad Helix
 
 En la aplicación local, Taxonomy Studio permite:
