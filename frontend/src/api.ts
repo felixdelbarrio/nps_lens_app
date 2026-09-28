@@ -715,7 +715,7 @@ export function downloadExecutiveReport(params: {
   return downloadArtifact("/api/dashboard/report/pptx", params, "reporte-ejecutivo.pptx");
 }
 
-export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "DISCOVERED";
+export type TaxonomyMode = "SOURCE" | "NORMALIZED" | "COMPLETED" | "COMPLETED_NORMALIZED" | "DISCOVERED";
 export type TaxonomyContext = Record<string, string>;
 export type TaxonomyStatus = {
   detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number; originals_unavailable?: number };
@@ -731,11 +731,13 @@ export type TaxonomyProjectInstructions = {
   version: string;
   designer: string;
   classifier: string;
+  helix: string;
 };
 export type TaxonomyDiscoverySettings = {
   method: "local" | "chatgpt_zip";
   designer_url: string;
   classifier_url: string;
+  helix_classifier_url: string;
 };
 export function taxonomyUrl(path: string, context: TaxonomyContext) {
   return `/api/taxonomy${path}?${new URLSearchParams(context)}`;

@@ -272,7 +272,7 @@ def test_discovered_cannot_use_obsolete_direct_generation(service) -> None:
 
 
 @pytest.mark.parametrize(
-    "policy,number", [("ACTIVE_ONLY", 1), ("SOURCE_AND_ACTIVE", 2), ("ALL_AVAILABLE", 4)]
+    "policy,number", [("ACTIVE_ONLY", 1), ("SOURCE_AND_ACTIVE", 2), ("ALL_AVAILABLE", 5)]
 )
 def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, number) -> None:
     tax, ctx = service

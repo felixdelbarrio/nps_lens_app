@@ -18,7 +18,7 @@ from threadpoolctl import threadpool_limits
 from nps_lens.analytics.text_mining import STOPWORDS_ES, preprocess_text
 
 ENGINE_VERSION = "2"
-MODES = ("SOURCE", "NORMALIZED", "COMPLETED", "DISCOVERED")
+MODES = ("SOURCE", "NORMALIZED", "COMPLETED", "COMPLETED_NORMALIZED", "DISCOVERED")
 SOURCE_COLUMNS = {
     "Canal": "source_channel",
     "Palanca": "source_lever",

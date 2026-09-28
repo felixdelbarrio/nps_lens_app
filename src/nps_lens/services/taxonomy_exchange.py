@@ -180,8 +180,36 @@ class TaxonomyExchange:
             ],
         }
 
-    def export(self, context: UploadContext) -> dict[str, Any]:
+    def export(self, context: UploadContext, pending: bool = False) -> dict[str, Any]:
         frame = self._frame(context)
+        full_frame = frame
+        state = self.taxonomy.state(context)
+        previous = self.taxonomy.artifact(state.get("artifacts", {}).get("DISCOVERED", "")) or {}
+        taxonomy = (
+            (state.get("discovered_taxonomy") or previous.get("taxonomy")) if pending else None
+        )
+        retained = {}
+        if pending:
+            if not taxonomy:
+                raise ValueError("Importa primero una taxonomía descubierta.")
+            if previous.get("taxonomy") != taxonomy:
+                previous = {}
+            hashes = previous.get("comment_hashes", {})
+            retained = {
+                key: (lever, sub)
+                for key, lever, sub in zip(
+                    previous.get("keys", []),
+                    previous.get("lever", []),
+                    previous.get("sublever", []),
+                )
+                if lever and sub
+            }
+            retained = {
+                key: retained[key]
+                for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
+                if key in retained and hashes.get(key) == digest(str(comment))
+            }
+            frame = frame.loc[~frame["_business_key"].isin(retained)]
         if frame.empty:
             raise ValueError("No hay comentarios que exportar.")
         batches: dict[str, list[dict[str, str]]] = {}
@@ -206,10 +234,12 @@ class TaxonomyExchange:
             )
         job = {
             "id": uuid.uuid4().hex,
-            "corpus": self._corpus(context, frame),
+            "corpus": self._corpus(context, full_frame),
+            "keys": frame["_business_key"].tolist(),
+            "retained": retained,
             "batches": batches,
-            "taxonomy": None,
-            "stage": "designer",
+            "taxonomy": taxonomy,
+            "stage": "classifier" if pending else "designer",
             "instructions_version": INSTRUCTIONS_VERSION,
         }
         result = self._write(job)
@@ -238,6 +268,16 @@ class TaxonomyExchange:
         }
 
     def import_response(self, context: UploadContext, content: bytes) -> dict[str, Any]:
+        if content.lstrip().startswith(b"{"):
+            if len(content) > MAX_MEMBER_BYTES:
+                raise ValueError("JSON demasiado grande.")
+            self._frame(context)
+            taxonomy = TaxonomyResponse.model_validate(strict_json(content))
+            TaxonomyValidator._validate_taxonomy(taxonomy)
+            state = self.taxonomy.state(context)
+            state["discovered_taxonomy"] = taxonomy.model_dump()
+            self.taxonomy.save_state(context, state)
+            return self.export(context, pending=True)
         files = read_zip(content)
         manifest = files.pop("manifest.json", None)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("job_id"), str):
@@ -261,6 +301,9 @@ class TaxonomyExchange:
                 raise ValueError("Este intercambio ya tiene otra taxonomía. Inicia uno nuevo.")
             if job["stage"] == "complete":
                 return {"job_id": job["id"], "stage": "complete"}
+            state = self.taxonomy.state(context)
+            state["discovered_taxonomy"] = value
+            self.taxonomy.save_state(context, state)
             job.update(taxonomy=value, stage="classifier")
             result = self._write(job)
             self._save(context, job)
@@ -298,6 +341,17 @@ class TaxonomyExchange:
                     for key in job["batches"]
                     for row in strict_json(existing[key].encode())["classifications"]
                 ]
+                merged = {
+                    **job["retained"],
+                    **{
+                        key: (row["lever"], row["sublever"])
+                        for key, row in zip(job["keys"], assignments)
+                    },
+                }
+                assignments = [
+                    {"lever": merged[key][0], "sublever": merged[key][1]}
+                    for key in frame["_business_key"]
+                ]
                 config = {
                     "method": "chatgpt_zip",
                     "taxonomy_sha256": digest(job["taxonomy"]),
@@ -316,6 +370,10 @@ class TaxonomyExchange:
                     "provenance": ["chatgpt_zip"] * len(assignments),
                     "nodes": [],
                     "taxonomy": job["taxonomy"],
+                    "comment_hashes": {
+                        key: digest(str(comment))
+                        for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
+                    },
                     "equivalences": {},
                 }
                 state = self.taxonomy.state(context)

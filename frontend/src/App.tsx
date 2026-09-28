@@ -761,7 +761,8 @@ export function App() {
   }
 
   const taxonomyContext = { service_origin: serviceOrigin, service_origin_n1: serviceOriginN1, service_origin_n2: serviceOriginN2 };
-  async function refreshTaxonomy() {
+  async function refreshTaxonomy(method?: string) {
+    if (method) setTouchpointSource(method);
     await Promise.all([mutateConfig(), mutateDashboard(), mutateDataset(), mutateLinking()]);
   }
 

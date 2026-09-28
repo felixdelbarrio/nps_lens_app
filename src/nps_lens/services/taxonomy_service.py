@@ -50,7 +50,7 @@ class TaxonomyResolver:
             out[column] = labels(frame, source if source in frame else column)
         if mode == "NORMALIZED":
             out = registry.apply("nps", out)
-        elif mode in ("COMPLETED", "DISCOVERED"):
+        elif mode in ("COMPLETED", "COMPLETED_NORMALIZED", "DISCOVERED"):
             if artifact is None:
                 raise ValueError("Primero crea esta taxonomía desde Taxonomy Studio.")
             assignments = pd.DataFrame(
@@ -68,6 +68,8 @@ class TaxonomyResolver:
             out["Palanca"] = keys.map(assignments["lever"]).fillna("")
             out["Subpalanca"] = keys.map(assignments["sublever"]).fillna("")
             out["Canal"] = registry.normalize_series("nps.Canal", out["Canal"])
+        if mode == "COMPLETED_NORMALIZED":
+            out = registry.apply("nps", out)
         out.attrs["taxonomy_mode"] = mode
         return out
 
@@ -187,15 +189,20 @@ class TaxonomyService:
         for mode, sig in state.get("artifacts", {}).items():
             item = self.artifact(sig)
             if item:
-                base = self.resolver.resolve(frame, "NORMALIZED", registry)
+                manual = item["config"].get("method") == "manual"
+                base = self.resolver.resolve(frame, "SOURCE" if manual else "NORMALIZED", registry)
                 config: TaxonomyConfig | dict[str, Any] = (
                     TaxonomyConfig(**item["config"])
-                    if mode == "COMPLETED"
+                    if mode == "COMPLETED" and item["config"].get("method") != "manual"
                     else cast(dict[str, Any], item["config"])
                 )
-                expected = signature(base, mode, config, registry.signature("nps"))
+                expected = signature(
+                    base, mode, config, "" if manual else registry.signature("nps")
+                )
                 if sig == expected:
                     available[mode] = item
+        if "COMPLETED" in available:
+            available["COMPLETED_NORMALIZED"] = available["COMPLETED"]
         return available
 
     def resolve(
@@ -296,6 +303,160 @@ class TaxonomyService:
             "quality": artifact.get("quality", []),
         }
 
+    def catalog(self, context: UploadContext, mode: str) -> dict[str, Any]:
+        if mode in ("NORMALIZED", "COMPLETED_NORMALIZED"):
+            base = self.catalog(context, "SOURCE" if mode == "NORMALIZED" else "COMPLETED")
+            pairs = pd.DataFrame(
+                [
+                    (branch["lever"], sub)
+                    for branch in base["taxonomy"]
+                    for sub in branch["sublevers"]
+                ],
+                columns=["Palanca", "Subpalanca"],
+            )
+            pairs = self.registry(context).apply("nps", pairs).drop_duplicates()
+            return {
+                "taxonomy": [
+                    {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
+                    for lever, group in pairs.groupby("Palanca", sort=True)
+                ]
+            }
+        state = self.state(context)
+        item = self.artifact(state.get("artifacts", {}).get(mode, ""))
+        if item and item.get("taxonomy"):
+            return cast(dict[str, Any], item["taxonomy"])
+        if mode == "DISCOVERED" and state.get("discovered_taxonomy"):
+            return cast(dict[str, Any], state["discovered_taxonomy"])
+        frame = self.resolve(context, mode=mode)
+        pairs = frame.loc[
+            labels(frame, "Palanca").ne("") & labels(frame, "Subpalanca").ne(""),
+            ["Palanca", "Subpalanca"],
+        ].drop_duplicates()
+        return {
+            "taxonomy": [
+                {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
+                for lever, group in pairs.groupby("Palanca", sort=True)
+            ]
+        }
+
+    def manual_draft(self, context: UploadContext) -> dict[str, Any]:
+        state = self.state(context)
+        if state.get("artifacts", {}).get("COMPLETED"):
+            return self.catalog(context, "COMPLETED")
+        source = self.catalog(context, "SOURCE")
+        return (
+            source
+            if source["taxonomy"]
+            else cast(dict[str, Any], state.get("discovered_taxonomy", {"taxonomy": []}))
+        )
+
+    def save_manual(self, context: UploadContext, branches: list[dict[str, Any]]) -> dict[str, Any]:
+        state = self.state(context)
+        if state.get("restored"):
+            raise ValueError("Snapshot inmutable: vuelve al dataset local.")
+        pairs: set[tuple[str, str]] = set()
+        seen = set()
+        mapping = {}
+        for branch in branches:
+            lever, subs = branch.get("lever"), branch.get("sublevers")
+            if (
+                not isinstance(lever, str)
+                or not lever.strip()
+                or not isinstance(subs, list)
+                or not subs
+            ):
+                raise ValueError("Cada Palanca requiere un nombre y al menos una Subpalanca.")
+            lever = lever.strip()
+            if lever.casefold() in seen:
+                raise ValueError("Palancas duplicadas.")
+            seen.add(lever.casefold())
+            if not all(isinstance(sub, str) for sub in subs):
+                raise ValueError("Las Subpalancas deben ser texto.")
+            cleaned = [sub.strip() for sub in subs]
+            if any(not sub for sub in cleaned) or len({sub.casefold() for sub in cleaned}) != len(
+                cleaned
+            ):
+                raise ValueError("Subpalancas vacías o duplicadas.")
+            pairs.update((lever, sub) for sub in cleaned)
+            old = branch.get("previous_lever", lever)
+            previous = branch.get("previous_sublevers", cleaned)
+            if (
+                not isinstance(old, str)
+                or not isinstance(previous, list)
+                or not all(isinstance(sub, str) for sub in previous)
+                or len(previous) != len(cleaned)
+            ):
+                raise ValueError("Correspondencia de edición inválida.")
+            mapping.update(
+                {
+                    (old, before): (lever, after)
+                    for before, after in zip(previous, cleaned)
+                    if old and before
+                }
+            )
+        if not pairs:
+            raise ValueError("Crea al menos una Palanca/Subpalanca.")
+        registry = self.registry(context)
+        frame = (
+            self.resolver.resolve(self.source(context), "SOURCE", registry)
+            .sort_values("_business_key")
+            .reset_index(drop=True)
+        )
+        available = self.available(context, self.source(context), registry)
+        base_mode = "COMPLETED" if "COMPLETED" in available else "SOURCE"
+        if (
+            base_mode == "SOURCE"
+            and not self.catalog(context, "SOURCE")["taxonomy"]
+            and "DISCOVERED" in available
+        ):
+            base_mode = "DISCOVERED"
+        base = self.resolve(context, frame, base_mode)
+        assigned = [
+            mapping.get(pair, pair)
+            for pair in zip(labels(base, "Palanca"), labels(base, "Subpalanca"))
+        ]
+        assigned = [pair if pair in pairs else ("", "") for pair in assigned]
+        taxonomy = {
+            "taxonomy": [
+                {
+                    "lever": lever,
+                    "sublevers": sorted(sub for parent, sub in pairs if parent == lever),
+                }
+                for lever in sorted({parent for parent, _ in pairs})
+            ]
+        }
+        config = {
+            "method": "manual",
+            "taxonomy": taxonomy,
+            "mapping": sorted((a, b) for a, b in mapping.items()),
+        }
+        sig = signature(frame, "COMPLETED", config, "")
+        artifact = {
+            "mode": "COMPLETED",
+            "signature": sig,
+            "keys": frame["_business_key"].tolist(),
+            "config": config,
+            "lever": [a for a, _ in assigned],
+            "sublever": [b for _, b in assigned],
+            "taxonomy": taxonomy,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "nodes": [],
+            "equivalences": {},
+        }
+        state.setdefault("artifacts", {})["COMPLETED"] = sig
+        with self.repository._connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+                (sig, context_key(context), "COMPLETED", json.dumps(artifact, ensure_ascii=False)),
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
+                (context_key(context), json.dumps(state, ensure_ascii=False)),
+            )
+        self._cache.clear()
+        self._state_cache.clear()
+        return taxonomy
+
     def configure(self, context: UploadContext, changes: dict[str, Any]) -> dict[str, Any]:
         state = self.state(context)
         frame, registry = self.source(context), self.registry(context)
@@ -336,11 +497,19 @@ class TaxonomyService:
                 {
                     "mode": mode,
                     "available": True,
-                    "levers": int(labels(resolved, "Palanca").replace("", pd.NA).nunique()),
-                    "sublevers": int(
-                        resolved.loc[classified, ["Palanca", "Subpalanca"]]
-                        .drop_duplicates()
-                        .shape[0]
+                    "levers": (
+                        len(item["taxonomy"]["taxonomy"])
+                        if item.get("taxonomy")
+                        else int(labels(resolved, "Palanca").replace("", pd.NA).nunique())
+                    ),
+                    "sublevers": (
+                        sum(len(branch["sublevers"]) for branch in item["taxonomy"]["taxonomy"])
+                        if item.get("taxonomy")
+                        else int(
+                            resolved.loc[classified, ["Palanca", "Subpalanca"]]
+                            .drop_duplicates()
+                            .shape[0]
+                        )
                     ),
                     "coverage": float(classified.mean()) if len(frame) else 0,
                     "macro_f1": sum(scores) / len(scores) if scores else None,

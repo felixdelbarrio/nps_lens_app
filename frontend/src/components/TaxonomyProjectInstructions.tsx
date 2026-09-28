@@ -3,9 +3,9 @@ import useSWR from "swr";
 
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyProjectInstructions as Instructions } from "../api";
 
-const TITLES = { designer: "Crea Taxonomía", classifier: "Clasifica taxonomía" };
+const TITLES = { designer: "Crea Taxonomía", classifier: "Clasifica taxonomía", helix: "Helix Classifier" };
 
-export function TaxonomyProjectInstructions({ role, context }: { role: "designer" | "classifier"; context: TaxonomyContext }) {
+export function TaxonomyProjectInstructions({ role, context }: { role: "designer" | "classifier" | "helix"; context: TaxonomyContext }) {
   const { data, error, mutate } = useSWR(
     taxonomyUrl("/discovery/instructions", context),
     () => taxonomyRequest<Instructions>("/discovery/instructions", context),

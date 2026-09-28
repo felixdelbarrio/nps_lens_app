@@ -4,9 +4,11 @@ import useSWR from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscoverySettings, type TaxonomyMode, type TaxonomyStatus } from "../api";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
 
-const NAMES: Record<TaxonomyMode, string> = { SOURCE: "Origen", NORMALIZED: "Normalizada", COMPLETED: "Completada", DISCOVERED: "Descubierta" };
+import { TAXONOMY_NAMES as NAMES } from "../utils/taxonomy";
+import { ManualTaxonomyEditor } from "./ManualTaxonomyEditor";
+import { HelixClassifier } from "./HelixClassifier";
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-type Props = { context: TaxonomyContext; onChange: () => Promise<void>; disabled?: boolean };
+type Props = { context: TaxonomyContext; onChange: (method?: string) => Promise<void>; disabled?: boolean };
 type Exploration = { rows: Array<Record<string, string | number | string[]>>; total: number; audit?: { multi_parent_sublevers: string[]; generic_labels: string[]; note: string }; note?: string };
 
 export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
@@ -17,8 +19,6 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [certaintyThreshold, setCertaintyThreshold] = useState(0.65);
-  const [minF1, setMinF1] = useState(0.65);
   const [discoveryMethod, setDiscoveryMethod] = useState<TaxonomyDiscoverySettings["method"]>("local");
   const [designerUrl, setDesignerUrl] = useState("");
   const [classifierUrl, setClassifierUrl] = useState("");
@@ -40,14 +40,6 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "No se pudo completar la operación."); await mutateDiscovery(); }
     finally { setBusy(false); }
   }
-  async function generate(mode: TaxonomyMode, regenerate: boolean) {
-    await action(async () => {
-      const config = mode === "COMPLETED" ? { certainty_threshold: certaintyThreshold, min_f1: minF1 } : {};
-      const result = await taxonomyRequest<{ cache_hit: boolean }>("/generate", context, jsonRequest("POST", { mode, regenerate, config }));
-      if (mode === "DISCOVERED") await mutateDiscovery();
-      setMessage(result.cache_hit ? "Resultado reutilizado de la caché local." : "Taxonomía calculada y guardada en local.");
-    });
-  }
   async function saveDiscovery(nextMethod = discoveryMethod) {
     await action(async () => {
       const result = await taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context, jsonRequest("PUT", { method: nextMethod, designer_url: designerUrl, classifier_url: classifierUrl }));
@@ -60,9 +52,9 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     if (result.saved_path) return `ZIP guardado en ${result.saved_path}. Súbelo a ${result.stage === "designer" ? "Crea Taxonomía" : "Clasifica taxonomía"} e importa aquí el ZIP de respuesta.`;
     return `Lotes recibidos: ${result.received}/${result.batches}. Pendientes: ${result.pending?.join(", ")}. Aún no se publica la taxonomía.`;
   }
-  async function exportZip() {
+  async function exportZip(pending = false) {
     await action(async () => {
-      const result = await taxonomyRequest<{ stage: string; saved_path: string }>("/discovery/export", context, { method: "POST" });
+      const result = await taxonomyRequest<{ stage: string; saved_path: string }>("/discovery/export", { ...context, pending: String(pending) }, { method: "POST" });
       setMessage(exchangeMessage(result));
     }, false);
   }
@@ -86,11 +78,8 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>Lente activa: <strong>{NAMES[data.active]}</strong> · {data.detection.rows.toLocaleString("es")} respuestas</p></div></div>
     {data.detection.originals_unavailable ? <p role="status">{data.detection.originals_unavailable} registros históricos no tienen el fichero original disponible. Origen muestra el valor conservado por la versión anterior.</p> : null}
     {data.requested_active !== data.active ? <p role="status">La lente anterior está desactualizada. Se muestra Normalizada hasta regenerarla.</p> : null}
-    <p className="secondary-copy">Completar aprende de etiquetas humanas; descubrir crea una alternativa usando únicamente ID y Comment. La nota NPS no se envía ni participa en el proceso.</p>
-    <div className="field-grid">
-      <label>Umbral de asignación<input type="number" min={0.5} max={1} step={0.05} value={certaintyThreshold} onChange={e => setCertaintyThreshold(Number(e.target.value))} disabled={locked} /></label>
-      <label>Macro F1 mínimo<input type="number" min={0} max={1} step={0.05} value={minF1} onChange={e => setMinF1(Number(e.target.value))} disabled={locked} /></label>
-    </div>
+    <p className="secondary-copy">Origen conserva las etiquetas del fichero. Completada permite editarlas a mano. Descubierta por LLM utiliza los comentarios. Normalizada aplica los sinónimos configurados a Origen o Completada.</p>
+    {data.discovery_local_available && !data.restored ? <ManualTaxonomyEditor key={`manual-${context.service_origin}`} context={context} disabled={locked} onChange={async () => { await mutate(); await onChange(); }} /> : null}
     {data.discovery_local_available && discovery ? <article className="settings-subsection taxonomy-discovery-settings">
       <h3>Método de descubrimiento</h3>
       <label>Método<select value={discoveryMethod} disabled={locked} onChange={e => { const next = e.target.value as TaxonomyDiscoverySettings["method"]; setDiscoveryMethod(next); void saveDiscovery(next); }}><option value="local">Local</option><option value="chatgpt_zip">ChatGPT · archivos ZIP</option></select></label>
@@ -103,7 +92,8 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
         <div className="inline-actions">
           <button className="secondary-button" disabled={locked} onClick={() => void saveDiscovery()}>Guardar URLs</button>
           <button className="primary-button" disabled={locked || data.restored || !data.detection.rows} onClick={() => void exportZip()}>Exportar ZIP a Descargas</button>
-          <label>Importar ZIP de respuesta<input type="file" accept=".zip,application/zip" disabled={locked || data.restored} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importZip(file); }} /></label>
+          <button className="secondary-button" disabled={locked || data.restored} onClick={() => void exportZip(true)}>Exportar comentarios pendientes</button>
+          <label>Importar ZIP de respuesta o JSON de taxonomía<input type="file" accept=".zip,.json,application/zip,application/json" disabled={locked || data.restored} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importZip(file); }} /></label>
         </div>
         <p className="field-hint">Los ZIP contienen los comentarios originales: compártelos solo en el espacio corporativo autorizado. Importaciones parciales se conservan, pero no se publica nada hasta validar todos los lotes. Puedes importar de nuevo el ZIP de Designer para recuperar el ZIP de clasificación.</p>
       </> : null}
@@ -113,12 +103,13 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       {item.available ? <><p>{item.levers} Palancas · {item.sublevers} Subpalancas</p><p>{((item.coverage || 0) * 100).toFixed(1)}% cobertura{item.macro_f1 != null ? ` · Macro F1 ${item.macro_f1.toFixed(2)}` : ""}</p>{item.mode === "NORMALIZED" ? <p>{item.equivalence_groups} grupos de equivalencias</p> : null}</> : <p>{item.stale ? "Corpus o configuración modificados; requiere regeneración." : "Aún no creada."}</p>}
       <div className="inline-actions">
         {item.available ? <><button className="secondary-button" disabled={locked} onClick={() => void explore({ mode: item.mode, offset: 0 })}>Explorar {NAMES[item.mode]}</button><button className="primary-button" disabled={locked || data.active === item.mode} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: item.mode })))}>Usar como lente</button></> : null}
-        {(item.mode === "COMPLETED" || item.mode === "DISCOVERED") && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || (item.mode === "COMPLETED" && data.detection.state === "MISSING") || (item.mode === "DISCOVERED" && discoveryMethod !== "chatgpt_zip")} onClick={() => void (item.mode === "DISCOVERED" ? exportZip() : generate(item.mode, item.available || Boolean(item.stale)))}>{item.available || item.stale ? "Regenerar" : item.mode === "COMPLETED" ? "Completar" : "Descubrir"}</button> : null}
+        {item.mode === "DISCOVERED" && !data.restored ? <button className="secondary-button" disabled={locked || !data.detection.usable_comments || discoveryMethod !== "chatgpt_zip"} onClick={() => void exportZip()}>{item.available || item.stale ? "Regenerar" : "Descubrir"}</button> : null}
       </div>
     </article>)}</div>
+    {data.discovery_local_available && discovery && !data.restored ? <HelixClassifier key={`helix-${context.service_origin}`} context={context} modes={data.taxonomies.filter(item => item.available).map(item => item.mode)} active={data.active} url={discovery.helix_classifier_url} disabled={locked} onChange={async (method) => { await mutate(); await onChange(method); }} /> : null}
     <div className="field-grid">
       <label>Taxonomía de partida<select value={left} onChange={e => setLeft(e.target.value as TaxonomyMode)}>{data.taxonomies.filter(t => t.available).map(t => <option key={t.mode} value={t.mode}>{NAMES[t.mode]}</option>)}</select></label>
-      <label>Comparar con<select value={right} onChange={e => setRight(e.target.value as TaxonomyMode)}><option value="DISCOVERED" disabled={!data.taxonomies.find(t => t.mode === "DISCOVERED")?.available}>Descubierta</option>{data.taxonomies.filter(t => t.available && t.mode !== "DISCOVERED").map(t => <option key={t.mode} value={t.mode}>{NAMES[t.mode]}</option>)}</select></label>
+      <label>Comparar con<select value={right} onChange={e => setRight(e.target.value as TaxonomyMode)}><option value="DISCOVERED" disabled={!data.taxonomies.find(t => t.mode === "DISCOVERED")?.available}>Descubierta por LLM</option>{data.taxonomies.filter(t => t.available && t.mode !== "DISCOVERED").map(t => <option key={t.mode} value={t.mode}>{NAMES[t.mode]}</option>)}</select></label>
     </div>
     <button className="secondary-button" disabled={locked || !data.taxonomies.some(t => t.mode === right && t.available)} onClick={() => void explore({ compare: true, offset: 0 })}>Comparar taxonomías</button>
     {busy ? <p role="status">Procesando en local…</p> : null}{message ? <p role="status">{message}</p> : null}

@@ -137,6 +137,7 @@ tests/test_ingest_contracts.py
 tests/test_ingest_features.py
 tests/test_iteration26_ingestion_evidence.py
 tests/test_knowledge_cache.py
+tests/test_linking_precision.py
 tests/test_llm_insight_response.py
 tests/test_local_processes.py
 tests/test_normalization_registry.py

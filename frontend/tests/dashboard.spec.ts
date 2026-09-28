@@ -100,6 +100,6 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(classifierInput, classifierOutput, "classifier");
   await page.getByLabel("Importar ZIP de respuesta").setInputFiles(classifierOutput);
   await expect(page.getByText(/Todos los lotes validados/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Explorar Descubierta" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Explorar Descubierta por LLM" })).toBeVisible();
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 });
