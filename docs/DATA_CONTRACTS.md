@@ -3,7 +3,7 @@
 ## Identidad canónica de dimensiones
 
 La ingesta conserva los valores originales de Canal, Palanca, Subpalanca y Comment.
-Las equivalencias se aplican al resolver la lente NORMALIZED, por dominio y dimensión
+Las equivalencias se aplican automáticamente al resolver las lentes Original y Manual, por dominio y dimensión
 (`nps.*` o `helix.*`), mediante alias explícitos. Las variantes por acento, mayúsculas o
 separadores se sugieren para revisión; no se agrupan automáticamente. Cambiar una
 equivalencia no modifica el histórico original ni la identidad de los registros.

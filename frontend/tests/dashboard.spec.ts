@@ -36,20 +36,20 @@ taxonomy = {"taxonomy": [
     {"lever": "Sin clasificación temática", "sublevers": ["Información insuficiente", "Tema no cubierto"]},
 ]}
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-    archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, separators=(",", ":")))
+    archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
     if stage == "designer":
-        archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False, separators=(",", ":")))
+        archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
     else:
         for name, payload in comments.items():
             result = {"classifications": [{"id": row["id"], "primary_classification": {"lever": "Atención", "sublever": "Resolución"}} for row in payload["comments"]]}
-            archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False))
 `;
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
 }
 
-async function exportedPath(page: import("@playwright/test").Page) {
-  const message = await page.getByText(/ZIP guardado en .*\.zip/).textContent();
-  const match = message?.match(/ZIP guardado en (.+?\.zip)\./);
+async function exportedPath(page: import("@playwright/test").Page, title: string) {
+  const message = await page.locator("article").filter({has:page.getByRole("heading", {name:title,exact:true})}).last().getByText(/ZIP guardado en .*\.zip/).textContent();
+  const match = message?.match(/ZIP guardado en (.+?\.zip)/);
   if (!match) throw new Error(`No se encontró la ruta del ZIP en: ${message}`);
   return match[1];
 }
@@ -87,19 +87,22 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
   await page.getByRole("button", { name: /Taxonomy Studio/i }).click();
-  await expect(page.getByRole("combobox", { name: "Método", exact: true })).toHaveValue(
-    "chatgpt_zip"
-  );
-  await page.getByRole("button", { name: "Exportar ZIP a Descargas" }).click();
-  const designerInput = await exportedPath(page);
+  await expect(page.getByLabel("Lente activa")).toHaveValue("SOURCE");
+  await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
+  const designerInput = await exportedPath(page, "Crea Taxonomía");
   const designerOutput = path.join(path.dirname(designerInput), "designer-response.zip");
   responseZip(designerInput, designerOutput, "designer");
-  await page.getByLabel("Importar ZIP de respuesta").setInputFiles(designerOutput);
-  const classifierInput = await exportedPath(page);
+  await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
+  await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
+  await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
+  const classifierInput = await exportedPath(page, "Clasifica taxonomía");
   const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
   responseZip(classifierInput, classifierOutput, "classifier");
-  await page.getByLabel("Importar ZIP de respuesta").setInputFiles(classifierOutput);
+  await page.getByLabel("Importar ZIP de comentarios clasificados").setInputFiles(classifierOutput);
   await expect(page.getByText(/Todos los lotes validados/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Explorar Descubierta" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Explorar Descubierta por LLM" })).toBeVisible();
+  await page.getByLabel("Lente activa").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 });
