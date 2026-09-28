@@ -1,10 +1,11 @@
-"""Versioned ZIP inputs and strict JSON outputs for the two taxonomy projects."""
+"""Versioned, bounded ZIP exchange with strict JSON payloads for the GPT projects."""
 
 from __future__ import annotations
 
 import hashlib
 import io
 import json
+import re
 import stat
 import uuid
 import zipfile
@@ -93,6 +94,36 @@ def read_zip(content: bytes) -> dict[str, Any]:
             return result
     except (zipfile.BadZipFile, RuntimeError, EOFError, NotImplementedError, zlib.error) as exc:
         raise ValueError("ZIP corrupto o no compatible.") from exc
+
+
+def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """One bounded ZIP contract for all three projects; JSON is validated inside it."""
+    if stage not in ("designer", "classifier", "helix"):
+        raise ValueError("Proyecto desconocido.")
+    files = read_zip(content)
+    manifest = files.pop("manifest.json", None)
+    schema = "nps-lens-helix/2" if stage == "helix" else "nps-lens-comments/2"
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != schema
+        or manifest.get("stage") != stage
+        or not isinstance(manifest.get("job_id"), str)
+        or not manifest["job_id"]
+    ):
+        raise ValueError(
+            "manifest.json no corresponde al proyecto seleccionado. Usa el manifiesto de su exportación."
+        )
+    valid = (
+        set(files) == {"taxonomy.json"}
+        if stage == "designer"
+        else bool(files) and all(re.fullmatch(r"results/[0-9]{6}\.json", name) for name in files)
+    )
+    if not valid:
+        expected = "taxonomy.json" if stage == "designer" else "results/NNNNNN.json"
+        raise ValueError(
+            f"El ZIP de respuesta debe contener únicamente manifest.json y {expected}."
+        )
+    return manifest, files
 
 
 class TaxonomyExchange:
@@ -290,12 +321,14 @@ class TaxonomyExchange:
         }
 
     def import_response(self, context: UploadContext, content: bytes, stage: str) -> dict[str, Any]:
-        if len(content) > MAX_ZIP_BYTES:
-            raise ValueError("JSON demasiado grande (máximo 32 MiB).")
-        payload = strict_json(content)
+        manifest, files = read_response(content, stage)
         frame = self._frame(context)
         if stage == "designer":
-            taxonomy = TaxonomyResponse.model_validate(payload)
+            if manifest.get("corpus_sha256") != self._corpus(context, frame):
+                raise ValueError(
+                    "El corpus ha cambiado o el ZIP pertenece a otro dataset. Exporta de nuevo."
+                )
+            taxonomy = TaxonomyResponse.model_validate(files["taxonomy.json"])
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
             state["discovered_taxonomy"] = taxonomy.model_dump()
@@ -305,19 +338,10 @@ class TaxonomyExchange:
                 state["artifacts"].pop("DISCOVERED", None)
             self.taxonomy.save_state(context, state)
             return {"stage": "designer", "imported": True}
-        if (
-            stage != "classifier"
-            or not isinstance(payload, dict)
-            or set(payload) != {"manifest", "results"}
-        ):
-            raise ValueError("La respuesta debe contener exactamente manifest y results.")
-        manifest, files = payload["manifest"], payload["results"]
-        if (
-            not isinstance(manifest, dict)
-            or not isinstance(manifest.get("job_id"), str)
-            or not isinstance(files, dict)
-        ):
-            raise ValueError("Manifiesto o resultados inválidos.")
+        files = {
+            name.removeprefix("results/").removesuffix(".json"): value
+            for name, value in files.items()
+        }
         job = self._load(context, manifest["job_id"])
         if job["taxonomy"] != self.taxonomy.state(context).get("discovered_taxonomy"):
             raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")

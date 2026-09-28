@@ -7,21 +7,23 @@ import pytest
 from test_taxonomy_exchange import (
     TAXONOMY,
     classifier_files,
+    classifier_zip,
+    designer_zip,
     exported,
     zipped,
 )
-from test_taxonomy_exchange import exchange as exchange
+from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
 from nps_lens.domain.models import UploadContext
 from nps_lens.services.helix_exchange import HelixExchange
-from nps_lens.services.taxonomy_exchange import TaxonomyExchange, encode
+from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 
 
 def discover(handler, context):
-    handler.import_response(context, encode(TAXONOMY), "designer")
+    handler.import_response(context, designer_zip(handler, context), "designer")
     files = exported(handler.export(context, "classifier")["saved_path"])
     handler.import_response(
-        context, encode(classifier_files(files["manifest.json"], files)), "classifier"
+        context, classifier_zip(classifier_files(files["manifest.json"], files)), "classifier"
     )
 
 
@@ -42,7 +44,7 @@ def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exc
     assert len(sent) == 2
     assert {row["Comment"] for row in sent} == {"Ahora no funciona", "Otra incidencia"}
     response = classifier_files(pending["manifest.json"], pending)
-    handler.import_response(context, encode(response), "classifier")
+    handler.import_response(context, classifier_zip(response), "classifier")
     resolved = handler.taxonomy.resolve(context, mode="DISCOVERED")
     assert len(resolved) == 406
     assert resolved.Palanca.eq("Atención").all()
@@ -310,12 +312,12 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
 
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
     handler, ctx, _, _ = exchange
-    handler.import_response(ctx, encode(TAXONOMY), "designer")
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     request = exported(handler.export(ctx, "classifier")["saved_path"])
     response = classifier_files(request["manifest.json"], request)
     handler.import_response(
         ctx,
-        encode(
+        classifier_zip(
             {"manifest": response["manifest"], "results": {"000001": response["results"]["000001"]}}
         ),
         "classifier",
@@ -324,6 +326,6 @@ def test_partial_classifier_export_omits_already_imported_comments(exchange):
         pending = exported(handler.export(ctx, "classifier")["saved_path"])
     assert sum(batch["count"] for batch in pending["manifest.json"]["batches"]) == 205
     handler.import_response(
-        ctx, encode(classifier_files(pending["manifest.json"], pending)), "classifier"
+        ctx, classifier_zip(classifier_files(pending["manifest.json"], pending)), "classifier"
     )
     assert handler.taxonomy.resolve(ctx, mode="DISCOVERED").Palanca.eq("Atención").all()

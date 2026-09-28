@@ -34,7 +34,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   expect(await screen.findByRole("button", { name: "Explorar Manual" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();
-  await user.upload(screen.getByLabelText("Importar JSON de comentarios clasificados"), new File(["{}"], "result.json", { type: "application/json" }));
+  await user.upload(screen.getByLabelText("Importar ZIP de comentarios clasificados"), new File(["{}"], "result.zip", { type: "application/zip" }));
   await user.click(await screen.findByRole("button", { name: "Explorar Descubierta por LLM" }));
   expect(await screen.findByText("Comparación reproducible")).toBeInTheDocument();
   expect(screen.queryByRole("button", {name:"Usar como lente"})).not.toBeInTheDocument();

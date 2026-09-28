@@ -711,7 +711,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     def require_local_taxonomy(request: Request) -> None:
         if cast(Settings, request.app.state.settings).auth_mode != "local":
-            raise HTTPException(404, "El intercambio con los proyectos GPT solo existe en la app local.")
+            raise HTTPException(
+                404, "El intercambio con los proyectos GPT solo existe en la app local."
+            )
 
     @app.get("/api/taxonomy/discovery/instructions")
     def taxonomy_project_instructions(request: Request) -> dict[str, Any]:
@@ -1060,6 +1062,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 touchpoint_source=touchpoint_source,
                 theme_mode=theme_mode,
             )
+        except pd.errors.MergeError:
+            raise
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 

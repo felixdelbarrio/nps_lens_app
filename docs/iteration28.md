@@ -20,17 +20,18 @@ Los enlaces abren los proyectos con la URL guardada. Las instrucciones de «Copi
 ## Intercambio NPS
 
 1. En Crea Taxonomía, exportar el ZIP de comentarios y procesarlo en el proyecto GPT.
-2. Importar un JSON estricto `{"taxonomy":[{"lever":"…","sublevers":["…"]}]}`.
+2. Importar el ZIP con `manifest.json` sin modificar y `taxonomy.json` estricto:
+   `{"taxonomy":[{"lever":"…","sublevers":["…"]}]}`.
    Esta acción solo guarda categorías; no inicia otra exportación.
 3. En Clasifica taxonomía, exportar los comentarios pendientes y la taxonomía guardada.
-4. Importar JSON estricto con `manifest` (copia exacta del manifiesto exportado) y
-   `results`, cuyas claves son los IDs de lote. Cada lote contiene `classifications`
+4. Importar el ZIP con `manifest.json` sin modificar y `results/NNNNNN.json` por lote.
+   Cada JSON de lote contiene `classifications`
    con `id` y `primary_classification: {lever, sublever}`.
 
 Se validan IDs, orden, categorías, corpus y manifiesto antes de escribir. Se admiten
 lotes completos parciales y reimportaciones idénticas. Las exportaciones posteriores
 omiten los comentarios ya clasificados para ese texto y taxonomía. Una taxonomía nueva
-invalida las asignaciones del catálogo anterior. Los proyectos NPS no admiten ZIP de respuesta.
+invalida las asignaciones del catálogo anterior. Los tres proyectos utilizan ZIP de respuesta con JSON estricto en su interior.
 
 ## Helix y Causalidad
 
@@ -59,5 +60,16 @@ retención: tres trabajos por contexto y nueve ámbitos de clasificaciones Helix
 ZIP nunca se extraen ni ejecutan. Las operaciones de edición e intercambio siguen
 limitadas a la aplicación local. La WebApp estática conserva su contrato de publicación.
 
-Los protocolos de respuesta anteriores no se convierten: exportar de nuevo con las
-instrucciones vigentes. Los snapshots que incluyan lentes retiradas se rechazan.
+Las instrucciones copiadas y exportadas deben corresponder al contrato ZIP vigente. Los snapshots que incluyan lentes retiradas se rechazan.
+
+## Corrección del intercambio ZIP y CI
+
+Los tres importadores leen el mismo contenedor ZIP con límites de tamaño, validan el
+proyecto del manifiesto y después los JSON internos. No se interpreta un ZIP como
+texto ni se mantiene un importador alternativo de JSON plano. Designer comprueba
+además que el corpus coincide antes de guardar las categorías.
+
+La fixture compartida de intercambio usa un nombre de función diferente del nombre
+inyectado por pytest, evitando el error F811 de CI. Los conflictos de identidad en
+Causalidad vuelven al manejador común de MergeError, que devuelve un mensaje útil
+sobre duplicados sin exponer identificadores internos.

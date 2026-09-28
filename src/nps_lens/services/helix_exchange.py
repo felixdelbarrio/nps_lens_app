@@ -24,7 +24,7 @@ from nps_lens.services.taxonomy_exchange import (
     MAX_ZIP_BYTES,
     digest,
     encode,
-    read_zip,
+    read_response,
     strict_json,
 )
 from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
@@ -236,10 +236,7 @@ class HelixExchange:
     def import_response(
         self, context: UploadContext, inputs: dict[str, Any], content: bytes
     ) -> dict[str, Any]:
-        files = read_zip(content)
-        manifest = files.pop("manifest.json", None)
-        if not isinstance(manifest, dict):
-            raise ValueError("Falta manifest.json.")
+        manifest, files = read_response(content, "helix")
         with self.repository._connect() as db:
             found = db.execute(
                 "SELECT payload FROM helix_exchange WHERE id=? AND context=?",
