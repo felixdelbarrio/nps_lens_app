@@ -108,6 +108,7 @@ from nps_lens.services.analytics import (
     format_percentage,
 )
 from nps_lens.services.analytics.kpis_service import compute_score_kpis
+from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -1226,6 +1227,12 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
+        state = self.taxonomy.state(context)
+        use_llm = (
+            self.settings.auth_mode == "local"
+            and not state.get("restored")
+            and state.get("causal_engine") == "llm"
+        )
         key = (
             "causal-analysis",
             *self._context_key(context),
@@ -1264,7 +1271,20 @@ class DashboardService:
                 max_days_apart=max_days_apart,
             )
             helix_annotated = annotate_incident_link_quality(helix_window)
-            helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
+            helix_slice = (
+                helix_window.copy()
+                if use_llm
+                else helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
+            )
+            imported_links = None
+            if use_llm:
+                handler = HelixExchange(self.taxonomy, Path("."))
+                inputs = handler.inputs(
+                    context,
+                    helix_total,
+                    [str(nps_frame.attrs.get("taxonomy_mode", state["active"]))],
+                )
+                imported_links = handler.links(context, inputs, focus_df, helix_slice)
             base: dict[str, object] = {
                 "ready": False,
                 "resolved_channel": resolved_channel,
@@ -1276,6 +1296,7 @@ class DashboardService:
                 "helix_window_rows": int(len(helix_window)),
                 "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
                 "touchpoint_source": active_source,
+                "causal_engine": "llm" if use_llm else "rules",
             }
             diagnostic_inputs: dict[str, Any] = dict(
                 nps=nps_slice,
@@ -1297,6 +1318,7 @@ class DashboardService:
             core = self._compute_linking_core(
                 nps_df=nps_slice,
                 helix_df=helix_slice,
+                imported_links=imported_links,
                 focus_df=focus_df,
                 focus_group=focus_group,
                 min_similarity=min_similarity,
@@ -1654,7 +1676,13 @@ class DashboardService:
                         else "Sin vínculos semánticos en esta ventana"
                     ),
                     "summary": (
-                        f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
+                        (
+                            "Asociaciones importadas de Helix Classifier para la lente activa. "
+                            "La confianza del LLM es semántica; no demuestra causalidad. "
+                            "Se conservan los filtros de periodo, ámbito y población."
+                        )
+                        if analysis.get("causal_engine") == "llm"
+                        else f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
                         f"{float(min_similarity):.2f}, al menos {LINK_MIN_SHARED_TERMS} términos específicos compartidos, "
                         f"hasta {LINK_TOP_K_PER_INCIDENT} comentarios por incidencia y ventana de ±{int(max_days_apart)} días. "
                         "Las coincidencias textuales no demuestran causalidad."
@@ -2697,13 +2725,20 @@ class DashboardService:
         focus_group: str,
         min_similarity: float,
         max_days_apart: int,
+        imported_links: Optional[pd.DataFrame] = None,
     ) -> dict[str, object]:
-        assignments_df, links_df = link_incidents_to_nps_topics(
-            focus_df,
-            helix_df,
-            min_similarity=min_similarity,
-            max_days_apart=max_days_apart,
-        )
+        if imported_links is None:
+            assignments_df, links_df = link_incidents_to_nps_topics(
+                focus_df,
+                helix_df,
+                min_similarity=min_similarity,
+                max_days_apart=max_days_apart,
+            )
+        else:
+            links_df = imported_links
+            assignments_df = links_df.sort_values("similarity", ascending=False).drop_duplicates(
+                "incident_id"
+            )[["incident_id", "nps_topic", "similarity", "incident_topic"]]
         overall_weekly, by_topic_weekly = weekly_aggregates(
             nps_df,
             helix_df,

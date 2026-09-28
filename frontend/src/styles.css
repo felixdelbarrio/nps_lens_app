@@ -1711,3 +1711,49 @@ input:disabled {
 .taxonomy-exploration { min-width: 0; display: grid; gap: 1rem; }
 .taxonomy-exploration .table-scroll { overflow: auto; max-height: 65vh; }
 .taxonomy-exploration td { vertical-align: top; min-width: 7rem; }
+
+.switch-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.switch-field input[role="switch"] {
+  appearance: none;
+  position: relative;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 26px;
+  min-height: 0;
+  padding: 2px;
+  border-radius: 20px;
+  background: var(--color-surface-subtle);
+  cursor: pointer;
+}
+
+.switch-field input[role="switch"]::before {
+  content: "";
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-text-secondary);
+}
+
+.switch-field input[role="switch"]:checked {
+  background: var(--color-brand-strong);
+}
+
+.switch-field input[role="switch"]:checked::before {
+  transform: translateX(18px);
+  background: var(--color-surface);
+}
+
+.switch-field input[role="switch"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-field { display: flex; align-items: center; gap: .6rem; }
+.checkbox-field input { width: auto; margin: 0; }

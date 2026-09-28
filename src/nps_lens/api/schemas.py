@@ -177,19 +177,14 @@ class LinkingResponse(BaseModel):
     scenarios: dict[str, Any] = Field(default_factory=dict)
 
 
-class TaxonomyGenerateRequest(BaseModel):
-    mode: str
-    config: dict[str, Any] = Field(default_factory=dict)
-    regenerate: bool = False
-
-
 class TaxonomySettingsRequest(BaseModel):
+    helix_modes: Optional[list[str]] = None
     active: Optional[str] = None
     default: Optional[str] = None
     policy: Optional[str] = None
 
 
 class TaxonomyDiscoverySettingsRequest(BaseModel):
-    method: str
-    designer_url: str
-    classifier_url: str
+    designer_url: Optional[str] = None
+    classifier_url: Optional[str] = None
+    helix_classifier_url: Optional[str] = None

@@ -41,8 +41,8 @@ def exported(path):
         }
 
 
-@pytest.fixture
-def exchange(tmp_path, monkeypatch):
+@pytest.fixture(name="exchange")
+def exchange_fixture(tmp_path, monkeypatch):
     settings = replace(
         Settings.from_env(),
         database_path=tmp_path / "test.db",
@@ -77,9 +77,9 @@ def exchange(tmp_path, monkeypatch):
 
 def classifier_files(manifest, inputs):
     return {
-        "manifest.json": manifest,
-        **{
-            name.replace("comments/", "results/"): {
+        "manifest": manifest,
+        "results": {
+            name.removeprefix("comments/").removesuffix(".json"): {
                 "classifications": [
                     {
                         "id": row["id"],
@@ -94,10 +94,24 @@ def classifier_files(manifest, inputs):
     }
 
 
+def designer_zip(handler, context, taxonomy=TAXONOMY):
+    request = exported(handler.export(context, "designer")["saved_path"])
+    return zipped({"manifest.json": request["manifest.json"], "taxonomy.json": taxonomy})
+
+
+def classifier_zip(response):
+    return zipped(
+        {
+            "manifest.json": response["manifest"],
+            **{f"results/{key}.json": value for key, value in response["results"].items()},
+        }
+    )
+
+
 def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     handler, context, frame, client = exchange
     params = {"service_origin": "Bank", "service_origin_n1": "Web"}
-    response = client.post("/api/taxonomy/discovery/export", params=params)
+    response = client.post("/api/taxonomy/discovery/designer/export", params=params)
     assert response.status_code == 200, response.text
     request = exported(response.json()["saved_path"])
     assert request["manifest.json"]["stage"] == "designer"
@@ -111,60 +125,68 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     assert [row["Comment"] for row in sent] == frame["Comment"].tolist()
     assert all(set(row) == {"id", "Comment"} for row in sent)
     assert "private-" not in json.dumps(request)
-    designer = zipped({"manifest.json": request["manifest.json"], "taxonomy.json": TAXONOMY})
     result = client.post(
-        "/api/taxonomy/discovery/import",
+        "/api/taxonomy/discovery/designer/import",
         params=params,
-        files={"file": ("response.zip", designer, "application/zip")},
+        files={
+            "file": (
+                "response.zip",
+                zipped({"manifest.json": request["manifest.json"], "taxonomy.json": TAXONOMY}),
+                "application/zip",
+            )
+        },
     )
     assert result.status_code == 200, result.text
-    classification = exported(result.json()["saved_path"])
+    assert "saved_path" not in result.json()
+    response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
+    assert response.status_code == 200, response.text
+    classification = exported(response.json()["saved_path"])
     assert classification["taxonomy.json"] == TAXONOMY
     files = classifier_files(classification["manifest.json"], classification)
-    partial = {
-        "manifest.json": files["manifest.json"],
-        "results/000001.json": files["results/000001.json"],
-    }
-    first = handler.import_response(context, zipped(partial))
+    partial = {"manifest": files["manifest"], "results": {"000001": files["results"]["000001"]}}
+    first = handler.import_response(context, classifier_zip(partial), "classifier")
     assert first["received"] == 1 and first["stage"] == "classifier"
     assert "DISCOVERED" not in handler.taxonomy.state(context)["artifacts"]
     handler = TaxonomyExchange(handler.taxonomy, handler.downloads)
-    assert handler.import_response(context, zipped(partial))["received"] == 1
-    broken = dict(files)
-    broken["results/000003.json"] = {"classifications": []}
+    assert handler.import_response(context, classifier_zip(partial), "classifier")["received"] == 1
+    broken = {**files, "results": {**files["results"], "000003": {"classifications": []}}}
     with pytest.raises(ValueError):
-        handler.import_response(context, zipped(broken))
-    assert handler.import_response(context, zipped(partial))["received"] == 1
-    complete = handler.import_response(context, zipped(files))
+        handler.import_response(context, classifier_zip(broken), "classifier")
+    assert handler.import_response(context, classifier_zip(partial), "classifier")["received"] == 1
+    complete = handler.import_response(context, classifier_zip(files), "classifier")
     assert complete["stage"] == "complete" and complete["received"] == 3
-    assert handler.import_response(context, zipped(files))["stage"] == "complete"
+    assert (
+        handler.import_response(context, classifier_zip(files), "classifier")["stage"] == "complete"
+    )
     resolved = handler.taxonomy.resolve(context, frame, "DISCOVERED")
-    assert len(resolved) == 405
-    assert resolved["Palanca"].eq("Atención").all()
+    assert len(resolved) == 405 and resolved["Palanca"].eq("Atención").all()
     assert resolved["Subpalanca"].eq("Resolución").all()
 
 
 def test_changed_corpus_and_foreign_job_rejected(exchange):
     handler, context, frame, _ = exchange
-    original = exported(handler.export(context)["saved_path"])
-    response = {"manifest.json": original["manifest.json"], "taxonomy.json": TAXONOMY}
+    handler.import_response(context, designer_zip(handler, context), "designer")
+    original = exported(handler.export(context, "classifier")["saved_path"])
+    response = classifier_files(original["manifest.json"], original)
     with pytest.raises(ValueError, match="dataset"):
-        handler.import_response(UploadContext("Other", "Web", ""), zipped(response))
+        handler.import_response(
+            UploadContext("Other", "Web", ""), classifier_zip(response), "classifier"
+        )
     frame.loc[0, "Comment"] = "Changed"
     with pytest.raises(ValueError, match="corpus"):
-        handler.import_response(context, zipped(response))
+        handler.import_response(context, classifier_zip(response), "classifier")
 
 
 def test_exchange_history_is_bounded(exchange):
     handler, context, _, _ = exchange
-    jobs = [handler.export(context) for _ in range(4)]
+    handler.import_response(context, designer_zip(handler, context), "designer")
+    jobs = [handler.export(context, "classifier") for _ in range(4)]
     with handler.repository._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM taxonomy_exchange").fetchone()[0] == 3
     oldest = exported(jobs[0]["saved_path"])
     with pytest.raises(ValueError, match="intercambio"):
         handler.import_response(
-            context,
-            zipped({"manifest.json": oldest["manifest.json"], "taxonomy.json": TAXONOMY}),
+            context, classifier_zip(classifier_files(oldest["manifest.json"], oldest)), "classifier"
         )
 
 
@@ -190,20 +212,53 @@ def test_duplicate_json_and_duplicate_members():
 
 def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
     handler, context, _, _ = exchange
-    request = exported(handler.export(context)["saved_path"])
     with pytest.raises((ValueError, TaxonomyDiscoveryError)):
         handler.import_response(
-            context,
-            zipped({"manifest.json": request["manifest.json"], "taxonomy.json": {"taxonomy": []}}),
+            context, designer_zip(handler, context, {"taxonomy": []}), "designer"
         )
-    result = handler.import_response(
-        context, zipped({"manifest.json": request["manifest.json"], "taxonomy.json": TAXONOMY})
-    )
-    inputs = exported(result["saved_path"])
+    with pytest.raises(ValueError):
+        handler.import_response(context, zipped({"taxonomy.json": TAXONOMY}), "designer")
+    handler.import_response(context, designer_zip(handler, context), "designer")
+    inputs = exported(handler.export(context, "classifier")["saved_path"])
     files = classifier_files(inputs["manifest.json"], inputs)
-    files["results/000001.json"]["classifications"][0]["primary_classification"][
+    files["results"]["000001"]["classifications"][0]["primary_classification"][
         "lever"
     ] = "Inventada"
     with pytest.raises((ValueError, TaxonomyDiscoveryError)):
-        handler.import_response(context, zipped(files))
+        handler.import_response(context, classifier_zip(files), "classifier")
     assert "DISCOVERED" not in handler.taxonomy.state(context)["artifacts"]
+
+
+@pytest.mark.parametrize("stage", ["designer", "classifier", "helix"])
+def test_all_projects_share_strict_zip_validation(stage):
+    from nps_lens.services.taxonomy_exchange import read_response
+
+    manifest = {
+        "schema_version": "nps-lens-helix/2" if stage == "helix" else "nps-lens-comments/2",
+        "stage": stage,
+        "job_id": "test",
+    }
+    member = "taxonomy.json" if stage == "designer" else "results/000001.json"
+    response = {"manifest.json": manifest, member: {}}
+    assert read_response(zipped(response), stage) == (manifest, {member: {}})
+    with pytest.raises(ValueError, match="ZIP"):
+        read_response(encode(response), stage)
+    with pytest.raises(ValueError, match="proyecto"):
+        read_response(zipped(response), "classifier" if stage != "classifier" else "designer")
+    with pytest.raises(ValueError, match="únicamente"):
+        read_response(zipped({**response, "extra.json": {}}), stage)
+    malformed = io.BytesIO()
+    with zipfile.ZipFile(malformed, "w") as archive:
+        archive.writestr("manifest.json", encode(manifest))
+        archive.writestr(member, '{"a":1,"a":2}')
+    with pytest.raises(ValueError, match="duplicadas"):
+        read_response(malformed.getvalue(), stage)
+
+
+def test_designer_zip_rejects_changed_dataset_without_mutation(exchange):
+    handler, context, frame, _ = exchange
+    response = designer_zip(handler, context)
+    frame.loc[0, "Comment"] = "Changed"
+    with pytest.raises(ValueError, match="corpus"):
+        handler.import_response(context, response, "designer")
+    assert "discovered_taxonomy" not in handler.taxonomy.state(context)

@@ -33,6 +33,7 @@ import type {
   UploadSelectionPayload,
   UploadResult
 } from "./api";
+import { CausalEngineControl } from "./components/CausalEngineControl";
 import { TaxonomyIngestNotice, TaxonomyStudio } from "./components/TaxonomyStudio";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
@@ -996,6 +997,7 @@ export function App() {
               </select>
             </label>
           ) : null}
+          {showCausalMethodFilter && config?.access?.local ? <CausalEngineControl context={taxonomyContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método de agrupación</span>
