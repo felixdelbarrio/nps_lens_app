@@ -240,9 +240,6 @@ def summarize_operational_metrics_for_incidents(
             if duration is not None and np.isfinite(float(duration)):
                 duration_samples.append(float(duration))
 
-    if not duration_samples and benchmark.overall_resolution_weeks is not None:
-        duration_samples = [float(benchmark.overall_resolution_weeks)]
-
     historical_resolution_weeks = (
         float(np.mean(duration_samples)) if duration_samples else float("nan")
     )
@@ -321,13 +318,7 @@ def enrich_chain_with_operational_metrics(
     support_organizations: list[str] = []
     historical_resolution_weeks: list[float] = []
     for _, row in out.iterrows():
-        incident_records = row.get("incident_records")
-        source_records = incident_records if isinstance(incident_records, list) else []
-        incident_ids = [
-            str(entry.get("incident_id", "") or "").strip()
-            for entry in source_records
-            if isinstance(entry, dict)
-        ]
+        incident_ids = list(dict.fromkeys(pair[0] for pair in row["evidence_pairs"]))
         metrics = summarize_operational_metrics_for_incidents(incident_ids, benchmark)
         support_organizations.append(metrics.support_organizations)
         historical_resolution_weeks.append(

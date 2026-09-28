@@ -30,10 +30,14 @@ def normalize_focus_group(focus_group: str) -> FocusGroup:
     return "detractor"
 
 
+def valid_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
+    """Preserve row alignment; only integer survey scores from 0 through 10 are valid."""
+    numeric = pd.to_numeric(scores, errors="coerce")
+    return numeric.where(numeric.between(0, 10) & numeric.mod(1).eq(0))
+
+
 def _score_series(df: pd.DataFrame, *, score_col: str = "NPS") -> pd.Series[Any]:
-    if score_col not in df.columns:
-        return pd.Series(np.nan, index=df.index, dtype="float64")
-    return pd.to_numeric(df[score_col], errors="coerce")
+    return valid_nps_scores(df.get(score_col, pd.Series(np.nan, index=df.index)))
 
 
 def normalize_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
@@ -51,8 +55,8 @@ def normalize_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
 
 def classify_nps_scores(scores: pd.Series[Any]) -> pd.Series[Any]:
     """Derive the snapshot group exclusively from a valid integer NPS score."""
-    score = pd.to_numeric(scores, errors="coerce")
-    valid = score.between(0, 10) & score.mod(1).eq(0)
+    score = valid_nps_scores(scores)
+    valid = score.notna()
     groups = pd.Series("", index=scores.index, dtype="string")
     groups.loc[valid & score.le(6)] = "DETRACTOR"
     groups.loc[valid & score.between(7, 8)] = "PASIVO"
@@ -173,6 +177,7 @@ def grouped_focus_rates(
             columns=[period_col, "responses", "detractor_rate", "passive_rate", "promoter_rate"]
         )
 
+    work = work.loc[classify_nps_scores(work["_score"]).ne("")].copy()
     work["_is_detractor"] = _focus_mask_from_series(work["_score"], focus_group="detractor")
     work["_is_passive"] = _focus_mask_from_series(work["_score"], focus_group="passive")
     work["_is_promoter"] = _focus_mask_from_series(work["_score"], focus_group="promoter")

@@ -33,14 +33,14 @@ def test_argentina_alias_identity_and_population(tmp_path):
             "Opinion Identifier": ["a", "b", "c"],
             "Opinion Unique Code": ["x", "y", "z"],
             "Text": [None] * 3,
-            "Verbatim valora la app SENDA": ["error transferencias", "no puedo entrar", None],
+            "Verbatim valora la app SENDA": ["transferencias rechazadas", "no puedo entrar", None],
         }
     ).to_excel(path, index=False)
     result = read_nps_thermal_excel(str(path), service_origin="Company")
     assert not [issue for issue in result.issues if issue.level == "ERROR"]
     assert result.df.ID.tolist() == ["a", "b", "c"]
     assert result.df._business_key.nunique() == 3
-    assert result.df.Comment.tolist() == ["error transferencias", "no puedo entrar", ""]
+    assert result.df.Comment.tolist() == ["transferencias rechazadas", "no puedo entrar", ""]
     assert result.df.match_status.tolist() == ["matchable", "matchable", "non_matchable"]
 
 
@@ -105,7 +105,7 @@ def test_occurrence_priority_partial_fallback_and_evidence_window():
             "bbva_startdatetime": ["2026-09-01", None],
             "Submit Date": ["2026-09-23", "2026-09-04"],
             "Incident Number": ["i1", "i2"],
-            "summary": ["error transferencias"] * 2,
+            "summary": ["transferencias rechazadas"] * 2,
         }
     )
     dates, sources = incident_occurrence_dates(frame)
@@ -115,7 +115,7 @@ def test_occurrence_priority_partial_fallback_and_evidence_window():
         {
             "ID": ["a", "b"],
             "Fecha": ["2026-09-01"] * 2,
-            "Comment": ["error transferencias", "nan"],
+            "Comment": ["transferencias rechazadas", "nan"],
             "Palanca": ["", "n/a"],
         }
     )

@@ -42,8 +42,12 @@ from nps_lens.analytics.incident_attribution import (
 from nps_lens.analytics.incident_rationale import build_incident_nps_rationale
 from nps_lens.analytics.linking_diagnostics import linking_diagnostics
 from nps_lens.analytics.linking_policy import (
+    LINK_MAX_DAYS_APART,
     LINK_MAX_VISIBLE_COMMENTS,
     LINK_MAX_VISIBLE_INCIDENTS,
+    LINK_MIN_SHARED_TERMS,
+    LINK_MIN_SIMILARITY,
+    LINK_TOP_K_PER_INCIDENT,
 )
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
@@ -103,6 +107,7 @@ from nps_lens.services.analytics import (
     format_metric,
     format_percentage,
 )
+from nps_lens.services.analytics.kpis_service import compute_score_kpis
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -1362,8 +1367,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1409,8 +1414,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         theme_mode: str = "light",
     ) -> dict[str, object]:
@@ -1460,7 +1465,14 @@ class DashboardService:
         causal_topic_map_df = cast(pd.DataFrame, mode_payload["causal_topic_map_df"])
         links_mode_df = cast(pd.DataFrame, mode_payload["links_mode_df"])
         trend_df = overall_daily if not overall_daily.empty else overall_weekly
-        average_focus = float(_numeric_series(trend_df, "focus_rate", default=0.0).mean())
+        score_kpis = compute_score_kpis(nps_slice)
+        rate_field = {
+            "detractor": "detractor_rate",
+            "passive": "neutral_rate",
+            "promoter": "promoter_rate",
+        }[focus_group]
+        period_focus = getattr(score_kpis, rate_field)
+        average_focus = float(period_focus) if period_focus is not None else float("nan")
         show_all_groups = str(resolved_group or "").strip().lower() == str(POP_ALL).lower()
 
         evidence_df = self._build_linking_evidence_table(
@@ -1495,7 +1507,7 @@ class DashboardService:
             entity_summary_chart_df["entity_label"] = (
                 _series_or_default(entity_summary_chart_df, "nps_topic").astype(str).str.strip()
             )
-        affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)[:10]
+        affected_topics = _affected_topics_for_method(chain_candidates_df, causal_topic_map_df)
         filtered_evidence_df = _filter_frame_by_topic_values(
             evidence_df,
             affected_topics,
@@ -1643,7 +1655,9 @@ class DashboardService:
                     ),
                     "summary": (
                         f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
-                        f"{float(min_similarity):.2f}, top-5 por incidencia y ventana de ±{int(max_days_apart)} días."
+                        f"{float(min_similarity):.2f}, al menos {LINK_MIN_SHARED_TERMS} términos específicos compartidos, "
+                        f"hasta {LINK_TOP_K_PER_INCIDENT} comentarios por incidencia y ventana de ±{int(max_days_apart)} días. "
+                        "Las coincidencias textuales no demuestran causalidad."
                     ),
                     "metrics": self._build_situation_narrative_metrics(
                         method_label=method_spec.label,
@@ -1710,8 +1724,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         score_channel: Optional[str] = None,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
@@ -1844,8 +1858,8 @@ class DashboardService:
         pop_month: str = POP_ALL,
         nps_group: Optional[str] = None,
         min_n: int = 200,
-        min_similarity: float = 0.15,
-        max_days_apart: int = 90,
+        min_similarity: float = LINK_MIN_SIMILARITY,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> PublicationArtifact:
@@ -2249,7 +2263,7 @@ class DashboardService:
                 "linked_incidents": "Incidencias relacionadas",
                 "linked_comments": "Comentarios relacionados",
                 "linked_pairs": "Vínculos semánticos",
-                "avg_similarity": "Confianza",
+                "avg_similarity": "Similitud textual",
                 "avg_nps": "Nota media (0–10)",
             }
         )
@@ -2261,18 +2275,16 @@ class DashboardService:
         del touchpoint_source
         if chain_df is None or chain_df.empty:
             return []
-        entities = (
-            _series_or_default(chain_df, "nps_topic").astype(str).str.strip().replace("", np.nan)
-        )
+        totals = summarize_attribution_chains(chain_df)
         return [
-            {"label": "Tópicos observados", "value": str(int(entities.nunique()))},
+            {"label": "Tópicos observados", "value": str(totals["topics_total"])},
             {
                 "label": "Incidencias relacionadas",
-                "value": str(int(_numeric_series(chain_df, "linked_incidents").sum())),
+                "value": str(totals["linked_incidents_total"]),
             },
             {
                 "label": "Vínculos semánticos",
-                "value": str(int(_numeric_series(chain_df, "linked_pairs").sum())),
+                "value": str(totals["linked_pairs_total"]),
             },
         ]
 
@@ -2282,7 +2294,9 @@ class DashboardService:
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
             title = str(row.get("nps_topic", "") or "").strip()
-            card = self._serialize_rows(pd.DataFrame([row]))[0]
+            card = self._serialize_rows(
+                pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
+            )[0]
             card.update(
                 {
                     "identity_rows": [
@@ -2291,7 +2305,7 @@ class DashboardService:
                             "value": str(card.get("anchor_topic") or "n/d"),
                         },
                         {
-                            "label": "Organizaciones responsables observadas",
+                            "label": "Organizaciones de las incidencias enlazadas",
                             "value": str(card.get("support_organizations") or "n/d"),
                         },
                         {
@@ -2304,11 +2318,11 @@ class DashboardService:
                     "statement": (
                         f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "
                         f"{int(row.get('linked_incidents', 0) or 0)} incidencias y "
-                        f"{int(row.get('linked_comments', 0) or 0)} comentarios."
+                        f"{int(row.get('linked_comments', 0) or 0)} comentarios. La similitud textual no demuestra causalidad."
                     ),
                     "spotlight_metrics": [
                         {
-                            "label": "Nota media del tópico",
+                            "label": "Score medio enlazado",
                             "value": format_metric(row.get("avg_nps")),
                         },
                         {
@@ -2320,7 +2334,7 @@ class DashboardService:
                             "value": str(int(row.get("linked_incidents", 0) or 0)),
                         },
                         {
-                            "label": "Confianza",
+                            "label": "Similitud textual",
                             "value": format_percentage(row.get("avg_similarity")),
                         },
                     ],

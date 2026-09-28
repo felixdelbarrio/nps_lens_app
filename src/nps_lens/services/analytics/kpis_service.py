@@ -9,6 +9,7 @@ from typing import Any, Optional, cast
 import numpy as np
 import pandas as pd
 
+from nps_lens.core.metrics import summarize
 from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL
 
 _KPI_ORDER = ("comments", "nps_average", "classic_nps", "detractor_rate", "promoter_rate")
@@ -47,12 +48,6 @@ class ScoreKpis:
         }
 
 
-def _score_series(frame: pd.DataFrame) -> pd.Series[Any]:
-    if frame is None or frame.empty or "NPS" not in frame.columns:
-        return pd.Series(dtype=float)
-    return pd.to_numeric(frame["NPS"], errors="coerce").dropna()
-
-
 def _useful_comment_count(frame: pd.DataFrame, *, fallback: int) -> int:
     if frame is None or frame.empty:
         return 0
@@ -69,9 +64,9 @@ def _useful_comment_count(frame: pd.DataFrame, *, fallback: int) -> int:
 
 
 def compute_score_kpis(frame: pd.DataFrame) -> ScoreKpis:
-    scores = _score_series(frame)
-    comment_count = _useful_comment_count(frame, fallback=int(len(scores)))
-    if scores.empty:
+    stats = summarize(frame)
+    comment_count = _useful_comment_count(frame, fallback=stats.n)
+    if not stats.n:
         return ScoreKpis(
             samples=0,
             nps_average=None,
@@ -81,16 +76,13 @@ def compute_score_kpis(frame: pd.DataFrame) -> ScoreKpis:
             promoter_rate=None,
             comments=comment_count,
         )
-    total = int(len(scores))
-    detractor_rate = float((scores <= 6.0).mean())
-    promoter_rate = float((scores >= 9.0).mean())
     return ScoreKpis(
-        samples=total,
-        nps_average=float(scores.mean()),
-        classic_nps=float((promoter_rate - detractor_rate) * 100.0),
-        detractor_rate=detractor_rate,
-        neutral_rate=float(((scores >= 7.0) & (scores <= 8.0)).mean()),
-        promoter_rate=promoter_rate,
+        samples=stats.n,
+        nps_average=stats.nps_avg,
+        classic_nps=stats.nps_classic_pp,
+        detractor_rate=stats.detractor_rate,
+        neutral_rate=stats.neutral_rate,
+        promoter_rate=stats.promoter_rate,
         comments=comment_count,
     )
 

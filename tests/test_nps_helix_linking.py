@@ -41,7 +41,6 @@ def test_link_incidents_to_nps_topics_sparse_chunked_path() -> None:
         helix,
         min_similarity=0.01,
         top_k_per_incident=2,
-        max_nps_rows_for_evidence=3,
         evidence_chunk_size=1,
     )
 
@@ -136,7 +135,6 @@ def test_link_incidents_to_nps_topics_uses_detailed_description_for_matching() -
         helix,
         min_similarity=0.001,
         top_k_per_incident=1,
-        max_nps_rows_for_evidence=1,
         evidence_chunk_size=1,
     )
 

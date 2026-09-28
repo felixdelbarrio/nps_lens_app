@@ -519,38 +519,20 @@ def test_build_incident_attribution_chains_can_return_all_examples_when_limit_is
     assert len(out.iloc[0]["comment_records"]) == 3
 
 
-def test_summarize_attribution_chains_uses_same_chain_level_source_for_totals() -> None:
-    attribution_df = pd.DataFrame(
+def test_summarize_attribution_chains_counts_unique_entities_not_samples() -> None:
+    chains = pd.DataFrame(
         [
-            {
-                "nps_topic": "Pagos / Transferencias",
-                "linked_incidents": 26,
-                "linked_comments": 32,
-                "linked_pairs": 46,
-            },
-            {
-                "nps_topic": "Acceso / Login",
-                "linked_incidents": 8,
-                "linked_comments": 10,
-                "linked_pairs": 14,
-            },
-            {
-                "nps_topic": "Pagos / Transferencias",
-                "linked_incidents": 4,
-                "linked_comments": 6,
-                "linked_pairs": 7,
-            },
+            {"nps_topic": "A", "evidence_pairs": [("i1", "n1"), ("i2", "n1")]},
+            {"nps_topic": "B", "evidence_pairs": [("i1", "n2"), ("i1", "n1")]},
+            {"nps_topic": "A", "evidence_pairs": [("i3", "n2")]},
         ]
     )
-
-    summary = summarize_attribution_chains(attribution_df)
-
-    assert summary == {
+    assert summarize_attribution_chains(chains) == {
         "chains_total": 3,
         "topics_total": 2,
-        "linked_incidents_total": 38,
-        "linked_comments_total": 48,
-        "linked_pairs_total": 67,
+        "linked_incidents_total": 3,
+        "linked_comments_total": 2,
+        "linked_pairs_total": 4,
     }
 
 

@@ -24,7 +24,7 @@ import plotly.io as pio
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
+from pptx.enum.text import PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
@@ -38,6 +38,7 @@ from nps_lens.analytics.incident_attribution import (
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.text_mining import summarize_taxonomy
+from nps_lens.core.nps_math import valid_nps_scores
 from nps_lens.design.tokens import (
     DesignTokens,
     bbva_typography_tokens,
@@ -164,12 +165,6 @@ def _fmt_count_or_nd(v: object) -> str:
     return format_volume(v, default="n/d")
 
 
-def _fmt_count_with_label(v: object, *, singular: str, plural: str) -> str:
-    count = _safe_int(v, default=-1)
-    label = singular if count == 1 else plural
-    return f"**{_fmt_count_or_nd(v)}** {label}"
-
-
 def _fmt_pct_or_nd(v: object, decimals: int = 2) -> str:
     if decimals == 2:
         return format_percentage(v)
@@ -228,15 +223,6 @@ def _wrap_label(
     return joiner.join(lines)
 
 
-def _configure_text_frame(tf: object) -> None:
-    with contextlib.suppress(Exception):
-        tf.word_wrap = True
-    with contextlib.suppress(Exception):
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    with contextlib.suppress(Exception):
-        tf.vertical_anchor = MSO_VERTICAL_ANCHOR.TOP
-
-
 def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
     clean = " ".join(str(text or "").split())
     if not clean:
@@ -247,23 +233,6 @@ def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
             break
     clean = re.sub(r"^(ACOTAMIENTO IRD|Acotamiento IRD)\s*", "", clean)
     return _clip(clean, max_len)
-
-
-def _is_cover_metric_line(text: str) -> bool:
-    low = str(text or "").strip().lower()
-    return any(
-        token in low
-        for token in [
-            "muestras",
-            "comentarios analizados",
-            "score medio",
-            "nps medio",
-            "nps clásico",
-            "nps clasico",
-            "detractores",
-            "promotores",
-        ]
-    )
 
 
 def _slug(value: object, *, max_len: int = 42) -> str:
@@ -383,7 +352,7 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
 
     out = nps_df.copy()
     out["date"] = _coerce_datetime_series(out.get("Fecha")).dt.normalize()
-    out["NPS"] = pd.to_numeric(out.get("NPS"), errors="coerce")
+    out["NPS"] = valid_nps_scores(out.get("NPS", pd.Series(dtype=float)))
     comment_col = _comment_column(out)
     out["comment_txt"] = (
         out.get(comment_col, pd.Series([""] * len(out), index=out.index))
@@ -810,7 +779,7 @@ def _build_topic_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> 
     work = _normalize_presentation_categories(source_df, columns=[dimension])
     work = work.dropna(subset=[dimension, "NPS"]).copy()
     work[dimension] = work[dimension].astype(str).str.strip()
-    work["NPS"] = pd.to_numeric(work["NPS"], errors="coerce")
+    work["NPS"] = valid_nps_scores(work["NPS"])
     work = work[work[dimension].ne("")].dropna(subset=["NPS"]).copy()
     if work.empty:
         return pd.DataFrame(columns=cols)
@@ -1014,7 +983,7 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="Confianza", side="right", font=dict(size=15)),
+            title=dict(text="Similitud textual", side="right", font=dict(size=15)),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -2072,16 +2041,6 @@ def _build_wrapped_table_layout(
     )
 
 
-def _plain_md(text: object) -> str:
-    s = str(text or "").strip()
-    if not s:
-        return ""
-    s = re.sub(r"`([^`]*)`", r"\1", s)
-    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
-    s = re.sub(r"^#+\s*", "", s)
-    return " ".join(s.split())
-
-
 def _chain_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
@@ -2174,7 +2133,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["red"],
             ),
             (
-                "Nota media del tópico",
+                "Score medio enlazado",
                 _fmt_num_or_nd(row.get("avg_nps", np.nan)),
                 BBVA_COLORS["green"],
             ),
@@ -2184,7 +2143,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["sky"],
             ),
             (
-                "Confianza",
+                "Similitud textual",
                 _fmt_pct_or_nd(row.get("avg_similarity", np.nan), decimals=0),
                 BBVA_COLORS["blue"],
             ),
@@ -2669,7 +2628,7 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
     entries = records or [CausalEvidenceRecord("", line, "") for line in fallback]
     if not entries:
         entries = [CausalEvidenceRecord("", "Sin evidencia Helix vinculada en el periodo.", "")]
-    max_entries = EDITORIAL_LIMITS.max_helix_evidence
+    max_entries = 3
     has_overflow = len(entries) > max_entries
     detailed_entries = list(entries[: max_entries - 1] if has_overflow else entries[:max_entries])
 
@@ -2712,7 +2671,7 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
             separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
             _add_highlighted_runs(
                 paragraph,
-                _clip(record.summary, 165),
+                _clip(record.summary, 130),
                 record.segments,
                 size=size,
                 color=BBVA_COLORS["ink"],
@@ -2726,10 +2685,13 @@ def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None
             line_length = 0
             for record in remaining:
                 incident_length = len(record.incident_id) + (2 if line_length else 0)
-                if line_length and line_length + incident_length > 72:
-                    paragraph = tf.add_paragraph()
-                    prepare_paragraph(paragraph, size=size)
-                    line_length = 0
+                if line_length + incident_length > 64:
+                    ellipsis = paragraph.add_run()
+                    ellipsis.text = ", …"
+                    ellipsis.font.name = "Lato"
+                    ellipsis.font.size = Pt(size)
+                    ellipsis.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                    break
                 if line_length:
                     separator = paragraph.add_run()
                     separator.text = ", "
@@ -3021,7 +2983,19 @@ def _fill_template_deck(
     pain = prs.slides[5]
     pain_rows = list(view.topic_table_df.head(4).itertuples())
     leader_name = str(getattr(pain_rows[0], "value", "Sin señal")) if pain_rows else "Sin señal"
-    _set_template_text(pain.shapes[1], "Volumen de opiniones", size=11, color=BBVA_COLORS["ink"])
+    for index, label in (
+        (1, "Volumen de opiniones"),
+        (11, "Score de experiencia"),
+        (12, "Peso de detractores"),
+    ):
+        _set_template_text(
+            pain.shapes[index],
+            label,
+            size=11,
+            bold=True,
+            font="Lato Black",
+            color=BBVA_COLORS["ink"],
+        )
     _set_template_text(
         pain.shapes[0],
         f"{leader_name} concentra el mayor dolor entre los tópicos observados en {topic_channel}",
@@ -3032,12 +3006,10 @@ def _fill_template_deck(
     )
     for column in range(4):
         row = pain_rows[column] if column < len(pain_rows) else None
-        offset = 2 + column * 6 if column else 2
         header_index = (2, 8, 9, 10)[column]
         volume_index = (14, 17, 20, 23)[column]
         score_index = (13, 16, 19, 22)[column]
         detractor_index = (6, 15, 18, 21)[column]
-        del offset
         _set_template_text(
             pain.shapes[header_index],
             _clip(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios", 28),
@@ -3104,7 +3076,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[4],
-            "NOTA MEDIA DEL TÓPICO",
+            "SCORE MEDIO ENLAZADO",
             size=12,
             bold=False,
             color=BBVA_COLORS["blue"],
@@ -3121,7 +3093,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[7],
-            "CONFIANZA",
+            "SIMILITUD TEXTUAL",
             size=12,
             bold=False,
             color=BBVA_COLORS["blue"],
@@ -3144,7 +3116,7 @@ def _fill_template_deck(
         slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · lectura {method.label}.",
+            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · No demuestran causalidad.",
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],

@@ -65,3 +65,11 @@ describe("Causal topic filters", () => {
     expect(screen.queryByRole("columnheader", { name: /segments/ })).not.toBeInTheDocument();
   });
 });
+
+it("shows full link totals instead of the capped evidence sample", () => {
+  const cards = payload.scenarios?.cards as Array<Record<string, unknown>>;
+  const linking = { ...payload, scenarios: { cards: [{ ...cards[0], linked_incidents: 375, linked_comments: 118 }] } };
+  render(<LinkingWorkspace linking={linking} tab="scenarios" onTabChange={() => {}} />);
+  expect(screen.getByRole("heading", { name: "375 incidencias enlazadas" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "118 comentarios enlazados" })).toBeInTheDocument();
+});
