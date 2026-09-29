@@ -31,6 +31,10 @@ source, target, stage = sys.argv[1:]
 with zipfile.ZipFile(source) as archive:
     manifest = json.loads(archive.read("manifest.json"))
     comments = {name: json.loads(archive.read(name)) for name in archive.namelist() if name.startswith("comments/")}
+    if stage == "classifier":
+        assert manifest["schema_version"] == "nps-lens-comments/3"
+        categories = json.loads(archive.read("taxonomy.json"))["categories"]
+        primary = next(key for key, pair in categories.items() if pair == {"lever": "Atención", "sublever": "Resolución"})
 taxonomy = {"taxonomy": [
     {"lever": "Atención", "sublevers": ["Resolución"]},
     {"lever": "Sin clasificación temática", "sublevers": ["Información insuficiente", "Tema no cubierto"]},
@@ -41,7 +45,7 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
     else:
         for name, payload in comments.items():
-            result = {"classifications": [{"id": row["id"], "primary_classification": {"lever": "Atención", "sublever": "Resolución"}} for row in payload["comments"]]}
+            result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": []} for row in payload["comments"]]}
             archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False))
 `;
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
@@ -104,7 +108,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   const classifierInput = await exportedPath(page, "Clasifica comentarios");
   const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
   responseZip(classifierInput, classifierOutput, "classifier");
-  await page.getByLabel("Importar ZIP de comentarios clasificados").setInputFiles(classifierOutput);
+  const [classificationImport] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
+    page.getByLabel("Importar ZIP de comentarios clasificados").setInputFiles(classifierOutput),
+  ]);
+  expect(classificationImport.ok(), await classificationImport.text()).toBeTruthy();
   await expect(page.getByText(/Importación validada/)).toBeVisible();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
