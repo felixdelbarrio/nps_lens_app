@@ -109,6 +109,7 @@ from nps_lens.services.analytics import (
 )
 from nps_lens.services.analytics.kpis_service import compute_score_kpis
 from nps_lens.services.helix_exchange import HelixExchange
+from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 from nps_lens.services.taxonomy_service import TaxonomyService
 from nps_lens.settings import Settings, normalize_downloads_path
 from nps_lens.ui.business import (
@@ -509,7 +510,13 @@ class DashboardService:
             if cached is not None:
                 self._frame_cache.move_to_end(key)
                 return cached
-            frame = self.taxonomy.resolve(context)
+            state = self.taxonomy.state(context)
+            mode = (
+                None
+                if state.get("restored") or self.taxonomy.lens_override
+                else (state["active"] if state["active"] in ("SOURCE", "COMPLETED") else "SOURCE")
+            )
+            frame = self.taxonomy.resolve(context, mode=mode)
             frame["match_status"] = nps_matchable_mask(frame).map(
                 {True: "matchable", False: "non_matchable"}
             )
@@ -522,6 +529,128 @@ class DashboardService:
                     self._frame_cache_limit,
                 ),
             )
+
+    def comments_scope(
+        self,
+        frame: pd.DataFrame,
+        *,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        score_channel: Optional[str] = None,
+        nps_group: Optional[str] = None,
+    ) -> pd.DataFrame:
+        channel = self._resolve_score_channel(frame, score_channel)
+        group = self._resolve_nps_group(frame, nps_group)
+        return self._apply_population_filters(
+            filter_by_nps_group(self._apply_score_channel_filter(frame, channel), group),
+            pop_year,
+            pop_month,
+        )
+
+    def causal_scope(
+        self,
+        context: UploadContext,
+        frame: pd.DataFrame,
+        *,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        score_channel: Optional[str] = None,
+        max_days_apart: int = 90,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
+        channel = self._resolve_score_channel(frame, score_channel)
+        assignments = self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
+            channel, []
+        )
+        resolved = channel if assignments else POP_ALL
+        nps = self._apply_population_filters(
+            self._apply_score_channel_filter(frame, resolved), pop_year, pop_month
+        )
+        helix = self._load_helix_df(context, score_channel=channel if assignments else None)
+        return (
+            nps,
+            helix,
+            self._causal_helix_window(helix, nps, max_days_apart=max_days_apart),
+            resolved,
+        )
+
+    def analysis_engine(self, kind: str, context: UploadContext, **scope: Any) -> dict[str, Any]:
+        preference = "comment_engine" if kind == "comments" else "causal_engine"
+        if (
+            self.settings.auth_mode != "local"
+            or self.taxonomy.state(context).get(preference) != "llm"
+        ):
+            return {"engine": "rules"}
+        return self.classification_status(kind, context, **scope)
+
+    def classification_status(
+        self,
+        kind: str,
+        context: UploadContext,
+        *,
+        pop_year: str = POP_ALL,
+        pop_month: str = POP_ALL,
+        score_channel: Optional[str] = None,
+        nps_group: Optional[str] = None,
+        max_days_apart: int = 90,
+    ) -> dict[str, Any]:
+        state = self.taxonomy.state(context)
+        mode = self.taxonomy.llm_mode(context)
+        total = received = 0
+        reason = ""
+        try:
+            if self.settings.auth_mode != "local" or state.get("restored"):
+                raise ValueError("Los motores LLM solo se activan en el dataset local.")
+            frame = self._load_nps_df(context)
+            if kind == "comments":
+                visible = self.comments_scope(
+                    frame,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    score_channel=score_channel,
+                    nps_group=nps_group,
+                )
+                total = len(visible)
+                received = len(
+                    TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
+                )
+                preference = "comment_engine"
+            elif kind == "helix":
+                _, _, visible, _ = self.causal_scope(
+                    context,
+                    frame,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    score_channel=score_channel,
+                    max_days_apart=max_days_apart,
+                )
+                total = len(visible)
+                handler = HelixExchange(self.taxonomy, Path("."))
+                inputs = handler.inputs(context, self._load_helix_df(context), mode)
+                received = (
+                    len(
+                        set(visible["Incident Number"].astype(str))
+                        & set(handler.current(context, inputs)[mode])
+                    )
+                    if total
+                    else 0
+                )
+                preference = "causal_engine"
+            else:
+                raise ValueError("Motor desconocido.")
+            ready = total > 0 and received == total
+            engine = "llm" if ready and state.get(preference) == "llm" else "rules"
+        except ValueError as exc:
+            reason, ready, engine = str(exc), False, "rules"
+        return {
+            "active": mode,
+            "engine": engine,
+            "ready": ready,
+            "total": total,
+            "received": received,
+            "pending": total - received,
+            "reason": reason
+            or ("" if ready else "El ámbito visible requiere todas sus clasificaciones LLM."),
+        }
 
     def _safe_helix_operational_benchmark(
         self,
@@ -867,6 +996,18 @@ class DashboardService:
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
         all_records = self._load_nps_df(context)
+        engine = self.analysis_engine(
+            "comments",
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            nps_group=nps_group,
+        )
+        if engine["engine"] == "llm":
+            all_records = TaxonomyExchange(self.taxonomy, Path(".")).apply(
+                context, all_records, engine["active"]
+            )
         resolved_channel = self._resolve_score_channel(all_records, score_channel)
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
@@ -943,6 +1084,13 @@ class DashboardService:
             if gap_base_window is not None
             else scope_history_df.iloc[:0]
         )
+        cohort_df = scope_current_df
+        if engine["engine"] == "llm":
+            cohort_df = analysis_current_df
+            gap_current_df = analysis_current_df
+            gap_base_df = self._apply_score_channel_filter(gap_base_df, resolved_channel)
+            gap_base_df = filter_by_nps_group(gap_base_df, resolved_group)
+            gap_base_df = gap_base_df.loc[gap_base_df["Palanca"].fillna("").ne("")]
 
         nps_explanation_bullets = daily_nps_explanation(period_scope)
 
@@ -987,7 +1135,7 @@ class DashboardService:
                 "column_dimension": cohort_col,
                 "figure": self._serialize_figure(
                     chart_cohort_heatmap(
-                        scope_current_df,
+                        cohort_df,
                         theme,
                         row_dim=_COHORT_ROW_DIMENSIONS.get(cohort_row, "Palanca"),
                         col_dim=_COHORT_COLUMN_DIMENSIONS.get(cohort_col, "Canal"),
@@ -1166,6 +1314,18 @@ class DashboardService:
             )
         else:
             frame = self._load_nps_df(context)
+            engine = self.analysis_engine(
+                "comments",
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                nps_group=nps_group,
+            )
+            if engine["engine"] == "llm":
+                frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
+                    context, frame, engine["active"]
+                )
             resolved_channel = self._resolve_score_channel(frame, score_channel)
             resolved_group = self._resolve_nps_group(frame, nps_group)
             frame = self._apply_score_channel_filter(frame, resolved_channel)
@@ -1227,12 +1387,15 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
-        state = self.taxonomy.state(context)
-        use_llm = (
-            self.settings.auth_mode == "local"
-            and not state.get("restored")
-            and state.get("causal_engine") == "llm"
+        llm_status = self.analysis_engine(
+            "helix",
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            max_days_apart=max_days_apart,
         )
+        use_llm = llm_status["engine"] == "llm"
         key = (
             "causal-analysis",
             *self._context_key(context),
@@ -1248,28 +1411,26 @@ class DashboardService:
 
         def _build() -> dict[str, object]:
             nps_frame = self._load_nps_df(context)
+            inputs = None
+            handler = HelixExchange(self.taxonomy, Path(".")) if use_llm else None
+            if handler:
+                inputs = handler.inputs(context, self._load_helix_df(context), llm_status["active"])
+                nps_frame = inputs["frame"]
+            nps_slice, helix_history, helix_window, resolved_channel = self.causal_scope(
+                context,
+                nps_frame,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                max_days_apart=max_days_apart,
+            )
             requested_channel = self._resolve_score_channel(nps_frame, score_channel)
             assignments = self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
                 requested_channel, []
             )
-            resolved_channel = requested_channel if assignments else POP_ALL
-            nps_slice = self._apply_population_filters(
-                self._apply_score_channel_filter(nps_frame, resolved_channel),
-                pop_year,
-                pop_month,
-            )
             focus_group, focus_label = self._linking_focus_group(POP_ALL)
             focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
             helix_total = self._load_helix_df(context)
-            helix_history = self._load_helix_df(
-                context,
-                score_channel=requested_channel if assignments else None,
-            )
-            helix_window = self._causal_helix_window(
-                helix_history,
-                nps_slice,
-                max_days_apart=max_days_apart,
-            )
             helix_annotated = annotate_incident_link_quality(helix_window)
             helix_slice = (
                 helix_window.copy()
@@ -1277,14 +1438,10 @@ class DashboardService:
                 else helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
             )
             imported_links = None
-            if use_llm:
-                handler = HelixExchange(self.taxonomy, Path("."))
-                inputs = handler.inputs(
-                    context,
-                    helix_total,
-                    str(nps_frame.attrs.get("taxonomy_mode", state["active"])),
+            if handler and inputs:
+                imported_links = handler.links(
+                    context, inputs, focus_df, helix_slice, max_days_apart=max_days_apart
                 )
-                imported_links = handler.links(context, inputs, focus_df, helix_slice)
             base: dict[str, object] = {
                 "ready": False,
                 "resolved_channel": resolved_channel,

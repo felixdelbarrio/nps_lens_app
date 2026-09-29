@@ -178,12 +178,14 @@ class LinkingResponse(BaseModel):
 
 
 class TaxonomySettingsRequest(BaseModel):
+    llm_active: Optional[str] = None
     active: Optional[str] = None
     default: Optional[str] = None
     policy: Optional[str] = None
 
 
 class TaxonomyDiscoverySettingsRequest(BaseModel):
+    normalizer_url: Optional[str] = None
     designer_url: Optional[str] = None
     classifier_url: Optional[str] = None
     helix_classifier_url: Optional[str] = None

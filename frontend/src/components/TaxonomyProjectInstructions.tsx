@@ -3,9 +3,9 @@ import useSWR from "swr";
 
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyProjectInstructions as Instructions } from "../api";
 
-const TITLES = { designer: "Crea Taxonomía", classifier: "Clasifica comentarios", helix: "Helix Classifier" };
+import { PROJECT_NAMES } from "../utils/taxonomy";
 
-export function TaxonomyProjectInstructions({ role, context }: { role: "designer" | "classifier" | "helix"; context: TaxonomyContext }) {
+export function TaxonomyProjectInstructions({ role, context }: { role: keyof typeof PROJECT_NAMES; context: TaxonomyContext }) {
   const { data, error, mutate } = useSWR(
     taxonomyUrl("/discovery/instructions", context),
     () => taxonomyRequest<Instructions>("/discovery/instructions", context),
@@ -13,7 +13,7 @@ export function TaxonomyProjectInstructions({ role, context }: { role: "designer
   );
   const [expanded, setExpanded] = useState(false);
   const [message, setMessage] = useState("");
-  const title = TITLES[role];
+  const title = PROJECT_NAMES[role];
 
   async function copy() {
     if (!data) return;

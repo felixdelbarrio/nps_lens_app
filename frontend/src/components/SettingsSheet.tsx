@@ -1,4 +1,8 @@
 import { useEffect } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import { taxonomyRequest, taxonomyUrl, type TaxonomyDiscoverySettings } from "../api";
+import { TaxonomyProject } from "./TaxonomyProject";
+import type { EngineStatus } from "./ClassificationEngineControl";
 
 import type { ServiceOriginHierarchyPayload } from "../api";
 import type { ThemeMode } from "../theme";
@@ -14,6 +18,8 @@ import { ColumnAliasMaintenance } from "./ColumnAliasMaintenance";
 export type SettingsTab = "appearance" | "ingestion" | "column-aliases" | "advanced" | "maintenance" | "equivalences" | "telemetry" | "snapshots";
 
 type SettingsSheetProps = {
+  classificationContext?: TaxonomyContext;
+  localTaxonomy?: boolean;
   taxonomyContext?: TaxonomyContext;
   onTaxonomyChange?: () => Promise<void>;
   open: boolean;
@@ -62,6 +68,8 @@ export function SettingsSheet({
   activeTab,
   onTabChange,
   onClose,
+  classificationContext = {},
+  localTaxonomy = false,
   themeMode,
   setThemeMode,
   downloadsPath,
@@ -85,6 +93,9 @@ export function SettingsSheet({
   reprocessPending,
   actionsDisabled = false
 }: SettingsSheetProps) {
+  const {mutate: revalidate} = useSWRConfig();
+  const {data: discovery} = useSWR(open && activeTab === "equivalences" && localTaxonomy ? taxonomyUrl("/discovery",taxonomyContext) : null, () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery",taxonomyContext));
+  const {data: causalEngine} = useSWR(open && activeTab === "advanced" && localTaxonomy ? taxonomyUrl("/helix/engine",classificationContext) : null, () => taxonomyRequest<EngineStatus>("/helix/engine",classificationContext));
   useEffect(() => {
     if (!open) {
       return undefined;
@@ -297,7 +308,9 @@ export function SettingsSheet({
                 <div className="field-grid">
                   <label>
                     <span>Similitud en la causalidad</span>
+                    {causalEngine?.engine === "llm" ? <span className="field-hint">El LLM determina la afinidad contextual; solo se aplica la ventana temporal.</span> : null}
                     <input
+                      disabled={causalEngine?.engine === "llm"}
                       max={1}
                       min={0.05}
                       onChange={(event) => setMinSimilarity(Number(event.target.value))}
@@ -309,7 +322,7 @@ export function SettingsSheet({
                   <label>
                     <span>Ventana de días</span>
                     <input
-                      max={30}
+                      max={365}
                       min={1}
                       onChange={(event) => setMaxDaysApart(Number(event.target.value))}
                       type="number"
@@ -382,7 +395,9 @@ export function SettingsSheet({
                 Decide qué nombre verá el cliente y agrupa debajo todas las formas equivalentes de escribirlo.
               </p>
             </div></div>
-            <EquivalenceMaintenance disabled={actionsDisabled} context={taxonomyContext} onChange={onTaxonomyChange} />
+            <p className="context-pill">Compañía: {taxonomyContext.service_origin}</p>
+            <EquivalenceMaintenance key={taxonomyContext.service_origin} disabled={actionsDisabled} context={taxonomyContext} onChange={onTaxonomyChange} />
+            {discovery ? <TaxonomyProject key={`normalizer-${taxonomyContext.service_origin}`} role="normalizer" context={taxonomyContext} url={discovery.normalizer_url} disabled={actionsDisabled} canExport onChange={async () => { await revalidate(["equivalences",new URLSearchParams(taxonomyContext).toString()]); await onTaxonomyChange?.(); }} /> : null}
           </section>
         ) : null}
 

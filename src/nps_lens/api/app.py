@@ -37,6 +37,7 @@ from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceReg
 from nps_lens.platform.downloads import persist_download
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
+from nps_lens.services.equivalence_exchange import EquivalenceExchange
 from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
@@ -571,8 +572,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, object]:
         require_admin(request)
-        registry = EquivalenceRegistry.load(dashboard_layer.settings.equivalences_path)
         context = taxonomy_context(request)
+        registry = dashboard_layer.taxonomy.registry(context)
         nps = dashboard_layer.taxonomy.source(context)
         stored = dashboard_layer.helix_store.get(
             DatasetContext(
@@ -628,7 +629,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_admin(request)
         try:
             registry = EquivalenceRegistry.from_dict(payload.model_dump())
-            registry.save(dashboard_layer.settings.equivalences_path)
+            dashboard_layer.taxonomy.save_equivalences(taxonomy_context(request), registry)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         dashboard_layer.clear_caches()
@@ -733,6 +734,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "designer_url": current.taxonomy_designer_url,
             "classifier_url": current.taxonomy_classifier_url,
             "helix_classifier_url": current.helix_classifier_url,
+            "normalizer_url": current.taxonomy_normalizer_url,
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -749,6 +751,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "designer_url": "taxonomy_designer_url",
                 "classifier_url": "taxonomy_classifier_url",
                 "helix_classifier_url": "helix_classifier_url",
+                "normalizer_url": "taxonomy_normalizer_url",
             }
             values = {
                 fields[key]: normalize_chatgpt_project_url(value)
@@ -777,7 +780,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                return exchange(request, dashboard_layer).export(taxonomy_context(request), stage)
+                handler = exchange(request, dashboard_layer)
+                context = taxonomy_context(request)
+                if stage == "normalizer":
+                    return EquivalenceExchange(handler.taxonomy, handler.downloads).export_concepts(
+                        context, dashboard_layer._load_helix_df(context)
+                    )
+                return handler.export(context, stage)
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -792,7 +801,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         content = file.file.read(MAX_ZIP_BYTES + 1)
         try:
             with dashboard_layer._analytics_lock:
-                result = handler.import_response(taxonomy_context(request), content, stage)
+                context = taxonomy_context(request)
+                result = (
+                    EquivalenceExchange(handler.taxonomy, handler.downloads).import_concepts(
+                        context, dashboard_layer._load_helix_df(context), content
+                    )
+                    if stage == "normalizer"
+                    else handler.import_response(context, content, stage)
+                )
                 dashboard_layer.clear_caches()
                 return result
         except (ValueError, OSError, TaxonomyDiscoveryError) as exc:
@@ -801,7 +817,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.get("/api/taxonomy/discovery/progress")
     def classification_progress(
         request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         try:
             return exchange(request, dashboard_layer).progress(taxonomy_context(request))
         except ValueError as exc:
@@ -858,12 +874,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> tuple[HelixExchange, UploadContext, dict[str, Any]]:
         handler = exchange(request, dashboard_layer)
         context = taxonomy_context(request)
-        taxonomy = dashboard_layer.taxonomy
-        mode = taxonomy.state(context)["active"]
-        if mode not in taxonomy.available(
-            context, taxonomy.source(context), taxonomy.registry(context)
-        ):
-            mode = "SOURCE"
+        mode = dashboard_layer.taxonomy.llm_mode(context)
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
         return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), mode)
 
@@ -903,52 +914,57 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get("/api/taxonomy/helix/engine")
-    def causal_engine(
-        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    def engine_scope(request: Request) -> dict[str, Any]:
+        params = request.query_params
+        try:
+            days = int(params.get("max_days_apart", "90"))
+        except ValueError as exc:
+            raise HTTPException(400, "Ventana temporal inválida.") from exc
+        if not 0 <= days <= 365:
+            raise HTTPException(400, "La ventana debe estar entre 0 y 365 días.")
+        return {
+            "pop_year": params.get("pop_year", "Todos"),
+            "pop_month": params.get("pop_month", "Todos"),
+            "score_channel": params.get("score_channel"),
+            "nps_group": params.get("nps_group"),
+            "max_days_apart": days,
+        }
+
+    @app.get("/api/taxonomy/{kind}/engine")
+    def classification_engine(
+        request: Request,
+        kind: str,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
-        state = dashboard_layer.taxonomy.state(taxonomy_context(request))
-        ready, reason = False, ""
-        try:
-            handler, context, inputs = helix_exchange(request, dashboard_layer)
-            ready = handler.status(context, inputs)["ready"]
-        except ValueError as exc:
-            reason = str(exc)
-        return {
-            "engine": state.get("causal_engine", "rules"),
-            "ready": ready,
-            "reason": reason,
-            "active": state["active"],
-        }
+        if kind not in ("comments", "helix"):
+            raise HTTPException(404, "Motor desconocido.")
+        return dashboard_layer.classification_status(
+            kind, taxonomy_context(request), **engine_scope(request)
+        )
 
-    @app.put("/api/taxonomy/helix/engine")
-    def set_causal_engine(
+    @app.put("/api/taxonomy/{kind}/engine")
+    def set_classification_engine(
         request: Request,
+        kind: str,
         engine: str,
         dashboard_layer: DashboardService = Depends(get_dashboard_service),
     ) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
-        try:
-            with dashboard_layer._analytics_lock:
-                if engine not in ("rules", "llm"):
-                    raise ValueError("Motor causal desconocido.")
-                context = taxonomy_context(request)
-                state = dashboard_layer.taxonomy.state(context)
-                if engine == "llm":
-                    handler, context, inputs = helix_exchange(request, dashboard_layer)
-                    if not handler.status(context, inputs)["ready"]:
-                        raise ValueError(
-                            "Importa primero todos los lotes Helix de la lente activa."
-                        )
-                state["causal_engine"] = engine
-                dashboard_layer.taxonomy.save_state(context, state)
-                dashboard_layer.clear_caches()
-                return {"engine": engine}
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        if kind not in ("comments", "helix") or engine not in ("rules", "llm"):
+            raise HTTPException(400, "Motor desconocido.")
+        with dashboard_layer._analytics_lock:
+            context = taxonomy_context(request)
+            status = dashboard_layer.classification_status(kind, context, **engine_scope(request))
+            if engine == "llm" and not status["ready"]:
+                raise HTTPException(409, status["reason"])
+            state = dashboard_layer.taxonomy.state(context)
+            state["comment_engine" if kind == "comments" else "causal_engine"] = engine
+            dashboard_layer.taxonomy.save_state(context, state)
+            dashboard_layer.clear_caches()
+            return {**status, "engine": engine}
 
     @app.put("/api/taxonomy/settings")
     def taxonomy_settings(

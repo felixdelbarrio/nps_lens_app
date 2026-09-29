@@ -16,13 +16,16 @@ from nps_lens.analytics.nps_helix_link import build_incident_display_text, build
 from nps_lens.analytics.taxonomy import MODES
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
+from nps_lens.ingest.helix_dates import incident_occurrence_dates
 from nps_lens.platform.downloads import persist_download
+from nps_lens.services.taxonomy_discovery import PrimaryClassification
 from nps_lens.services.taxonomy_exchange import (
     BATCH_ROWS,
     MAX_EXPANDED_BYTES,
     MAX_MEMBER_BYTES,
     MAX_MEMBERS,
     MAX_ZIP_BYTES,
+    TaxonomyExchange,
     digest,
     encode,
     read_response,
@@ -45,6 +48,9 @@ class IncidentClassification(BaseModel):
     id: str
     lever: str
     sublever: str
+    secondary_classifications: list[PrimaryClassification] = Field(
+        default_factory=list, max_length=2
+    )
     rationale: str = Field(min_length=1, max_length=2000)
     links: list[EvidenceLink] = Field(max_length=20)
 
@@ -73,7 +79,22 @@ class HelixExchange:
         if mode not in MODES:
             raise ValueError("Selecciona una lente disponible.")
         source = self.taxonomy.source(context).sort_values("_business_key")
-        resolved = {mode: self.taxonomy.resolve(context, source, mode)}
+        available = self.taxonomy.available(context, source, self.taxonomy.registry(context))
+        frame = (
+            self.taxonomy.resolve(context, source, mode)
+            if mode in available
+            else source.assign(Palanca="", Subpalanca="")
+        )
+        exchange = TaxonomyExchange(self.taxonomy, self.downloads)
+        classified = exchange.assignments(context, source, mode)
+        if classified:
+            frame = frame.copy()
+            for column, field in (("Palanca", "lever"), ("Subpalanca", "sublever")):
+                mapped = frame["_business_key"].map(
+                    {key: row["primary_classification"][field] for key, row in classified.items()}
+                )
+                frame[column] = mapped.fillna(frame[column])
+        resolved = {mode: frame}
         catalogs = {mode: self.taxonomy.catalog(context, mode) for mode in resolved}
         if any(not catalog["taxonomy"] for catalog in catalogs.values()):
             raise ValueError("La lente activa no contiene Palancas/Subpalancas.")
@@ -98,6 +119,9 @@ class HelixExchange:
             {
                 "id": key,
                 "Comment": str(comment),
+                "secondary_classifications": classified.get(key, {}).get(
+                    "secondary_classifications", []
+                ),
                 "taxonomies": {
                     mode: {
                         "lever": str(pairs[i][0]),
@@ -116,7 +140,15 @@ class HelixExchange:
                     "helix-taxonomy/2",
                     mode,
                     catalogs[mode],
-                    [(row["id"], row["Comment"], row["taxonomies"][mode]) for row in comments],
+                    [
+                        (
+                            row["id"],
+                            row["Comment"],
+                            row["taxonomies"][mode],
+                            row["secondary_classifications"],
+                        )
+                        for row in comments
+                    ],
                 ]
             )
             for mode in resolved
@@ -124,6 +156,7 @@ class HelixExchange:
         if mode == "COMPLETED":
             scopes[mode] = digest([scopes[mode], self.taxonomy.state(context)["artifacts"][mode]])
         return {
+            "frame": frame,
             "modes": list(resolved),
             "taxonomies": catalogs,
             "scopes": scopes,
@@ -163,6 +196,7 @@ class HelixExchange:
             "total": total,
             "received": len(rows),
             "classified": classified,
+            "multiple": sum(bool(row.get("secondary_classifications")) for row in rows.values()),
             "unassigned": len(rows) - classified,
             "coverage": classified / total if total else 0,
             "links": sum(len(row["links"]) for row in rows.values()),
@@ -286,18 +320,35 @@ class HelixExchange:
                 }:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
                 mode = inputs["modes"][0]
-                if (row.lever, row.sublever) not in pairs[mode] and (row.lever or row.sublever):
-                    raise ValueError("Palanca/Subpalanca fuera de la taxonomía.")
+                assigned = [
+                    (row.lever, row.sublever),
+                    *((pair.lever, pair.sublever) for pair in row.secondary_classifications),
+                ]
+                if (
+                    len(set(assigned)) != len(assigned)
+                    or any(pair not in pairs[mode] for pair in assigned if pair != ("", ""))
+                    or (row.secondary_classifications and not row.lever)
+                ):
+                    raise ValueError("Palanca/Subpalanca fuera de la taxonomía o repetida.")
                 if len({link.nps_id for link in row.links}) != len(row.links):
                     raise ValueError("Vínculos NPS duplicados.")
                 for link in row.links:
                     comment = comments.get(link.nps_id)
-                    if (
-                        not comment
-                        or comment["taxonomies"][mode]
-                        != {"lever": row.lever, "sublever": row.sublever}
-                        or not row.lever
-                    ):
+                    comment_pairs = (
+                        {
+                            (
+                                comment["taxonomies"][mode]["lever"],
+                                comment["taxonomies"][mode]["sublever"],
+                            ),
+                            *(
+                                (pair["lever"], pair["sublever"])
+                                for pair in comment["secondary_classifications"]
+                            ),
+                        }
+                        if comment
+                        else set()
+                    )
+                    if not comment or not comment_pairs.intersection(assigned) or not row.lever:
                         raise ValueError("Vínculo a comentario desconocido o a otra categoría.")
                 validated[(mode, row.id)] = row.model_dump(exclude={"id"})
         existing = self.current(context, inputs)
@@ -332,28 +383,49 @@ class HelixExchange:
         inputs: dict[str, Any],
         focus: pd.DataFrame,
         incidents: pd.DataFrame,
+        *,
+        max_days_apart: int = 90,
     ) -> pd.DataFrame:
         mode = inputs["modes"][0]
         current = self.current(context, inputs)[mode]
-        if not inputs["incidents"] or len(current) != len(inputs["incidents"]):
+        incident_ids = set(incidents["Incident Number"].astype(str))
+        if not incident_ids or not incident_ids.issubset(current):
             raise ValueError(
                 "Importa la respuesta Helix completa para la lente activa antes de usar causalidad LLM."
             )
         nps_topics = dict(zip(analytical_response_ids(focus), build_nps_topic(focus)))
-        incident_ids = set(incidents["Incident Number"].astype(str))
+        nps_dates = dict(
+            zip(
+                analytical_response_ids(focus),
+                pd.to_datetime(
+                    focus.get("Fecha", pd.Series(index=focus.index, dtype="datetime64[ns]")),
+                    errors="coerce",
+                ),
+            )
+        )
+        incident_dates = dict(
+            zip(incidents["Incident Number"].astype(str), incident_occurrence_dates(incidents)[0])
+        )
         rows = [
             {
                 "nps_id": link["nps_id"],
                 "incident_id": key,
                 "similarity": link["confidence"],
                 "nps_topic": nps_topics[link["nps_id"]],
-                "incident_topic": row["lever"] + " > " + row["sublever"],
+                "incident_topic": " · ".join(
+                    pair["lever"] + " > " + pair["sublever"]
+                    for pair in [row, *row.get("secondary_classifications", [])]
+                ),
                 "llm_rationale": row["rationale"],
             }
             for key, row in current.items()
             if key in incident_ids
             for link in row["links"]
             if link["nps_id"] in nps_topics
+            and pd.notna(nps_dates.get(link["nps_id"]))
+            and pd.notna(incident_dates.get(key))
+            and abs((nps_dates[link["nps_id"]].normalize() - incident_dates[key].normalize()).days)
+            <= max_days_apart
         ]
         return pd.DataFrame(
             rows,

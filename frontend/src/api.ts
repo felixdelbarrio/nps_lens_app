@@ -726,15 +726,18 @@ export type TaxonomyStatus = {
   restored: boolean;
   discovery_local_available?: boolean;
   discovered_catalog_available: boolean;
+  llm_active: TaxonomyMode;
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
   version: string;
+  normalizer: string;
   designer: string;
   classifier: string;
   helix: string;
 };
 export type TaxonomyDiscoverySettings = {
+  normalizer_url: string;
   designer_url: string;
   classifier_url: string;
   helix_classifier_url: string;
