@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import { afterEach, expect, it, vi } from "vitest";
 import { HelixClassifier } from "./HelixClassifier";
-import { CausalEngineControl } from "./CausalEngineControl";
+import { ClassificationEngineControl } from "./ClassificationEngineControl";
 afterEach(() => vi.unstubAllGlobals());
 it("imports independent taxonomy assignments without method selectors and autosaves URL", async () => {
   const fetcher = vi.fn(async (url: string) => {
@@ -16,10 +16,10 @@ it("imports independent taxonomy assignments without method selectors and autosa
   render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="SOURCE" url="https://chatgpt.com/g/test" disabled={false} onChange={onChange} /></SWRConfig>);
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-  const url = screen.getByLabelText("URL · Helix Classifier");
+  const url = screen.getByLabelText("URL · Clasifica incidencias");
   await user.clear(url); await user.type(url,"https://chatgpt.com/g/updated"); await user.tab();
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/discovery"), expect.objectContaining({method:"PUT",body:JSON.stringify({helix_classifier_url:"https://chatgpt.com/g/updated"})})));
-  await user.upload(screen.getByLabelText("Importar ZIP Helix de respuesta"), new File(["ZIP"], "response.zip", {type:"application/zip"}));
+  await user.upload(screen.getByLabelText("Importar ZIP de incidencias clasificadas"), new File(["ZIP"], "response.zip", {type:"application/zip"}));
   await waitFor(() => expect(onChange).toHaveBeenCalled());
 });
 it.each([false,true])("allows activation only when ready=%s", async ready => {
@@ -29,23 +29,16 @@ it.each([false,true])("allows activation only when ready=%s", async ready => {
     return new Response(JSON.stringify({engine,ready,active:"SOURCE"}));
   }));
   const user = userEvent.setup();
-  render(<SWRConfig value={{provider: () => new Map()}}><CausalEngineControl context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Lente: Original/);
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText(/Lente: Taxonomía Original/);
   const toggle = screen.getByRole("switch");
   if (ready) {expect(toggle).toBeEnabled();await user.click(toggle);await waitFor(()=>expect(toggle).toBeChecked());}
   else expect(toggle).toBeDisabled();
 });
-it("allows returning to rules after classifications become stale", async () => {
-  let engine = "llm";
-  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
-    if (init?.method === "PUT") engine = "rules";
-    return new Response(JSON.stringify({engine,ready:false,reason:"Taxonomía desactualizada",active:"SOURCE"}));
-  }));
-  const user = userEvent.setup();
-  render(<SWRConfig value={{provider: () => new Map()}}><CausalEngineControl context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  const toggle = screen.getByRole("switch");
-  await waitFor(() => expect(toggle).toBeChecked());
-  expect(toggle).toBeEnabled();
-  await user.click(toggle);
-  await waitFor(() => expect(toggle).not.toBeChecked());
+it("disables stale classification and displays the effective static engine", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText(/Ámbito pendiente/);
+  expect(screen.getByRole("switch")).toBeDisabled();
+  expect(screen.getByRole("switch")).not.toBeChecked();
 });

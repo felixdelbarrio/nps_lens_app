@@ -23,7 +23,7 @@ function setup() {
 it("copies each exact server template and shares one read-only request", async () => {
   const { user, fetcher } = setup();
   const clipboard = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-  const designer = screen.getByRole("button", { name: "Copiar instrucciones de Crea Taxonomía" });
+  const designer = screen.getByRole("button", { name: "Copiar instrucciones de Crear Taxonomía" });
   await waitFor(() => expect(designer).toBeEnabled());
   await user.click(designer);
   expect(clipboard).toHaveBeenLastCalledWith(instructions.designer);
@@ -37,11 +37,11 @@ it("copies each exact server template and shares one read-only request", async (
 it("reveals selectable text when clipboard access is denied", async () => {
   const { user } = setup();
   vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("NotAllowedError"));
-  const button = screen.getByRole("button", { name: "Copiar instrucciones de Crea Taxonomía" });
+  const button = screen.getByRole("button", { name: "Copiar instrucciones de Crear Taxonomía" });
   await waitFor(() => expect(button).toBeEnabled());
   await user.click(button);
   expect(await screen.findByText(/cópialo manualmente/)).toBeInTheDocument();
-  const text = screen.getByRole("textbox", { name: "Instrucciones de Crea Taxonomía" });
+  const text = screen.getByRole("textbox", { name: "Instrucciones de Crear Taxonomía" });
   expect(text).toHaveValue(instructions.designer);
   expect(text.closest("details")).toHaveAttribute("open");
   expect(text).toHaveAttribute("readonly");

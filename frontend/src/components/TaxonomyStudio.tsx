@@ -4,7 +4,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscoverySettings, type TaxonomyMode, type TaxonomyStatus } from "../api";
 import { TAXONOMY_NAMES as NAMES } from "../utils/taxonomy";
 import { ManualTaxonomyEditor } from "./ManualTaxonomyEditor";
-import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
+import { NavigationTabs } from "./NavigationTabs";
 import { HelixClassifier } from "./HelixClassifier";
 import { TaxonomyProject } from "./TaxonomyProject";
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -14,6 +14,7 @@ type Exploration = { rows: Array<Record<string, string | number | string[]>>; to
 export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const { data, error, mutate } = useSWR(taxonomyUrl("", context), () => taxonomyRequest<TaxonomyStatus>("", context));
   const { data: discovery } = useSWR(data?.discovery_local_available ? taxonomyUrl("/discovery", context) : null, () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context));
+  const [tab, setTab] = useState("static");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [left, setLeft] = useState<TaxonomyMode>("SOURCE");
@@ -37,26 +38,29 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   if (!data) return <p>Preparando taxonomías…</p>;
   const locked = disabled || busy;
   const available = data.taxonomies.filter(item => item.available && item.selectable !== false);
+  const staticOptions = available.filter(item => item.mode !== "DISCOVERED");
+  const llmOptions = data.taxonomies.filter(item => item.mode === "DISCOVERED" ? data.discovered_catalog_available : item.available && item.selectable !== false);
+  const llmMode = data.llm_active;
+  const staticMode = staticOptions.some(item => item.mode === data.active) ? data.active : staticOptions[0]?.mode || "";
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
-    <h3>Taxonomía</h3>
-    <label>Lente activa<select value={data.active} disabled={locked} onChange={e => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", {active:e.target.value})))}>{data.taxonomies.map(item => <option key={item.mode} value={item.mode} disabled={!item.available || item.selectable === false}>{NAMES[item.mode]}</option>)}</select></label>
-    <p className="secondary-copy">Las equivalencias se aplican automáticamente a Original y Manual al usarlas como lente. Descubierta por LLM conserva las categorías del modelo.</p>
-    {data.requested_active !== data.active ? <p role="status">La lente anterior no está disponible. Se utiliza Original.</p> : null}
-    {data.taxonomies.map(item => <article className="settings-subsection" key={item.mode}>
-      <h3>{NAMES[item.mode]}</h3>
-      {item.available && item.selectable !== false ? <p>{item.levers} Palancas · {item.sublevers} Subpalancas · {formatPercentage(item.coverage || 0)} cobertura</p> : <p>{item.mode === "SOURCE" ? "El fichero no contiene una taxonomía original." : item.mode === "DISCOVERED" && data.discovered_catalog_available ? "Categorías importadas. Pendiente de clasificar comentarios." : item.stale ? "Los datos han cambiado; revisa esta taxonomía." : "Aún no creada."}</p>}
-      {item.available && item.selectable !== false ? <TaxonomyExplorer key={`${item.mode}-${item.created_at || ""}`} context={context} mode={item.mode} /> : null}
-      {item.mode === "COMPLETED" ? <>
-        <details><summary>Normalización · tabla de equivalencias</summary><EquivalenceMaintenance taxonomyOnly disabled={locked || data.restored} context={context} onChange={refresh} /></details>
-        {data.discovery_local_available && !data.restored ? <ManualTaxonomyEditor context={context} disabled={locked} onChange={refresh} /> : null}
-      </> : null}
-      {item.mode === "DISCOVERED" && data.discovery_local_available && !data.restored && discovery ? <div className="field-grid taxonomy-projects">
-        <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked || data.restored} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject role="classifier" context={context} url={discovery.classifier_url} disabled={locked || data.restored} canExport={Boolean(data.discovered_catalog_available)} onChange={refresh} />
-      </div> : null}
-    </article>)}
-    {data.discovery_local_available && discovery && !data.restored ? <HelixClassifier context={context} mode={data.active} url={discovery.helix_classifier_url} disabled={locked} onChange={refresh} /> : null}
+    <NavigationTabs items={[{id:"static",label:"Análisis estático"},{id:"llm",label:"Análisis con LLM"}]} value={tab} onChange={setTab} />
+    {tab === "static" ? <div className="settings-section-stack">
+      <section className="taxonomy-lens"><p className="eyebrow">Análisis estático</p><label>Taxonomía a utilizar<select value={staticMode} disabled={locked || !staticOptions.length} onChange={e => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", {active:e.target.value})))}>{!staticOptions.length ? <option value="">No hay taxonomías disponibles</option> : staticOptions.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label><p>Las equivalencias de esta compañía se mantienen en Configuración → Unificar conceptos y se aplican a Original y Manual.</p></section>
+      {data.taxonomies.filter(item => item.mode !== "DISCOVERED").map(item => <article className="settings-subsection" key={item.mode}>
+        <h3>{NAMES[item.mode]}</h3>
+        {item.available && item.selectable !== false ? <><p>{item.levers} Palancas · {item.sublevers} Subpalancas · {formatPercentage(item.coverage || 0)} cobertura</p><TaxonomyExplorer key={`${item.mode}-${item.created_at || ""}`} context={context} mode={item.mode} /></> : <p>{item.stale ? "Los datos han cambiado; revisa esta taxonomía." : "Aún no disponible."}</p>}
+        {item.mode === "COMPLETED" && data.discovery_local_available && !data.restored ? <ManualTaxonomyEditor context={context} disabled={locked} onChange={refresh} /> : null}
+      </article>)}
+    </div> : <div className="settings-section-stack">
+      <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><h3>Lente activa para LLM</h3><p>Esta taxonomía define las categorías para clasificar comentarios e incidencias. Cada lente conserva sus propios resultados.</p><label>Lente activa<select value={llmOptions.some(item => item.mode === llmMode) ? llmMode : ""} disabled={locked || !llmOptions.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{llm_active:e.target.value})))}><option value="" disabled>Selecciona una taxonomía</option>{llmOptions.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
+      {data.discovery_local_available && discovery && !data.restored ? <>
+        <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
+        <TaxonomyProject role="classifier" context={context} url={discovery.classifier_url} disabled={locked} canExport={llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
+        <HelixClassifier context={context} mode={llmMode} url={discovery.helix_classifier_url} disabled={locked || !llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
+      </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
+      {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
+    </div>}
     <details><summary>Comparar taxonomías</summary><div className="field-grid">
       <label>Taxonomía de partida<select value={left} onChange={e => setLeft(e.target.value as TaxonomyMode)}>{available.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label>
       <label>Comparar con<select value={right} onChange={e => setRight(e.target.value as TaxonomyMode)}>{data.taxonomies.map(item => <option key={item.mode} value={item.mode} disabled={!item.available || item.selectable === false}>{NAMES[item.mode]}</option>)}</select></label>

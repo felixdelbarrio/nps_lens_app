@@ -6,7 +6,7 @@ import { TaxonomyStudio, SnapshotSettings } from "./TaxonomyStudio";
 
 const context = { service_origin: "Bank", service_origin_n1: "Web" };
 function status() {
-  return { active: "SOURCE", requested_active: "SOURCE", default: "SOURCE", policy: "ACTIVE_ONLY", restored: false, discovered_catalog_available: false, discovery_local_available: true, detection: { state: "PARTIAL", rows: 96, missing: 16, usable_comments: 96 }, taxonomies: [
+  return { active: "SOURCE", llm_active: "SOURCE", requested_active: "SOURCE", default: "SOURCE", policy: "ACTIVE_ONLY", restored: false, discovered_catalog_available: false, discovery_local_available: true, detection: { state: "PARTIAL", rows: 96, missing: 16, usable_comments: 96 }, taxonomies: [
     { mode: "SOURCE", available: true, levers: 2, sublevers: 4, coverage: 0.83 },
     { mode: "COMPLETED", available: false }, { mode: "DISCOVERED", available: false }
   ] };
@@ -17,13 +17,13 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/discovery/instructions")) return new Response(JSON.stringify({ version: "test", designer: "Designer instructions", classifier: "Classifier instructions" }));
     if (url.includes("/discovery/designer/export")) return new Response(JSON.stringify({stage: "designer", saved_path: "/Downloads/designer.zip"}));
-    if (url.includes("/discovery/classifier/import")) { Object.assign(state.taxonomies[2], {available:true,coverage:1,levers:2,sublevers:4}); return new Response(JSON.stringify({stage:"complete",progress:{total:96,received:96,pending:0}})); }
-    if (url.includes("/discovery/progress")) return new Response(JSON.stringify({total:96,received:0,pending:96}));
+    if (url.includes("/discovery/classifier/import")) { state.discovered_catalog_available = true; Object.assign(state.taxonomies[2], {available:true,coverage:1,levers:2,sublevers:4}); return new Response(JSON.stringify({stage:"complete",progress:{total:96,received:96,pending:0}})); }
+    if (url.includes("/discovery/progress")) return new Response(JSON.stringify({total:96,received:0,pending:96,multiple:0,designer:{total:96,received:0,pending:96,levers:0,sublevers:0}}));
     if (url.includes("/discovery")) return new Response(JSON.stringify({ helix_classifier_url:"https://chatgpt.com/g/helix", designer_url: "https://chatgpt.com/g/designer", classifier_url: "https://chatgpt.com/g/classifier", session: "connected" }));
     if (url.includes("/manual")) { if (init?.method === "PUT") Object.assign(state.taxonomies[1], { available: true, coverage: 1, levers: 1, sublevers: 1 }); return new Response(JSON.stringify({revision:"",exists:false,templates:["NONE","SOURCE"],affected_comments:0, taxonomy: [{ lever: "Atención", sublevers: ["Resolución"] }] })); }
     if (url.includes("/helix")) return new Response(JSON.stringify({ready:false,taxonomies:{SOURCE:{received:0,pending:1}},pending:1}));
     if (url.includes("/settings/equivalences")) return new Response(JSON.stringify({dimensions:{"nps.Palanca":[]},available_dimensions:["nps.Palanca"]}));
-    if (url.includes("/settings")) { state.active = JSON.parse(String(init?.body)).active; state.requested_active = state.active; return new Response("{}"); }
+    if (url.includes("/settings")) { Object.assign(state,JSON.parse(String(init?.body))); state.requested_active = state.active; return new Response("{}"); }
     if (url.includes("/explore") || url.includes("/compare")) return new Response(JSON.stringify({ rows: [], total: 0, note: "Comparación reproducible" }));
     return new Response(JSON.stringify(state));
   });
@@ -32,7 +32,9 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   render(<SWRConfig value={{ provider: () => new Map() }}><TaxonomyStudio context={context} onChange={async () => {}} /></SWRConfig>);
   await user.click(await screen.findByRole("button", { name: "Crear Manual" }));
   await user.click(await screen.findByRole("button", { name: "Guardar Manual" }));
-  expect(await screen.findByText("Explorar Manual")).toBeInTheDocument();
+  expect(await screen.findByText("Explorar Taxonomía Manual")).toBeInTheDocument();
+  expect(screen.queryByText("Normalización · tabla de equivalencias")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("tab", {name:"Análisis con LLM"}));
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();
   await user.upload(screen.getByLabelText("Importar ZIP de comentarios clasificados"), new File(["{}"], "result.zip", { type: "application/zip" }));
@@ -40,7 +42,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   expect(await screen.findByText("Comparación reproducible")).toBeInTheDocument();
   expect(screen.queryByRole("button", {name:"Usar como lente"})).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("Lente activa"), "DISCOVERED");
-  await waitFor(() => expect(state.active).toBe("DISCOVERED"));
+  await waitFor(() => expect(state.llm_active).toBe("DISCOVERED"));
   expect(fetcher.mock.calls.filter(([url]) => url.includes("/generate"))).toHaveLength(0);
 });
 it("persists snapshot policy and default lens", async () => {

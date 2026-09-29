@@ -94,6 +94,7 @@ src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py
 src/nps_lens/services/dashboard_service.py
+src/nps_lens/services/equivalence_exchange.py
 src/nps_lens/services/helix_exchange.py
 src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
@@ -137,7 +138,8 @@ tests/test_incident_rationale.py
 tests/test_ingest_contracts.py
 tests/test_ingest_features.py
 tests/test_iteration26_ingestion_evidence.py
-tests/test_iteration27_taxonomy_helix.py
+tests/test_iteration28_taxonomy_helix.py
+tests/test_iteration30_workflows.py
 tests/test_knowledge_cache.py
 tests/test_linking_precision.py
 tests/test_llm_insight_response.py

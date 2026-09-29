@@ -33,7 +33,7 @@ import type {
   UploadSelectionPayload,
   UploadResult
 } from "./api";
-import { CausalEngineControl } from "./components/CausalEngineControl";
+import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { TaxonomyIngestNotice, TaxonomyStudio } from "./components/TaxonomyStudio";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
@@ -763,6 +763,7 @@ export function App() {
   }
 
   const taxonomyContext = { service_origin: serviceOrigin, service_origin_n1: serviceOriginN1, service_origin_n2: serviceOriginN2 };
+  const classificationContext = {...taxonomyContext,pop_year:popYear,pop_month:popMonth,score_channel:scoreChannel,nps_group:npsGroup,max_days_apart:String(maxDaysApart)};
   async function refreshTaxonomy() {
     await Promise.all([mutateConfig(), mutateDashboard(), mutateDataset(), mutateLinking()]);
   }
@@ -998,7 +999,7 @@ export function App() {
               </select>
             </label>
           ) : null}
-          {showCausalMethodFilter && config?.access?.local ? <CausalEngineControl context={taxonomyContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
+          {config?.access?.local && (showCausalMethodFilter || showScoreGroup) ? <ClassificationEngineControl kind={showCausalMethodFilter ? "helix" : "comments"} context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método de agrupación</span>
@@ -1816,6 +1817,8 @@ export function App() {
       {isAdmin ? (
         <SettingsSheet
           taxonomyContext={taxonomyContext}
+          classificationContext={classificationContext}
+          localTaxonomy={Boolean(config?.access?.local)}
           onTaxonomyChange={refreshTaxonomy}
           actionsDisabled={actionsDisabled}
           activeTab={settingsTab}
