@@ -798,13 +798,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (ValueError, OSError, TaxonomyDiscoveryError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/api/taxonomy/discovery/progress")
+    def classification_progress(
+        request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
+    ) -> dict[str, int]:
+        try:
+            return exchange(request, dashboard_layer).progress(taxonomy_context(request))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/api/taxonomy/manual")
     def manual_taxonomy(
         request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
-        return dashboard_layer.taxonomy.manual_draft(taxonomy_context(request))
+        try:
+            return dashboard_layer.taxonomy.manual_info(
+                taxonomy_context(request), request.query_params.get("template", "CURRENT")
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.put("/api/taxonomy/manual")
     def save_manual_taxonomy(
@@ -821,21 +835,37 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     isinstance(branch, dict) for branch in branches
                 ):
                     raise ValueError("Taxonomía inválida.")
-                result = dashboard_layer.taxonomy.save_manual(taxonomy_context(request), branches)
+                context = taxonomy_context(request)
+                info = dashboard_layer.taxonomy.manual_info(context)
+                if payload.get("revision") != info["revision"]:
+                    raise HTTPException(409, "Manual ha cambiado. Vuelve a abrir el editor.")
+                if info["revision"] and payload.get("confirmed") is not True:
+                    raise HTTPException(
+                        409,
+                        "Confirma la sustitución: se recalcularán las relaciones con comentarios y deberás clasificar Helix de nuevo para Manual.",
+                    )
+                template = payload.get("template", "CURRENT")
+                if template != "CURRENT" and template not in info["templates"]:
+                    raise ValueError("La plantilla ya no está disponible.")
+                result = dashboard_layer.taxonomy.save_manual(context, branches, template=template)
                 dashboard_layer.clear_caches()
                 return result
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     def helix_exchange(
-        request: Request, dashboard_layer: DashboardService, *, active_only: bool = False
+        request: Request, dashboard_layer: DashboardService
     ) -> tuple[HelixExchange, UploadContext, dict[str, Any]]:
         handler = exchange(request, dashboard_layer)
         context = taxonomy_context(request)
-        state = dashboard_layer.taxonomy.state(context)
-        modes = [state["active"]] if active_only else dashboard_layer.taxonomy.helix_modes(context)
+        taxonomy = dashboard_layer.taxonomy
+        mode = taxonomy.state(context)["active"]
+        if mode not in taxonomy.available(
+            context, taxonomy.source(context), taxonomy.registry(context)
+        ):
+            mode = "SOURCE"
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
-        return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), modes)
+        return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), mode)
 
     @app.get("/api/taxonomy/helix")
     def helix_exchange_status(
@@ -882,7 +912,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         state = dashboard_layer.taxonomy.state(taxonomy_context(request))
         ready, reason = False, ""
         try:
-            handler, context, inputs = helix_exchange(request, dashboard_layer, active_only=True)
+            handler, context, inputs = helix_exchange(request, dashboard_layer)
             ready = handler.status(context, inputs)["ready"]
         except ValueError as exc:
             reason = str(exc)
@@ -908,9 +938,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 context = taxonomy_context(request)
                 state = dashboard_layer.taxonomy.state(context)
                 if engine == "llm":
-                    handler, context, inputs = helix_exchange(
-                        request, dashboard_layer, active_only=True
-                    )
+                    handler, context, inputs = helix_exchange(request, dashboard_layer)
                     if not handler.status(context, inputs)["ready"]:
                         raise ValueError(
                             "Importa primero todos los lotes Helix de la lente activa."

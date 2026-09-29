@@ -1282,7 +1282,7 @@ class DashboardService:
                 inputs = handler.inputs(
                     context,
                     helix_total,
-                    [str(nps_frame.attrs.get("taxonomy_mode", state["active"]))],
+                    str(nps_frame.attrs.get("taxonomy_mode", state["active"])),
                 )
                 imported_links = handler.links(context, inputs, focus_df, helix_slice)
             base: dict[str, object] = {

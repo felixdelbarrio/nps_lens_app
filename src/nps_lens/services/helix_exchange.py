@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import uuid
 import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from nps_lens.services.taxonomy_exchange import (
     encode,
     read_response,
     strict_json,
+    validate_payload,
 )
 from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
@@ -37,19 +39,14 @@ class EvidenceLink(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-class TaxonomyAssignment(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    taxonomy_mode: str
+class IncidentClassification(BaseModel):
+    # Only the classification contract is persisted; annotations are not domain fields.
+    model_config = ConfigDict(extra="ignore", strict=True)
+    id: str
     lever: str
     sublever: str
     rationale: str = Field(min_length=1, max_length=2000)
     links: list[EvidenceLink] = Field(max_length=20)
-
-
-class IncidentClassification(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    id: str
-    assignments: list[TaxonomyAssignment] = Field(min_length=1, max_length=3)
 
 
 class IncidentResponse(BaseModel):
@@ -70,20 +67,16 @@ class HelixExchange:
                 "CREATE TABLE IF NOT EXISTS helix_classifications (context TEXT NOT NULL, scope TEXT NOT NULL, incident TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(context, scope, incident))"
             )
 
-    def inputs(
-        self, context: UploadContext, incidents: pd.DataFrame, modes: list[str]
-    ) -> dict[str, Any]:
+    def inputs(self, context: UploadContext, incidents: pd.DataFrame, mode: str) -> dict[str, Any]:
         if self.taxonomy.state(context).get("restored"):
             raise ValueError("Vuelve al dataset local para usar el intercambio Helix.")
-        if not modes or len(modes) != len(set(modes)) or any(mode not in MODES for mode in modes):
-            raise ValueError("Selecciona entre una y tres taxonomías disponibles.")
+        if mode not in MODES:
+            raise ValueError("Selecciona una lente disponible.")
         source = self.taxonomy.source(context).sort_values("_business_key")
-        resolved = {
-            mode: self.taxonomy.resolve(context, source, mode) for mode in MODES if mode in modes
-        }
+        resolved = {mode: self.taxonomy.resolve(context, source, mode)}
         catalogs = {mode: self.taxonomy.catalog(context, mode) for mode in resolved}
         if any(not catalog["taxonomy"] for catalog in catalogs.values()):
-            raise ValueError("Alguna taxonomía seleccionada no contiene Palancas/Subpalancas.")
+            raise ValueError("La lente activa no contiene Palancas/Subpalancas.")
         ids = incidents.get("Incident Number", pd.Series(dtype=str)).astype(str)
         if len(ids) != len(incidents) or not ids.is_unique or ids.str.strip().eq("").any():
             raise ValueError("Las incidencias requieren IDs únicos y no vacíos.")
@@ -128,6 +121,8 @@ class HelixExchange:
             )
             for mode in resolved
         }
+        if mode == "COMPLETED":
+            scopes[mode] = digest([scopes[mode], self.taxonomy.state(context)["artifacts"][mode]])
         return {
             "modes": list(resolved),
             "taxonomies": catalogs,
@@ -159,7 +154,22 @@ class HelixExchange:
             mode: {"received": len(rows), "pending": total - len(rows)}
             for mode, rows in current.items()
         }
+        rows = current[inputs["modes"][0]]
+        categories = Counter(
+            (row["lever"], row["sublever"]) for row in rows.values() if row["lever"]
+        )
+        classified = sum(categories.values())
         return {
+            "total": total,
+            "received": len(rows),
+            "classified": classified,
+            "unassigned": len(rows) - classified,
+            "coverage": classified / total if total else 0,
+            "links": sum(len(row["links"]) for row in rows.values()),
+            "categories": [
+                {"lever": lever, "sublever": sub, "count": count}
+                for (lever, sub), count in categories.most_common()
+            ],
             "taxonomies": counts,
             "pending": sum(item["pending"] for item in counts.values()),
             "ready": bool(total and all(item["pending"] == 0 for item in counts.values())),
@@ -178,7 +188,7 @@ class HelixExchange:
         ]
         pending = [row for row in pending if row["pending_taxonomies"]]
         if not pending:
-            raise ValueError("No hay incidencias pendientes para las taxonomías seleccionadas.")
+            raise ValueError("No hay incidencias pendientes para la lente activa.")
         job_id = uuid.uuid4().hex
         batches = {
             f"{i // BATCH_ROWS + 1:06d}": pending[i : i + BATCH_ROWS]
@@ -266,7 +276,7 @@ class HelixExchange:
             key = name.removeprefix("results/").removesuffix(".json")
             if name != f"results/{key}.json" or key not in job["batches"]:
                 raise ValueError("Lote de respuesta desconocido.")
-            response = IncidentResponse.model_validate(payload)
+            response = validate_payload(IncidentResponse, payload, name)
             expected = job["batches"][key]
             if [row.id for row in response.classifications] != [row["id"] for row in expected]:
                 raise ValueError("IDs u orden de incidencias incorrectos.")
@@ -275,30 +285,21 @@ class HelixExchange:
                     k: v for k, v in original.items() if k != "pending_taxonomies"
                 }:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
-                if [assignment.taxonomy_mode for assignment in row.assignments] != original[
-                    "pending_taxonomies"
-                ]:
-                    raise ValueError(
-                        "Cada incidencia requiere exactamente las taxonomías pendientes, en orden."
-                    )
-                for assignment in row.assignments:
-                    mode = assignment.taxonomy_mode
-                    if (assignment.lever, assignment.sublever) not in pairs[mode] and (
-                        assignment.lever or assignment.sublever
+                mode = inputs["modes"][0]
+                if (row.lever, row.sublever) not in pairs[mode] and (row.lever or row.sublever):
+                    raise ValueError("Palanca/Subpalanca fuera de la taxonomía.")
+                if len({link.nps_id for link in row.links}) != len(row.links):
+                    raise ValueError("Vínculos NPS duplicados.")
+                for link in row.links:
+                    comment = comments.get(link.nps_id)
+                    if (
+                        not comment
+                        or comment["taxonomies"][mode]
+                        != {"lever": row.lever, "sublever": row.sublever}
+                        or not row.lever
                     ):
-                        raise ValueError("Palanca/Subpalanca fuera de la taxonomía.")
-                    if len({link.nps_id for link in assignment.links}) != len(assignment.links):
-                        raise ValueError("Vínculos NPS duplicados.")
-                    for link in assignment.links:
-                        comment = comments.get(link.nps_id)
-                        if (
-                            not comment
-                            or comment["taxonomies"][mode]
-                            != {"lever": assignment.lever, "sublever": assignment.sublever}
-                            or not assignment.lever
-                        ):
-                            raise ValueError("Vínculo a comentario desconocido o a otra categoría.")
-                    validated[(mode, row.id)] = assignment.model_dump()
+                        raise ValueError("Vínculo a comentario desconocido o a otra categoría.")
+                validated[(mode, row.id)] = row.model_dump(exclude={"id"})
         existing = self.current(context, inputs)
         if any(
             key in existing[mode] and existing[mode][key] != value
@@ -332,11 +333,12 @@ class HelixExchange:
         focus: pd.DataFrame,
         incidents: pd.DataFrame,
     ) -> pd.DataFrame:
-        if len(inputs["modes"]) != 1 or not self.status(context, inputs)["ready"]:
+        mode = inputs["modes"][0]
+        current = self.current(context, inputs)[mode]
+        if not inputs["incidents"] or len(current) != len(inputs["incidents"]):
             raise ValueError(
                 "Importa la respuesta Helix completa para la lente activa antes de usar causalidad LLM."
             )
-        mode = inputs["modes"][0]
         nps_topics = dict(zip(analytical_response_ids(focus), build_nps_topic(focus)))
         incident_ids = set(incidents["Incident Number"].astype(str))
         rows = [
@@ -348,7 +350,7 @@ class HelixExchange:
                 "incident_topic": row["lever"] + " > " + row["sublever"],
                 "llm_rationale": row["rationale"],
             }
-            for key, row in self.current(context, inputs)[mode].items()
+            for key, row in current.items()
             if key in incident_ids
             for link in row["links"]
             if link["nps_id"] in nps_topics

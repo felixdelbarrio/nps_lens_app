@@ -106,16 +106,10 @@ def helix_response(request, nps_id, entity="Resolución"):
                 "classifications": [
                     {
                         "id": row["id"],
-                        "assignments": [
-                            {
-                                "taxonomy_mode": mode,
-                                "lever": "Atención",
-                                "sublever": "Resolución",
-                                "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
-                                "links": [{"nps_id": nps_id, "confidence": 0.9}],
-                            }
-                            for mode in row["pending_taxonomies"]
-                        ],
+                        "lever": "Atención",
+                        "sublever": "Resolución",
+                        "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
+                        "links": [{"nps_id": nps_id, "confidence": 0.9}],
                     }
                     for row in payload["incidents"]
                 ]
@@ -128,7 +122,7 @@ def helix_response(request, nps_id, entity="Resolución"):
 
 def test_helix_partial_pending_atomic_and_stale(helix):
     handler, ctx, frame, incidents, _ = helix
-    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
     with pytest.raises(ValueError, match="Importa"):
         handler.links(ctx, inputs, frame, incidents)
     request = exported(handler.export(ctx, inputs)["saved_path"])
@@ -142,7 +136,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     pending = exported(handler.export(ctx, inputs)["saved_path"])
     assert pending["incidents/000001.json"]["incidents"][0]["id"] == "INC-200"
     invalid = copy.deepcopy(response)
-    invalid["results/000002.json"]["classifications"][0]["assignments"][0]["lever"] = "Inventada"
+    invalid["results/000002.json"]["classifications"][0]["lever"] = "Inventada"
     with pytest.raises(ValueError, match="taxonomía"):
         handler.import_response(ctx, inputs, zipped(invalid))
     assert handler.status(ctx, inputs)["pending"] == 1
@@ -154,11 +148,11 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     with pytest.raises(ValueError, match="dataset"):
         handler.import_response(UploadContext("Foreign", "", ""), inputs, zipped(response))
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
-    altered = handler.inputs(ctx, incidents, ["COMPLETED"])
+    altered = handler.inputs(ctx, incidents, "COMPLETED")
     with pytest.raises(ValueError, match="cambiado"):
         handler.import_response(ctx, altered, zipped(response))
     incidents.loc[0, "Detailed Description"] = "Otro síntoma"
-    updated = handler.inputs(ctx, incidents, ["SOURCE"])
+    updated = handler.inputs(ctx, incidents, "SOURCE")
     assert handler.status(ctx, updated)["pending"] == 1
     with pytest.raises(ValueError, match="cambiado"):
         handler.import_response(ctx, updated, zipped(response))
@@ -176,7 +170,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
 )
 def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monkeypatch):
     handler, ctx, frame, incidents, client = helix
-    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_path"])
     response = helix_response(request, inputs["comments"][0]["id"], entity)
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
@@ -234,7 +228,7 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     frame["Fecha"] = pd.Timestamp("2026-09-01")
     frame["NPS"] = 2
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
-    inputs = handler.inputs(ctx, incidents, ["SOURCE"])
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_path"])
     handler.import_response(
         ctx, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))
@@ -274,25 +268,20 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
     exchange = TaxonomyExchange(handler.taxonomy, handler.downloads)
     discover(exchange, ctx)
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
-    source = handler.inputs(ctx, incidents, ["SOURCE"])
+    source = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, source)["saved_path"])
     handler.import_response(
         ctx, source, zipped(helix_response(request, source["comments"][0]["id"]))
     )
-    all_inputs = handler.inputs(ctx, incidents, ["SOURCE", "COMPLETED", "DISCOVERED"])
-    assert all_inputs["scopes"]["SOURCE"] == source["scopes"]["SOURCE"]
-    request = exported(handler.export(ctx, all_inputs)["saved_path"])
-    assert request["incidents/000001.json"]["incidents"][0]["pending_taxonomies"] == [
-        "COMPLETED",
-        "DISCOVERED",
-    ]
-    assert "method" not in request["manifest.json"]
-    response = helix_response(request, all_inputs["comments"][0]["id"])
-    assert handler.import_response(ctx, all_inputs, zipped(response))["ready"]
+    for mode in ["COMPLETED", "DISCOVERED"]:
+        current = handler.inputs(ctx, incidents, mode)
+        assert handler.status(ctx, current)["pending"] == 201
+        request = exported(handler.export(ctx, current)["saved_path"])
+        assert list(request["manifest.json"]["taxonomy_scopes"]) == [mode]
+        response = helix_response(request, current["comments"][0]["id"])
+        assert handler.import_response(ctx, current, zipped(response))["ready"]
     for mode in ["SOURCE", "COMPLETED", "DISCOVERED"]:
-        current = handler.inputs(ctx, incidents, [mode])
-        assert handler.status(ctx, current)["ready"]
-        assert len(handler.current(ctx, current)[mode]) == 201
+        assert handler.status(ctx, handler.inputs(ctx, incidents, mode))["ready"]
     handler.taxonomy.save_manual(
         ctx,
         [
@@ -304,10 +293,9 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
             }
         ],
     )
-    changed = handler.inputs(ctx, incidents, ["SOURCE", "COMPLETED", "DISCOVERED"])
-    counts = handler.status(ctx, changed)["taxonomies"]
-    assert counts["SOURCE"]["pending"] == counts["DISCOVERED"]["pending"] == 0
-    assert counts["COMPLETED"]["pending"] == 201
+    for mode in ["SOURCE", "DISCOVERED"]:
+        assert handler.status(ctx, handler.inputs(ctx, incidents, mode))["pending"] == 0
+    assert handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))["pending"] == 201
 
 
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
@@ -329,3 +317,87 @@ def test_partial_classifier_export_omits_already_imported_comments(exchange):
         ctx, classifier_zip(classifier_files(pending["manifest.json"], pending)), "classifier"
     )
     assert handler.taxonomy.resolve(ctx, mode="DISCOVERED").Palanca.eq("Atención").all()
+
+
+def test_manual_replacement_requires_review_and_unique_revision(helix):
+    handler, ctx, _, incidents, client = helix
+    params = {"service_origin": ctx.service_origin}
+    initial = client.get("/api/taxonomy/manual", params=params).json()
+    assert initial["templates"] == ["NONE", "SOURCE"]
+    assert not initial["exists"]
+    payload = {**initial, "template": "SOURCE"}
+    assert client.put("/api/taxonomy/manual", params=params, json=payload).status_code == 200
+    current = client.get("/api/taxonomy/manual", params=params).json()
+    old_inputs = handler.inputs(ctx, incidents, "COMPLETED")
+    request = exported(handler.export(ctx, old_inputs)["saved_path"])
+    handler.import_response(
+        ctx, old_inputs, zipped(helix_response(request, old_inputs["comments"][0]["id"]))
+    )
+    replacement = {**current, "template": "SOURCE"}
+    assert client.put("/api/taxonomy/manual", params=params, json=replacement).status_code == 409
+    assert handler.status(ctx, old_inputs)["ready"]
+    replacement["confirmed"] = True
+    assert client.put("/api/taxonomy/manual", params=params, json=replacement).status_code == 200
+    latest = client.get("/api/taxonomy/manual", params=params).json()
+    assert latest["revision"] != current["revision"]
+    assert handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))["pending"] == 201
+    assert client.put("/api/taxonomy/manual", params=params, json=replacement).status_code == 409
+    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
+
+
+def test_manual_missing_catalog_can_be_recreated(exchange):
+    handler, ctx, _, client = exchange
+    tax = handler.taxonomy
+    tax.save_manual(ctx, [{"lever": "Manual", "sublevers": ["Tema"]}], template="NONE")
+    state = tax.state(ctx)
+    sig = state["artifacts"]["COMPLETED"]
+    item = dict(tax.artifact(sig))
+    item.pop("taxonomy")
+    with tax.repository._connect() as db:
+        from nps_lens.services.taxonomy_exchange import encode
+
+        db.execute(
+            "UPDATE taxonomy_artifacts SET payload=? WHERE signature=?",
+            (encode(item).decode(), sig),
+        )
+    tax._cache.clear()
+    response = client.get("/api/taxonomy/manual", params={"service_origin": ctx.service_origin})
+    assert response.status_code == 200
+    assert response.json()["exists"] is False
+    assert response.json()["templates"] == ["NONE"]
+
+
+def test_helix_flat_annotations_kpis_and_concise_validation(helix):
+    handler, ctx, _, incidents, _ = helix
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
+    request = exported(handler.export(ctx, inputs)["saved_path"])
+    response = helix_response(request, inputs["comments"][0]["id"])
+    first = response["results/000001.json"]["classifications"][0]
+    first.update(entity="", lever="", sublever="", links=[])
+    status = handler.import_response(ctx, inputs, zipped(response))
+    assert status["total"] == status["received"] == 201
+    assert status["classified"] == status["links"] == 200
+    assert status["unassigned"] == 1
+    assert sum(row["count"] for row in status["categories"]) == 200
+    assert "entity" not in next(iter(handler.current(ctx, inputs)["SOURCE"].values()))
+    first["links"] = "private invalid value"
+    with pytest.raises(ValueError) as error:
+        handler.import_response(ctx, inputs, zipped(response))
+    assert "results/000001.json" in str(error.value)
+    assert "private invalid value" not in str(error.value)
+    assert len(str(error.value)) < 300
+    assert handler.status(ctx, inputs)["received"] == 201
+
+
+def test_partial_imports_accumulate_across_jobs_after_restart(exchange):
+    handler, ctx, _, _ = exchange
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    for received in (200, 400, 405):
+        request = exported(handler.export(ctx, "classifier")["saved_path"])
+        response = classifier_files(request["manifest.json"], request)
+        response["results"] = {"000001": response["results"]["000001"]}
+        result = handler.import_response(ctx, classifier_zip(response), "classifier")
+        assert result["progress"] == {"total": 405, "received": received, "pending": 405 - received}
+        assert handler.taxonomy.resolve(ctx, mode="DISCOVERED").Palanca.ne("").sum() == received
+        handler = TaxonomyExchange(handler.taxonomy, handler.downloads)
+        assert handler.progress(ctx)["received"] == received
