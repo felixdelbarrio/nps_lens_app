@@ -1,0 +1,67 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { SWRConfig } from "swr";
+import { afterEach, expect, it, vi } from "vitest";
+import { TaxonomyProject } from "./TaxonomyProject";
+import { HelixClassifier } from "./HelixClassifier";
+
+const context = { service_origin: "Bank" };
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  ["classifier", 1, false], ["classifier", 1, true], ["classifier", 0, false],
+  ["helix", 1, false], ["helix", 1, true], ["helix", 0, false],
+] as const)("%s preserves imported progress with pending=%s and export failure=%s", async (role, pending, failExport) => {
+  let imported = false;
+  const calls: string[] = [];
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({ version: "3", [role]: "Reglas" });
+    const counts = () => ({ total: 2, received: imported ? 2 - pending : 0, pending: imported ? pending : 2 });
+    if (url.includes("/import")) {
+      imported = true; calls.push("import");
+      return Response.json(role === "helix" ? counts() : { progress: counts() });
+    }
+    if (url.includes("/export")) {
+      calls.push("export");
+      // Progress must already have been refreshed before the second request.
+      expect(screen.getByRole("progressbar")).toHaveAttribute("value", String(2 - pending));
+      return failExport ? Response.json({ detail: "Disco lleno" }, { status: 400 }) : Response.json({ saved_path: "/Downloads/next.zip" });
+    }
+    calls.push("refresh");
+    return Response.json({ ...counts(), multiple: 0, classified: 0, unassigned: 0, coverage: 0, links: 0, categories: [], designer: counts() });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const onChange = vi.fn(async () => {});
+  render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    {role === "classifier" ? <TaxonomyProject role="classifier" context={context} url="" disabled={false} canExport onChange={onChange} /> : <HelixClassifier context={context} mode="SOURCE" url="" disabled={false} onChange={onChange} />}
+  </SWRConfig>);
+  await screen.findByRole("progressbar");
+  await userEvent.setup().upload(screen.getByLabelText(role === "classifier" ? "Importar ZIP de comentarios clasificados" : "Importar ZIP de incidencias clasificadas"), new File(["ZIP"], "result.zip", { type: "application/zip" }));
+  await waitFor(() => expect(onChange).toHaveBeenCalled());
+  if (pending) {
+    expect(await screen.findByText(failExport ? /importación se conserva/ : /Siguiente ZIP preparado en \/Downloads\/next.zip/)).toBeInTheDocument();
+    expect(calls.filter(c => c === "export")).toHaveLength(1);
+    expect(calls.indexOf("export")).toBeGreaterThan(calls.indexOf("import"));
+    if (failExport) expect(screen.getByText(/Disco lleno/)).toBeInTheDocument();
+  } else {
+    expect(calls).not.toContain("export");
+  }
+  await waitFor(() => expect(screen.getByLabelText(role === "classifier" ? "Importar ZIP de comentarios clasificados" : "Importar ZIP de incidencias clasificadas")).toBeEnabled());
+  expect(screen.getByRole("progressbar")).toHaveAttribute("value", String(2 - pending));
+  expect(screen.getByRole("button", { name: role === "classifier" ? "Exportar comentarios pendientes" : "Exportar incidencias pendientes" })).toHaveProperty("disabled", !pending);
+});
+
+it("refreshes locally resolved empty comments without showing a nonexistent ZIP", async () => {
+  let exported = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({ version: "3", classifier: "Reglas" });
+    if (url.includes("/export")) { exported = true; return Response.json({ saved_path: null, stage: "complete", batches: 0 }); }
+    return Response.json({ total: 2, received: exported ? 2 : 0, pending: exported ? 0 : 2, multiple: 0 });
+  }));
+  render(<SWRConfig value={{ provider: () => new Map() }}><TaxonomyProject role="classifier" context={context} url="" disabled={false} canExport onChange={async () => {}} /></SWRConfig>);
+  await screen.findByRole("progressbar");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Exportar comentarios pendientes" }));
+  expect(await screen.findByText("Clasificación completa. No quedan comentarios pendientes.")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("progressbar")).toHaveAttribute("value", "2"));
+  expect(screen.queryByText(/guardado en null/)).not.toBeInTheDocument();
+});
