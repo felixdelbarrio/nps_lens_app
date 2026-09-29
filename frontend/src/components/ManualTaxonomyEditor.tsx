@@ -30,20 +30,20 @@ export function ManualTaxonomyEditor({ context, disabled, onChange }: { context:
   }
   function update(index: number, branch: Branch) { setBranches(current => current?.map((item, i) => i === index ? branch : item) ?? null); }
   const locked = disabled || busy;
-  return <article className="settings-subsection"><h4>Manual</h4>
+  return <article className="settings-subsection"><h4>Catálogo editable</h4>
     <p>Elige una plantilla para crear una nueva taxonomía o modifica la existente. Cada guardado genera una revisión independiente.</p>
     {info?.exists ? <p className="secondary-copy">Revisión Manual: <code title={info.revision}>{info.revision.slice(0, 12)}</code></p> : null}
     {branches === null ? <>
       <label>Plantilla<select value={template} disabled={locked} onChange={event => setTemplate(event.target.value)}>{(info?.templates || ["NONE"]).map(value => <option key={value} value={value}>{value === "NONE" ? "Sin plantilla" : value === "SOURCE" ? "Original" : "Descubierto"}</option>)}</select></label>
       <div className="inline-actions"><button className="secondary-button" disabled={locked || !info} onClick={() => void load(template)}>Crear Manual</button><button className="secondary-button" disabled={locked || !info?.exists} onClick={() => void load("CURRENT")}>Visualizar / modificar Manual</button></div>
     </> : <>
-      {branches.map((branch, i) => <fieldset key={i} disabled={locked}><legend>Palanca {i + 1}</legend>
+      <div className="manual-taxonomy-branches">{branches.map((branch, i) => <fieldset className="manual-branch" key={i} disabled={locked}><legend>Palanca {i + 1}</legend>
         <label>Nombre de Palanca<input value={branch.lever} onChange={e => update(i, { ...branch, lever: e.target.value })} /></label>
-        {branch.sublevers.map((sub, j) => <div className="inline-actions" key={j}><label>Subpalanca {j + 1}<input value={sub} onChange={e => update(i, { ...branch, sublevers: branch.sublevers.map((value, k) => k === j ? e.target.value : value) })} /></label><button className="secondary-button" onClick={() => update(i, { ...branch, sublevers: branch.sublevers.filter((_, k) => k !== j), previous_sublevers: branch.previous_sublevers?.filter((_, k) => k !== j) })}>Eliminar Subpalanca {j + 1}</button></div>)}
+        {branch.sublevers.map((sub, j) => <div className="manual-sublever" key={j}><label>Subpalanca {j + 1}<input value={sub} onChange={e => update(i, { ...branch, sublevers: branch.sublevers.map((value, k) => k === j ? e.target.value : value) })} /></label><button className="secondary-button" onClick={() => update(i, { ...branch, sublevers: branch.sublevers.filter((_, k) => k !== j), previous_sublevers: branch.previous_sublevers?.filter((_, k) => k !== j) })}>Eliminar Subpalanca {j + 1}</button></div>)}
         <div className="inline-actions"><button className="secondary-button" onClick={() => update(i, { ...branch, sublevers: [...branch.sublevers, ""], previous_sublevers: [...(branch.previous_sublevers || []), ""] })}>Añadir Subpalanca</button><button className="secondary-button" onClick={() => setBranches(branches.filter((_, k) => k !== i))}>Eliminar Palanca {i + 1}</button></div>
-      </fieldset>)}
+      </fieldset>)}</div>
       {draft.revision ? <div role="note"><p>Al guardar se sustituirá Manual: se recalcularán las relaciones de {info?.affected_comments || 0} comentarios con la plantilla o las correspondencias editadas. Las categorías eliminadas quedarán pendientes. Las clasificaciones y vínculos Helix de Manual deberán generarse de nuevo. La lente activa solo cambia desde su selector.</p><label className="checkbox-field"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />Confirmo la sustitución y el recálculo de relaciones</label></div> : null}
-      <div className="inline-actions"><button className="secondary-button" disabled={locked} onClick={() => setBranches([...branches, { lever: "", sublevers: [""], previous_lever: "", previous_sublevers: [""] }])}>Añadir Palanca</button><button className="primary-button" disabled={locked || !branches.length || Boolean(draft.revision && !confirmed)} onClick={() => void save()}>Guardar Manual</button><button className="secondary-button" disabled={locked} onClick={() => setBranches(null)}>Cancelar</button></div>
+      <div className="inline-actions manual-save-actions"><button className="secondary-button" disabled={locked} onClick={() => setBranches([...branches, { lever: "", sublevers: [""], previous_lever: "", previous_sublevers: [""] }])}>Añadir Palanca</button><button className="primary-button" disabled={locked || !branches.length || Boolean(draft.revision && !confirmed)} onClick={() => void save()}>Guardar Manual</button><button className="secondary-button" disabled={locked} onClick={() => setBranches(null)}>Cancelar</button></div>
     </>}
     {error ? <p role="alert">{error.message}</p> : null}
     {message ? <p role="status">{message}</p> : null}

@@ -88,14 +88,18 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
   await page.getByRole("button", { name: /Taxonomy Studio/i }).click();
-  await expect(page.getByLabel("Lente activa")).toHaveValue("SOURCE");
+  await expect(page.getByLabel("Taxonomía a utilizar")).toHaveValue("SOURCE");
+  await expect(page.getByText("Normalización · tabla de equivalencias")).toHaveCount(0);
+  await page.getByRole("tab",{name:"Análisis con LLM"}).click();
   await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
   await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
-  const designerInput = await exportedPath(page, "Crea Taxonomía");
+  const designerInput = await exportedPath(page, "Crear Taxonomía");
   const designerOutput = path.join(path.dirname(designerInput), "designer-response.zip");
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
+  await page.getByLabel("Lente activa").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
   const classifierInput = await exportedPath(page, "Clasifica comentarios");
   const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
@@ -105,6 +109,12 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
   await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
+  await expect(page.getByTestId("error-banner")).toHaveCount(0);
+  await page.getByRole("button", {name:"Comentarios",exact:true}).click();
+  const llmSwitch = page.getByRole("switch", {name:"Usar clasificación LLM"});
+  await expect(llmSwitch).toBeEnabled();
+  await llmSwitch.check();
+  await expect(llmSwitch).toBeChecked();
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();

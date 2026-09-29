@@ -2,18 +2,28 @@
 
 Las plantillas oficiales están en `src/nps_lens/services/taxonomy_prompts.py` y
 Taxonomy Studio permite copiarlas debajo de las URLs. Deben sustituir por completo
-las instrucciones anteriores de **Crea Taxonomía**, **Clasifica comentarios** y **Helix Classifier**.
+las instrucciones anteriores de **Crear Taxonomía**, **Clasifica comentarios** y **Clasifica incidencias**.
+**Unifica conceptos** se configura exclusivamente en Configuración → Unificar conceptos,
+heredando la compañía seleccionada.
 
 ## Flujo vigente
 
-1. Taxonomy Studio exporta `nps-lens-designer-<job>.zip` a Descargas.
-2. El usuario lo adjunta al proyecto Crea Taxonomía en su navegador habitual.
-3. El proyecto devuelve un ZIP con `manifest.json` y `taxonomy.json`.
-4. Al importarlo, NPS Lens valida la taxonomía; el usuario exporta los pendientes
-   en `nps-lens-classifier-<job>.zip`.
-5. El usuario lo adjunta a Clasifica comentarios e importa su ZIP de respuesta.
-6. Cada importación válida publica las asignaciones recibidas en DISCOVERED y
-   actualiza el progreso acumulado del corpus. Se exportan solo los pendientes.
+1. En Análisis estático se elige Original o Manual. Las equivalencias se mantienen
+   por compañía en Configuración y se aplican a ambas taxonomías.
+2. En Análisis con LLM se elige la lente Original, Manual o Descubierta. Los
+   proyectos de comentarios e incidencias comparten esa lente y conservan sus
+   resultados por separado.
+3. Crear Taxonomía exporta los comentarios; su respuesta contiene `manifest.json`
+   y `taxonomy.json`. Su importación habilita el catálogo Descubierta para elegirlo.
+4. Clasifica comentarios exporta solo pendientes de la lente elegida. Cada lote
+   válido actualiza el progreso acumulado. Clasifica incidencias hace lo mismo
+   con Helix, incluyendo evidencias NPS.
+5. Comentarios y Causalidad permiten activar LLM cuando el ámbito visible está
+   completamente procesado. Si cambian los filtros y falta alguna respuesta,
+   utilizan automáticamente el análisis estático.
+6. Unifica conceptos exporta comentarios, vocabulario y equivalencias actuales;
+   importa `manifest.json` y `equivalences.json`. Valida compañía, corpus, alias y
+   conflictos antes de actualizar los conceptos de esa compañía.
 
 NPS Lens no abre ni controla Chrome, no almacena una sesión de ChatGPT y no pide
 permisos de administración de aplicaciones en macOS. Los ZIP contienen comentarios
@@ -38,8 +48,11 @@ secuenciales y no exponen las claves internas de negocio.
 
 La taxonomía admite como máximo diez Palancas y cuatro Subpalancas por Palanca e
 incluye siempre `Sin clasificación temática / Información insuficiente` y
-`Sin clasificación temática / Tema no cubierto`. El clasificador devuelve una
-única pareja válida por comentario, en el mismo orden.
+`Sin clasificación temática / Tema no cubierto`. Estos límites se aplican al diseñador; Original y Manual conservan su catálogo.
+El clasificador devuelve una pareja principal y hasta dos parejas adicionales
+cuando existen temas independientes explícitos. Se conserva el orden del lote;
+se rechazan parejas desconocidas o repetidas. Los cálculos NPS utilizan la pareja
+principal y cada respuesta se cuenta una sola vez.
 
 ## Seguridad y límites
 
@@ -62,7 +75,7 @@ garantizarla.
 
 Helix exporta únicamente la lente activa. Su ZIP de respuesta contiene el manifiesto
 original y `results/NNNNNN.json`, con filas planas `id`, `lever`, `sublever`,
-`rationale` y `links`. Los campos de anotación adicionales se ignoran y no se guardan.
+`secondary_classifications`, `rationale` y `links`. Los campos de anotación adicionales se ignoran y no se guardan.
 Se validan IDs, orden, catálogo y cada vínculo antes de escribir ninguna asignación.
 Los resultados se conservan por lente y huella del corpus. Recrear Manual cambia su
 revisión e invalida sus resultados Helix, aunque las etiquetas sean iguales.
@@ -70,3 +83,12 @@ revisión e invalida sus resultados Helix, aunque las etiquetas sean iguales.
 El estado distingue procesadas, pendientes, con categoría, sin encaje y vínculos NPS;
 la cobertura es incidencias con categoría / total. Una incidencia sin encaje lleva
 ambas etiquetas vacías y ningún vínculo, y no vuelve a exportarse como pendiente.
+
+En causalidad LLM, la afinidad procede de los vínculos importados. El umbral local
+no se aplica y su control queda desactivado. La ventana temporal sigue siendo
+configurable y se comprueba en cada pareja comentario–incidencia.
+
+Las instrucciones requieren interpretar el contexto de banca de empresas,
+negaciones, tarea y resultado; no clasificar solo por palabras coincidentes. Una
+valoración general comprensible no debe caer en «Información insuficiente».
+Las categorías adicionales aportan contexto sin multiplicar los volúmenes NPS.

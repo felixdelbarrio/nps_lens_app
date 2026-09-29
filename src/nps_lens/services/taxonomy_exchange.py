@@ -115,11 +115,13 @@ def read_zip(content: bytes) -> dict[str, Any]:
 
 def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """One bounded ZIP contract for all three projects; JSON is validated inside it."""
-    if stage not in ("designer", "classifier", "helix"):
+    if stage not in ("designer", "classifier", "helix", "normalizer"):
         raise ValueError("Proyecto desconocido.")
     files = read_zip(content)
     manifest = files.pop("manifest.json", None)
-    schema = "nps-lens-helix/2" if stage == "helix" else "nps-lens-comments/2"
+    schema = {"helix": "nps-lens-helix/2", "normalizer": "nps-lens-normalization/1"}.get(
+        stage, "nps-lens-comments/2"
+    )
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != schema
@@ -131,12 +133,14 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
             "manifest.json no corresponde al proyecto seleccionado. Usa el manifiesto de su exportación."
         )
     valid = (
-        set(files) == {"taxonomy.json"}
-        if stage == "designer"
+        set(files) == {"taxonomy.json" if stage == "designer" else "equivalences.json"}
+        if stage in ("designer", "normalizer")
         else bool(files) and all(re.fullmatch(r"results/[0-9]{6}\.json", name) for name in files)
     )
     if not valid:
-        expected = "taxonomy.json" if stage == "designer" else "results/NNNNNN.json"
+        expected = {"designer": "taxonomy.json", "normalizer": "equivalences.json"}.get(
+            stage, "results/NNNNNN.json"
+        )
         raise ValueError(
             f"El ZIP de respuesta debe contener únicamente manifest.json y {expected}."
         )
@@ -221,6 +225,8 @@ class TaxonomyExchange:
             "job_id": job["id"],
             "stage": stage,
             "corpus_sha256": job["corpus"],
+            "taxonomy_mode": job["mode"],
+            "manual_revision": job["manual_revision"],
             "taxonomy_sha256": digest(job["taxonomy"]) if stage == "classifier" else None,
             "batches": [
                 {"id": key, "count": len(rows), "sha256": digest({"comments": rows})}
@@ -228,48 +234,83 @@ class TaxonomyExchange:
             ],
         }
 
-    def _assignments(self, context: UploadContext, frame: Any, taxonomy: Any) -> dict[str, Any]:
-        state = self.taxonomy.state(context)
-        artifact = self.taxonomy.artifact(state.get("artifacts", {}).get("DISCOVERED", "")) or {}
-        if artifact.get("taxonomy") != taxonomy:
-            artifact = {}
+    def assignments(self, context: UploadContext, frame: Any, mode: str) -> dict[str, Any]:
+        artifact = self.taxonomy.classification_artifact(context, mode)
+        catalog = self.taxonomy.catalog(context, mode)
+        revision = (
+            self.taxonomy.state(context).get("artifacts", {}).get("COMPLETED", "")
+            if mode == "COMPLETED"
+            else ""
+        )
+        if (
+            artifact.get("taxonomy") != catalog
+            or artifact.get("config", {}).get("manual_revision", "") != revision
+        ):
+            return {}
         hashes = artifact.get("comment_hashes", {})
         comments = dict(zip(frame["_business_key"], frame["Comment"].fillna("")))
-        retained = {
-            key: (lever, sub)
+        secondary = artifact.get("secondary_classifications", {})
+        return {
+            key: {
+                "primary_classification": {"lever": lever, "sublever": sub},
+                "secondary_classifications": secondary.get(key, []),
+            }
             for key, lever, sub in zip(
                 artifact.get("keys", []), artifact.get("lever", []), artifact.get("sublever", [])
             )
             if lever and sub and key in comments and hashes.get(key) == digest(str(comments[key]))
         }
-        corpus = self._corpus(context, frame)
-        with self.repository._connect() as db:
-            jobs = db.execute(
-                "SELECT payload FROM taxonomy_exchange WHERE context=?", (context_key(context),)
-            ).fetchall()
-            for (raw_job,) in jobs:
-                job = strict_json(raw_job.encode())
-                if job["corpus"] != corpus or job["taxonomy"] != taxonomy:
-                    continue
-                retained.update(job["retained"])
-                keys = dict(
-                    zip(
-                        (row["id"] for rows in job["batches"].values() for row in rows), job["keys"]
-                    )
-                )
-                for (raw_batch,) in db.execute(
-                    "SELECT payload FROM taxonomy_exchange_batches WHERE job=?", (job["id"],)
-                ).fetchall():
-                    for row in strict_json(raw_batch.encode())["classifications"]:
-                        primary = row["primary_classification"]
-                        retained[keys[row["id"]]] = (primary["lever"], primary["sublever"])
-        return retained
 
-    def progress(self, context: UploadContext) -> dict[str, int]:
+    def progress(self, context: UploadContext) -> dict[str, Any]:
         frame = self._frame(context)
-        taxonomy = self.taxonomy.state(context).get("discovered_taxonomy")
-        received = len(self._assignments(context, frame, taxonomy)) if taxonomy else 0
-        return {"total": len(frame), "received": received, "pending": len(frame) - received}
+        state = self.taxonomy.state(context)
+        mode = self.taxonomy.llm_mode(context)
+        catalog = self.taxonomy.catalog(context, mode)
+        assignments = self.assignments(context, frame, mode) if catalog["taxonomy"] else {}
+        received = len(assignments)
+        designer = state.get("designer_progress", {})
+        designed = (
+            designer.get("received", 0)
+            if designer.get("corpus") == self._corpus(context, frame)
+            else 0
+        )
+        return {
+            "mode": mode,
+            "total": len(frame),
+            "received": received,
+            "pending": len(frame) - received,
+            "multiple": sum(bool(row["secondary_classifications"]) for row in assignments.values()),
+            "designer": {
+                "total": len(frame),
+                "received": designed,
+                "pending": len(frame) - designed,
+                "levers": len(state.get("discovered_taxonomy", {}).get("taxonomy", [])),
+                "sublevers": sum(
+                    len(branch["sublevers"])
+                    for branch in state.get("discovered_taxonomy", {}).get("taxonomy", [])
+                ),
+            },
+        }
+
+    def apply(self, context: UploadContext, frame: Any, mode: str) -> Any:
+        assignments = self.assignments(context, frame, mode)
+        out = frame.copy()
+        keys = out["_business_key"]
+        for column, field in (("Palanca", "lever"), ("Subpalanca", "sublever")):
+            out[column] = keys.map(
+                {key: row["primary_classification"][field] for key, row in assignments.items()}
+            ).fillna("")
+        out["Temas adicionales"] = keys.map(
+            {
+                key: " · ".join(
+                    pair["lever"] + " > " + pair["sublever"]
+                    for pair in row["secondary_classifications"]
+                )
+                for key, row in assignments.items()
+            }
+        ).fillna("")
+        out.attrs["taxonomy_mode"] = mode
+        return out
 
     def export(self, context: UploadContext, stage: str) -> dict[str, Any]:
         if stage not in ("designer", "classifier"):
@@ -278,15 +319,12 @@ class TaxonomyExchange:
         frame = self._frame(context)
         full_frame = frame
         state = self.taxonomy.state(context)
-        previous = self.taxonomy.artifact(state.get("artifacts", {}).get("DISCOVERED", "")) or {}
-        taxonomy = (
-            (state.get("discovered_taxonomy") or previous.get("taxonomy")) if pending else None
-        )
-        retained = {}
+        mode = self.taxonomy.llm_mode(context) if pending else "DISCOVERED"
+        taxonomy = self.taxonomy.catalog(context, mode) if pending else None
         if pending:
-            if not taxonomy:
-                raise ValueError("Importa primero una taxonomía descubierta.")
-            retained = self._assignments(context, frame, taxonomy)
+            if not taxonomy or not taxonomy["taxonomy"]:
+                raise ValueError("Crea o importa primero la taxonomía de la lente LLM.")
+            retained = self.assignments(context, frame, mode)
             frame = frame.loc[~frame["_business_key"].isin(retained)]
         if frame.empty:
             raise ValueError("No hay comentarios que exportar.")
@@ -314,7 +352,10 @@ class TaxonomyExchange:
             "id": uuid.uuid4().hex,
             "corpus": self._corpus(context, full_frame),
             "keys": frame["_business_key"].tolist(),
-            "retained": retained,
+            "mode": mode,
+            "manual_revision": (
+                state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
+            ),
             "batches": batches,
             "taxonomy": taxonomy,
             "stage": "classifier" if pending else "designer",
@@ -358,6 +399,10 @@ class TaxonomyExchange:
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
             state["discovered_taxonomy"] = taxonomy.model_dump()
+            state["designer_progress"] = {
+                "received": len(frame),
+                "corpus": self._corpus(context, frame),
+            }
             # A new catalog must not expose assignments from a different catalog.
             previous = self.taxonomy.artifact(state.get("artifacts", {}).get("DISCOVERED", ""))
             if previous and previous.get("taxonomy") != state["discovered_taxonomy"]:
@@ -369,7 +414,14 @@ class TaxonomyExchange:
             for name, value in files.items()
         }
         job = self._load(context, manifest["job_id"])
-        if job["taxonomy"] != self.taxonomy.state(context).get("discovered_taxonomy"):
+        mode = job.get("mode")
+        if mode not in ("SOURCE", "COMPLETED", "DISCOVERED"):
+            raise ValueError("Exporta un nuevo intercambio con la lente LLM seleccionada.")
+        if job["taxonomy"] != self.taxonomy.catalog(context, mode) or (
+            mode == "COMPLETED"
+            and job["manual_revision"]
+            != self.taxonomy.state(context).get("artifacts", {}).get(mode, "")
+        ):
             raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")
         if manifest != self._manifest(job, "classifier"):
             raise ValueError("El manifiesto no coincide con la exportación.")
@@ -377,8 +429,9 @@ class TaxonomyExchange:
             raise ValueError("El corpus ha cambiado. Exporta un nuevo ZIP; no se importó nada.")
         if job["taxonomy"] is None:
             raise ValueError("Importa primero la taxonomía.")
-        taxonomy = TaxonomyResponse.model_validate(job["taxonomy"])
-        categories = TaxonomyValidator._validate_taxonomy(taxonomy)
+        categories = {
+            branch["lever"]: set(branch["sublevers"]) for branch in job["taxonomy"]["taxonomy"]
+        }
         if not files:
             raise ValueError("No hay resultados de clasificación.")
         validated = {}
@@ -391,7 +444,7 @@ class TaxonomyExchange:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")
             TaxonomyValidator._validate_batch(response, expected, categories)
             validated[key] = encode(response.model_dump()).decode()
-        retained = self._assignments(context, frame, job["taxonomy"])
+        retained = self.assignments(context, frame, mode)
         with self.repository._connect() as db:
             existing = dict(
                 db.execute(
@@ -408,18 +461,18 @@ class TaxonomyExchange:
             )
             for payload in existing.values():
                 for row in strict_json(payload.encode())["classifications"]:
-                    primary = row["primary_classification"]
-                    merged[keys[row["id"]]] = (primary["lever"], primary["sublever"])
+                    merged[keys[row["id"]]] = {
+                        key: value for key, value in row.items() if key != "id"
+                    }
             assignments = [
-                {
-                    "lever": merged.get(key, ("", ""))[0],
-                    "sublever": merged.get(key, ("", ""))[1],
-                }
+                merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
                 for key in frame["_business_key"]
             ]
             config = {
                 "method": "chatgpt_zip",
+                "taxonomy_mode": mode,
                 "taxonomy_sha256": digest(job["taxonomy"]),
+                "manual_revision": job["manual_revision"],
                 "instructions_version": job["instructions_version"],
             }
             sig = signature(frame, "DISCOVERED", config)
@@ -432,6 +485,11 @@ class TaxonomyExchange:
                 "lever": [row["lever"] for row in assignments],
                 "sublever": [row["sublever"] for row in assignments],
                 "provenance": ["chatgpt_zip"] * len(assignments),
+                "secondary_classifications": {
+                    key: row["secondary_classifications"]
+                    for key, row in merged.items()
+                    if row["secondary_classifications"]
+                },
                 "nodes": [],
                 "taxonomy": job["taxonomy"],
                 "comment_hashes": {
@@ -441,7 +499,9 @@ class TaxonomyExchange:
                 "equivalences": {},
             }
             state = self.taxonomy.state(context)
-            state.setdefault("artifacts", {})["DISCOVERED"] = sig
+            state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[
+                mode
+            ] = sig
             db.execute(
                 "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
                 (sig, context_key(context), "DISCOVERED", encode(artifact).decode()),

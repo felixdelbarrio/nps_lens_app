@@ -141,12 +141,33 @@ class TaxonomyService:
             )
 
     def registry(self, context: UploadContext) -> EquivalenceRegistry:
-        restored = self.state(context).get("restored")
-        return (
-            EquivalenceRegistry.from_dict(restored["equivalences"])
-            if restored
-            else EquivalenceRegistry.load(self.equivalences_path)
+        state = self.state(context)
+        if state.get("restored"):
+            return EquivalenceRegistry.from_dict(state["restored"]["equivalences"])
+        if "equivalences" in state:
+            return EquivalenceRegistry.from_dict(state["equivalences"])
+        return EquivalenceRegistry.load(self.equivalences_path)
+
+    def save_equivalences(self, context: UploadContext, registry: EquivalenceRegistry) -> None:
+        state = self.state(context)
+        if state.get("restored"):
+            raise ValueError("Vuelve al dataset local para modificar conceptos.")
+        state["equivalences"] = registry.to_dict()
+        self.save_state(context, state)
+        self._state_cache.clear()
+        self._cache.clear()
+
+    def llm_mode(self, context: UploadContext) -> str:
+        state = self.state(context)
+        return str(
+            state.get("llm_active")
+            or ("DISCOVERED" if state.get("discovered_taxonomy") else state["active"])
         )
+
+    def classification_artifact(self, context: UploadContext, mode: str) -> dict[str, Any]:
+        state = self.state(context)
+        signatures = state.get("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})
+        return self.artifact(signatures.get(mode, "")) or {}
 
     def clear_source_cache(self) -> None:
         with self._source_lock:
@@ -460,6 +481,11 @@ class TaxonomyService:
                         "La taxonomía seleccionada debe estar disponible y actualizada."
                     )
                 state[field] = changes[field]
+        if "llm_active" in changes:
+            mode = changes["llm_active"]
+            if mode not in MODES or not self.catalog(context, mode)["taxonomy"]:
+                raise ValueError("Selecciona una taxonomía disponible para LLM.")
+            state["llm_active"] = mode
         if "policy" in changes:
             if changes["policy"] not in POLICIES:
                 raise ValueError("Política de snapshot desconocida.")
@@ -522,6 +548,7 @@ class TaxonomyService:
             "taxonomies": cards,
             "active": selected,
             "requested_active": state["active"],
+            "llm_active": self.llm_mode(context),
             "default": state["default"],
             "policy": state["policy"],
             "restored": bool(state.get("restored")),

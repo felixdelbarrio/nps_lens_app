@@ -83,14 +83,16 @@ def test_manual_uses_discovered_skeleton_without_origin(exchange):
     assert handler.taxonomy.resolve(context, mode="COMPLETED").Palanca.eq("Atención").all()
 
 
-@pytest.fixture
-def helix(exchange):
+@pytest.fixture(name="helix")
+def helix_fixture(exchange):
     handler, context, frame, client = exchange
     frame["Palanca"], frame["Subpalanca"] = "Atención", "Resolución"
+    frame["Fecha"], frame["NPS"] = pd.Timestamp("2026-09-01"), 2
     incidents = pd.DataFrame(
         {
             "Incident Number": [f"INC-{i}" for i in range(201)],
             "Detailed Description": "No resuelven el problema",
+            "Submit Date": pd.Timestamp("2026-09-01"),
             "BBVA_SourceServiceN2": "Web",
         }
     )

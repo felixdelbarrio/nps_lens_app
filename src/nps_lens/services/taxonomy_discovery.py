@@ -62,6 +62,9 @@ class PrimaryClassification(_StrictModel):
 class CommentClassification(_StrictModel):
     id: str = Field(min_length=1)
     primary_classification: PrimaryClassification
+    secondary_classifications: list[PrimaryClassification] = Field(
+        default_factory=list, max_length=2
+    )
 
 
 class ClassificationResponse(_StrictModel):
@@ -103,7 +106,15 @@ class TaxonomyValidator:
         result: dict[str, PrimaryClassification] = {}
         for item in response.classifications:
             primary = item.primary_classification
-            if primary.lever not in categories or primary.sublever not in categories[primary.lever]:
+            pairs = [primary, *item.secondary_classifications]
+            if len({(pair.lever, pair.sublever) for pair in pairs}) != len(pairs):
+                raise TaxonomyDiscoveryError(
+                    DiscoveryErrorCode.INVALID_CLASSIFICATION, "Temas duplicados en un comentario."
+                )
+            if any(
+                pair.lever not in categories or pair.sublever not in categories[pair.lever]
+                for pair in pairs
+            ):
                 raise TaxonomyDiscoveryError(
                     DiscoveryErrorCode.INVALID_CLASSIFICATION,
                     "La clasificación utiliza una categoría fuera de la taxonomía.",

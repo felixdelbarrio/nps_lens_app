@@ -3,7 +3,7 @@ import useSWR from "swr";
 
 import { fetchEquivalences, updateEquivalences, type EquivalenceRegistryPayload, type TaxonomyContext } from "../api";
 
-export function EquivalenceMaintenance({ disabled = false, context = {}, taxonomyOnly = false, onChange }: { disabled?: boolean; taxonomyOnly?: boolean; context?: TaxonomyContext; onChange?: () => Promise<void> }) {
+export function EquivalenceMaintenance({ disabled = false, context = {}, onChange }: { disabled?: boolean; context?: TaxonomyContext; onChange?: () => Promise<void> }) {
   const { data, error, mutate } = useSWR(["equivalences", new URLSearchParams(context).toString()], () => fetchEquivalences(context));
   const [draft, setDraft] = useState<EquivalenceRegistryPayload | null>(null);
   const [domain, setDomain] = useState("nps");
@@ -13,7 +13,7 @@ export function EquivalenceMaintenance({ disabled = false, context = {}, taxonom
   const registry = draft || data;
   if (error) return <p role="alert">{error.message}</p>;
   if (!registry) return <p>Preparando conceptos…</p>;
-  const dimensions = (registry.available_dimensions || Object.keys(registry.dimensions)).filter(key => key.startsWith(domain + ".") && (!taxonomyOnly || ["nps.Palanca", "nps.Subpalanca"].includes(key)));
+  const dimensions = (registry.available_dimensions || Object.keys(registry.dimensions)).filter(key => key.startsWith(domain + "."));
   const groups = registry.dimensions[dimension] || [];
   const stats = registry.statistics?.[dimension];
   function edit(index: number, canonical: string, aliases: string[]) {
@@ -31,7 +31,7 @@ export function EquivalenceMaintenance({ disabled = false, context = {}, taxonom
   }
   return <div className="settings-section-stack">
     <p>Solo se unifican los alias que guardes. Los comentarios, descripciones y resoluciones permanecen intactos.</p>
-    <div className="field-grid">{!taxonomyOnly && <label>Dominio<select value={domain} disabled={saving} onChange={e => { setDomain(e.target.value); setDimension((registry.available_dimensions || Object.keys(registry.dimensions)).find(key => key.startsWith(e.target.value + ".")) || ""); }}><option value="nps">NPS</option><option value="helix">Helix</option></select></label>}
+    <div className="field-grid"><label>Dominio<select value={domain} disabled={saving} onChange={e => { setDomain(e.target.value); setDimension((registry.available_dimensions || Object.keys(registry.dimensions)).find(key => key.startsWith(e.target.value + ".")) || ""); }}><option value="nps">NPS</option><option value="helix">Helix</option></select></label>
     <label>Dimensión<select value={dimension} disabled={saving} onChange={e => setDimension(e.target.value)}>{dimensions.map(key => <option key={key} value={key}>{key.split(".")[1]}</option>)}</select></label></div>
     <h4>{dimension}</h4>
     <div className="table-scroll"><table className="data-table"><thead><tr><th>Nombre principal</th><th>Alias equivalentes</th><th>Registros</th><th>Acciones</th></tr></thead><tbody>{groups.map((group, index) => <tr key={index}>

@@ -24,6 +24,7 @@ DEFAULT_UI_MIN_N_CROSS_COMPARISONS = 30
 DEFAULT_UI_NPS_GROUP = "Detractores"
 DEFAULT_UI_SCORE_CHANNEL = "Web"
 DEFAULT_UI_POP_VALUE = "Todos"
+DEFAULT_TAXONOMY_NORMALIZER_URL = "https://chatgpt.com/g/g-p-6abbc1faf1c881a4aaefff027e88dea8"
 DEFAULT_TAXONOMY_DESIGNER_URL = "https://chatgpt.com/g/g-p-6aaabb05fd0881a49965c28ef21333a9"
 DEFAULT_HELIX_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aba1edf109c81a4880f5420a0105b37"
 DEFAULT_TAXONOMY_CLASSIFIER_URL = "https://chatgpt.com/g/g-p-6aaab79eb94481a498b0b2bb6ba2cb2a"
@@ -51,6 +52,7 @@ UI_PREF_ENV_KEYS = {
     "max_days_apart": "NPS_LENS_UI_MAX_DAYS_APART",
     "min_n_nps_gaps": "NPS_LENS_UI_MIN_N_NPS_GAPS",
     "min_n_cross_comparisons": "NPS_LENS_UI_MIN_N_CROSS_COMPARISONS",
+    "taxonomy_normalizer_url": "NPS_LENS_TAXONOMY_NORMALIZER_URL",
     "taxonomy_designer_url": "NPS_LENS_TAXONOMY_DESIGNER_URL",
     "taxonomy_classifier_url": "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
     "helix_classifier_url": "NPS_LENS_HELIX_CLASSIFIER_URL",
@@ -392,6 +394,7 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
         elif str(name) == "report_dimension_analysis":
             value = normalize_report_dimension_analysis(raw_value)
         elif str(name) in {
+            "taxonomy_normalizer_url",
             "taxonomy_designer_url",
             "taxonomy_classifier_url",
             "helix_classifier_url",
@@ -472,6 +475,7 @@ class Settings:
     default_max_days_apart: int = DEFAULT_UI_MAX_DAYS_APART
     default_min_n_nps_gaps: int = DEFAULT_UI_MIN_N_NPS_GAPS
     default_min_n_cross_comparisons: int = DEFAULT_UI_MIN_N_CROSS_COMPARISONS
+    taxonomy_normalizer_url: str = DEFAULT_TAXONOMY_NORMALIZER_URL
     taxonomy_designer_url: str = DEFAULT_TAXONOMY_DESIGNER_URL
     taxonomy_classifier_url: str = DEFAULT_TAXONOMY_CLASSIFIER_URL
     helix_classifier_url: str = DEFAULT_HELIX_CLASSIFIER_URL
@@ -572,6 +576,12 @@ class Settings:
             200,
         )
         try:
+            taxonomy_normalizer_url = normalize_chatgpt_project_url(
+                os.getenv("NPS_LENS_TAXONOMY_NORMALIZER_URL", DEFAULT_TAXONOMY_NORMALIZER_URL)
+            )
+        except ValueError:
+            taxonomy_normalizer_url = DEFAULT_TAXONOMY_NORMALIZER_URL
+        try:
             taxonomy_designer_url = normalize_chatgpt_project_url(
                 os.getenv("NPS_LENS_TAXONOMY_DESIGNER_URL", DEFAULT_TAXONOMY_DESIGNER_URL)
             )
@@ -624,6 +634,7 @@ class Settings:
             default_max_days_apart=default_max_days_apart,
             default_min_n_nps_gaps=default_min_n_nps_gaps,
             default_min_n_cross_comparisons=default_min_n_cross_comparisons,
+            taxonomy_normalizer_url=taxonomy_normalizer_url,
             taxonomy_designer_url=taxonomy_designer_url,
             taxonomy_classifier_url=taxonomy_classifier_url,
             helix_classifier_url=helix_classifier_url,
@@ -714,6 +725,7 @@ class Settings:
             "max_days_apart": max_days_apart,
             "min_n_nps_gaps": min_n_nps_gaps,
             "min_n_cross_comparisons": min_n_cross_comparisons,
+            "taxonomy_normalizer_url": self.taxonomy_normalizer_url,
             "taxonomy_designer_url": self.taxonomy_designer_url,
             "taxonomy_classifier_url": self.taxonomy_classifier_url,
             "helix_classifier_url": self.helix_classifier_url,
