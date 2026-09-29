@@ -13,7 +13,7 @@ it("imports independent taxonomy assignments without method selectors and autosa
   vi.stubGlobal("fetch", fetcher);
   const onChange = vi.fn(async () => {});
   const user = userEvent.setup();
-  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} modes={["SOURCE","COMPLETED"]} url="https://chatgpt.com/g/test" disabled={false} onChange={onChange} /></SWRConfig>);
+  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="SOURCE" url="https://chatgpt.com/g/test" disabled={false} onChange={onChange} /></SWRConfig>);
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   const url = screen.getByLabelText("URL · Helix Classifier");

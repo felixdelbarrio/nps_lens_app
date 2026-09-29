@@ -3,7 +3,7 @@ import useSWR from "swr";
 
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyProjectInstructions as Instructions } from "../api";
 
-const TITLES = { designer: "Crea Taxonomía", classifier: "Clasifica taxonomía", helix: "Helix Classifier" };
+const TITLES = { designer: "Crea Taxonomía", classifier: "Clasifica comentarios", helix: "Helix Classifier" };
 
 export function TaxonomyProjectInstructions({ role, context }: { role: "designer" | "classifier" | "helix"; context: TaxonomyContext }) {
   const { data, error, mutate } = useSWR(

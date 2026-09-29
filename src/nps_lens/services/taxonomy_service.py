@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -284,18 +285,47 @@ class TaxonomyService:
             }
         return cast(dict[str, Any], catalog)
 
-    def manual_draft(self, context: UploadContext) -> dict[str, Any]:
+    def manual_draft(self, context: UploadContext, template: str = "CURRENT") -> dict[str, Any]:
         state = self.state(context)
-        if state.get("artifacts", {}).get("COMPLETED"):
-            return self.catalog(context, "COMPLETED", normalized=False)
-        source = self.catalog(context, "SOURCE", normalized=False)
-        return (
-            source
-            if source["taxonomy"]
-            else cast(dict[str, Any], state.get("discovered_taxonomy", {"taxonomy": []}))
-        )
+        if template == "CURRENT":
+            item = self.artifact(state.get("artifacts", {}).get("COMPLETED", "")) or {}
+            if item.get("taxonomy"):
+                return cast(dict[str, Any], item["taxonomy"])
+            template = (
+                "SOURCE"
+                if self.catalog(context, "SOURCE", normalized=False)["taxonomy"]
+                else "DISCOVERED"
+            )
+        if template == "NONE":
+            return {"taxonomy": []}
+        if template not in ("SOURCE", "DISCOVERED"):
+            raise ValueError("Plantilla desconocida.")
+        if template == "DISCOVERED":
+            return cast(dict[str, Any], state.get("discovered_taxonomy") or {"taxonomy": []})
+        return self.catalog(context, template, normalized=False)
 
-    def save_manual(self, context: UploadContext, branches: list[dict[str, Any]]) -> dict[str, Any]:
+    def manual_info(self, context: UploadContext, template: str = "CURRENT") -> dict[str, Any]:
+        state = self.state(context)
+        revision = state.get("artifacts", {}).get("COMPLETED", "")
+        item = self.artifact(revision) or {}
+        return {
+            **self.manual_draft(context, template),
+            "revision": revision,
+            "exists": bool(item.get("taxonomy")),
+            "templates": ["NONE"]
+            + [
+                mode
+                for mode in ("SOURCE", "DISCOVERED")
+                if self.manual_draft(context, mode)["taxonomy"]
+            ],
+            "affected_comments": sum(
+                bool(a and b) for a, b in zip(item.get("lever", []), item.get("sublever", []))
+            ),
+        }
+
+    def save_manual(
+        self, context: UploadContext, branches: list[dict[str, Any]], *, template: str = "CURRENT"
+    ) -> dict[str, Any]:
         state = self.state(context)
         if state.get("restored"):
             raise ValueError("Snapshot inmutable: vuelve al dataset local.")
@@ -346,17 +376,23 @@ class TaxonomyService:
             .reset_index(drop=True)
         )
         available = self.available(context, self.source(context), registry)
-        base_mode = "COMPLETED" if "COMPLETED" in available else "SOURCE"
-        if (
-            base_mode == "SOURCE"
-            and not self.catalog(context, "SOURCE")["taxonomy"]
-            and "DISCOVERED" in available
-        ):
-            base_mode = "DISCOVERED"
+        base_mode = template
+        if base_mode == "CURRENT":
+            base_mode = "COMPLETED" if "COMPLETED" in available else "SOURCE"
+            if (
+                base_mode == "SOURCE"
+                and not self.catalog(context, "SOURCE")["taxonomy"]
+                and "DISCOVERED" in available
+            ):
+                base_mode = "DISCOVERED"
+        if base_mode not in ("NONE", "SOURCE", "COMPLETED", "DISCOVERED"):
+            raise ValueError("Plantilla desconocida.")
+        if base_mode == "DISCOVERED" and base_mode not in available:
+            base_mode = "NONE"
         # Editing operates on raw assignments; normalization is only a lens operation.
         base = (
             original_labels(frame)
-            if base_mode == "SOURCE"
+            if base_mode in ("SOURCE", "NONE") or base_mode not in available
             else self.resolver.resolve(
                 frame,
                 base_mode,
@@ -368,7 +404,9 @@ class TaxonomyService:
             mapping.get(pair, pair)
             for pair in zip(labels(base, "Palanca"), labels(base, "Subpalanca"))
         ]
-        assigned = [pair if pair in pairs else ("", "") for pair in assigned]
+        assigned = [
+            pair if base_mode != "NONE" and pair in pairs else ("", "") for pair in assigned
+        ]
         taxonomy = {
             "taxonomy": [
                 {
@@ -380,6 +418,7 @@ class TaxonomyService:
         }
         config = {
             "method": "manual",
+            "revision": uuid.uuid4().hex,
             "taxonomy": taxonomy,
             "mapping": sorted((a, b) for a, b in mapping.items()),
         }
@@ -421,32 +460,12 @@ class TaxonomyService:
                         "La taxonomía seleccionada debe estar disponible y actualizada."
                     )
                 state[field] = changes[field]
-        if "helix_modes" in changes:
-            modes = changes["helix_modes"]
-            if (
-                not modes
-                or len(modes) != len(set(modes))
-                or any(mode not in available for mode in modes)
-            ):
-                raise ValueError("Selecciona taxonomías disponibles para Helix.")
-            state["helix_modes"] = modes
         if "policy" in changes:
             if changes["policy"] not in POLICIES:
                 raise ValueError("Política de snapshot desconocida.")
             state["policy"] = changes["policy"]
         self.save_state(context, state)
         return {key: state[key] for key in ("active", "default", "policy")}
-
-    def helix_modes(
-        self, context: UploadContext, available: Optional[dict[str, Any]] = None
-    ) -> list[str]:
-        state = self.state(context)
-        if available is None:
-            available = self.available(context, self.source(context), self.registry(context))
-        selected = state["active"] if state["active"] in available else "SOURCE"
-        return [mode for mode in state.get("helix_modes", [selected]) if mode in available] or [
-            selected
-        ]
 
     def studio(self, context: UploadContext) -> dict[str, Any]:
         frame, registry = self.source(context), self.registry(context)
@@ -506,7 +525,6 @@ class TaxonomyService:
             "default": state["default"],
             "policy": state["policy"],
             "restored": bool(state.get("restored")),
-            "helix_modes": self.helix_modes(context, available),
             "discovered_catalog_available": bool(state.get("discovered_taxonomy")),
         }
 

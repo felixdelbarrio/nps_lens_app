@@ -146,7 +146,8 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     partial = {"manifest": files["manifest"], "results": {"000001": files["results"]["000001"]}}
     first = handler.import_response(context, classifier_zip(partial), "classifier")
     assert first["received"] == 1 and first["stage"] == "classifier"
-    assert "DISCOVERED" not in handler.taxonomy.state(context)["artifacts"]
+    assert first["progress"] == {"total": 405, "received": 200, "pending": 205}
+    assert handler.taxonomy.resolve(context, mode="DISCOVERED").Palanca.ne("").sum() == 200
     handler = TaxonomyExchange(handler.taxonomy, handler.downloads)
     assert handler.import_response(context, classifier_zip(partial), "classifier")["received"] == 1
     broken = {**files, "results": {**files["results"], "000003": {"classifications": []}}}

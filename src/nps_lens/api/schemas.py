@@ -178,7 +178,6 @@ class LinkingResponse(BaseModel):
 
 
 class TaxonomySettingsRequest(BaseModel):
-    helix_modes: Optional[list[str]] = None
     active: Optional[str] = None
     default: Optional[str] = None
     policy: Optional[str] = None

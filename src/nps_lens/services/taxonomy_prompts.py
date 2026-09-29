@@ -61,7 +61,7 @@ No incluyas IDs ni clasificaciones en taxonomy.json. Este proyecto solo diseña 
 Lee todos los lotes antes de consolidarla. No entregues una taxonomía parcial.
 """
 
-CLASSIFIER_INSTRUCTIONS = """CLASIFICA TAXONOMÍA · nps-lens-comments/2
+CLASSIFIER_INSTRUCTIONS = """CLASIFICA COMENTARIOS · nps-lens-comments/2
 La entrada es un ZIP con manifest.json, INSTRUCCIONES.txt y comments/NNNNNN.json.
 Lee todos los lotes en el orden manifest.batches. Cada uno contiene
 {"comments":[{"id":"cadena","Comment":"texto"}]}. Comprueba conteos, IDs únicos
@@ -105,7 +105,9 @@ results/NNNNNN.json por lote procesado, usando el id de manifest.batches. Cada a
 {"classifications":[{"id":"ID original","primary_classification":{"lever":"Palanca exacta","sublever":"Subpalanca exacta"}}]}.
 No incluyas otros archivos, carpetas vacías ni comentarios originales.
 Cada lote conserva exactamente todos sus IDs, una vez y en el orden de entrada.
-Puedes entregar lotes completos parciales; no entregues un lote con filas omitidas.
+Procesa todos los lotes del manifiesto. Si una limitación impide completarlos, entrega
+solo lotes completos y explica fuera del ZIP cuántos comentarios quedan pendientes.
+La aplicación acumula el progreso y exporta únicamente los pendientes en el siguiente ZIP.
 No incluyas comentarios originales. No inventes clasificaciones para aparentar completitud.
 """
 
@@ -118,9 +120,8 @@ Lee manifest.json, taxonomies.json, incidents/*.json y todos los comments/*.json
 Comprueba los SHA-256 y conteos de incidencias frente a manifest.batches.
 Las taxonomías son SOURCE (Original), COMPLETED (Manual), DISCOVERED (Descubierta por LLM).
 Original y Manual ya incluyen las equivalencias: conserva literalmente sus etiquetas.
-Cada incidencia contiene pending_taxonomies. Devuelve una asignación por CADA taxonomía
-pendiente, en el mismo orden. No devuelvas asignaciones ya resueltas ni omitas ninguna.
-No mezcles categorías entre taxonomías. Una incidencia puede tener hasta tres parejas.
+Solo se exporta la lente activa indicada por manifest.taxonomy_scopes (una entrada).
+Devuelve exactamente una pareja por incidencia de esa lente.
 Asigna lever/sublever por el significado explícito de la descripción y las categorías
 de esa taxonomía. No inventes causas técnicas. Si no existe evidencia o encaje,
 lever y sublever deben ser ambos vacíos, links=[] y rationale debe explicar la limitación.
@@ -133,9 +134,9 @@ caracteres) explica evidencia y limitaciones; no expongas datos personales innec
 NO elijas método causal ni inventes journeys o entidades. La aplicación seleccionará
 Palanca, Subpalanca, Source Service N2 o journeys posteriormente, en Causalidad.
 Entrega un ZIP real con manifest.json sin modificar y results/NNNNNN.json por lote:
-{"classifications":[{"id":"ID original","assignments":[{"taxonomy_mode":"SOURCE",
-"lever":"Palanca exacta","sublever":"Subpalanca exacta","rationale":"Evidencia",
-"links":[{"nps_id":"ID de comentario","confidence":0.85}]}]}]}.
+{"classifications":[{"id":"ID original","lever":"Palanca exacta",
+"sublever":"Subpalanca exacta","rationale":"Evidencia",
+"links":[{"nps_id":"ID de comentario","confidence":0.85}]}]}.
 Conserva todos los IDs y el orden. JSON UTF-8 estricto, sin campos extra, NaN,
 Infinity, duplicados ni Markdown. No incluyas corpus, taxonomías ni carpetas vacías.
 Puedes entregar lotes COMPLETOS parciales e indicar fuera del ZIP cuáles faltan;

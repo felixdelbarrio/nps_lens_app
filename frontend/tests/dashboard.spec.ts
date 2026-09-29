@@ -64,6 +64,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
     })
   ).toBeVisible();
 
+  await expect(page.getByTestId("upload-input")).toBeVisible();
   await page.getByRole("button", { name: /Ingesta/i }).click();
   await page.getByTestId("upload-input").setInputFiles(marchFixture);
   await page.getByRole("button", { name: "Importar / actualizar NPS" }).click();
@@ -96,13 +97,15 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
   await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
-  const classifierInput = await exportedPath(page, "Clasifica taxonomía");
+  const classifierInput = await exportedPath(page, "Clasifica comentarios");
   const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
   responseZip(classifierInput, classifierOutput, "classifier");
   await page.getByLabel("Importar ZIP de comentarios clasificados").setInputFiles(classifierOutput);
-  await expect(page.getByText(/Todos los lotes validados/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Explorar Descubierta por LLM" })).toBeVisible();
+  await expect(page.getByText(/Importación validada/)).toBeVisible();
+  await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
   await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
 });
