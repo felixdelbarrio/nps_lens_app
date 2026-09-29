@@ -51,9 +51,10 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
 }
 
-async function exportedPath(page: import("@playwright/test").Page, title: string) {
-  const message = await page.locator("article").filter({has:page.getByRole("heading", {name:title,exact:true})}).last().getByText(/ZIP guardado en .*\.zip/).textContent();
-  const match = message?.match(/ZIP guardado en (.+?\.zip)/);
+async function exportedPath(page: import("@playwright/test").Page, title: string, automatic = false) {
+  const pattern = automatic ? /Siguiente ZIP preparado en (.+?\.zip)/ : /ZIP guardado en (.+?\.zip)/;
+  const message = await page.locator("article").filter({has:page.getByRole("heading", {name:title,exact:true})}).last().getByText(pattern).textContent();
+  const match = message?.match(pattern);
   if (!match) throw new Error(`No se encontró la ruta del ZIP en: ${message}`);
   return match[1];
 }
@@ -105,15 +106,32 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
   await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
-  const classifierInput = await exportedPath(page, "Clasifica comentarios");
-  const classifierOutput = path.join(path.dirname(classifierInput), "classifier-response.zip");
-  responseZip(classifierInput, classifierOutput, "classifier");
-  const [classificationImport] = await Promise.all([
-    page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
-    page.getByLabel("Importar ZIP de comentarios clasificados").setInputFiles(classifierOutput),
-  ]);
-  expect(classificationImport.ok(), await classificationImport.text()).toBeTruthy();
-  await expect(page.getByText(/Importación validada/)).toBeVisible();
+  let classifierInput = await exportedPath(page, "Clasifica comentarios");
+  const classifierUpload = page.getByLabel("Importar ZIP de comentarios clasificados");
+  let previousPending = Infinity;
+  while (previousPending > 0) {
+    const classifierOutput = classifierInput.replace(/\.zip$/, "-response.zip");
+    responseZip(classifierInput, classifierOutput, "classifier");
+    await expect(classifierUpload).toBeEnabled();
+    const [classificationImport] = await Promise.all([
+      page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
+      classifierUpload.setInputFiles(classifierOutput),
+    ]);
+    expect(classificationImport.ok(), await classificationImport.text()).toBeTruthy();
+    const { progress } = await classificationImport.json();
+    expect(progress.pending).toBeGreaterThanOrEqual(0);
+    expect(progress.pending).toBeLessThan(previousPending);
+    expect(progress.received + progress.pending).toBe(progress.total);
+    previousPending = progress.pending;
+    await expect(page.getByText(/Importación validada/)).toBeVisible();
+    if (previousPending > 0) {
+      const nextInput = await exportedPath(page, "Clasifica comentarios", true);
+      expect(nextInput).not.toBe(classifierInput);
+      classifierInput = nextInput;
+    }
+  }
+  await expect(classifierUpload).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Exportar comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
   await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
