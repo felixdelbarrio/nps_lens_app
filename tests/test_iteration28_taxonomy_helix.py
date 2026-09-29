@@ -30,8 +30,7 @@ def discover(handler, context):
 def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exchange):
     handler, context, frame, _ = exchange
     discover(handler, context)
-    with pytest.raises(ValueError, match="comentarios"):
-        handler.export(context, stage="classifier")
+    assert handler.export(context, stage="classifier")["saved_path"] is None
     frame.loc[0, "Comment"] = "Ahora no funciona"
     frame.loc[len(frame)] = ["new-key", "Otra incidencia", "", "", "Web"]
     pending = exported(handler.export(context, stage="classifier")["saved_path"])
@@ -108,8 +107,13 @@ def helix_response(request, nps_id, entity="Resolución"):
                 "classifications": [
                     {
                         "id": row["id"],
-                        "lever": "Atención",
-                        "sublever": "Resolución",
+                        "primary": next(
+                            key
+                            for catalog in request["taxonomies.json"].values()
+                            for key, pair in catalog.items()
+                            if pair == {"lever": "Atención", "sublever": "Resolución"}
+                        ),
+                        "secondary": [],
                         "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
                         "links": [{"nps_id": nps_id, "confidence": 0.9}],
                     }
@@ -138,7 +142,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     pending = exported(handler.export(ctx, inputs)["saved_path"])
     assert pending["incidents/000001.json"]["incidents"][0]["id"] == "INC-200"
     invalid = copy.deepcopy(response)
-    invalid["results/000002.json"]["classifications"][0]["lever"] = "Inventada"
+    invalid["results/000002.json"]["classifications"][0]["primary"] = "Inventada"
     with pytest.raises(ValueError, match="taxonomía"):
         handler.import_response(ctx, inputs, zipped(invalid))
     assert handler.status(ctx, inputs)["pending"] == 1
@@ -375,7 +379,7 @@ def test_helix_flat_annotations_kpis_and_concise_validation(helix):
     request = exported(handler.export(ctx, inputs)["saved_path"])
     response = helix_response(request, inputs["comments"][0]["id"])
     first = response["results/000001.json"]["classifications"][0]
-    first.update(entity="", lever="", sublever="", links=[])
+    first.update(entity="", primary=None, secondary=[], links=[])
     status = handler.import_response(ctx, inputs, zipped(response))
     assert status["total"] == status["received"] == 201
     assert status["classified"] == status["links"] == 200

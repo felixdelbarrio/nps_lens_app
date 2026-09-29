@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unicodedata
 from enum import Enum
-from typing import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -16,7 +15,6 @@ from nps_lens.services.taxonomy_prompts import (
 
 class DiscoveryErrorCode(str, Enum):
     INVALID_TAXONOMY = "INVALID_TAXONOMY"
-    INVALID_CLASSIFICATION = "INVALID_CLASSIFICATION"
 
 
 class TaxonomyDiscoveryError(RuntimeError):
@@ -54,23 +52,6 @@ class TaxonomyResponse(_StrictModel):
     taxonomy: list[TaxonomyBranch] = Field(min_length=1, max_length=MAX_LEVERS)
 
 
-class PrimaryClassification(_StrictModel):
-    lever: str = Field(min_length=1)
-    sublever: str = Field(min_length=1)
-
-
-class CommentClassification(_StrictModel):
-    id: str = Field(min_length=1)
-    primary_classification: PrimaryClassification
-    secondary_classifications: list[PrimaryClassification] = Field(
-        default_factory=list, max_length=2
-    )
-
-
-class ClassificationResponse(_StrictModel):
-    classifications: list[CommentClassification]
-
-
 class TaxonomyValidator:
     @staticmethod
     def _validate_taxonomy(taxonomy: TaxonomyResponse) -> dict[str, set[str]]:
@@ -90,34 +71,3 @@ class TaxonomyValidator:
                 "La taxonomía no contiene las categorías obligatorias para texto sin encaje.",
             )
         return categories
-
-    @staticmethod
-    def _validate_batch(
-        response: ClassificationResponse,
-        expected: Sequence[str],
-        categories: dict[str, set[str]],
-    ) -> dict[str, PrimaryClassification]:
-        ids = [item.id for item in response.classifications]
-        if len(ids) != len(set(ids)) or set(ids) != set(expected):
-            raise TaxonomyDiscoveryError(
-                DiscoveryErrorCode.INVALID_CLASSIFICATION,
-                "La clasificación contiene IDs desconocidos, duplicados o ausentes.",
-            )
-        result: dict[str, PrimaryClassification] = {}
-        for item in response.classifications:
-            primary = item.primary_classification
-            pairs = [primary, *item.secondary_classifications]
-            if len({(pair.lever, pair.sublever) for pair in pairs}) != len(pairs):
-                raise TaxonomyDiscoveryError(
-                    DiscoveryErrorCode.INVALID_CLASSIFICATION, "Temas duplicados en un comentario."
-                )
-            if any(
-                pair.lever not in categories or pair.sublever not in categories[pair.lever]
-                for pair in pairs
-            ):
-                raise TaxonomyDiscoveryError(
-                    DiscoveryErrorCode.INVALID_CLASSIFICATION,
-                    "La clasificación utiliza una categoría fuera de la taxonomía.",
-                )
-            result[item.id] = primary
-        return result

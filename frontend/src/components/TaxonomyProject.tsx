@@ -1,6 +1,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext } from "../api";
+import { exportExchange, prepareNextZip } from "../utils/classificationExchange";
 import { PROJECT_NAMES } from "../utils/taxonomy";
 import { ProjectUrlField } from "./ProjectUrlField";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
@@ -21,6 +22,18 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo completar la operación."); }
     finally { setBusy(false); }
   }
+  async function importZip(file: File) {
+    const body = new FormData();
+    body.append("file", file);
+    const result = await taxonomyRequest<{progress?: ExchangeCounts}>(`/discovery/${role}/import`, context, {method:"POST", body});
+    const success = role === "designer" ? "Taxonomía importada. Ya puedes utilizarla para clasificar comentarios e incidencias." : role === "normalizer" ? "Conceptos actualizados para esta compañía." : "Importación validada. Progreso acumulado actualizado.";
+    setMessage(success);
+    await mutate();
+    if (role === "classifier" && result.progress) {
+      setMessage(success + await prepareNextZip(context, "/discovery/classifier/export", result.progress.pending));
+    }
+    await onChange();
+  }
   const locked = disabled || busy;
   const counts = role === "designer" ? progress?.designer : progress;
   return <article className="settings-subsection taxonomy-project">
@@ -29,8 +42,9 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
     {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Procesa todos los lotes exportados e importa la respuesta. El progreso se acumula; el siguiente ZIP incluye solo pendientes." : "Clasificación completa. Activa Usar clasificación LLM en los filtros de Comentarios."}</p> : null}
-    <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(async () => { const result = await taxonomyRequest<{saved_path: string}>(`/discovery/${role}/export`, context, {method:"POST"}); setMessage(`ZIP guardado en ${result.saved_path}`); })}>{EXPORT_LABELS[role]}</button>
-    <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(async () => { const body = new FormData(); body.append("file", file); await taxonomyRequest(`/discovery/${role}/import`, context, {method:"POST",body}); setMessage(role === "designer" ? "Taxonomía importada. Ya puedes utilizarla para clasificar comentarios e incidencias." : role === "normalizer" ? "Conceptos actualizados para esta compañía." : "Importación validada. Progreso acumulado actualizado."); await mutate(); await onChange(); }); }} /></label></div>
+    <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(async () => { try { setMessage(await exportExchange(context, `/discovery/${role}/export`)); }
+      finally { if (role === "classifier") { await mutate(); await onChange(); } } })}>{EXPORT_LABELS[role]}</button>
+    <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(() => importZip(file)); }} /></label></div>
     {message ? <p role="status">{message}</p> : null}
   </article>;
 }
