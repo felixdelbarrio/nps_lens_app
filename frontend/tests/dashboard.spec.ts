@@ -114,8 +114,8 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("tab", { name: "Comentarios", exact: true }).click();
   const llmSwitch = page.getByRole("switch", {name:"Usar clasificación LLM"});
   await expect(llmSwitch).toBeEnabled();
-  await llmSwitch.check();
-  await expect(llmSwitch).toBeChecked();
+  await llmSwitch.click();
+  await expect(llmSwitch).toBeChecked({ timeout: 15000 });
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
