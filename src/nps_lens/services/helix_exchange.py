@@ -18,14 +18,19 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 from nps_lens.platform.downloads import persist_download
-from nps_lens.services.taxonomy_discovery import PrimaryClassification
+from nps_lens.services.classification_protocol import (
+    HELIX_MAX_ITEMS,
+    HELIX_SCHEMA,
+    CompactClassification,
+    category_catalog,
+)
 from nps_lens.services.taxonomy_exchange import (
-    BATCH_ROWS,
     MAX_EXPANDED_BYTES,
     MAX_MEMBER_BYTES,
     MAX_MEMBERS,
     MAX_ZIP_BYTES,
     TaxonomyExchange,
+    bounded_batches,
     digest,
     encode,
     read_response,
@@ -42,15 +47,9 @@ class EvidenceLink(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
-class IncidentClassification(BaseModel):
-    # Only the classification contract is persisted; annotations are not domain fields.
+class IncidentClassification(CompactClassification):
+    # Annotations remain excluded from the internal business contract.
     model_config = ConfigDict(extra="ignore", strict=True)
-    id: str
-    lever: str
-    sublever: str
-    secondary_classifications: list[PrimaryClassification] = Field(
-        default_factory=list, max_length=2
-    )
     rationale: str = Field(min_length=1, max_length=2000)
     links: list[EvidenceLink] = Field(max_length=20)
 
@@ -211,25 +210,45 @@ class HelixExchange:
 
     def export(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, Any]:
         known = self.current(context, inputs)
-        pending = [
-            {
-                **row,
-                "pending_taxonomies": [
-                    mode for mode in inputs["modes"] if row["id"] not in known[mode]
-                ],
-            }
-            for row in inputs["incidents"]
-        ]
-        pending = [row for row in pending if row["pending_taxonomies"]]
+        pending = []
+        for row in inputs["incidents"]:
+            modes = [mode for mode in inputs["modes"] if row["id"] not in known[mode]]
+            if modes:
+                pending.append({**row, "pending_taxonomies": modes})
+                if len(pending) == HELIX_MAX_ITEMS:
+                    break
         if not pending:
             raise ValueError("No hay incidencias pendientes para la lente activa.")
         job_id = uuid.uuid4().hex
-        batches = {
-            f"{i // BATCH_ROWS + 1:06d}": pending[i : i + BATCH_ROWS]
-            for i in range(0, len(pending), BATCH_ROWS)
+        batches = bounded_batches(pending, "incidents")
+        catalogs = {
+            mode: category_catalog(catalog) for mode, catalog in inputs["taxonomies"].items()
         }
+        category_ids = {
+            mode: {(pair["lever"], pair["sublever"]): key for key, pair in catalog.items()}
+            for mode, catalog in catalogs.items()
+        }
+        mode = inputs["modes"][0]
+        evidence = bounded_batches(
+            (
+                {
+                    "id": row["id"],
+                    "Comment": row["Comment"],
+                    "primary": category_ids[mode].get(
+                        (row["taxonomies"][mode]["lever"], row["taxonomies"][mode]["sublever"])
+                    ),
+                    "secondary": [
+                        category_ids[mode][(pair["lever"], pair["sublever"])]
+                        for pair in row["secondary_classifications"]
+                    ],
+                }
+                for row in inputs["comments"]
+            ),
+            "comments",
+        )
         manifest = {
-            "schema_version": "nps-lens-helix/2",
+            "schema_version": HELIX_SCHEMA,
+            "taxonomies_sha256": digest(catalogs),
             "job_id": job_id,
             "stage": "helix",
             "taxonomy_scopes": inputs["scopes"],
@@ -238,33 +257,30 @@ class HelixExchange:
                 for key, rows in batches.items()
             ],
         }
-        files = {"manifest.json": manifest, "taxonomies.json": inputs["taxonomies"]}
+        files = {"manifest.json": manifest, "taxonomies.json": catalogs}
         files.update(
             {f"incidents/{key}.json": {"incidents": rows} for key, rows in batches.items()}
         )
-        files.update(
-            {
-                f"comments/{i // BATCH_ROWS + 1:06d}.json": {
-                    "comments": inputs["comments"][i : i + BATCH_ROWS]
-                }
-                for i in range(0, len(inputs["comments"]), BATCH_ROWS)
-            }
-        )
-        raw_files = {name: encode(payload) for name, payload in files.items()}
-        if (
-            len(files) >= MAX_MEMBERS
-            or any(len(raw) > MAX_MEMBER_BYTES for raw in raw_files.values())
-            or sum(map(len, raw_files.values())) > MAX_EXPANDED_BYTES
-        ):
+        files.update({f"comments/{key}.json": {"comments": rows} for key, rows in evidence.items()})
+        if len(files) >= MAX_MEMBERS:
             raise ValueError("El corpus supera los límites del intercambio ZIP; reduce el dataset.")
+        instructions = PROJECT_INSTRUCTIONS["helix"].encode()
+        expanded_size = len(instructions)
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, raw in raw_files.items():
+            for name, payload in files.items():
+                raw = encode(payload)
+                expanded_size += len(raw)
+                if len(raw) > MAX_MEMBER_BYTES or expanded_size > MAX_EXPANDED_BYTES:
+                    raise ValueError(
+                        "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                    )
                 archive.writestr(name, raw)
-            archive.writestr("INSTRUCCIONES.txt", PROJECT_INSTRUCTIONS["helix"])
-        if len(output.getvalue()) > MAX_ZIP_BYTES:
+            archive.writestr("INSTRUCCIONES.txt", instructions)
+        content = output.getvalue()
+        if len(content) > MAX_ZIP_BYTES:
             raise ValueError("ZIP demasiado grande.")
-        path = persist_download(output.getvalue(), f"nps-lens-helix-{job_id}.zip", self.downloads)
+        path = persist_download(content, f"nps-lens-helix-{job_id}.zip", self.downloads)
         job = {"manifest": manifest, "batches": batches}
         with self.repository._connect() as db:
             db.execute(
@@ -295,13 +311,8 @@ class HelixExchange:
             )
         source = {row["id"]: row for row in inputs["incidents"]}
         comments = {row["id"]: row for row in inputs["comments"]}
-        pairs = {
-            mode: {
-                (branch["lever"], sub)
-                for branch in catalog["taxonomy"]
-                for sub in branch["sublevers"]
-            }
-            for mode, catalog in inputs["taxonomies"].items()
+        catalogs = {
+            mode: category_catalog(catalog) for mode, catalog in inputs["taxonomies"].items()
         }
         validated: dict[tuple[str, str], dict[str, Any]] = {}
         if not files:
@@ -320,16 +331,12 @@ class HelixExchange:
                 }:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
                 mode = inputs["modes"][0]
+                expanded = row.expand(catalogs[mode])
+                primary = expanded["primary_classification"]
                 assigned = [
-                    (row.lever, row.sublever),
-                    *((pair.lever, pair.sublever) for pair in row.secondary_classifications),
+                    (pair["lever"], pair["sublever"])
+                    for pair in [primary, *expanded["secondary_classifications"]]
                 ]
-                if (
-                    len(set(assigned)) != len(assigned)
-                    or any(pair not in pairs[mode] for pair in assigned if pair != ("", ""))
-                    or (row.secondary_classifications and not row.lever)
-                ):
-                    raise ValueError("Palanca/Subpalanca fuera de la taxonomía o repetida.")
                 if len({link.nps_id for link in row.links}) != len(row.links):
                     raise ValueError("Vínculos NPS duplicados.")
                 for link in row.links:
@@ -348,9 +355,18 @@ class HelixExchange:
                         if comment
                         else set()
                     )
-                    if not comment or not comment_pairs.intersection(assigned) or not row.lever:
+                    if (
+                        not comment
+                        or not comment_pairs.intersection(assigned)
+                        or row.primary is None
+                    ):
                         raise ValueError("Vínculo a comentario desconocido o a otra categoría.")
-                validated[(mode, row.id)] = row.model_dump(exclude={"id"})
+                validated[(mode, row.id)] = {
+                    **primary,
+                    "secondary_classifications": expanded["secondary_classifications"],
+                    "rationale": row.rationale,
+                    "links": [link.model_dump() for link in row.links],
+                }
         existing = self.current(context, inputs)
         if any(
             key in existing[mode] and existing[mode][key] != value

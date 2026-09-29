@@ -32,13 +32,28 @@ originales: solo deben subirse a un espacio corporativo autorizado.
 ## Contrato
 
 Cada ZIP de entrada contiene un manifiesto versionado, las instrucciones, y lotes
-deterministas de hasta 200 filas y 80.000 bytes. El manifiesto liga el intercambio
+deterministas. Designer y normalizer conservan 200 filas / 80.000 bytes.
+Classifier (`nps-lens-comments/3`) y Helix (`nps-lens-helix/3`) usan hasta 1.000
+elementos / 300.000 bytes UTF-8 por lote, sin truncar elementos excesivos.
+El manifiesto liga el intercambio
 al corpus, taxonomía, conteos y SHA-256 de cada lote. Los IDs enviados son opacos,
 secuenciales y no exponen las claves internas de negocio.
 
 - Designer devuelve exactamente `manifest.json` y `taxonomy.json`.
-- Classifier devuelve `manifest.json` y uno o varios
-  `results/NNNNNN.json` completos.
+- Classifier envía como máximo 4.000 representantes de textos exactamente iguales,
+  sin normalizar mayúsculas ni espacios. Antes resuelve localmente los vacíos
+  (`fillna("")`) solo si existe `Sin clasificación temática / Información insuficiente`.
+  Persiste cada asignación con la huella individual del comentario, incluidas las
+  asignaciones propagadas a duplicados. Si todo queda resuelto, no crea un ZIP.
+- Classifier devuelve `manifest.json` y uno o varios `results/NNNNNN.json` completos:
+  `{"classifications":[{"id":"1","primary":"c001","secondary":["c002"]}]}`.
+  `taxonomy.json.categories` contiene el mapping determinista ID → lever/sublever;
+  se reconstruyen las etiquetas antes de persistirlas. No cambia analytics/reporting.
+- Tras importar, la UI refresca el progreso y prepara automáticamente el siguiente
+  ZIP si quedan pendientes. Muestra su ruta y mantiene la exportación manual.
+  Un fallo de esa segunda llamada no revierte la importación.
+- ZIP classifier/Helix anteriores a v3 se rechazan explícitamente. Las asignaciones
+  ya persistidas siguen vigentes mientras sus huellas y catálogos sean válidos.
 - La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, y sus
   asignaciones se pueden explorar y utilizar inmediatamente.
 - Repetir una respuesta idéntica es idempotente; una respuesta diferente para un
@@ -63,8 +78,9 @@ NaN/Infinity y archivos o expansiones por encima de los límites. La escritura e
 Descargas es atómica.
 
 El límite es 32 MiB comprimidos, 128 MiB expandidos, 2 MiB por JSON y 4.096 entradas.
-El corpus exportable se limita a 64 MiB sin truncarlo; si lo supera, debe dividirse
-explícitamente. Estas son salvaguardas locales, no límites garantizados de ChatGPT.
+Designer conserva el límite de corpus de 64 MiB. Classifier acota representantes y
+Helix incidencias por intercambio; el resto queda pendiente para el siguiente ZIP.
+Helix sigue incluyendo toda la evidencia NPS y rechaza corpus que superen la seguridad ZIP. Estas son salvaguardas locales, no límites garantizados de ChatGPT.
 
 Las pruebas automatizadas verifican el contrato, seguridad, reanudación, reinicio,
 idempotencia, atomicidad, orden y recorrido UI/API. La precisión semántica real del
@@ -74,15 +90,18 @@ garantizarla.
 ## Helix y lente activa
 
 Helix exporta únicamente la lente activa. Su ZIP de respuesta contiene el manifiesto
-original y `results/NNNNNN.json`, con filas planas `id`, `lever`, `sublever`,
-`secondary_classifications`, `rationale` y `links`. Los campos de anotación adicionales se ignoran y no se guardan.
+original y `results/NNNNNN.json`, con filas planas `id`, `primary`, `secondary`,
+`rationale` y `links`. `taxonomies.json` contiene el mapping de categorías por lente.
+Las evidencias NPS usan los mismos IDs en `primary` y `secondary`, conservando todo
+el corpus y los IDs enlazables. Cada ZIP envía hasta 2.000 incidencias pendientes;
+no se deduplican por descripción ni se preclasifican las vacías. Los campos de anotación adicionales se ignoran y no se guardan.
 Se validan IDs, orden, catálogo y cada vínculo antes de escribir ninguna asignación.
 Los resultados se conservan por lente y huella del corpus. Recrear Manual cambia su
 revisión e invalida sus resultados Helix, aunque las etiquetas sean iguales.
 
 El estado distingue procesadas, pendientes, con categoría, sin encaje y vínculos NPS;
 la cobertura es incidencias con categoría / total. Una incidencia sin encaje lleva
-ambas etiquetas vacías y ningún vínculo, y no vuelve a exportarse como pendiente.
+`primary=null`, `secondary=[]` y ningún vínculo, y no vuelve a exportarse como pendiente.
 
 En causalidad LLM, la afinidad procede de los vínculos importados. El umbral local
 no se aplica y su control queda desactivado. La ventana temporal sigue siendo
@@ -92,3 +111,9 @@ Las instrucciones requieren interpretar el contexto de banca de empresas,
 negaciones, tarea y resultado; no clasificar solo por palabras coincidentes. Una
 valoración general comprensible no debe caer en «Información insuficiente».
 Las categorías adicionales aportan contexto sin multiplicar los volúmenes NPS.
+
+Python puede usarse en ChatGPT para leer, indexar, validar y construir ZIP/JSON,
+nunca para ejecutar datos de entrada ni sustituir decisiones semánticas por reglas.
+Las instrucciones piden continuar con todos los lotes completos posibles antes de
+entregar un parcial; los límites reales de la sesión pueden seguir requiriendo
+varios intercambios. Hay que actualizar las instrucciones de ambos Proyectos ChatGPT.

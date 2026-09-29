@@ -50,6 +50,9 @@ def exchange_fixture(tmp_path, monkeypatch):
         equivalences_path=tmp_path / "equivalences.json",
         auth_mode="local",
     )
+    # Small batches keep these pre-existing partial/restart scenarios lightweight.
+    # Production limits are exercised without this override in iteration31 tests.
+    monkeypatch.setattr("nps_lens.services.taxonomy_exchange.CLASSIFICATION_BATCH_ROWS", 200)
     app = create_app(settings)
     service = app.state.dashboard_service.taxonomy
     frame = pd.DataFrame(
@@ -83,7 +86,12 @@ def classifier_files(manifest, inputs):
                 "classifications": [
                     {
                         "id": row["id"],
-                        "primary_classification": {"lever": "Atención", "sublever": "Resolución"},
+                        "primary": next(
+                            key
+                            for key, pair in inputs["taxonomy.json"]["categories"].items()
+                            if pair == {"lever": "Atención", "sublever": "Resolución"}
+                        ),
+                        "secondary": [],
                     }
                     for row in payload["comments"]
                 ]
@@ -141,7 +149,11 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
     assert response.status_code == 200, response.text
     classification = exported(response.json()["saved_path"])
-    assert classification["taxonomy.json"] == TAXONOMY
+    assert list(classification["taxonomy.json"]["categories"].values()) == [
+        {"lever": branch["lever"], "sublever": sub}
+        for branch in TAXONOMY["taxonomy"]
+        for sub in branch["sublevers"]
+    ]
     files = classifier_files(classification["manifest.json"], classification)
     partial = {"manifest": files["manifest"], "results": {"000001": files["results"]["000001"]}}
     first = handler.import_response(context, classifier_zip(partial), "classifier")
@@ -222,9 +234,7 @@ def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
     handler.import_response(context, designer_zip(handler, context), "designer")
     inputs = exported(handler.export(context, "classifier")["saved_path"])
     files = classifier_files(inputs["manifest.json"], inputs)
-    files["results"]["000001"]["classifications"][0]["primary_classification"][
-        "lever"
-    ] = "Inventada"
+    files["results"]["000001"]["classifications"][0]["primary"] = "Inventada"
     with pytest.raises((ValueError, TaxonomyDiscoveryError)):
         handler.import_response(context, classifier_zip(files), "classifier")
     assert "DISCOVERED" not in handler.taxonomy.state(context)["artifacts"]
@@ -235,7 +245,11 @@ def test_all_projects_share_strict_zip_validation(stage):
     from nps_lens.services.taxonomy_exchange import read_response
 
     manifest = {
-        "schema_version": "nps-lens-helix/2" if stage == "helix" else "nps-lens-comments/2",
+        "schema_version": {
+            "helix": "nps-lens-helix/3",
+            "classifier": "nps-lens-comments/3",
+            "designer": "nps-lens-comments/2",
+        }[stage],
         "stage": stage,
         "job_id": "test",
     }

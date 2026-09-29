@@ -786,7 +786,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     return EquivalenceExchange(handler.taxonomy, handler.downloads).export_concepts(
                         context, dashboard_layer._load_helix_df(context)
                     )
-                return handler.export(context, stage)
+                try:
+                    return handler.export(context, stage)
+                finally:
+                    if stage == "classifier":
+                        dashboard_layer.clear_caches()
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 

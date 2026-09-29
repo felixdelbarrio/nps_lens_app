@@ -12,19 +12,32 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Iterable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from nps_lens.analytics.taxonomy import signature
 from nps_lens.domain.models import UploadContext
 from nps_lens.platform.downloads import persist_download
+from nps_lens.services.classification_protocol import (
+    CLASSIFICATION_BATCH_BYTES,
+    CLASSIFICATION_BATCH_ROWS,
+    CLASSIFIER_MAX_ITEMS,
+    CLASSIFIER_SCHEMA,
+    HELIX_SCHEMA,
+    CompactCommentResponse,
+    category_catalog,
+)
 from nps_lens.services.taxonomy_discovery import (
-    ClassificationResponse,
     TaxonomyResponse,
     TaxonomyValidator,
 )
-from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
+from nps_lens.services.taxonomy_prompts import (
+    FALLBACK_LEVER,
+    FALLBACK_SUBLEVERS,
+    INSTRUCTIONS_VERSION,
+    PROJECT_INSTRUCTIONS,
+)
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 
 MAX_ZIP_BYTES = 32 * 1024 * 1024
@@ -38,6 +51,32 @@ MAX_RETAINED_JOBS = 3
 
 def encode(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+
+
+def bounded_batches(
+    items: Iterable[dict[str, Any]],
+    field: str,
+) -> dict[str, list[dict[str, Any]]]:
+    batches: dict[str, list[dict[str, Any]]] = {}
+    rows: list[dict[str, Any]] = []
+    overhead = len(encode({field: []}))
+    size = overhead
+    for row in items:
+        cost = len(encode(row))
+        if overhead + cost > CLASSIFICATION_BATCH_BYTES:
+            raise ValueError(
+                f"Un elemento supera {CLASSIFICATION_BATCH_BYTES:,} bytes; no se truncará."
+            )
+        if rows and (
+            len(rows) >= CLASSIFICATION_BATCH_ROWS or size + 1 + cost > CLASSIFICATION_BATCH_BYTES
+        ):
+            batches[f"{len(batches) + 1:06d}"] = rows
+            rows, size = [], overhead
+        size += cost + bool(rows)
+        rows.append(row)
+    if rows:
+        batches[f"{len(batches) + 1:06d}"] = rows
+    return batches
 
 
 def digest(value: Any) -> str:
@@ -119,9 +158,11 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
         raise ValueError("Proyecto desconocido.")
     files = read_zip(content)
     manifest = files.pop("manifest.json", None)
-    schema = {"helix": "nps-lens-helix/2", "normalizer": "nps-lens-normalization/1"}.get(
-        stage, "nps-lens-comments/2"
-    )
+    schema = {
+        "classifier": CLASSIFIER_SCHEMA,
+        "helix": HELIX_SCHEMA,
+        "normalizer": "nps-lens-normalization/1",
+    }.get(stage, "nps-lens-comments/2")
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != schema
@@ -130,7 +171,7 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
         or not manifest["job_id"]
     ):
         raise ValueError(
-            "manifest.json no corresponde al proyecto seleccionado. Usa el manifiesto de su exportación."
+            f"manifest.json incompatible con el proyecto seleccionado; se requiere {schema}. Exporta un nuevo ZIP."
         )
     valid = (
         set(files) == {"taxonomy.json" if stage == "designer" else "equivalences.json"}
@@ -221,13 +262,17 @@ class TaxonomyExchange:
 
     def _manifest(self, job: dict[str, Any], stage: str) -> dict[str, Any]:
         return {
-            "schema_version": "nps-lens-comments/2",
+            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-comments/2",
             "job_id": job["id"],
             "stage": stage,
             "corpus_sha256": job["corpus"],
             "taxonomy_mode": job["mode"],
             "manual_revision": job["manual_revision"],
-            "taxonomy_sha256": digest(job["taxonomy"]) if stage == "classifier" else None,
+            "taxonomy_sha256": (
+                digest({"categories": category_catalog(job["taxonomy"])})
+                if stage == "classifier"
+                else None
+            ),
             "batches": [
                 {"id": key, "count": len(rows), "sha256": digest({"comments": rows})}
                 for key, rows in job["batches"].items()
@@ -321,29 +366,71 @@ class TaxonomyExchange:
         state = self.taxonomy.state(context)
         mode = self.taxonomy.llm_mode(context) if pending else "DISCOVERED"
         taxonomy = self.taxonomy.catalog(context, mode) if pending else None
+        revision = state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
+        groups: dict[str, list[str]] = {}
         if pending:
             if not taxonomy or not taxonomy["taxonomy"]:
                 raise ValueError("Crea o importa primero la taxonomía de la lente LLM.")
             retained = self.assignments(context, frame, mode)
             frame = frame.loc[~frame["_business_key"].isin(retained)]
-        if frame.empty:
-            raise ValueError("No hay comentarios que exportar.")
-        batches: dict[str, list[dict[str, str]]] = {}
-        rows: list[dict[str, str]] = []
-        size = total = 0
-        for index, comment in enumerate(frame["Comment"].astype("string").fillna("")):
-            row = {"id": str(index + 1), "Comment": str(comment)}
-            cost = len(encode(row)) + 1
-            if cost > BATCH_BYTES:
-                raise ValueError("Un comentario supera 80.000 bytes; no se truncará.")
-            if rows and (len(rows) >= BATCH_ROWS or size + cost > BATCH_BYTES):
+            fallback = {"lever": FALLBACK_LEVER, "sublever": FALLBACK_SUBLEVERS[0]}
+            if fallback in category_catalog(taxonomy).values():
+                empty_keys = frame.loc[frame["Comment"].fillna("").eq(""), "_business_key"]
+                if len(empty_keys):
+                    retained.update(
+                        {
+                            key: {
+                                "primary_classification": fallback,
+                                "secondary_classifications": [],
+                            }
+                            for key in empty_keys
+                        }
+                    )
+                    with self.repository._connect() as db:
+                        self._persist_assignments(
+                            db,
+                            context,
+                            full_frame,
+                            {
+                                "mode": mode,
+                                "taxonomy": taxonomy,
+                                "manual_revision": revision,
+                                "instructions_version": INSTRUCTIONS_VERSION,
+                            },
+                            retained,
+                        )
+                    self._clear_caches()
+                    frame = frame.loc[~frame["_business_key"].isin(retained)]
+            # Sorted business keys choose stable representatives; text is never normalized.
+            for key, comment in zip(frame["_business_key"], frame["Comment"].fillna("")):
+                if comment in groups:
+                    groups[comment].append(key)
+                elif len(groups) < CLASSIFIER_MAX_ITEMS:
+                    groups[comment] = [key]
+            rows = [{"id": str(i), "Comment": text} for i, text in enumerate(groups, 1)]
+            if not rows:
+                return {"stage": "complete", "saved_path": None, "batches": 0}
+            batches = bounded_batches(rows, "comments")
+            total = sum(len(encode({"comments": rows})) for rows in batches.values())
+        else:
+            if frame.empty:
+                raise ValueError("No hay comentarios que exportar.")
+            batches = {}
+            rows = []
+            size = total = 0
+            for index, comment in enumerate(frame["Comment"].astype("string").fillna("")):
+                row = {"id": str(index + 1), "Comment": str(comment)}
+                cost = len(encode(row)) + 1
+                if cost > BATCH_BYTES:
+                    raise ValueError("Un comentario supera 80.000 bytes; no se truncará.")
+                if rows and (len(rows) >= BATCH_ROWS or size + cost > BATCH_BYTES):
+                    batches[f"{len(batches) + 1:06d}"] = rows
+                    rows, size = [], 0
+                rows.append(row)
+                size += cost
+                total += cost
+            if rows:
                 batches[f"{len(batches) + 1:06d}"] = rows
-                rows, size = [], 0
-            rows.append(row)
-            size += cost
-            total += cost
-        if rows:
-            batches[f"{len(batches) + 1:06d}"] = rows
         if total > MAX_EXPANDED_BYTES // 2 or len(batches) > MAX_MEMBERS - 4:
             raise ValueError(
                 "Corpus demasiado grande para un intercambio ZIP (64 MiB o 4092 lotes). Divide el dataset explícitamente."
@@ -351,11 +438,9 @@ class TaxonomyExchange:
         job = {
             "id": uuid.uuid4().hex,
             "corpus": self._corpus(context, full_frame),
-            "keys": frame["_business_key"].tolist(),
+            "groups": {str(i): keys for i, keys in enumerate(groups.values(), 1)},
             "mode": mode,
-            "manual_revision": (
-                state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
-            ),
+            "manual_revision": revision,
             "batches": batches,
             "taxonomy": taxonomy,
             "stage": "classifier" if pending else "designer",
@@ -373,7 +458,9 @@ class TaxonomyExchange:
             archive.writestr("manifest.json", encode(self._manifest(job, stage)))
             archive.writestr("INSTRUCCIONES.txt", PROJECT_INSTRUCTIONS[stage])
             if stage == "classifier":
-                archive.writestr("taxonomy.json", encode(job["taxonomy"]))
+                archive.writestr(
+                    "taxonomy.json", encode({"categories": category_catalog(job["taxonomy"])})
+                )
             for key, rows in job["batches"].items():
                 archive.writestr(f"comments/{key}.json", encode({"comments": rows}))
         content = output.getvalue()
@@ -429,21 +516,24 @@ class TaxonomyExchange:
             raise ValueError("El corpus ha cambiado. Exporta un nuevo ZIP; no se importó nada.")
         if job["taxonomy"] is None:
             raise ValueError("Importa primero la taxonomía.")
-        categories = {
-            branch["lever"]: set(branch["sublevers"]) for branch in job["taxonomy"]["taxonomy"]
-        }
+        categories = category_catalog(job["taxonomy"])
         if not files:
             raise ValueError("No hay resultados de clasificación.")
         validated = {}
         for key, payload in files.items():
             if key not in job["batches"]:
                 raise ValueError("Fichero de resultado no esperado.")
-            response = validate_payload(ClassificationResponse, payload, f"results/{key}.json")
+            response = validate_payload(CompactCommentResponse, payload, f"results/{key}.json")
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")
-            TaxonomyValidator._validate_batch(response, expected, categories)
-            validated[key] = encode(response.model_dump()).decode()
+            validated[key] = encode(
+                {
+                    "classifications": [
+                        {"id": row.id, **row.expand(categories)} for row in response.classifications
+                    ]
+                }
+            ).decode()
         retained = self.assignments(context, frame, mode)
         with self.repository._connect() as db:
             existing = dict(
@@ -456,60 +546,16 @@ class TaxonomyExchange:
                     raise ValueError("Un lote ya importado tiene un resultado diferente.")
             existing.update(validated)
             merged = retained
-            keys = dict(
-                zip((row["id"] for rows in job["batches"].values() for row in rows), job["keys"])
-            )
             for payload in existing.values():
                 for row in strict_json(payload.encode())["classifications"]:
-                    merged[keys[row["id"]]] = {
-                        key: value for key, value in row.items() if key != "id"
-                    }
-            assignments = [
-                merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
-                for key in frame["_business_key"]
-            ]
-            config = {
-                "method": "chatgpt_zip",
-                "taxonomy_mode": mode,
-                "taxonomy_sha256": digest(job["taxonomy"]),
-                "manual_revision": job["manual_revision"],
-                "instructions_version": job["instructions_version"],
-            }
-            sig = signature(frame, "DISCOVERED", config)
-            artifact = {
-                "mode": "DISCOVERED",
-                "signature": sig,
-                "keys": frame["_business_key"].tolist(),
-                "config": config,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "lever": [row["lever"] for row in assignments],
-                "sublever": [row["sublever"] for row in assignments],
-                "provenance": ["chatgpt_zip"] * len(assignments),
-                "secondary_classifications": {
-                    key: row["secondary_classifications"]
-                    for key, row in merged.items()
-                    if row["secondary_classifications"]
-                },
-                "nodes": [],
-                "taxonomy": job["taxonomy"],
-                "comment_hashes": {
-                    key: digest(str(comment))
-                    for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
-                },
-                "equivalences": {},
-            }
-            state = self.taxonomy.state(context)
-            state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[
-                mode
-            ] = sig
-            db.execute(
-                "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
-                (sig, context_key(context), "DISCOVERED", encode(artifact).decode()),
-            )
-            db.execute(
-                "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
-                (context_key(context), encode(state).decode()),
-            )
+                    value = {key: value for key, value in row.items() if key != "id"}
+                    for business_key in job["groups"][row["id"]]:
+                        if business_key in merged and merged[business_key] != value:
+                            raise ValueError(
+                                "Un comentario ya tiene una respuesta diferente para esa taxonomía."
+                            )
+                        merged[business_key] = value
+            self._persist_assignments(db, context, frame, job, merged)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
                 "UPDATE taxonomy_exchange SET payload=? WHERE id=?",
@@ -519,8 +565,7 @@ class TaxonomyExchange:
                 "INSERT OR IGNORE INTO taxonomy_exchange_batches VALUES (?, ?, ?)",
                 [(job["id"], key, payload) for key, payload in validated.items()],
             )
-        self.taxonomy._state_cache.clear()
-        self.taxonomy._cache.clear()
+        self._clear_caches()
         return {
             "job_id": job["id"],
             "stage": job["stage"],
@@ -533,3 +578,61 @@ class TaxonomyExchange:
                 "pending": len(frame) - len(merged),
             },
         }
+
+    def _persist_assignments(
+        self,
+        db: Any,
+        context: UploadContext,
+        frame: Any,
+        job: dict[str, Any],
+        merged: dict[str, Any],
+    ) -> None:
+        mode = job["mode"]
+        assignments = [
+            merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
+            for key in frame["_business_key"]
+        ]
+        config = {
+            "method": "chatgpt_zip",
+            "taxonomy_mode": mode,
+            "taxonomy_sha256": digest(job["taxonomy"]),
+            "manual_revision": job["manual_revision"],
+            "instructions_version": job["instructions_version"],
+        }
+        sig = signature(frame, "DISCOVERED", config)
+        artifact = {
+            "mode": "DISCOVERED",
+            "signature": sig,
+            "keys": frame["_business_key"].tolist(),
+            "config": config,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "lever": [row["lever"] for row in assignments],
+            "sublever": [row["sublever"] for row in assignments],
+            "provenance": ["chatgpt_zip"] * len(assignments),
+            "secondary_classifications": {
+                key: row["secondary_classifications"]
+                for key, row in merged.items()
+                if row["secondary_classifications"]
+            },
+            "nodes": [],
+            "taxonomy": job["taxonomy"],
+            "comment_hashes": {
+                key: digest(str(comment))
+                for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
+            },
+            "equivalences": {},
+        }
+        state = self.taxonomy.state(context)
+        state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[mode] = sig
+        db.execute(
+            "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+            (sig, context_key(context), "DISCOVERED", encode(artifact).decode()),
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
+            (context_key(context), encode(state).decode()),
+        )
+
+    def _clear_caches(self) -> None:
+        self.taxonomy._state_cache.clear()
+        self.taxonomy._cache.clear()

@@ -61,8 +61,8 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
     result = classifier_files(files["manifest.json"], files)
     result["results"] = {"000001": result["results"]["000001"]}
     for row in result["results"]["000001"]["classifications"]:
-        row["primary_classification"] = {"lever": "Acceso", "sublever": "Token"}
-        row["secondary_classifications"] = [{"lever": "Atención", "sublever": "Resolución"}]
+        row["primary"] = "c001"
+        row["secondary"] = ["c002"]
     handler.import_response(ctx, classifier_zip(result), "classifier")
     assert handler.progress(ctx)["multiple"] == 200
     assert handler.taxonomy.resolve(ctx, mode="SOURCE").Palanca.eq("Atención").sum() == 404
