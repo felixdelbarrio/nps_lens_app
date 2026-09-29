@@ -16,7 +16,7 @@ export function ClassificationEngineControl({kind, context, disabled, onChange}:
     catch(error) { setMessage(error instanceof Error ? error.message : "No se pudo cambiar el motor."); }
     finally {setBusy(false);}
   }
-  return <div className="classification-engine"><label className="switch-field"><input type="checkbox" role="switch" checked={data?.ready && data.engine === "llm"} disabled={disabled || busy || !data?.ready} onChange={e=>void change(e.target.checked ? "llm" : "rules")} />{kind === "helix" ? "Usar causalidad mediante LLM" : "Usar clasificación LLM"}</label>
+  return <div className="classification-engine"><label className="switch-field"><input type="checkbox" role="switch" checked={Boolean(data?.ready && data.engine === "llm")} disabled={disabled || busy || !data?.ready} onChange={e=>void change(e.target.checked ? "llm" : "rules")} />{kind === "helix" ? "Usar causalidad mediante LLM" : "Usar clasificación LLM"}</label>
     {data ? <p className="field-hint">Lente: {TAXONOMY_NAMES[data.active]}. {formatVolume(data.received)} de {formatVolume(data.total)} {kind === "helix" ? "incidencias" : "comentarios"} del ámbito visible procesados. {data.ready ? "" : data.reason}</p> : null}
     {message || error ? <p role="status">{message || error.message}</p> : null}
   </div>;

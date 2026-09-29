@@ -110,7 +110,8 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByLabel("Lente activa").selectOption("DISCOVERED");
   await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
-  await page.getByRole("button", {name:"Comentarios",exact:true}).click();
+  await page.getByRole("button", { name: /Insights/i }).click();
+  await page.getByRole("tab", { name: "Comentarios", exact: true }).click();
   const llmSwitch = page.getByRole("switch", {name:"Usar clasificación LLM"});
   await expect(llmSwitch).toBeEnabled();
   await llmSwitch.check();
