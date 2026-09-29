@@ -27,7 +27,7 @@ it("copies each exact server template and shares one read-only request", async (
   await waitFor(() => expect(designer).toBeEnabled());
   await user.click(designer);
   expect(clipboard).toHaveBeenLastCalledWith(instructions.designer);
-  await user.click(screen.getByRole("button", { name: "Copiar instrucciones de Clasifica taxonomía" }));
+  await user.click(screen.getByRole("button", { name: "Copiar instrucciones de Clasifica comentarios" }));
   expect(clipboard).toHaveBeenLastCalledWith(instructions.classifier);
   expect(screen.getAllByText(/Instrucciones copiadas/)).toHaveLength(2);
   expect(fetcher).toHaveBeenCalledTimes(1);

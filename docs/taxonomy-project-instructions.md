@@ -2,17 +2,18 @@
 
 Las plantillas oficiales están en `src/nps_lens/services/taxonomy_prompts.py` y
 Taxonomy Studio permite copiarlas debajo de las URLs. Deben sustituir por completo
-las instrucciones anteriores de **Crea Taxonomía** y **Clasifica taxonomía**.
+las instrucciones anteriores de **Crea Taxonomía**, **Clasifica comentarios** y **Helix Classifier**.
 
 ## Flujo vigente
 
 1. Taxonomy Studio exporta `nps-lens-designer-<job>.zip` a Descargas.
 2. El usuario lo adjunta al proyecto Crea Taxonomía en su navegador habitual.
 3. El proyecto devuelve un ZIP con `manifest.json` y `taxonomy.json`.
-4. Al importarlo, NPS Lens valida la taxonomía y exporta
-   `nps-lens-classifier-<job>.zip`.
-5. El usuario lo adjunta a Clasifica taxonomía e importa su ZIP de respuesta.
-6. NPS Lens publica DISCOVERED únicamente tras validar todos los lotes.
+4. Al importarlo, NPS Lens valida la taxonomía; el usuario exporta los pendientes
+   en `nps-lens-classifier-<job>.zip`.
+5. El usuario lo adjunta a Clasifica comentarios e importa su ZIP de respuesta.
+6. Cada importación válida publica las asignaciones recibidas en DISCOVERED y
+   actualiza el progreso acumulado del corpus. Se exportan solo los pendientes.
 
 NPS Lens no abre ni controla Chrome, no almacena una sesión de ChatGPT y no pide
 permisos de administración de aplicaciones en macOS. Los ZIP contienen comentarios
@@ -28,8 +29,8 @@ secuenciales y no exponen las claves internas de negocio.
 - Designer devuelve exactamente `manifest.json` y `taxonomy.json`.
 - Classifier devuelve `manifest.json` y uno o varios
   `results/NNNNNN.json` completos.
-- La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, pero no
-  se hace visible como taxonomía.
+- La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, y sus
+  asignaciones se pueden explorar y utilizar inmediatamente.
 - Repetir una respuesta idéntica es idempotente; una respuesta diferente para un
   lote ya importado se rechaza.
 - Un cambio del corpus, IDs ausentes o reordenados, categorías inventadas, JSON con
@@ -56,3 +57,16 @@ Las pruebas automatizadas verifican el contrato, seguridad, reanudación, reinic
 idempotencia, atomicidad, orden y recorrido UI/API. La precisión semántica real del
 modelo debe evaluarse aparte con un corpus etiquetado; una prueba simulada no puede
 garantizarla.
+
+## Helix y lente activa
+
+Helix exporta únicamente la lente activa. Su ZIP de respuesta contiene el manifiesto
+original y `results/NNNNNN.json`, con filas planas `id`, `lever`, `sublever`,
+`rationale` y `links`. Los campos de anotación adicionales se ignoran y no se guardan.
+Se validan IDs, orden, catálogo y cada vínculo antes de escribir ninguna asignación.
+Los resultados se conservan por lente y huella del corpus. Recrear Manual cambia su
+revisión e invalida sus resultados Helix, aunque las etiquetas sean iguales.
+
+El estado distingue procesadas, pendientes, con categoría, sin encaje y vínculos NPS;
+la cobertura es incidencias con categoría / total. Una incidencia sin encaje lleva
+ambas etiquetas vacías y ningún vínculo, y no vuelve a exportarse como pendiente.

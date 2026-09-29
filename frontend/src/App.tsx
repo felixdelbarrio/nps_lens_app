@@ -64,7 +64,6 @@ import {
 import { toBusinessCopy } from "./utils/businessCopy";
 
 const MAIN_AREAS = [
-  { id: "taxonomy", label: "Taxonomy Studio", description: "Lentes, cobertura y comparación", icon: "database" as const },
   {
     id: "insights",
     label: "Insights",
@@ -77,6 +76,7 @@ const MAIN_AREAS = [
     description: "Nuevas cargas e histórico",
     icon: "upload" as const
   },
+  { id: "taxonomy", label: "Taxonomy Studio", description: "Lentes, cobertura y comparación", icon: "database" as const },
   {
     id: "data",
     label: "Datos",
@@ -292,6 +292,7 @@ export function App() {
       return;
     }
     didHydrate.current = true;
+    setMainArea(config.nps_dataset.rows || config.helix_dataset.rows ? "insights" : "ingest");
     initialContextKey.current = config.default_service_origin;
     const latestYear = getLatestAvailableYear(config.available_years || []);
     const latestMonth = getLatestAvailableMonth(

@@ -725,9 +725,8 @@ export type TaxonomyStatus = {
   policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
   restored: boolean;
   discovery_local_available?: boolean;
-  helix_modes: TaxonomyMode[];
   discovered_catalog_available: boolean;
-  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number }>;
+  taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
   version: string;
