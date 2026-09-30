@@ -41,6 +41,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const staticOptions = available.filter(item => item.mode !== "DISCOVERED");
   const llmOptions = data.taxonomies.filter(item => item.mode === "DISCOVERED" ? data.discovered_catalog_available : item.available && item.selectable !== false);
   const llmMode = data.llm_active;
+  const exchangeKey = `${taxonomyUrl("", context)}:${llmMode}`;
   const staticMode = staticOptions.some(item => item.mode === data.active) ? data.active : staticOptions[0]?.mode || "";
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
@@ -56,8 +57,8 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><h3>Lente activa para LLM</h3><p>Esta taxonomía define las categorías para clasificar comentarios e incidencias. Cada lente conserva sus propios resultados.</p><label>Lente activa<select value={llmOptions.some(item => item.mode === llmMode) ? llmMode : ""} disabled={locked || !llmOptions.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{llm_active:e.target.value})))}><option value="" disabled>Selecciona una taxonomía</option>{llmOptions.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject role="classifier" context={context} url={discovery.classifier_url} disabled={locked} canExport={llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
-        <HelixClassifier context={context} mode={llmMode} url={discovery.helix_classifier_url} disabled={locked || !llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
+        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={context} url={discovery.classifier_url} disabled={locked} canExport={llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
+        <HelixClassifier key={`helix:${exchangeKey}`} context={context} mode={llmMode} url={discovery.helix_classifier_url} disabled={locked || !llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}

@@ -144,7 +144,10 @@ Procesa sucesivamente todos los lotes completos que permita la sesión. No te de
 voluntariamente tras el primero. Antes de devolver un parcial, intenta continuar con
 el siguiente lote. Solo ante un límite real devuelve únicamente lotes totalmente
 terminados y explica fuera del ZIP cuántos comentarios quedan pendientes.
-La aplicación acumula el progreso y exporta únicamente los pendientes en el siguiente ZIP.
+La aplicación descarga todos los pendientes repartidos en ZIP numerados, con un lote
+por archivo. Procesa solo el ZIP recibido; no solicites otros archivos para completarlo.
+Conserva índice y total en la salida: 1_4_comentarios.zip -> 1_4_comentarios_clasificados.zip.
+La aplicación acumula las respuestas de todos los ZIP; no necesita regenerarlos al importar.
 No incluyas comentarios originales. No inventes clasificaciones para aparentar completitud.
 """
 
@@ -197,6 +200,10 @@ voluntariamente tras el primero. Antes de devolver un parcial, intenta continuar
 el siguiente lote. Solo ante un límite real entrega lotes totalmente terminados e
 indica fuera del ZIP cuáles faltan. Nunca inventes resultados, omitas filas ni
 rellenes con valores genéricos para simular completitud.
+La descarga contiene ZIP numerados, con un lote de incidencias por archivo y toda
+la evidencia NPS necesaria. Procesa cada ZIP independientemente, sin mezclar manifiestos.
+Conserva índice y total: 1_3_incidencias_helix.zip -> 1_3_incidencias_helix_clasificadas.zip.
+La aplicación acumula las respuestas; no necesita regenerar ZIP al importar.
 Antes de entregar reabre el ZIP y valida esquema, manifiesto, IDs, conteos y parejas.
 """
 

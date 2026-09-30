@@ -7,6 +7,7 @@ import io
 import json
 import re
 import stat
+import tempfile
 import uuid
 import zipfile
 import zlib
@@ -22,7 +23,6 @@ from nps_lens.platform.downloads import persist_download
 from nps_lens.services.classification_protocol import (
     CLASSIFICATION_BATCH_BYTES,
     CLASSIFICATION_BATCH_ROWS,
-    CLASSIFIER_MAX_ITEMS,
     CLASSIFIER_SCHEMA,
     HELIX_SCHEMA,
     CompactCommentResponse,
@@ -186,6 +186,79 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
             f"El ZIP de respuesta debe contener únicamente manifest.json y {expected}."
         )
     return manifest, files
+
+
+def validate_manifest(manifest: dict[str, Any], expected: dict[str, Any]) -> set[str]:
+    """A response belongs to the exact batches advertised by its input ZIP."""
+    batches = manifest.get("batches")
+    known = {row["id"]: row for row in expected["batches"]}
+    if not isinstance(batches, list) or not batches or manifest != {**expected, "batches": batches}:
+        raise ValueError("El manifiesto no coincide con la exportación.")
+    ids: set[str] = set()
+    for batch in batches:
+        key = batch.get("id") if isinstance(batch, dict) else None
+        if not isinstance(key, str) or key in ids or known.get(key) != batch:
+            raise ValueError("El manifiesto contiene un lote desconocido, alterado o repetido.")
+        ids.add(key)
+    return ids
+
+
+def write_numbered_zips(
+    downloads: Path,
+    label: str,
+    manifest: dict[str, Any],
+    batches: dict[str, list[dict[str, Any]]],
+    shared: dict[str, Any],
+    field: str,
+) -> dict[str, Any]:
+    """Publish a complete folder atomically, compressing shared evidence only once."""
+    instructions = PROJECT_INSTRUCTIONS[manifest["stage"]].encode()
+    expanded = len(instructions)
+    if len(shared) + 3 > MAX_MEMBERS:
+        raise ValueError("Demasiados ficheros para un intercambio ZIP.")
+    base = io.BytesIO()
+    with zipfile.ZipFile(base, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("INSTRUCCIONES.txt", instructions)
+        for name, payload in shared.items():
+            raw = encode(payload)
+            expanded += len(raw)
+            if len(raw) > MAX_MEMBER_BYTES or expanded > MAX_EXPANDED_BYTES:
+                raise ValueError(
+                    "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                )
+            archive.writestr(name, raw)
+    base_content = base.getvalue()
+    if len(base_content) > MAX_ZIP_BYTES:
+        raise ValueError("El ZIP de entrada supera 32 MiB.")
+    directory = downloads / f"{label}-{datetime.now():%Y%m%d-%H%M%S}-{manifest['job_id']}"
+    downloads.mkdir(parents=True, exist_ok=True)
+    paths = []
+    with tempfile.TemporaryDirectory(prefix=".nps-lens-", dir=downloads) as temporary:
+        for index, batch in enumerate(manifest["batches"], 1):
+            key = batch["id"]
+            parts = {
+                "manifest.json": encode({**manifest, "batches": [batch]}),
+                f"{field}/{key}.json": encode({field: batches[key]}),
+            }
+            if (
+                any(len(raw) > MAX_MEMBER_BYTES for raw in parts.values())
+                or expanded + sum(map(len, parts.values())) > MAX_EXPANDED_BYTES
+            ):
+                raise ValueError(
+                    "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                )
+            output = io.BytesIO(base_content)
+            with zipfile.ZipFile(output, "a", zipfile.ZIP_DEFLATED) as archive:
+                for name, raw in parts.items():
+                    archive.writestr(name, raw)
+            content = output.getvalue()
+            if len(content) > MAX_ZIP_BYTES:
+                raise ValueError("El ZIP de entrada supera 32 MiB.")
+            name = f"{index}_{len(batches)}_{label}.zip"
+            persist_download(content, name, Path(temporary))
+            paths.append(str(directory / name))
+        Path(temporary).rename(directory)
+    return {"saved_paths": paths, "saved_directory": str(directory), "batches": len(paths)}
 
 
 class TaxonomyExchange:
@@ -374,7 +447,8 @@ class TaxonomyExchange:
             retained = self.assignments(context, frame, mode)
             frame = frame.loc[~frame["_business_key"].isin(retained)]
             fallback = {"lever": FALLBACK_LEVER, "sublever": FALLBACK_SUBLEVERS[0]}
-            if fallback in category_catalog(taxonomy).values():
+            categories = category_catalog(taxonomy)
+            if fallback in categories.values():
                 empty_keys = frame.loc[frame["Comment"].fillna("").eq(""), "_business_key"]
                 if len(empty_keys):
                     retained.update(
@@ -405,13 +479,17 @@ class TaxonomyExchange:
             for key, comment in zip(frame["_business_key"], frame["Comment"].fillna("")):
                 if comment in groups:
                     groups[comment].append(key)
-                elif len(groups) < CLASSIFIER_MAX_ITEMS:
+                else:
                     groups[comment] = [key]
             rows = [{"id": str(i), "Comment": text} for i, text in enumerate(groups, 1)]
             if not rows:
-                return {"stage": "complete", "saved_path": None, "batches": 0}
+                return {
+                    "stage": "complete",
+                    "saved_paths": [],
+                    "saved_directory": None,
+                    "batches": 0,
+                }
             batches = bounded_batches(rows, "comments")
-            total = sum(len(encode({"comments": rows})) for rows in batches.values())
         else:
             if frame.empty:
                 raise ValueError("No hay comentarios que exportar.")
@@ -431,7 +509,7 @@ class TaxonomyExchange:
                 total += cost
             if rows:
                 batches[f"{len(batches) + 1:06d}"] = rows
-        if total > MAX_EXPANDED_BYTES // 2 or len(batches) > MAX_MEMBERS - 4:
+        if not pending and (total > MAX_EXPANDED_BYTES // 2 or len(batches) > MAX_MEMBERS - 4):
             raise ValueError(
                 "Corpus demasiado grande para un intercambio ZIP (64 MiB o 4092 lotes). Divide el dataset explícitamente."
             )
@@ -446,10 +524,18 @@ class TaxonomyExchange:
             "stage": "classifier" if pending else "designer",
             "instructions_version": INSTRUCTIONS_VERSION,
         }
-        result = self._write(job)
-        if pending:
-            self._save(context, job)
-        return result
+        if not pending:
+            return self._write(job)
+        result = write_numbered_zips(
+            self.downloads,
+            "comentarios",
+            self._manifest(job, "classifier"),
+            batches,
+            {"taxonomy.json": {"categories": categories}},
+            "comments",
+        )
+        self._save(context, job)
+        return {**result, "job_id": job["id"], "stage": "classifier"}
 
     def _write(self, job: dict[str, Any]) -> dict[str, Any]:
         stage = job["stage"]
@@ -457,10 +543,6 @@ class TaxonomyExchange:
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             archive.writestr("manifest.json", encode(self._manifest(job, stage)))
             archive.writestr("INSTRUCCIONES.txt", PROJECT_INSTRUCTIONS[stage])
-            if stage == "classifier":
-                archive.writestr(
-                    "taxonomy.json", encode({"categories": category_catalog(job["taxonomy"])})
-                )
             for key, rows in job["batches"].items():
                 archive.writestr(f"comments/{key}.json", encode({"comments": rows}))
         content = output.getvalue()
@@ -510,8 +592,7 @@ class TaxonomyExchange:
             != self.taxonomy.state(context).get("artifacts", {}).get(mode, "")
         ):
             raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")
-        if manifest != self._manifest(job, "classifier"):
-            raise ValueError("El manifiesto no coincide con la exportación.")
+        allowed_batches = validate_manifest(manifest, self._manifest(job, "classifier"))
         if self._corpus(context, frame) != job["corpus"]:
             raise ValueError("El corpus ha cambiado. Exporta un nuevo ZIP; no se importó nada.")
         if job["taxonomy"] is None:
@@ -521,8 +602,8 @@ class TaxonomyExchange:
             raise ValueError("No hay resultados de clasificación.")
         validated = {}
         for key, payload in files.items():
-            if key not in job["batches"]:
-                raise ValueError("Fichero de resultado no esperado.")
+            if key not in allowed_batches:
+                raise ValueError("Fichero de resultado no esperado en este ZIP.")
             response = validate_payload(CompactCommentResponse, payload, f"results/{key}.json")
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:

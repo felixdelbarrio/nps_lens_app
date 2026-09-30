@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import io
 import uuid
-import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -17,27 +15,22 @@ from nps_lens.analytics.taxonomy import MODES
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
-from nps_lens.platform.downloads import persist_download
 from nps_lens.services.classification_protocol import (
-    HELIX_MAX_ITEMS,
     HELIX_SCHEMA,
     CompactClassification,
     category_catalog,
 )
 from nps_lens.services.taxonomy_exchange import (
-    MAX_EXPANDED_BYTES,
-    MAX_MEMBER_BYTES,
-    MAX_MEMBERS,
-    MAX_ZIP_BYTES,
     TaxonomyExchange,
     bounded_batches,
     digest,
     encode,
     read_response,
     strict_json,
+    validate_manifest,
     validate_payload,
+    write_numbered_zips,
 )
-from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 
 
@@ -215,10 +208,8 @@ class HelixExchange:
             modes = [mode for mode in inputs["modes"] if row["id"] not in known[mode]]
             if modes:
                 pending.append({**row, "pending_taxonomies": modes})
-                if len(pending) == HELIX_MAX_ITEMS:
-                    break
         if not pending:
-            raise ValueError("No hay incidencias pendientes para la lente activa.")
+            return {"saved_paths": [], "saved_directory": None, "batches": 0, "pending": 0}
         job_id = uuid.uuid4().hex
         batches = bounded_batches(pending, "incidents")
         catalogs = {
@@ -257,30 +248,13 @@ class HelixExchange:
                 for key, rows in batches.items()
             ],
         }
-        files = {"manifest.json": manifest, "taxonomies.json": catalogs}
-        files.update(
-            {f"incidents/{key}.json": {"incidents": rows} for key, rows in batches.items()}
+        shared: dict[str, Any] = {"taxonomies.json": catalogs}
+        shared.update(
+            {f"comments/{key}.json": {"comments": rows} for key, rows in evidence.items()}
         )
-        files.update({f"comments/{key}.json": {"comments": rows} for key, rows in evidence.items()})
-        if len(files) >= MAX_MEMBERS:
-            raise ValueError("El corpus supera los límites del intercambio ZIP; reduce el dataset.")
-        instructions = PROJECT_INSTRUCTIONS["helix"].encode()
-        expanded_size = len(instructions)
-        output = io.BytesIO()
-        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, payload in files.items():
-                raw = encode(payload)
-                expanded_size += len(raw)
-                if len(raw) > MAX_MEMBER_BYTES or expanded_size > MAX_EXPANDED_BYTES:
-                    raise ValueError(
-                        "El corpus supera los límites del intercambio ZIP; reduce el dataset."
-                    )
-                archive.writestr(name, raw)
-            archive.writestr("INSTRUCCIONES.txt", instructions)
-        content = output.getvalue()
-        if len(content) > MAX_ZIP_BYTES:
-            raise ValueError("ZIP demasiado grande.")
-        path = persist_download(content, f"nps-lens-helix-{job_id}.zip", self.downloads)
+        result = write_numbered_zips(
+            self.downloads, "incidencias_helix", manifest, batches, shared, "incidents"
+        )
         job = {"manifest": manifest, "batches": batches}
         with self.repository._connect() as db:
             db.execute(
@@ -291,7 +265,7 @@ class HelixExchange:
                 "DELETE FROM helix_exchange WHERE context=? AND id NOT IN (SELECT id FROM helix_exchange WHERE context=? ORDER BY rowid DESC LIMIT 3)",
                 (context_key(context), context_key(context)),
             )
-        return {"saved_path": str(path), "pending": len(pending)}
+        return {**result, "pending": len(pending)}
 
     def import_response(
         self, context: UploadContext, inputs: dict[str, Any], content: bytes
@@ -305,7 +279,8 @@ class HelixExchange:
         if not found:
             raise ValueError("El intercambio no pertenece a este dataset.")
         job = strict_json(found[0].encode())
-        if manifest != job["manifest"] or manifest["taxonomy_scopes"] != inputs["scopes"]:
+        allowed_batches = validate_manifest(manifest, job["manifest"])
+        if manifest["taxonomy_scopes"] != inputs["scopes"]:
             raise ValueError(
                 "La selección, las taxonomías o el corpus han cambiado; exporta de nuevo."
             )
@@ -319,7 +294,7 @@ class HelixExchange:
             raise ValueError("No hay lotes de respuesta.")
         for name, payload in files.items():
             key = name.removeprefix("results/").removesuffix(".json")
-            if name != f"results/{key}.json" or key not in job["batches"]:
+            if name != f"results/{key}.json" or key not in allowed_batches:
                 raise ValueError("Lote de respuesta desconocido.")
             response = validate_payload(IncidentResponse, payload, name)
             expected = job["batches"][key]

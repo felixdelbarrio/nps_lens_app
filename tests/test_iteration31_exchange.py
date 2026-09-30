@@ -55,7 +55,7 @@ def test_exact_text_fanout_local_empty_restart_and_individual_fingerprints(excha
         exchange, monkeypatch, [None, "", "NO", "NO", "no", "texto", "texto ", " "]
     )
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     sent = request["comments/000001.json"]["comments"]
     assert [row["Comment"] for row in sent] == ["NO", "no", "texto", "texto ", " "]
     assert handler.progress(ctx)["received"] == 2
@@ -78,11 +78,11 @@ def test_exact_text_fanout_local_empty_restart_and_individual_fingerprints(excha
     assert values[frame.iloc[3]._business_key]["secondary_classifications"] == [
         {"lever": "Sin clasificación temática", "sublever": "Tema no cubierto"}
     ]
-    assert handler.export(ctx, "classifier")["saved_path"] is None
+    assert handler.export(ctx, "classifier")["saved_paths"] == []
     frame.loc[3, "Comment"] = "changed"
     handler = restart(handler, frame, monkeypatch)
     assert handler.progress(ctx)["received"] == 7
-    new = exported(handler.export(ctx, "classifier")["saved_path"])
+    new = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert new["comments/000001.json"]["comments"] == [{"id": "1", "Comment": "changed"}]
     with pytest.raises(ValueError, match="corpus"):
         handler.import_response(ctx, classifier_zip(response), "classifier")
@@ -95,21 +95,26 @@ def test_all_empty_resolves_only_when_exact_fallback_exists(exchange, monkeypatc
         handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     result = handler.export(ctx, "classifier")
     if fallback:
-        assert result == {"stage": "complete", "saved_path": None, "batches": 0}
+        assert result == {
+            "stage": "complete",
+            "saved_paths": [],
+            "saved_directory": None,
+            "batches": 0,
+        }
         assert handler.progress(ctx)["pending"] == 0
         assert restart(handler, frame, monkeypatch).progress(ctx)["received"] == 3
     else:
-        request = exported(result["saved_path"])
+        request = exported(result["saved_paths"])
         assert request["comments/000001.json"]["comments"] == [{"id": "1", "Comment": ""}]
         assert handler.progress(ctx)["pending"] == 3
 
 
-def test_classifier_cap_batches_pending_fanout_beyond_cap_and_restart(exchange, monkeypatch):
+def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch):
     comments = [f"comment {i}" for i in range(4_003)] + ["comment 0", "comment 4001"]
     handler, ctx, frame = set_comments(exchange, monkeypatch, comments)
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert request["manifest.json"]["schema_version"] == "nps-lens-comments/3"
-    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000] * 4
+    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000] * 4 + [3]
     assert request["manifest.json"]["taxonomy_sha256"] == digest(request["taxonomy.json"])
     for batch in request["manifest.json"]["batches"]:
         assert batch["sha256"] == digest(request[f"comments/{batch['id']}.json"])
@@ -118,7 +123,7 @@ def test_classifier_cap_batches_pending_fanout_beyond_cap_and_restart(exchange, 
     result = handler.import_response(ctx, classifier_zip(response), "classifier")
     assert result["progress"]["received"] == 1_001
     handler = restart(handler, frame, monkeypatch)
-    next_request = exported(handler.export(ctx, "classifier")["saved_path"])
+    next_request = exported(handler.export(ctx, "classifier")["saved_paths"])
     pending = [
         row["Comment"]
         for name, batch in next_request.items()
@@ -149,7 +154,7 @@ def test_classifier_cap_batches_pending_fanout_beyond_cap_and_restart(exchange, 
 def test_classifier_rejects_compact_category_errors_atomically(exchange, changes):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     response["results"]["000001"]["classifications"][-1].update(changes)
     with pytest.raises(ValueError):
@@ -188,7 +193,7 @@ def test_catalog_ids_deterministic_and_legacy_persisted_labels_survive(exchange)
             },
         )
     assert handler.progress(ctx)["received"] == 1
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert sum(b["count"] for b in request["manifest.json"]["batches"]) == len(frame) - 1
     response = classifier_files(request["manifest.json"], request)
     response["manifest"]["schema_version"] = "nps-lens-comments/2"
@@ -197,15 +202,15 @@ def test_catalog_ids_deterministic_and_legacy_persisted_labels_survive(exchange)
     assert handler.progress(ctx)["received"] == 1
 
 
-def test_helix_cap_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
+def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
     handler, ctx, frame, original, _ = helix
     incidents = pd.concat([original.iloc[:1]] * 2_005, ignore_index=True)
     incidents["Incident Number"] = [f"INC-{i}" for i in range(len(incidents))]
     incidents.loc[0, "Detailed Description"] = ""
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     assert request["manifest.json"]["schema_version"] == "nps-lens-helix/3"
-    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000, 1_000]
+    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000, 1_000, 5]
     assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-0"
     assert handler.status(ctx, inputs)["received"] == 0
     assert request["comments/000001.json"]["comments"][0] == {
@@ -215,14 +220,18 @@ def test_helix_cap_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
         "secondary": [],
     }
     response = helix_response(request, inputs["comments"][0]["id"])
-    response.pop("results/000002.json")
+    response = {
+        key: value
+        for key, value in response.items()
+        if key in ("manifest.json", "results/000001.json")
+    }
     response["results/000001.json"]["classifications"][0].update(
         primary=None, secondary=[], links=[]
     )
     assert handler.import_response(ctx, inputs, zipped(response))["received"] == 1_000
     handler = restart(handler, frame, monkeypatch)
     assert handler.status(ctx, inputs)["unassigned"] == 1
-    next_request = exported(handler.export(ctx, inputs)["saved_path"])
+    next_request = exported(handler.export(ctx, inputs)["saved_paths"])
     assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [1_000, 5]
     assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-1000"
     response = helix_response(next_request, inputs["comments"][0]["id"])
@@ -249,7 +258,7 @@ def test_helix_cap_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
 def test_helix_rejects_invalid_category_rationale_or_links(helix, changes):
     handler, ctx, _, incidents, _ = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, inputs["comments"][0]["id"])
     response["results/000001.json"]["classifications"][-1].update(changes)
     with pytest.raises(ValueError):
@@ -263,14 +272,14 @@ def test_helix_rejects_invalid_category_rationale_or_links(helix, changes):
 def test_helix_secondary_evidence_and_link_coherence(exchange, monkeypatch):
     handler, ctx, frame = set_comments(exchange, monkeypatch, ["dos temas", "otro"])
     frame.loc[1, ["Palanca", "Subpalanca"]] = ["Acceso", "Token"]
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     response["results"]["000001"]["classifications"][0]["secondary"] = ["c001"]
     handler.import_response(ctx, classifier_zip(response), "classifier")
     helix = HelixExchange(handler.taxonomy, handler.downloads)
     incidents = pd.DataFrame({"Incident Number": ["INC"], "Detailed Description": ["dos temas"]})
     inputs = helix.inputs(ctx, incidents, "SOURCE")
-    request = exported(helix.export(ctx, inputs)["saved_path"])
+    request = exported(helix.export(ctx, inputs)["saved_paths"])
     assert request["comments/000001.json"]["comments"][0]["secondary"] == ["c001"]
     response = helix_response(request, inputs["comments"][0]["id"])
     row = response["results/000001.json"]["classifications"][0]
@@ -310,7 +319,7 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
             else helix.export(ctx, helix.inputs(ctx, incidents, "SOURCE"))
         )
 
-    request = exported(export()["saved_path"])
+    request = exported(export()["saved_paths"])
     prefix = "incidents/" if stage == "helix" else "comments/"
     batches = [v for k, v in request.items() if k.startswith(prefix)]
     assert len(batches) == 2
@@ -326,8 +335,8 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
 def test_classifier_conflicting_jobs_do_not_overwrite_fanout(exchange, monkeypatch):
     handler, ctx, frame = set_comments(exchange, monkeypatch, ["igual", "igual"])
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
-    first = exported(handler.export(ctx, "classifier")["saved_path"])
-    second = exported(handler.export(ctx, "classifier")["saved_path"])
+    first = exported(handler.export(ctx, "classifier")["saved_paths"])
+    second = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(first["manifest.json"], first)
     handler.import_response(ctx, classifier_zip(response), "classifier")
     response = classifier_files(second["manifest.json"], second)
@@ -350,7 +359,7 @@ def test_empty_assignments_keep_lens_and_catalog_invalidation(exchange, monkeypa
     else:
         handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     handler.taxonomy.configure(ctx, {"llm_active": mode})
-    assert handler.export(ctx, "classifier")["saved_path"] is None
+    assert handler.export(ctx, "classifier")["saved_paths"] == []
     assert handler.progress(ctx)["received"] == 2
     if mode == "SOURCE":
         frame["Palanca"], frame["Subpalanca"] = "Otra", "Categoría"

@@ -8,8 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CLASSIFICATION_BATCH_ROWS = 1_000
 CLASSIFICATION_BATCH_BYTES = 300_000
-CLASSIFIER_MAX_ITEMS = 4_000
-HELIX_MAX_ITEMS = 2_000
 CLASSIFIER_SCHEMA = "nps-lens-comments/3"
 HELIX_SCHEMA = "nps-lens-helix/3"
 

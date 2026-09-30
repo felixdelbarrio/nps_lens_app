@@ -57,7 +57,7 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
     frame["Fecha"], frame["NPS"] = pd.Timestamp("2026-10-01"), 2
     frame.loc[:199, "Fecha"] = pd.Timestamp("2026-09-01")
     handler.taxonomy.configure(ctx, {"llm_active": "SOURCE"})
-    files = exported(handler.export(ctx, "classifier")["saved_path"])
+    files = exported(handler.export(ctx, "classifier")["saved_paths"])
     result = classifier_files(files["manifest.json"], files)
     result["results"] = {"000001": result["results"]["000001"]}
     for row in result["results"]["000001"]["classifications"]:
@@ -103,7 +103,7 @@ def test_helix_toggle_uses_visible_window_and_llm_links_obey_dates(helix, monkey
     dashboard = client.app.state.dashboard_service
     monkeypatch.setattr(dashboard, "_load_helix_df", lambda *args, **kwargs: incidents)
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    files = exported(handler.export(ctx, inputs)["saved_path"])
+    files = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(files, inputs["comments"][0]["id"])
     partial = {name: value for name, value in response.items() if name != "results/000002.json"}
     handler.import_response(ctx, inputs, zipped(partial))

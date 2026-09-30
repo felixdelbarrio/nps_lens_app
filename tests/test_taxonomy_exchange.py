@@ -33,6 +33,17 @@ def zipped(files):
 
 
 def exported(path):
+    # Consolidate a series only for the existing multi-batch import regression cases.
+    # Numbered ZIPs are exercised individually by test_numbered_exchange.
+    if isinstance(path, list):
+        combined = {}
+        batches = []
+        for member in path:
+            files = exported(member)
+            batches.extend(files["manifest.json"]["batches"])
+            combined.update(files)
+        combined["manifest.json"]["batches"] = batches
+        return combined
     with zipfile.ZipFile(path) as archive:
         return {
             name: json.loads(archive.read(name))
@@ -148,7 +159,7 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     assert "saved_path" not in result.json()
     response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
     assert response.status_code == 200, response.text
-    classification = exported(response.json()["saved_path"])
+    classification = exported(response.json()["saved_paths"])
     assert list(classification["taxonomy.json"]["categories"].values()) == [
         {"lever": branch["lever"], "sublever": sub}
         for branch in TAXONOMY["taxonomy"]
@@ -179,7 +190,7 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
 def test_changed_corpus_and_foreign_job_rejected(exchange):
     handler, context, frame, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
-    original = exported(handler.export(context, "classifier")["saved_path"])
+    original = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(original["manifest.json"], original)
     with pytest.raises(ValueError, match="dataset"):
         handler.import_response(
@@ -196,7 +207,7 @@ def test_exchange_history_is_bounded(exchange):
     jobs = [handler.export(context, "classifier") for _ in range(4)]
     with handler.repository._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM taxonomy_exchange").fetchone()[0] == 3
-    oldest = exported(jobs[0]["saved_path"])
+    oldest = exported(jobs[0]["saved_paths"])
     with pytest.raises(ValueError, match="intercambio"):
         handler.import_response(
             context, classifier_zip(classifier_files(oldest["manifest.json"], oldest)), "classifier"
@@ -232,7 +243,7 @@ def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
     with pytest.raises(ValueError):
         handler.import_response(context, zipped({"taxonomy.json": TAXONOMY}), "designer")
     handler.import_response(context, designer_zip(handler, context), "designer")
-    inputs = exported(handler.export(context, "classifier")["saved_path"])
+    inputs = exported(handler.export(context, "classifier")["saved_paths"])
     files = classifier_files(inputs["manifest.json"], inputs)
     files["results"]["000001"]["classifications"][0]["primary"] = "Inventada"
     with pytest.raises((ValueError, TaxonomyDiscoveryError)):

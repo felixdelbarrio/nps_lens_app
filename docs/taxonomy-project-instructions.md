@@ -40,7 +40,7 @@ al corpus, taxonomía, conteos y SHA-256 de cada lote. Los IDs enviados son opac
 secuenciales y no exponen las claves internas de negocio.
 
 - Designer devuelve exactamente `manifest.json` y `taxonomy.json`.
-- Classifier envía como máximo 4.000 representantes de textos exactamente iguales,
+- Classifier exporta todos los representantes pendientes de textos exactamente iguales,
   sin normalizar mayúsculas ni espacios. Antes resuelve localmente los vacíos
   (`fillna("")`) solo si existe `Sin clasificación temática / Información insuficiente`.
   Persiste cada asignación con la huella individual del comentario, incluidas las
@@ -49,9 +49,12 @@ secuenciales y no exponen las claves internas de negocio.
   `{"classifications":[{"id":"1","primary":"c001","secondary":["c002"]}]}`.
   `taxonomy.json.categories` contiene el mapping determinista ID → lever/sublever;
   se reconstruyen las etiquetas antes de persistirlas. No cambia analytics/reporting.
-- Tras importar, la UI refresca el progreso y prepara automáticamente el siguiente
-  ZIP si quedan pendientes. Muestra su ruta y mantiene la exportación manual.
-  Un fallo de esa segunda llamada no revierte la importación.
+- Una descarga prepara todos los ZIP pendientes, con un lote por archivo, en una
+  carpeta propia de Descargas: `1_2_comentarios.zip`, `2_2_comentarios.zip` o
+  `1_2_incidencias_helix.zip`, `2_2_incidencias_helix.zip`. La UI muestra la carpeta
+  y los archivos. Cada respuesta se importa por separado, en cualquier orden.
+  Importar actualiza el progreso sin generar otros ZIP. Una nueva descarga manual
+  contiene solo pendientes. Se conservan las tres últimas series completas.
 - ZIP classifier/Helix anteriores a v3 se rechazan explícitamente. Las asignaciones
   ya persistidas siguen vigentes mientras sus huellas y catálogos sean válidos.
 - La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, y sus
@@ -78,8 +81,7 @@ NaN/Infinity y archivos o expansiones por encima de los límites. La escritura e
 Descargas es atómica.
 
 El límite es 32 MiB comprimidos, 128 MiB expandidos, 2 MiB por JSON y 4.096 entradas.
-Designer conserva el límite de corpus de 64 MiB. Classifier acota representantes y
-Helix incidencias por intercambio; el resto queda pendiente para el siguiente ZIP.
+Designer conserva el límite de corpus de 64 MiB. Classifier y Helix dividen todos los pendientes en ZIP de un lote cada uno.
 Helix sigue incluyendo toda la evidencia NPS y rechaza corpus que superen la seguridad ZIP. Estas son salvaguardas locales, no límites garantizados de ChatGPT.
 
 Las pruebas automatizadas verifican el contrato, seguridad, reanudación, reinicio,
@@ -93,7 +95,7 @@ Helix exporta únicamente la lente activa. Su ZIP de respuesta contiene el manif
 original y `results/NNNNNN.json`, con filas planas `id`, `primary`, `secondary`,
 `rationale` y `links`. `taxonomies.json` contiene el mapping de categorías por lente.
 Las evidencias NPS usan los mismos IDs en `primary` y `secondary`, conservando todo
-el corpus y los IDs enlazables. Cada ZIP envía hasta 2.000 incidencias pendientes;
+el corpus y los IDs enlazables. Cada ZIP envía un lote de hasta 1.000 incidencias pendientes;
 no se deduplican por descripción ni se preclasifican las vacías. Los campos de anotación adicionales se ignoran y no se guardan.
 Se validan IDs, orden, catálogo y cada vínculo antes de escribir ninguna asignación.
 Los resultados se conservan por lente y huella del corpus. Recrear Manual cambia su
@@ -114,6 +116,6 @@ Las categorías adicionales aportan contexto sin multiplicar los volúmenes NPS.
 
 Python puede usarse en ChatGPT para leer, indexar, validar y construir ZIP/JSON,
 nunca para ejecutar datos de entrada ni sustituir decisiones semánticas por reglas.
-Las instrucciones piden continuar con todos los lotes completos posibles antes de
-entregar un parcial; los límites reales de la sesión pueden seguir requiriendo
-varios intercambios. Hay que actualizar las instrucciones de ambos Proyectos ChatGPT.
+Cada ZIP se procesa por separado y la respuesta conserva su número de archivo.
+Los límites reales de la sesión del modelo pueden impedir completar un lote;
+la división no garantiza su capacidad de procesamiento. Hay que actualizar las instrucciones de ambos Proyectos ChatGPT.

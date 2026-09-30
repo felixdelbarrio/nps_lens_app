@@ -21,7 +21,7 @@ from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 
 def discover(handler, context):
     handler.import_response(context, designer_zip(handler, context), "designer")
-    files = exported(handler.export(context, "classifier")["saved_path"])
+    files = exported(handler.export(context, "classifier")["saved_paths"])
     handler.import_response(
         context, classifier_zip(classifier_files(files["manifest.json"], files)), "classifier"
     )
@@ -30,10 +30,10 @@ def discover(handler, context):
 def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exchange):
     handler, context, frame, _ = exchange
     discover(handler, context)
-    assert handler.export(context, stage="classifier")["saved_path"] is None
+    assert handler.export(context, stage="classifier")["saved_paths"] == []
     frame.loc[0, "Comment"] = "Ahora no funciona"
     frame.loc[len(frame)] = ["new-key", "Otra incidencia", "", "", "Web"]
-    pending = exported(handler.export(context, stage="classifier")["saved_path"])
+    pending = exported(handler.export(context, stage="classifier")["saved_paths"])
     sent = [
         row
         for name, batch in pending.items()
@@ -131,7 +131,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     with pytest.raises(ValueError, match="Importa"):
         handler.links(ctx, inputs, frame, incidents)
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, inputs["comments"][0]["id"])
     partial = {
         "manifest.json": response["manifest.json"],
@@ -139,7 +139,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     }
     assert handler.import_response(ctx, inputs, zipped(partial))["pending"] == 1
     assert not handler.status(ctx, inputs)["ready"]
-    pending = exported(handler.export(ctx, inputs)["saved_path"])
+    pending = exported(handler.export(ctx, inputs)["saved_paths"])
     assert pending["incidents/000001.json"]["incidents"][0]["id"] == "INC-200"
     invalid = copy.deepcopy(response)
     invalid["results/000002.json"]["classifications"][0]["primary"] = "Inventada"
@@ -177,7 +177,7 @@ def test_helix_partial_pending_atomic_and_stale(helix):
 def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monkeypatch):
     handler, ctx, frame, incidents, client = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, inputs["comments"][0]["id"], entity)
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
     dashboard = client.app.state.dashboard_service
@@ -235,7 +235,7 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     frame["NPS"] = 2
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     handler.import_response(
         ctx, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))
     )
@@ -275,14 +275,14 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
     discover(exchange, ctx)
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
     source = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, source)["saved_path"])
+    request = exported(handler.export(ctx, source)["saved_paths"])
     handler.import_response(
         ctx, source, zipped(helix_response(request, source["comments"][0]["id"]))
     )
     for mode in ["COMPLETED", "DISCOVERED"]:
         current = handler.inputs(ctx, incidents, mode)
         assert handler.status(ctx, current)["pending"] == 201
-        request = exported(handler.export(ctx, current)["saved_path"])
+        request = exported(handler.export(ctx, current)["saved_paths"])
         assert list(request["manifest.json"]["taxonomy_scopes"]) == [mode]
         response = helix_response(request, current["comments"][0]["id"])
         assert handler.import_response(ctx, current, zipped(response))["ready"]
@@ -307,7 +307,7 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
-    request = exported(handler.export(ctx, "classifier")["saved_path"])
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     handler.import_response(
         ctx,
@@ -317,7 +317,7 @@ def test_partial_classifier_export_omits_already_imported_comments(exchange):
         "classifier",
     )
     for _ in range(5):
-        pending = exported(handler.export(ctx, "classifier")["saved_path"])
+        pending = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert sum(batch["count"] for batch in pending["manifest.json"]["batches"]) == 205
     handler.import_response(
         ctx, classifier_zip(classifier_files(pending["manifest.json"], pending)), "classifier"
@@ -335,7 +335,7 @@ def test_manual_replacement_requires_review_and_unique_revision(helix):
     assert client.put("/api/taxonomy/manual", params=params, json=payload).status_code == 200
     current = client.get("/api/taxonomy/manual", params=params).json()
     old_inputs = handler.inputs(ctx, incidents, "COMPLETED")
-    request = exported(handler.export(ctx, old_inputs)["saved_path"])
+    request = exported(handler.export(ctx, old_inputs)["saved_paths"])
     handler.import_response(
         ctx, old_inputs, zipped(helix_response(request, old_inputs["comments"][0]["id"]))
     )
@@ -376,7 +376,7 @@ def test_manual_missing_catalog_can_be_recreated(exchange):
 def test_helix_flat_annotations_kpis_and_concise_validation(helix):
     handler, ctx, _, incidents, _ = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    request = exported(handler.export(ctx, inputs)["saved_path"])
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, inputs["comments"][0]["id"])
     first = response["results/000001.json"]["classifications"][0]
     first.update(entity="", primary=None, secondary=[], links=[])
@@ -399,7 +399,7 @@ def test_partial_imports_accumulate_across_jobs_after_restart(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     for received in (200, 400, 405):
-        request = exported(handler.export(ctx, "classifier")["saved_path"])
+        request = exported(handler.export(ctx, "classifier")["saved_paths"])
         response = classifier_files(request["manifest.json"], request)
         response["results"] = {"000001": response["results"]["000001"]}
         result = handler.import_response(ctx, classifier_zip(response), "classifier")

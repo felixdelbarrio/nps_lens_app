@@ -3,9 +3,10 @@ import { useState } from "react";
 import useSWR from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyMode } from "../api";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
+import { ExchangeFiles } from "./ExchangeFiles";
 import { ProjectUrlField } from "./ProjectUrlField";
 import { ExchangeProgress } from "./ExchangeProgress";
-import { exportExchange, prepareNextZip } from "../utils/classificationExchange";
+import { exportClassification, classificationImportMessage, type ClassificationExport } from "../utils/classificationExchange";
 import { PROJECT_NAMES } from "../utils/taxonomy";
 import { TAXONOMY_NAMES } from "../utils/taxonomy";
 
@@ -13,6 +14,7 @@ type Status = { total:number; received:number; classified:number; unassigned:num
 export function HelixClassifier({ context, mode, url, disabled, onChange }: { context: TaxonomyContext; mode: TaxonomyMode; url: string; disabled: boolean; onChange: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [exported, setExported] = useState<ClassificationExport | null>(null);
   const { data, error, mutate } = useSWR([taxonomyUrl("/helix", context), mode], () => taxonomyRequest<Status>("/helix", context), { shouldRetryOnError: false });
   async function run(action: () => Promise<void>) {
     setBusy(true); setMessage("");
@@ -25,9 +27,8 @@ export function HelixClassifier({ context, mode, url, disabled, onChange }: { co
     body.append("file", file);
     const result = await taxonomyRequest<Status>("/helix/import", context, { method: "POST", body });
     const success = "Clasificaciones Helix validadas e importadas.";
-    setMessage(success);
+    setMessage(`${success} ${classificationImportMessage(result.pending)}`);
     await mutate();
-    setMessage(success + await prepareNextZip(context, "/helix/export", result.pending));
     await onChange();
   }
   const locked = disabled || busy;
@@ -38,8 +39,9 @@ export function HelixClassifier({ context, mode, url, disabled, onChange }: { co
     {data ? <><ExchangeProgress counts={data} unit="incidencias" metrics={[{label:"Con categoría",value:data.classified},{label:"Sin encaje",value:data.unassigned},{label:"Vínculos NPS",value:data.links},{label:"Con temas adicionales",value:data.multiple}]} /><p>Cobertura temática: {formatPercentage(data.coverage)}. Sin encaje significa procesada sin evidencia suficiente para asignar una categoría.</p>
     {data.categories?.length ? <details><summary>Distribución de incidencias</summary><div className="table-scroll"><table><thead><tr><th>Palanca</th><th>Subpalanca</th><th>Incidencias</th></tr></thead><tbody>{data.categories.map(row => <tr key={`${row.lever}/${row.sublever}`}><td>{row.lever}</td><td>{row.sublever}</td><td>{formatVolume(row.count)}</td></tr>)}</tbody></table></div></details> : null}</> : null}
     {error ? <p role="status">{error.message}</p> : null}
-    <div className="inline-actions"><button className="primary-button" disabled={locked || !data?.pending} onClick={() => void run(async () => { setMessage(await exportExchange(context, "/helix/export")); })}>Exportar incidencias pendientes</button>
+    <div className="inline-actions"><button className="primary-button" disabled={locked || !data?.pending} onClick={() => void run(async () => { setExported(null); setExported(await exportClassification(context, "/helix/export")); })}>Descargar todos los ZIP de incidencias pendientes</button>
     <label>Importar ZIP de incidencias clasificadas<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void run(() => importZip(file)); }} /></label></div>
+    <ExchangeFiles result={exported} />
     {message ? <p role="status">{message}</p> : null}
   </article>;
 }
