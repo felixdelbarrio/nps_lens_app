@@ -128,6 +128,16 @@ incluidos en este intercambio. No cambies la taxonomía.
 Devuelve un ZIP con manifest.json (copia íntegra del original, sin modificar) y un archivo
 results/NNNNNN.json por lote procesado, usando el id de manifest.batches. Cada archivo:
 {"classifications":[{"id":"ID original","primary":"c003","secondary":["c008"]}]}.
+VALIDACIÓN FINAL OBLIGATORIA: reabre el ZIP y comprueba TODAS las filas con Python.
+Cada fila debe contener exactamente id (cadena), primary (ID de categoría conocido,
+no null) y secondary (lista de 0–2 IDs conocidos, distintos entre sí y de primary).
+No uses primary_classification, secondary_classifications ni objetos lever/sublever
+como campos de respuesta: pertenecen a otro formato y la importación los rechazará.
+El manifest v3 debe acompañar resultados v3; copiarlo no convierte un formato anterior.
+Si has redactado etiquetas, sustitúyelas mecánicamente por sus IDs exactos del catálogo
+antes de crear el ZIP, conservando las decisiones; nunca inventes equivalencias.
+Valida también manifiesto intacto, conteos e IDs en el orden original de cada lote.
+No entregues el ZIP hasta superar estas comprobaciones.
 No incluyas otros archivos, carpetas vacías ni comentarios originales.
 Cada lote conserva exactamente todos sus IDs, una vez y en el orden de entrada.
 Procesa sucesivamente todos los lotes completos que permita la sesión. No te detengas
