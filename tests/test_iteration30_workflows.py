@@ -56,7 +56,7 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
     frame.loc[404, ["Palanca", "Subpalanca"]] = ["Acceso", "Token"]
     frame["Fecha"], frame["NPS"] = pd.Timestamp("2026-10-01"), 2
     frame.loc[:199, "Fecha"] = pd.Timestamp("2026-09-01")
-    handler.taxonomy.configure(ctx, {"llm_active": "SOURCE"})
+    handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     files = exported(handler.export(ctx, "classifier")["saved_paths"])
     result = classifier_files(files["manifest.json"], files)
     result["results"] = {"000001": result["results"]["000001"]}
@@ -91,9 +91,9 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
         == 409
     )
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
-    handler.taxonomy.configure(ctx, {"llm_active": "COMPLETED"})
+    handler.taxonomy.configure(ctx, {"active": "COMPLETED"})
     assert handler.progress(ctx)["received"] == 0
-    handler.taxonomy.configure(ctx, {"llm_active": "SOURCE"})
+    handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     assert handler.progress(ctx)["received"] == 200
 
 

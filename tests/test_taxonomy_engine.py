@@ -19,6 +19,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.classification_protocol import digest
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 from nps_lens.settings import Settings
@@ -97,7 +98,13 @@ def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
         "nodes": [],
         "equivalences": {},
     }
+    artifact["taxonomy"] = {"taxonomy": [{"lever": "ChatGPT", "sublevers": ["Clasificado"]}]}
+    artifact["comment_hashes"] = {
+        key: digest(str(text))
+        for key, text in zip(frame["_business_key"], frame["Comment"].fillna(""))
+    }
     state = tax.state(ctx)
+    state["discovered_taxonomy"] = artifact["taxonomy"]
     state.setdefault("artifacts", {})["DISCOVERED"] = sig
     with tax.repository._connect() as connection:
         connection.execute(
@@ -223,9 +230,7 @@ def test_cache_invalidation_uses_only_relevant_inputs(service) -> None:
     assert tax.resolve(ctx, mode="DISCOVERED").Palanca.eq("ChatGPT").all()
     with tax.repository._connect() as connection:
         connection.execute("UPDATE records SET comment_text = 'changed'")
-    assert not next(t for t in tax.studio(ctx)["taxonomies"] if t["mode"] == "DISCOVERED")[
-        "available"
-    ]
+    assert next(t for t in tax.studio(ctx)["taxonomies"] if t["mode"] == "DISCOVERED")["available"]
 
 
 @pytest.mark.parametrize(
@@ -235,7 +240,7 @@ def test_snapshots_restore_frozen_assignments_without_sklearn(service, policy, n
     tax, ctx = service
     tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     seed_discovered(tax, ctx)
-    tax.configure(ctx, {"active": "DISCOVERED", "default": "DISCOVERED", "policy": policy})
+    tax.configure(ctx, {"active": "DISCOVERED", "policy": policy})
     before = tax.resolve(ctx)
     snapshot = tax.snapshot(ctx)
     assert len(snapshot["taxonomies"]) == number
@@ -284,7 +289,7 @@ def test_taxonomy_api_round_trip(settings, service) -> None:
     assert generated.status_code == 200, generated.text
     assert (
         client.put(
-            "/api/taxonomy/settings", params=params, json={"default": "COMPLETED"}
+            "/api/taxonomy/settings", params=params, json={"active": "COMPLETED"}
         ).status_code
         == 200
     )
@@ -317,18 +322,18 @@ def test_migration_recovers_source_and_preserves_record_identity(service, settin
 
 
 @pytest.mark.parametrize("mode", ["SOURCE", "COMPLETED", "DISCOVERED"])
-def test_snapshot_default_resolves_without_changing_active(service, mode) -> None:
+def test_snapshot_uses_global_framework(service, mode) -> None:
     tax, ctx = service
     if mode == "COMPLETED":
         tax.save_manual(ctx, tax.manual_draft(ctx)["taxonomy"])
     elif mode == "DISCOVERED":
         seed_discovered(tax, ctx)
-    tax.configure(ctx, {"active": "SOURCE", "default": mode})
+    tax.configure(ctx, {"active": mode})
     with tax.snapshot_lens(ctx):
         assert tax.resolve(ctx).attrs["taxonomy_mode"] == mode
         snapshot = tax.snapshot(ctx)
         assert snapshot["active"] == mode
-    assert tax.resolve(ctx).attrs["taxonomy_mode"] == "SOURCE"
+    assert tax.resolve(ctx).attrs["taxonomy_mode"] == mode
 
 
 def test_studio_validates_available_artifacts_once_per_request(service, monkeypatch):
@@ -367,7 +372,7 @@ def test_unsupported_saved_lens_falls_back_and_only_three_modes_are_exposed(serv
     state = tax.state(ctx)
     state.update(active="retired", default="retired")
     tax.save_state(ctx, state)
-    assert tax.state(ctx)["active"] == tax.state(ctx)["default"] == "SOURCE"
+    assert tax.state(ctx)["active"] == "SOURCE"
     assert [item["mode"] for item in tax.studio(ctx)["taxonomies"]] == [
         "SOURCE",
         "COMPLETED",

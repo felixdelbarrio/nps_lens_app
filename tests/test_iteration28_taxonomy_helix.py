@@ -21,6 +21,7 @@ from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 
 def discover(handler, context):
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     files = exported(handler.export(context, "classifier")["saved_paths"])
     handler.import_response(
         context, classifier_zip(classifier_files(files["manifest.json"], files)), "classifier"
@@ -307,6 +308,7 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     handler.import_response(
@@ -398,6 +400,7 @@ def test_helix_flat_annotations_kpis_and_concise_validation(helix):
 def test_partial_imports_accumulate_across_jobs_after_restart(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     for received in (200, 400, 405):
         request = exported(handler.export(ctx, "classifier")["saved_paths"])
         response = classifier_files(request["manifest.json"], request)

@@ -19,12 +19,12 @@ from nps_lens.services.classification_protocol import (
     HELIX_SCHEMA,
     CompactClassification,
     category_catalog,
+    digest,
+    encode,
 )
 from nps_lens.services.taxonomy_exchange import (
     TaxonomyExchange,
     bounded_batches,
-    digest,
-    encode,
     read_response,
     strict_json,
     validate_manifest,
@@ -63,6 +63,10 @@ class HelixExchange:
             )
             db.execute(
                 "CREATE TABLE IF NOT EXISTS helix_classifications (context TEXT NOT NULL, scope TEXT NOT NULL, incident TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(context, scope, incident))"
+            )
+
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS helix_taxonomy_scopes (context TEXT NOT NULL, mode TEXT NOT NULL, revision TEXT NOT NULL, scope TEXT NOT NULL, PRIMARY KEY(context, mode))"
             )
 
     def inputs(self, context: UploadContext, incidents: pd.DataFrame, mode: str) -> dict[str, Any]:
@@ -126,27 +130,52 @@ class HelixExchange:
                 zip(analytical_response_ids(source), source["Comment"].fillna(""))
             )
         ]
-        scopes = {
-            mode: digest(
-                [
-                    "helix-taxonomy/2",
-                    mode,
-                    catalogs[mode],
-                    [
-                        (
-                            row["id"],
-                            row["Comment"],
-                            row["taxonomies"][mode],
-                            row["secondary_classifications"],
-                        )
-                        for row in comments
-                    ],
-                ]
-            )
-            for mode in resolved
-        }
-        if mode == "COMPLETED":
-            scopes[mode] = digest([scopes[mode], self.taxonomy.state(context)["artifacts"][mode]])
+        revision = digest(
+            [
+                catalogs[mode],
+                (
+                    self.taxonomy.state(context).get("artifacts", {}).get("COMPLETED", "")
+                    if mode == "COMPLETED"
+                    else ""
+                ),
+            ]
+        )
+        scopes = {}
+        with self.repository._connect() as db:
+            saved = db.execute(
+                "SELECT revision, scope FROM helix_taxonomy_scopes WHERE context=? AND mode=?",
+                (context_key(context), mode),
+            ).fetchone()
+            if saved and saved[0] == revision:
+                scopes[mode] = saved[1]
+            else:
+                scopes = {
+                    mode: digest(
+                        [
+                            "helix-taxonomy/2",
+                            mode,
+                            catalogs[mode],
+                            [
+                                (
+                                    row["id"],
+                                    row["Comment"],
+                                    row["taxonomies"][mode],
+                                    row["secondary_classifications"],
+                                )
+                                for row in comments
+                            ],
+                        ]
+                    )
+                    for mode in resolved
+                }
+                if mode == "COMPLETED":
+                    scopes[mode] = digest(
+                        [scopes[mode], self.taxonomy.state(context)["artifacts"][mode]]
+                    )
+                db.execute(
+                    "INSERT OR REPLACE INTO helix_taxonomy_scopes VALUES (?, ?, ?, ?)",
+                    (context_key(context), mode, revision, scopes[mode]),
+                )
         return {
             "frame": frame,
             "modes": list(resolved),
@@ -158,6 +187,8 @@ class HelixExchange:
 
     def current(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, dict[str, Any]]:
         fingerprints = {row["id"]: digest(row) for row in inputs["incidents"]}
+        comments = {row["id"]: row for row in inputs["comments"]}
+        evidence: dict[str, str] = {}
         current: dict[str, dict[str, Any]] = {}
         with self.repository._connect() as db:
             for mode, scope in inputs["scopes"].items():
@@ -165,11 +196,20 @@ class HelixExchange:
                     "SELECT incident, fingerprint, payload FROM helix_classifications WHERE context=? AND scope=?",
                     (context_key(context), scope),
                 ).fetchall()
-                current[mode] = {
-                    key: strict_json(payload.encode())
-                    for key, fingerprint, payload in rows
-                    if fingerprints.get(key) == fingerprint
-                }
+                current[mode] = {}
+                for key, fingerprint, payload in rows:
+                    if fingerprints.get(key) != fingerprint:
+                        continue
+                    item = strict_json(payload.encode())
+                    for comment, expected in item.get("evidence_hashes", {}).items():
+                        if comment not in evidence:
+                            evidence[comment] = (
+                                digest(comments[comment]) if comment in comments else ""
+                            )
+                        if evidence[comment] != expected:
+                            break
+                    else:
+                        current[mode][key] = item
         return current
 
     def status(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -341,6 +381,9 @@ class HelixExchange:
                     "secondary_classifications": expanded["secondary_classifications"],
                     "rationale": row.rationale,
                     "links": [link.model_dump() for link in row.links],
+                    "evidence_hashes": {
+                        link.nps_id: digest(comments[link.nps_id]) for link in row.links
+                    },
                 }
         existing = self.current(context, inputs)
         if any(

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry, clean_label
 from nps_lens.platform.downloads import persist_download
+from nps_lens.services.classification_protocol import digest, encode
 from nps_lens.services.taxonomy_exchange import (
     BATCH_ROWS,
     MAX_EXPANDED_BYTES,
@@ -20,8 +21,6 @@ from nps_lens.services.taxonomy_exchange import (
     MAX_MEMBERS,
     MAX_ZIP_BYTES,
     TaxonomyExchange,
-    digest,
-    encode,
     read_response,
     validate_payload,
 )

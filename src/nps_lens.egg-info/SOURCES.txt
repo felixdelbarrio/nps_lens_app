@@ -152,6 +152,7 @@ tests/test_nps_helix_linking.py
 tests/test_nps_math.py
 tests/test_nps_parser.py
 tests/test_nps_score_classification.py
+tests/test_numbered_exchange.py
 tests/test_period_kpis.py
 tests/test_platform_artifacts.py
 tests/test_platform_batch.py

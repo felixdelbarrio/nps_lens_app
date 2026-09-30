@@ -8,11 +8,17 @@ heredando la compañía seleccionada.
 
 ## Flujo vigente
 
-1. En Análisis estático se elige Original o Manual. Las equivalencias se mantienen
-   por compañía en Configuración y se aplican a ambas taxonomías.
-2. En Análisis con LLM se elige la lente Original, Manual o Descubierta. Los
-   proyectos de comentarios e incidencias comparten esa lente y conservan sus
-   resultados por separado.
+1. El selector **Marco de clasificación**, antes de las pestañas, elige Original,
+   Manual o Descubierta para toda la aplicación: Insights, comentarios, incidencias,
+   presentaciones y snapshots. Solo muestra catálogos disponibles; sin ninguno,
+   se deshabilitan el selector y los intercambios de clasificación, pero se puede
+   crear una taxonomía manual o descubrirla con LLM.
+2. La selección se guarda por Owner Support Company en
+   `NPS_LENS_CLASSIFICATION_FRAMEWORKS` del `.env`. Cada taxonomía conserva sus
+   resultados LLM al alternar marcos. Los nuevos comentarios/incidencias quedan
+   pendientes; no invalidan los registros ya procesados. Cambiar el catálogo o la
+   revisión manual exige reclasificar esa taxonomía. Un cambio en evidencia NPS
+   enlazada invalida solo las incidencias que dependían de ella.
 3. Crear Taxonomía exporta los comentarios; su respuesta contiene `manifest.json`
    y `taxonomy.json`. Su importación habilita el catálogo Descubierta para elegirlo.
 4. Clasifica comentarios exporta solo pendientes de la lente elegida. Cada lote
@@ -102,7 +108,9 @@ Los resultados se conservan por lente y huella del corpus. Recrear Manual cambia
 revisión e invalida sus resultados Helix, aunque las etiquetas sean iguales.
 
 El estado distingue procesadas, pendientes, con categoría, sin encaje y vínculos NPS;
-la cobertura es incidencias con categoría / total. Una incidencia sin encaje lleva
+la cobertura es incidencias con categoría / total. «Con más de una categoría»
+cuenta registros con una principal y al menos una adicional, una sola vez por
+registro; las adicionales no multiplican los totales ni el NPS. Una incidencia sin encaje lleva
 `primary=null`, `secondary=[]` y ningún vínculo, y no vuelve a exportarse como pendiente.
 
 En causalidad LLM, la afinidad procede de los vínculos importados. El umbral local

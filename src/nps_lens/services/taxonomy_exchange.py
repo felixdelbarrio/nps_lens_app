@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import re
@@ -27,6 +26,8 @@ from nps_lens.services.classification_protocol import (
     HELIX_SCHEMA,
     CompactCommentResponse,
     category_catalog,
+    digest,
+    encode,
 )
 from nps_lens.services.taxonomy_discovery import (
     TaxonomyResponse,
@@ -47,10 +48,6 @@ MAX_MEMBERS = 4096
 BATCH_ROWS = 200
 BATCH_BYTES = 80_000
 MAX_RETAINED_JOBS = 3
-
-
-def encode(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
 
 
 def bounded_batches(
@@ -77,10 +74,6 @@ def bounded_batches(
     if rows:
         batches[f"{len(batches) + 1:06d}"] = rows
     return batches
-
-
-def digest(value: Any) -> str:
-    return hashlib.sha256(encode(value)).hexdigest()
 
 
 def strict_json(raw: bytes) -> Any:
@@ -382,7 +375,7 @@ class TaxonomyExchange:
     def progress(self, context: UploadContext) -> dict[str, Any]:
         frame = self._frame(context)
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context)
+        mode = self.taxonomy.state(context)["active"]
         catalog = self.taxonomy.catalog(context, mode)
         assignments = self.assignments(context, frame, mode) if catalog["taxonomy"] else {}
         received = len(assignments)
@@ -437,7 +430,7 @@ class TaxonomyExchange:
         frame = self._frame(context)
         full_frame = frame
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context) if pending else "DISCOVERED"
+        mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
         taxonomy = self.taxonomy.catalog(context, mode) if pending else None
         revision = state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
         groups: dict[str, list[str]] = {}

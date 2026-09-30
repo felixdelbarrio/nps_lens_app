@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_MIN_SIMILARITY
 
@@ -178,9 +178,8 @@ class LinkingResponse(BaseModel):
 
 
 class TaxonomySettingsRequest(BaseModel):
-    llm_active: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
     active: Optional[str] = None
-    default: Optional[str] = None
     policy: Optional[str] = None
 
 

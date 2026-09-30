@@ -38,27 +38,24 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   if (!data) return <p>Preparando taxonomías…</p>;
   const locked = disabled || busy;
   const available = data.taxonomies.filter(item => item.available && item.selectable !== false);
-  const staticOptions = available.filter(item => item.mode !== "DISCOVERED");
-  const llmOptions = data.taxonomies.filter(item => item.mode === "DISCOVERED" ? data.discovered_catalog_available : item.available && item.selectable !== false);
-  const llmMode = data.llm_active;
-  const exchangeKey = `${taxonomyUrl("", context)}:${llmMode}`;
-  const staticMode = staticOptions.some(item => item.mode === data.active) ? data.active : staticOptions[0]?.mode || "";
+  const activeMode = data.active;
+  const hasFramework = available.some(item => item.mode === activeMode);
+  const exchangeKey = `${taxonomyUrl("", context)}:${activeMode}`;
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
+      <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><p>Se aplica a Insights, comentarios, incidencias y presentaciones. La selección se guarda por compañía; cada taxonomía conserva sus resultados LLM.</p><label>Marco de clasificación<select value={hasFramework ? activeMode : ""} disabled={locked || !available.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{active:e.target.value})))}><option value="" disabled>No hay una taxonomía seleccionada</option>{available.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
     <NavigationTabs items={[{id:"static",label:"Análisis estático"},{id:"llm",label:"Análisis con LLM"}]} value={tab} onChange={setTab} />
     {tab === "static" ? <div className="settings-section-stack">
-      <section className="taxonomy-lens"><p className="eyebrow">Análisis estático</p><label>Taxonomía a utilizar<select value={staticMode} disabled={locked || !staticOptions.length} onChange={e => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", {active:e.target.value})))}>{!staticOptions.length ? <option value="">No hay taxonomías disponibles</option> : staticOptions.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label><p>Las equivalencias de esta compañía se mantienen en Configuración → Unificar conceptos y se aplican a Original y Manual.</p></section>
       {data.taxonomies.filter(item => item.mode !== "DISCOVERED").map(item => <article className="settings-subsection" key={item.mode}>
         <h3>{NAMES[item.mode]}</h3>
         {item.available && item.selectable !== false ? <><p>{item.levers} Palancas · {item.sublevers} Subpalancas · {formatPercentage(item.coverage || 0)} cobertura</p><TaxonomyExplorer key={`${item.mode}-${item.created_at || ""}`} context={context} mode={item.mode} /></> : <p>{item.stale ? "Los datos han cambiado; revisa esta taxonomía." : "Aún no disponible."}</p>}
         {item.mode === "COMPLETED" && data.discovery_local_available && !data.restored ? <ManualTaxonomyEditor context={context} disabled={locked} onChange={refresh} /> : null}
       </article>)}
     </div> : <div className="settings-section-stack">
-      <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><h3>Lente activa para LLM</h3><p>Esta taxonomía define las categorías para clasificar comentarios e incidencias. Cada lente conserva sus propios resultados.</p><label>Lente activa<select value={llmOptions.some(item => item.mode === llmMode) ? llmMode : ""} disabled={locked || !llmOptions.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{llm_active:e.target.value})))}><option value="" disabled>Selecciona una taxonomía</option>{llmOptions.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={context} url={discovery.classifier_url} disabled={locked} canExport={llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
-        <HelixClassifier key={`helix:${exchangeKey}`} context={context} mode={llmMode} url={discovery.helix_classifier_url} disabled={locked || !llmOptions.some(item => item.mode === llmMode)} onChange={refresh} />
+        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={context} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
+        <HelixClassifier key={`helix:${exchangeKey}`} context={context} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}
@@ -108,7 +105,6 @@ export function SnapshotSettings({ context, onChange, disabled = false }: Props)
   }
   if (!data) return <p>Preparando snapshots…</p>;
   return <section className="settings-group"><h3>Snapshots</h3><p>Conserva el corpus, las asignaciones, las equivalencias y Helix para abrir el mismo análisis sin recalcular modelos.</p>
-    <label>Taxonomía activa por defecto<select value={data.default} disabled={disabled || busy} onChange={e => void perform(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { default: e.target.value })))}>{data.taxonomies.filter(t => t.available).map(t => <option key={t.mode} value={t.mode}>{NAMES[t.mode]}</option>)}</select></label>
     <label>Qué guardar<select value={data.policy} disabled={disabled || busy} onChange={e => void perform(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { policy: e.target.value })))}><option value="ACTIVE_ONLY">Solo activa</option><option value="SOURCE_AND_ACTIVE">Original y activa</option><option value="ALL_AVAILABLE">Todas las disponibles</option></select></label>
     <a className="secondary-button" href={taxonomyUrl("/snapshot", context)} download>Guardar snapshot local</a>
     <label>Restaurar snapshot<input type="file" accept=".json" disabled={disabled || busy} onChange={e => { const file = e.target.files?.[0]; if (!file) return; const form = new FormData(); form.append("file", file); void perform(() => taxonomyRequest("/restore", context, { method: "POST", body: form })); e.target.value = ""; }} /></label>

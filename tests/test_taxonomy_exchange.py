@@ -57,6 +57,7 @@ def exchange_fixture(tmp_path, monkeypatch):
     settings = replace(
         Settings.from_env(),
         database_path=tmp_path / "test.db",
+        dotenv_path=tmp_path / ".env",
         data_dir=tmp_path,
         equivalences_path=tmp_path / "equivalences.json",
         auth_mode="local",
@@ -157,6 +158,12 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     )
     assert result.status_code == 200, result.text
     assert "saved_path" not in result.json()
+    assert (
+        client.put(
+            "/api/taxonomy/settings", params=params, json={"active": "DISCOVERED"}
+        ).status_code
+        == 200
+    )
     response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
     assert response.status_code == 200, response.text
     classification = exported(response.json()["saved_paths"])
@@ -190,6 +197,7 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
 def test_changed_corpus_and_foreign_job_rejected(exchange):
     handler, context, frame, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     original = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(original["manifest.json"], original)
     with pytest.raises(ValueError, match="dataset"):
@@ -204,6 +212,7 @@ def test_changed_corpus_and_foreign_job_rejected(exchange):
 def test_exchange_history_is_bounded(exchange):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     jobs = [handler.export(context, "classifier") for _ in range(4)]
     with handler.repository._connect() as db:
         assert db.execute("SELECT COUNT(*) FROM taxonomy_exchange").fetchone()[0] == 3
@@ -242,7 +251,9 @@ def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
         )
     with pytest.raises(ValueError):
         handler.import_response(context, zipped({"taxonomy.json": TAXONOMY}), "designer")
+        handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     inputs = exported(handler.export(context, "classifier")["saved_paths"])
     files = classifier_files(inputs["manifest.json"], inputs)
     files["results"]["000001"]["classifications"][0]["primary"] = "Inventada"
@@ -287,4 +298,5 @@ def test_designer_zip_rejects_changed_dataset_without_mutation(exchange):
     frame.loc[0, "Comment"] = "Changed"
     with pytest.raises(ValueError, match="corpus"):
         handler.import_response(context, response, "designer")
+        handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     assert "discovered_taxonomy" not in handler.taxonomy.state(context)

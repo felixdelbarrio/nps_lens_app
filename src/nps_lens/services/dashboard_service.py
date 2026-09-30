@@ -384,7 +384,9 @@ class DashboardService:
     def __init__(self, repository: SqliteNpsRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self.taxonomy = TaxonomyService(repository, settings.equivalences_path)
+        self.taxonomy = TaxonomyService(
+            repository, settings.equivalences_path, settings.dotenv_path
+        )
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self._migrate_helix_owner_context()
         self.logger = logging.getLogger(__name__)
@@ -510,13 +512,7 @@ class DashboardService:
             if cached is not None:
                 self._frame_cache.move_to_end(key)
                 return cached
-            state = self.taxonomy.state(context)
-            mode = (
-                None
-                if state.get("restored") or self.taxonomy.lens_override
-                else (state["active"] if state["active"] in ("SOURCE", "COMPLETED") else "SOURCE")
-            )
-            frame = self.taxonomy.resolve(context, mode=mode)
+            frame = self.taxonomy.resolve(context)
             frame["match_status"] = nps_matchable_mask(frame).map(
                 {True: "matchable", False: "non_matchable"}
             )
@@ -594,7 +590,7 @@ class DashboardService:
         max_days_apart: int = 90,
     ) -> dict[str, Any]:
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context)
+        mode = self.taxonomy.state(context)["active"]
         total = received = 0
         reason = ""
         try:

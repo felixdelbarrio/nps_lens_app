@@ -204,7 +204,15 @@ La descarga contiene ZIP numerados, con un lote de incidencias por archivo y tod
 la evidencia NPS necesaria. Procesa cada ZIP independientemente, sin mezclar manifiestos.
 Conserva índice y total: 1_3_incidencias_helix.zip -> 1_3_incidencias_helix_clasificadas.zip.
 La aplicación acumula las respuestas; no necesita regenerar ZIP al importar.
-Antes de entregar reabre el ZIP y valida esquema, manifiesto, IDs, conteos y parejas.
+VALIDACIÓN FINAL OBLIGATORIA: reabre el ZIP y valida TODAS las filas con Python.
+Cada fila contiene id (cadena), primary (ID del mapping taxonomies.json de la lente,
+o null), secondary (lista de 0–2 IDs), rationale (cadena) y links (lista).
+No uses lever, sublever, primary_classification ni secondary_classifications en la
+respuesta. Las etiquetas son exclusivamente información de entrada: convierte cada
+pareja elegida a su ID exacto del catálogo antes de escribir primary/secondary.
+Rechaza tu propio archivo si falta primary o si es un objeto, si los IDs no están
+en el catálogo, si cambian el orden o conteo de incidencias o si cambia el manifiesto.
+No entregues el ZIP hasta que estas comprobaciones pasen.
 """
 
 NORMALIZER_INSTRUCTIONS = """UNIFICA CONCEPTOS · nps-lens-normalization/1

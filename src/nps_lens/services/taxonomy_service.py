@@ -13,6 +13,7 @@ from threading import RLock
 from typing import Any, Iterator, Optional, cast
 
 import pandas as pd
+from dotenv import dotenv_values
 
 from nps_lens.analytics.taxonomy import (
     MODES,
@@ -24,6 +25,8 @@ from nps_lens.analytics.taxonomy import (
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.classification_protocol import digest
+from nps_lens.settings import persist_ui_prefs
 
 POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
 
@@ -63,10 +66,6 @@ class TaxonomyResolver:
                 }
             ).set_index("key")
             keys = frame["_business_key"]
-            if not keys.isin(assignments.index).all():
-                raise ValueError(
-                    "La taxonomía no corresponde a este corpus; regenera antes de usarla."
-                )
             out["Palanca"] = keys.map(assignments["lever"]).fillna("")
             out["Subpalanca"] = keys.map(assignments["sublever"]).fillna("")
             if mode == "DISCOVERED":
@@ -82,7 +81,15 @@ class TaxonomyService:
         self,
         repository: SqliteNpsRepository,
         equivalences_path: Any,
+        dotenv_path: Optional[Path] = None,
     ) -> None:
+        self.dotenv_path = dotenv_path
+        raw = (
+            dotenv_values(dotenv_path).get("NPS_LENS_CLASSIFICATION_FRAMEWORKS", "{}")
+            if dotenv_path
+            else "{}"
+        )
+        self.frameworks: dict[str, str] = json.loads(raw or "{}")
         self.repository = repository
         self.equivalences_path = equivalences_path
         self.resolver = TaxonomyResolver()
@@ -119,15 +126,15 @@ class TaxonomyService:
             if row
             else {
                 "active": "SOURCE",
-                "default": "SOURCE",
                 "policy": "ACTIVE_ONLY",
                 "artifacts": {},
             }
         )
 
-        for field in ("active", "default"):
-            if state.get(field) not in MODES:
-                state[field] = "SOURCE"
+        if not state.get("restored") and key in self.frameworks:
+            state["active"] = self.frameworks[key]
+        if state.get("active") not in MODES:
+            state["active"] = "SOURCE"
         if len(self._state_cache) >= 4:
             self._state_cache.clear()
         self._state_cache[key] = (revision, state)
@@ -156,13 +163,6 @@ class TaxonomyService:
         self.save_state(context, state)
         self._state_cache.clear()
         self._cache.clear()
-
-    def llm_mode(self, context: UploadContext) -> str:
-        state = self.state(context)
-        return str(
-            state.get("llm_active")
-            or ("DISCOVERED" if state.get("discovered_taxonomy") else state["active"])
-        )
 
     def classification_artifact(self, context: UploadContext, mode: str) -> dict[str, Any]:
         state = self.state(context)
@@ -218,10 +218,18 @@ class TaxonomyService:
                 continue
             item = self.artifact(sig)
             if item:
-                base = original_labels(frame)
-                expected = signature(base, mode, item["config"], "")
-                if sig == expected:
-                    available[mode] = item
+                if mode == "DISCOVERED" and item.get("taxonomy") != state.get(
+                    "discovered_taxonomy"
+                ):
+                    continue
+                available[mode] = item
+        if state.get("discovered_taxonomy") and "DISCOVERED" not in available:
+            available["DISCOVERED"] = {
+                "taxonomy": state["discovered_taxonomy"],
+                "keys": [],
+                "lever": [],
+                "sublever": [],
+            }
         return available
 
     def resolve(
@@ -259,7 +267,12 @@ class TaxonomyService:
                 out["Canal"] = frame["_business_key"].map(lookup)
             out.attrs["taxonomy_mode"] = selected
             return out
-        return self.resolver.resolve(frame, selected, registry, item)
+        resolved = self.resolver.resolve(frame, selected, registry, item)
+        if selected == "DISCOVERED" and item and item.get("comment_hashes"):
+            hashes = frame["Comment"].fillna("").map(lambda value: digest(str(value)))
+            valid = frame["_business_key"].map(item["comment_hashes"]) == hashes
+            resolved.loc[~valid, ["Palanca", "Subpalanca"]] = ""
+        return resolved
 
     def catalog(
         self, context: UploadContext, mode: str, *, normalized: bool = True
@@ -474,24 +487,26 @@ class TaxonomyService:
         state = self.state(context)
         frame, registry = self.source(context), self.registry(context)
         available = self.available(context, frame, registry)
-        for field in ("active", "default"):
-            if field in changes:
-                if changes[field] not in available:
-                    raise ValueError(
-                        "La taxonomía seleccionada debe estar disponible y actualizada."
-                    )
-                state[field] = changes[field]
-        if "llm_active" in changes:
-            mode = changes["llm_active"]
-            if mode not in MODES or not self.catalog(context, mode)["taxonomy"]:
-                raise ValueError("Selecciona una taxonomía disponible para LLM.")
-            state["llm_active"] = mode
+        if "active" in changes:
+            mode = changes["active"]
+            if mode not in available or not self.catalog(context, mode)["taxonomy"]:
+                raise ValueError(
+                    "La taxonomía seleccionada debe estar disponible y contener categorías."
+                )
+            state["active"] = mode
         if "policy" in changes:
             if changes["policy"] not in POLICIES:
                 raise ValueError("Política de snapshot desconocida.")
             state["policy"] = changes["policy"]
+        if "active" in changes:
+            preferences = {**self.frameworks, context_key(context): state["active"]}
+            persist_ui_prefs(
+                self.dotenv_path,
+                {"classification_frameworks": json.dumps(preferences, ensure_ascii=False)},
+            )
+            self.frameworks = preferences
         self.save_state(context, state)
-        return {key: state[key] for key in ("active", "default", "policy")}
+        return {key: state[key] for key in ("active", "policy")}
 
     def studio(self, context: UploadContext) -> dict[str, Any]:
         frame, registry = self.source(context), self.registry(context)
@@ -548,8 +563,6 @@ class TaxonomyService:
             "taxonomies": cards,
             "active": selected,
             "requested_active": state["active"],
-            "llm_active": self.llm_mode(context),
-            "default": state["default"],
             "policy": state["policy"],
             "restored": bool(state.get("restored")),
             "discovered_catalog_available": bool(state.get("discovered_taxonomy")),
@@ -651,10 +664,10 @@ class TaxonomyService:
     ) -> dict[str, Any]:
         frame, registry, state = self.source(context), self.registry(context), self.state(context)
         available = self.available(context, frame, registry)
-        active = state["default"]
+        active = state["active"]
         if active not in available:
             raise ValueError(
-                "La taxonomía por defecto del snapshot está desactualizada o no existe."
+                "El marco de clasificación no está disponible para guardar el snapshot."
             )
         modes = (
             list(available)
@@ -717,13 +730,14 @@ class TaxonomyService:
         for mode, item in payload["taxonomies"].items():
             if mode not in MODES:
                 raise ValueError("Taxonomía desconocida en snapshot.")
+            if set(item.get("keys", [])) != set(frame["_business_key"]):
+                raise ValueError("Faltan asignaciones del corpus en el snapshot.")
             self.resolver.resolve(frame, "DISCOVERED", registry, item)
         state = self.state(context)
         state.update(
             {
                 "restored": payload,
                 "active": payload["active"],
-                "default": payload["active"],
                 "policy": payload["policy"],
             }
         )
@@ -732,13 +746,13 @@ class TaxonomyService:
     def resume_local(self, context: UploadContext) -> None:
         state = self.state(context)
         state.pop("restored", None)
-        state["active"] = state["default"] = "SOURCE"
+        state["active"] = self.frameworks.get(context_key(context), "SOURCE")
         self.save_state(context, state)
 
     @contextmanager
     def snapshot_lens(self, context: UploadContext) -> Iterator[None]:
         previous = self.lens_override
-        self.lens_override = self.state(context)["default"]
+        self.lens_override = self.state(context)["active"]
         try:
             self.resolve(context, mode=self.lens_override)
             yield

@@ -6,7 +6,7 @@ import { PROJECT_NAMES } from "../utils/taxonomy";
 import { ExchangeFiles } from "./ExchangeFiles";
 import { ProjectUrlField } from "./ProjectUrlField";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
-import { ExchangeProgress, type ExchangeCounts } from "./ExchangeProgress";
+import { ADDITIONAL_TOPICS, ExchangeProgress, type ExchangeCounts } from "./ExchangeProgress";
 
 type Progress = ExchangeCounts & { multiple:number; designer:ExchangeCounts & {levers:number;sublevers:number} };
 type Role = "designer" | "classifier" | "normalizer";
@@ -47,7 +47,7 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
   const counts = role === "designer" ? progress?.designer : progress;
   return <article className="settings-subsection taxonomy-project">
     <div className="section-heading"><div><h3>{PROJECT_NAMES[role]}</h3><p className="secondary-copy">{role === "designer" ? "Descubre dimensiones de experiencia que expliquen las opiniones del canal." : role === "classifier" ? "Clasifica con la lente activa. La categoría principal conserva los recuentos; los temas adicionales aportan contexto." : "Propón nombres principales y alias equivalentes para la compañía seleccionada."}</p></div></div>
-    {counts && role !== "normalizer" ? <ExchangeProgress counts={counts} unit="comentarios" metrics={role === "designer" ? [{label:"Palancas",value:progress!.designer.levers},{label:"Subpalancas",value:progress!.designer.sublevers}] : [{label:"Con temas adicionales",value:progress!.multiple}]} /> : null}
+    {counts && role !== "normalizer" ? <ExchangeProgress counts={counts} unit="comentarios" metrics={role === "designer" ? [{label:"Palancas",value:progress!.designer.levers},{label:"Subpalancas",value:progress!.designer.sublevers}] : [{...ADDITIONAL_TOPICS,value:progress!.multiple}]} /> : null}
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
     {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : "Clasificación completa. Activa Usar clasificación LLM en los filtros de Comentarios."}</p> : null}

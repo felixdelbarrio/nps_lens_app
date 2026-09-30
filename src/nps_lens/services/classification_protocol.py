@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +12,14 @@ CLASSIFICATION_BATCH_ROWS = 1_000
 CLASSIFICATION_BATCH_BYTES = 300_000
 CLASSIFIER_SCHEMA = "nps-lens-comments/3"
 HELIX_SCHEMA = "nps-lens-helix/3"
+
+
+def encode(value: Any) -> bytes:
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+
+
+def digest(value: Any) -> str:
+    return hashlib.sha256(encode(value)).hexdigest()
 
 
 def category_catalog(taxonomy: dict[str, Any]) -> dict[str, dict[str, str]]:
