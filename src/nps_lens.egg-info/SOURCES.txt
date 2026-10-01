@@ -144,6 +144,7 @@ tests/test_iteration26_ingestion_evidence.py
 tests/test_iteration28_taxonomy_helix.py
 tests/test_iteration30_workflows.py
 tests/test_iteration31_exchange.py
+tests/test_iteration32_semantics.py
 tests/test_knowledge_cache.py
 tests/test_linking_precision.py
 tests/test_llm_insight_response.py

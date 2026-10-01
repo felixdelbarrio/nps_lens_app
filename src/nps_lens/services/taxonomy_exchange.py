@@ -111,6 +111,43 @@ def validate_payload(model: type[Model], payload: Any, filename: str) -> Model:
         ) from exc
 
 
+_CLASSIFIER_FIELDS = frozenset({"id", "primary", "secondary"})
+_CLASSIFIER_IGNORABLE_ANNOTATIONS = frozenset({"evidence", "reason", "rationale"})
+
+
+def normalize_classifier_payload(payload: Any) -> Any:
+    """Drop only known non-semantic LLM annotations at the exchange boundary.
+
+    The persisted contract remains exactly ``id/primary/secondary`` and every unknown
+    extra field is still rejected by the strict Pydantic model. This makes imports
+    resilient to explanatory prose that some LLMs add despite the ZIP instructions,
+    without silently accepting schema drift.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    rows = payload.get("classifications")
+    if not isinstance(rows, list):
+        return payload
+
+    normalized: list[Any] = []
+    changed = False
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized.append(row)
+            continue
+        extras = set(row) - _CLASSIFIER_FIELDS
+        if extras and extras <= _CLASSIFIER_IGNORABLE_ANNOTATIONS:
+            normalized.append(
+                {key: value for key, value in row.items() if key in _CLASSIFIER_FIELDS}
+            )
+            changed = True
+        else:
+            normalized.append(row)
+    if not changed:
+        return payload
+    return {**payload, "classifications": normalized}
+
+
 def read_zip(content: bytes) -> dict[str, Any]:
     if len(content) > MAX_ZIP_BYTES:
         raise ValueError("ZIP demasiado grande (máximo 32 MiB).")
@@ -637,7 +674,11 @@ class TaxonomyExchange:
         for key, payload in files.items():
             if key not in allowed_batches:
                 raise ValueError("Fichero de resultado no esperado en este ZIP.")
-            response = validate_payload(CompactCommentResponse, payload, f"results/{key}.json")
+            response = validate_payload(
+                CompactCommentResponse,
+                normalize_classifier_payload(payload),
+                f"results/{key}.json",
+            )
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")

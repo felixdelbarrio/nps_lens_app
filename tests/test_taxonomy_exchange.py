@@ -351,3 +351,26 @@ def test_designer_zip_rejects_changed_dataset_without_mutation(exchange):
         handler.import_response(context, response, "designer")
         handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     assert "discovered_taxonomy" not in handler.taxonomy.state(context)
+
+
+def test_classifier_tolerates_known_nonsemantic_llm_annotations(exchange):
+    handler, ctx, _, _ = exchange
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    response = classifier_files(request["manifest.json"], request)
+    for row in response["results"]["000001"]["classifications"]:
+        row["evidence"] = {"quotes": ["texto"], "reason": "explicación no contractual"}
+    result = handler.import_response(ctx, classifier_zip(response), "classifier")
+    assert result["received"] == len(request["manifest.json"]["batches"])
+
+
+def test_classifier_still_rejects_unknown_schema_drift(exchange):
+    handler, ctx, _, _ = exchange
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    response = classifier_files(request["manifest.json"], request)
+    response["results"]["000001"]["classifications"][0]["entity"] = "unexpected"
+    with pytest.raises(ValueError, match="formato inválido"):
+        handler.import_response(ctx, classifier_zip(response), "classifier")
