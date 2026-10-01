@@ -60,6 +60,66 @@ class IncidentResponse(BaseModel):
     classifications: list[IncidentClassification]
 
 
+_HELIX_IGNORABLE_ANNOTATIONS = frozenset({"evidence", "reason", "rationale"})
+
+
+def normalize_helix_payload(payload: Any) -> Any:
+    """Drop only known non-semantic LLM annotations at the Helix boundary.
+
+    Some LLMs add explanatory ``evidence``/``reason``/``rationale`` fields despite
+    the explicit ZIP contract.  Those fields never participate in classification or
+    linking decisions, so accepting them as annotations is safe.  Unknown extras are
+    deliberately left untouched and are still rejected by the strict Pydantic models,
+    preserving schema-drift detection.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    rows = payload.get("classifications")
+    if not isinstance(rows, list):
+        return payload
+
+    row_fields = frozenset(IncidentClassification.model_fields)
+    link_fields = frozenset(EvidenceLink.model_fields)
+    normalized_rows: list[Any] = []
+    changed = False
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized_rows.append(row)
+            continue
+
+        normalized_row = row
+        extras = set(row) - row_fields
+        if extras and extras <= _HELIX_IGNORABLE_ANNOTATIONS:
+            normalized_row = {key: value for key, value in row.items() if key in row_fields}
+            changed = True
+
+        links = normalized_row.get("links")
+        if isinstance(links, list):
+            normalized_links: list[Any] = []
+            links_changed = False
+            for link in links:
+                if not isinstance(link, dict):
+                    normalized_links.append(link)
+                    continue
+                link_extras = set(link) - link_fields
+                if link_extras and link_extras <= _HELIX_IGNORABLE_ANNOTATIONS:
+                    normalized_links.append(
+                        {key: value for key, value in link.items() if key in link_fields}
+                    )
+                    links_changed = True
+                else:
+                    normalized_links.append(link)
+            if links_changed:
+                normalized_row = {**normalized_row, "links": normalized_links}
+                changed = True
+
+        normalized_rows.append(normalized_row)
+
+    if not changed:
+        return payload
+    return {**payload, "classifications": normalized_rows}
+
+
 class HelixExchange:
     def __init__(self, taxonomy: TaxonomyService, downloads: Path):
         self.taxonomy = taxonomy
@@ -340,7 +400,7 @@ class HelixExchange:
             key = name.removeprefix("results/").removesuffix(".json")
             if name != f"results/{key}.json" or key not in allowed_batches:
                 raise ValueError("Lote de respuesta desconocido.")
-            response = validate_payload(IncidentResponse, payload, name)
+            response = validate_payload(IncidentResponse, normalize_helix_payload(payload), name)
             expected = job["batches"][key]
             if [row.id for row in response.classifications] != [row["id"] for row in expected]:
                 raise ValueError("IDs u orden de incidencias incorrectos.")

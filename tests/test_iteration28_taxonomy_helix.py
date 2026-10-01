@@ -448,6 +448,36 @@ def test_helix_flat_annotations_kpis_and_concise_validation(helix):
     assert handler.status(ctx, inputs)["received"] == 201
 
 
+def test_helix_tolerates_known_nonsemantic_llm_annotations_but_rejects_schema_drift(helix):
+    handler, ctx, _, incidents, _ = helix
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
+    response = helix_response(request, inputs["comments"][0]["id"])
+    first = response["results/000001.json"]["classifications"][0]
+    first["evidence"] = {
+        "quotes": ["texto"],
+        "reason": "explicación no contractual",
+    }
+    first["rationale"] = "explicación no contractual"
+    first["links"][0]["reason"] = "explicación no contractual"
+
+    status = handler.import_response(ctx, inputs, zipped(response))
+    assert status["received"] == len(incidents)
+    stored = handler.current(ctx, inputs)["SOURCE"][first["id"]]
+    assert "evidence" not in stored and "rationale" not in stored
+    assert "reason" not in stored["links"][0]
+
+    changed_incidents = incidents.assign(
+        **{"Detailed Description": incidents["Detailed Description"] + " cambiado"}
+    )
+    fresh = handler.inputs(ctx, changed_incidents, "SOURCE")
+    request = exported(handler.export(ctx, fresh)["saved_paths"])
+    response = helix_response(request, fresh["comments"][0]["id"])
+    response["results/000001.json"]["classifications"][0]["entity"] = "unexpected"
+    with pytest.raises(ValueError, match="formato inválido"):
+        handler.import_response(ctx, fresh, zipped(response))
+
+
 def test_partial_imports_accumulate_across_jobs_after_restart(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")

@@ -248,14 +248,12 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
         {"primary": "c999"},
         {"primary": None},
         {"secondary": ["c001"]},
-        {"rationale": ""},
-        {"rationale": "a" * 2_001},
         {"links": [{"nps_id": "unknown", "confidence": 0.8}]},
         {"links": [{"nps_id": "unknown", "confidence": 1.1}]},
         {"links": [{"nps_id": "unknown", "confidence": 0.8}] * 21},
     ],
 )
-def test_helix_rejects_invalid_category_rationale_or_links(helix, changes):
+def test_helix_rejects_invalid_category_or_links(helix, changes):
     handler, ctx, _, incidents, _ = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
