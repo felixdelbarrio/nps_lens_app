@@ -164,7 +164,6 @@ CHAIN_COLUMNS = [
     "incidents",
     "responses",
     "support_organizations",
-    "historical_resolution_weeks",
     "presentation_mode",
     "journey_route",
     "journey_evidence_pattern",
@@ -1853,14 +1852,6 @@ def build_incident_attribution_chains(
                 }
             )
         )
-        historical_resolution_weeks = _safe_float(
-            pd.to_numeric(
-                grp.get("historical_resolution_weeks", pd.Series(dtype=float)),
-                errors="coerce",
-            ).mean(),
-            default=np.nan,
-        )
-
         incident_ids = [
             str(rec.get("incident_id", "")).strip()
             for rec in incident_records
@@ -1921,7 +1912,6 @@ def build_incident_attribution_chains(
                 "incidents": incidents_total,
                 "responses": responses_total,
                 "support_organizations": support_organizations,
-                "historical_resolution_weeks": historical_resolution_weeks,
                 "presentation_mode": source_mode,
                 "journey_route": journey_route,
                 "journey_evidence_pattern": journey_evidence_pattern,

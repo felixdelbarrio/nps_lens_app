@@ -2515,10 +2515,6 @@ class DashboardService:
                             "label": "Organizaciones de las incidencias enlazadas",
                             "value": str(card.get("support_organizations") or "n/d"),
                         },
-                        {
-                            "label": "Duración media histórica de resolución (semanas)",
-                            "value": format_metric(row.get("historical_resolution_weeks")),
-                        },
                     ],
                     "rank": index,
                     "title": title,
