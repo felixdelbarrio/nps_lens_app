@@ -365,6 +365,34 @@ def test_classifier_tolerates_known_nonsemantic_llm_annotations(exchange):
     assert result["received"] == len(request["manifest.json"]["batches"])
 
 
+def test_classifier_drops_fallback_categories_from_secondary_topics(exchange):
+    handler, ctx, _, _ = exchange
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    response = classifier_files(request["manifest.json"], request)
+    categories = request["taxonomy.json"]["categories"]
+    fallback = next(
+        key for key, value in categories.items() if value["lever"] == FALLBACK_LEVER
+    )
+    legitimate_secondary = next(
+        key
+        for key, value in categories.items()
+        if value["lever"] == "Velocidad" and value["sublever"] == "Espera"
+    )
+    row = response["results"]["000001"]["classifications"][0]
+    row["secondary"] = [legitimate_secondary, fallback]
+
+    result = handler.import_response(ctx, classifier_zip(response), "classifier")
+
+    assert result["received"] == len(request["manifest.json"]["batches"])
+    resolved = handler.assignments(ctx, handler._frame(ctx), "DISCOVERED")
+    first = resolved[next(iter(resolved))]
+    assert first["secondary_classifications"] == [
+        {"lever": "Velocidad", "sublever": "Espera"}
+    ]
+
+
 def test_classifier_still_rejects_unknown_schema_drift(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")

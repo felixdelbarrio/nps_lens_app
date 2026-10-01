@@ -148,6 +148,40 @@ def normalize_classifier_payload(payload: Any) -> Any:
     return {**payload, "classifications": normalized}
 
 
+def normalize_reserve_secondaries(
+    response: CompactCommentResponse, catalog: dict[str, dict[str, str]]
+) -> CompactCommentResponse:
+    """Remove fallback categories when an LLM emits them as secondary topics.
+
+    Fallbacks describe the absence of a classifiable secondary topic, so persisting one
+    as an additional topic would violate the domain invariant.  We repair only this
+    deterministic contradiction; unknown categories, duplicate topics and every other
+    semantic/schema error remain strict and are rejected by ``expand``.
+    """
+    fallback_ids = {
+        key for key, category in catalog.items() if category["lever"] == FALLBACK_LEVER
+    }
+    if not fallback_ids:
+        return response
+
+    changed = False
+    classifications = []
+    for row in response.classifications:
+        ids = [row.primary, *row.secondary]
+        if len(ids) != len(set(ids)) or any(key not in catalog for key in ids):
+            raise ValueError(
+                "ID de categoría desconocido en la taxonomía o temas secundarios inválidos."
+            )
+        secondary = [key for key in row.secondary if key not in fallback_ids]
+        if secondary != row.secondary:
+            row = row.model_copy(update={"secondary": secondary})
+            changed = True
+        classifications.append(row)
+    if not changed:
+        return response
+    return response.model_copy(update={"classifications": classifications})
+
+
 def read_zip(content: bytes) -> dict[str, Any]:
     if len(content) > MAX_ZIP_BYTES:
         raise ValueError("ZIP demasiado grande (máximo 32 MiB).")
@@ -682,6 +716,7 @@ class TaxonomyExchange:
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")
+            response = normalize_reserve_secondaries(response, categories)
             for decision in response.classifications:
                 decision.expand(categories)
             validated[key] = encode(
