@@ -3,7 +3,8 @@ from __future__ import annotations
 import unicodedata
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from typing_extensions import Annotated
 
 from nps_lens.services.semantic_validation import GroundedDecision
 from nps_lens.services.taxonomy_prompts import (
@@ -53,8 +54,23 @@ class TaxonomyResponse(_StrictModel):
     taxonomy: list[TaxonomyBranch] = Field(min_length=1, max_length=MAX_LEVERS)
 
 
+class TaxonomyReview(GroundedDecision):
+    """Corpus-level evidence for a designed taxonomy.
+
+    Unlike one classification decision (which intentionally caps evidence at three
+    quotes), a taxonomy review may need to ground several boundaries and
+    counterexamples across the corpus. Keep it bounded by the maximum number of
+    taxonomy leaves rather than reusing the per-decision limit.
+    """
+
+    quotes: list[str] = Field(max_length=MAX_LEVERS * MAX_SUBLEVERS)
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=12, max_length=5_000)
+    ]
+
+
 class TaxonomyDesignResponse(TaxonomyResponse):
-    review: GroundedDecision
+    review: TaxonomyReview
 
 
 class TaxonomyValidator:

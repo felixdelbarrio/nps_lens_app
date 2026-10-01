@@ -84,6 +84,32 @@ def test_identical_incidents_cannot_drift_between_batches(helix):
     assert handler.status(context, inputs)["received"] == 200
 
 
+def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exchange):
+    handler, context, _, _ = exchange
+    request = exported(handler.export(context, "designer")["saved_path"])
+    taxonomy = reviewed_taxonomy(TAXONOMY, request)
+    quotes = [
+        row["Comment"]
+        for name, value in request.items()
+        if name.startswith("comments/")
+        for row in value["comments"]
+        if row["Comment"].strip()
+    ][:4]
+    taxonomy["review"]["quotes"] = quotes
+    taxonomy["review"]["reason"] = (
+        "Fronteras contrastadas con evidencia distribuida. " + ("x" * 2_050)
+    )
+
+    result = handler.import_response(
+        context,
+        zipped({"manifest.json": request["manifest.json"], "taxonomy.json": taxonomy}),
+        "designer",
+    )
+
+    assert result == {"stage": "designer", "imported": True}
+    assert handler.taxonomy.state(context)["designer_review"]["quotes"] == quotes
+
+
 def test_designer_review_cannot_cite_another_corpus(exchange):
     handler, context, _, _ = exchange
     request = exported(handler.export(context, "designer")["saved_path"])
