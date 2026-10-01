@@ -59,7 +59,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
                 "avg_nps": 2,
                 "avg_similarity": 0.7,
                 "support_organizations": "Equipo",
-                "historical_resolution_weeks": 1.234,
                 "incident_records": [
                     {
                         "incident_id": "INC1",

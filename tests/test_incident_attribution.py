@@ -133,7 +133,6 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 "incidents": 5,
                 "responses": 120,
                 "support_organizations": "Producto + Tecnologia",
-                "historical_resolution_weeks": 6,
             }
         ]
     )

@@ -148,7 +148,6 @@ def _sample_payload() -> dict:
                 "incidents": 5,
                 "responses": 120,
                 "support_organizations": "Producto + Tecnologia",
-                "historical_resolution_weeks": 6.0,
                 "incident_records": [
                     {
                         "incident_id": "INC00001",

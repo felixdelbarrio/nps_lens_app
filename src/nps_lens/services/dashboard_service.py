@@ -679,7 +679,7 @@ class DashboardService:
                 context,
                 exc,
             )
-            return HelixOperationalBenchmark({}, {}, None)
+            return HelixOperationalBenchmark({})
 
     def resolve_context(
         self,

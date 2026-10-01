@@ -70,7 +70,9 @@ def _coalesce_text_columns(
 
 
 def _unique_preserve_order(values: Sequence[object]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip()))
+    return tuple(
+        dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip())
+    )
 
 
 def _split_support_orgs(value: object) -> tuple[str, ...]:
@@ -90,7 +92,9 @@ def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationa
     mapping: dict[str, tuple[str, ...]] = {}
     for incident_id, organizations in zip(incident_ids, support_orgs):
         if incident_id:
-            mapping[incident_id] = _unique_preserve_order((*mapping.get(incident_id, ()), *organizations))
+            mapping[incident_id] = _unique_preserve_order(
+                (*mapping.get(incident_id, ()), *organizations)
+            )
     return HelixOperationalBenchmark(mapping)
 
 

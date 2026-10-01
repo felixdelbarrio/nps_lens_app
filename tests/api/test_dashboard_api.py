@@ -560,7 +560,6 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert [row["label"] for row in identity] == [
         "Tópico NPS ancla",
         "Organizaciones de las incidencias enlazadas",
-        "Duración media histórica de resolución (semanas)",
     ]
     assert len({row["NPS Topic"] for row in evidence_rows}) <= 10
     assert (

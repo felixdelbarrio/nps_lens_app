@@ -24,8 +24,7 @@ const payload = {
   scenarios: { cards: [{
     title: "Escenario", identity_rows: [
       { label: "Tópico NPS ancla", value: "Pagos" },
-      { label: "Organizaciones responsables observadas", value: "Equipo" },
-      { label: "Duración media histórica de resolución (semanas)", value: "1,20" }
+      { label: "Organizaciones responsables observadas", value: "Equipo" }
     ],
     incident_records: [{ incident_id: "INC1", summary: "Error <script>alert(1)</script>", summary_segments: [
       { text: "Error", bold: true }, { text: " <script>alert(1)</script>", bold: false }

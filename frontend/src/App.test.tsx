@@ -325,8 +325,7 @@ const linkingPayloadAvailable = {
         support_organizations: "VoC + Analitica",
         identity_rows: [
           { label: "Tópico NPS ancla", value: "Pagos > Transferencias" },
-          { label: "Organizaciones responsables observadas", value: "VoC + Analitica" },
-          { label: "Duración media histórica de resolución (semanas)", value: "1,20" }
+          { label: "Organizaciones responsables observadas", value: "VoC + Analitica" }
         ],
         flow_steps: [
           "(12) Incidencias + comentarios",
