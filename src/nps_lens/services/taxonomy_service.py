@@ -26,6 +26,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.classification_protocol import digest
+from nps_lens.services.taxonomy_discovery import TaxonomyResponse
 from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION
 from nps_lens.settings import persist_ui_prefs
 
@@ -73,6 +74,9 @@ class TaxonomyResolver:
                 out["Canal"] = registry.normalize_series("nps.Canal", out["Canal"])
         if mode in ("SOURCE", "COMPLETED"):
             out = registry.apply("nps", out)
+        if mode == "DISCOVERED" and artifact and artifact.get("mode", mode) == "DISCOVERED":
+            complete = out["Palanca"].str.strip().ne("") & out["Subpalanca"].str.strip().ne("")
+            out.loc[~complete, ["Palanca", "Subpalanca"]] = ""
         out.attrs["taxonomy_mode"] = mode
         return out
 
@@ -268,7 +272,7 @@ class TaxonomyService:
         item = available[selected]
         # Frozen lenses carry their own assignments and equivalences.
         if state.get("restored") and item:
-            out = self.resolver.resolve(frame, "DISCOVERED", registry, item)
+            out = self.resolver.resolve(frame, "DISCOVERED", registry, {**item, "mode": selected})
             if "channel" in item:
                 lookup = pd.Series(item["channel"], index=item["keys"])
                 out["Canal"] = frame["_business_key"].map(lookup)
@@ -288,10 +292,10 @@ class TaxonomyService:
             raise ValueError("Taxonomía desconocida.")
         state = self.state(context)
         item = self.artifact(state.get("artifacts", {}).get(mode, ""))
-        if item and item.get("taxonomy"):
-            catalog = item["taxonomy"]
-        elif mode == "DISCOVERED" and state.get("discovered_taxonomy"):
+        if mode == "DISCOVERED" and state.get("discovered_taxonomy"):
             catalog = state["discovered_taxonomy"]
+        elif item and item.get("taxonomy"):
+            catalog = item["taxonomy"]
         else:
             frame = (
                 original_labels(self.source(context))
@@ -308,6 +312,13 @@ class TaxonomyService:
                     for lever, group in pairs.groupby("Palanca", sort=True)
                 ]
             }
+        if mode == "DISCOVERED":
+            try:
+                TaxonomyResponse.model_validate(catalog)
+            except ValueError as exc:
+                raise ValueError(
+                    "La taxonomía diseñada no contiene criterion; regenera con el diseñador actual."
+                ) from exc
         if normalized and mode in ("SOURCE", "COMPLETED"):
             pairs = pd.DataFrame(
                 [
@@ -342,7 +353,20 @@ class TaxonomyService:
         if template not in ("SOURCE", "DISCOVERED"):
             raise ValueError("Plantilla desconocida.")
         if template == "DISCOVERED":
-            return cast(dict[str, Any], state.get("discovered_taxonomy") or {"taxonomy": []})
+            catalog = (
+                self.catalog(context, "DISCOVERED")
+                if state.get("discovered_taxonomy")
+                else {"taxonomy": []}
+            )
+            return {
+                "taxonomy": [
+                    {
+                        "lever": branch["lever"],
+                        "sublevers": [sub["name"] for sub in branch["sublevers"]],
+                    }
+                    for branch in catalog["taxonomy"]
+                ]
+            }
         return self.catalog(context, template, normalized=False)
 
     def manual_info(self, context: UploadContext, template: str = "CURRENT") -> dict[str, Any]:
@@ -739,7 +763,7 @@ class TaxonomyService:
                 raise ValueError("Taxonomía desconocida en snapshot.")
             if set(item.get("keys", [])) != set(frame["_business_key"]):
                 raise ValueError("Faltan asignaciones del corpus en el snapshot.")
-            self.resolver.resolve(frame, "DISCOVERED", registry, item)
+            self.resolver.resolve(frame, "DISCOVERED", registry, {**item, "mode": mode})
         state = self.state(context)
         state.update(
             {

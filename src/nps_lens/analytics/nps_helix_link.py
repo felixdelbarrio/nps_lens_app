@@ -119,8 +119,15 @@ def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
 _DETAIL_LABEL = re.compile(
     r"(?im)^[ \t]*(?:[-*•][ \t]*)?(?:\d+[.)][ \t]*)?([^:\n]{2,65})[ \t]*:[ \t]*"
 )
-_SIGNAL_LABEL = re.compile(
-    r"s[ií]ntoma|impacto|error|causa|resoluci[oó]n|soluci[oó]n|descripci[oó]n|problema|symptom|impact|resolution|description|cause",
+_ADMIN_LABEL = re.compile(
+    r"^(?:nombre|apellido|tel[eé]fono|email|e-mail|correo|dni|cuit|legajo|"
+    r"contacto|adjuntos|canal|producto|categor[ií]a|categorization|asignado a|assigned group|"
+    r"owner support company|servicio origen|source service|prioridad|priority)$",
+    re.IGNORECASE,
+)
+
+_NARRATIVE_LABEL = re.compile(
+    r"^(?:s[ií]ntoma|impacto|error|causa|resoluci[oó]n|soluci[oó]n|descripci[oó]n|problema|symptom|impact|resolution|description|cause)$",
     re.IGNORECASE,
 )
 
@@ -128,35 +135,39 @@ _SIGNAL_LABEL = re.compile(
 def _detail_signal(text: str) -> str:
     labels = list(_DETAIL_LABEL.finditer(text))
     if not labels:
-        return text[:320]
-    parts = []
+        return text
+    parts = [text[: labels[0].start()].strip()]
     for index, match in enumerate(labels):
-        if _SIGNAL_LABEL.search(match.group(1)):
+        if not _ADMIN_LABEL.fullmatch(match.group(1).strip()):
             end = labels[index + 1].start() if index + 1 < len(labels) else len(text)
-            value = text[match.end() : end].strip()
-            if value:
-                parts.append(value[:240])
-    return " ".join(parts)[:640]
+            # Unknown labels may themselves contain a negation or correction.
+            start = (
+                match.end() if _NARRATIVE_LABEL.fullmatch(match.group(1).strip()) else match.start()
+            )
+            parts.append(text[start:end].strip())
+    return " ".join(part for part in parts if part)
 
 
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
-    """Compact semantic evidence, with field-specific limits and no repeated values."""
+    """Narrative evidence without administrative template fields or repeated values."""
     fields = [
-        ("summary", 180),
-        ("Description", 180),
-        ("Short Description", 180),
-        ("BBVA_ExecutiveDescription", 320),
-        ("BBVA_FinalImpact", 320),
-        ("BBVA_RootCauseMain", 160),
-        ("BBVA_RootCause1", 240),
-        ("BBVA_RootCauseExecutive", 260),
-        ("Resolution", 240),
-        ("Detailed Description", 640),
-        ("Detailed Decription", 640),
+        "summary",
+        "Description",
+        "Short Description",
+        "BBVA_ExecutiveDescription",
+        "BBVA_FinalImpact",
+        "BBVA_RootCauseMain",
+        "BBVA_RootCause1",
+        "BBVA_RootCauseExecutive",
+        "Resolution",
+        "Detailed Description",
+        "Detailed Decription",
+        "bbva_detaileddescription",
+        "Descripción",
     ]
     compact = pd.Series("", index=df.index, dtype="string")
     seen = []
-    for name, limit in fields:
+    for name in fields:
         for column in _ordered_cols_ci(df, [name]):
             part = _txt_series(df, column)
             if name.startswith("Detailed"):
@@ -175,7 +186,7 @@ def build_incident_text(df: pd.DataFrame) -> pd.Series:
             for previous in seen:
                 duplicate |= key.eq(previous)
             seen.append(key)
-            compact = compact + " " + part.mask(duplicate, "").str.slice(0, limit)
+            compact = compact + " " + part.mask(duplicate, "")
     return compact.str.replace(r"\s+", " ", regex=True).str.strip()
 
 
@@ -243,7 +254,7 @@ def _safe_id(series: pd.Series) -> pd.Series:
     return series.astype(str).fillna("").replace({"nan": ""})
 
 
-def link_incidents_to_nps_topics(
+def retrieve_incident_candidates(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
     min_similarity: float = LINK_MIN_SIMILARITY,
@@ -251,18 +262,12 @@ def link_incidents_to_nps_topics(
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
     evidence_chunk_size: int = 128,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Return:
-    - assignments per incident to best NPS topic (and similarity)
-    - evidence links from incidents to specific detractor comments
-    """
+) -> pd.DataFrame:
+    """Shared batched retrieval; candidates are not semantic proof of a link."""
 
     if nps_detractors.empty or helix_incidents.empty:
-        return (
-            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity"]),
-            pd.DataFrame(
-                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-            ),
+        return pd.DataFrame(
+            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
         )
 
     nps_text = build_nps_text(nps_detractors)
@@ -271,11 +276,8 @@ def link_incidents_to_nps_topics(
     nps_text = nps_text.loc[matchable].map(preprocess_text)
     helix = filter_linkable_incidents(helix_incidents)
     if helix.empty or nps.empty:
-        return (
-            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity"]),
-            pd.DataFrame(
-                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-            ),
+        return pd.DataFrame(
+            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
         )
 
     nps["nps_id"] = analytical_response_ids(nps)
@@ -302,19 +304,14 @@ def link_incidents_to_nps_topics(
             )
             helix = helix.loc[relevant].copy()
             if helix.empty:
-                return (
-                    pd.DataFrame(
-                        columns=["incident_id", "nps_topic", "similarity", "incident_topic"]
-                    ),
-                    pd.DataFrame(
-                        columns=[
-                            "nps_id",
-                            "incident_id",
-                            "similarity",
-                            "nps_topic",
-                            "incident_topic",
-                        ]
-                    ),
+                return pd.DataFrame(
+                    columns=[
+                        "nps_id",
+                        "incident_id",
+                        "similarity",
+                        "nps_topic",
+                        "incident_topic",
+                    ]
                 )
 
     nps["nps_topic"] = build_nps_topic(nps)
@@ -326,11 +323,8 @@ def link_incidents_to_nps_topics(
     helix_text = helix_text.map(preprocess_text)
     corpus = nps_text.tolist() + helix_text.tolist()
     if not any(str(t).strip() for t in corpus):
-        return (
-            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
-            pd.DataFrame(
-                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-            ),
+        return pd.DataFrame(
+            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
         )
 
     # Literal narrative evidence only. Character fragments inflated similarity on
@@ -390,11 +384,8 @@ def link_incidents_to_nps_topics(
         word_matrix = word_vec.fit_transform(corpus)
     except ValueError:
         # Empty vocabulary after cleaning
-        return (
-            pd.DataFrame(columns=["incident_id", "nps_topic", "similarity", "incident_topic"]),
-            pd.DataFrame(
-                columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-            ),
+        return pd.DataFrame(
+            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
         )
 
     split = len(nps)
@@ -452,13 +443,10 @@ def link_incidents_to_nps_topics(
                 candidate_vals = candidate_vals[valid]
             if not len(candidate_idx):
                 continue
-            if len(candidate_vals) > per_incident_k:
-                pick = np.argpartition(candidate_vals, -per_incident_k)[-per_incident_k:]
-                pick = pick[np.argsort(-candidate_vals[pick])]
-                idx, vals = candidate_idx[pick], candidate_vals[pick]
-            else:
-                order = np.argsort(-candidate_vals)
-                idx, vals = candidate_idx[order], candidate_vals[order]
+            order = np.lexsort((nps_ids[candidate_idx].astype(str), -candidate_vals))[
+                :per_incident_k
+            ]
+            idx, vals = candidate_idx[order], candidate_vals[order]
             for j, sim in zip(idx.tolist(), vals.tolist()):
                 s = float(sim)
                 if s < float(min_similarity):
@@ -490,11 +478,31 @@ def link_incidents_to_nps_topics(
         .drop_duplicates(["incident_id", "nps_id"])
         .reset_index(drop=True)
     )
-    # Every assignment must have an accepted, dated comment as its evidence.
-    assign_df = links_df.drop_duplicates("incident_id")[
+    return links_df
+
+
+def link_incidents_to_nps_topics(
+    nps_detractors: pd.DataFrame,
+    helix_incidents: pd.DataFrame,
+    min_similarity: float = LINK_MIN_SIMILARITY,
+    max_features: int = 50000,
+    top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
+    evidence_chunk_size: int = 128,
+    max_days_apart: int | None = LINK_MAX_DAYS_APART,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    links = retrieve_incident_candidates(
+        nps_detractors,
+        helix_incidents,
+        min_similarity,
+        max_features,
+        top_k_per_incident,
+        evidence_chunk_size,
+        max_days_apart,
+    )
+    assignments = links.drop_duplicates("incident_id")[
         ["incident_id", "nps_topic", "similarity", "incident_topic"]
     ].reset_index(drop=True)
-    return assign_df, links_df
+    return assignments, links
 
 
 def _period_aggregates(

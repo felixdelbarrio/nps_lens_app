@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from nps_lens.api.app import create_app
 from nps_lens.domain.models import UploadContext
+from nps_lens.services.classification_protocol import label_criterion
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange, encode, read_zip
 from nps_lens.services.taxonomy_prompts import (
@@ -106,17 +107,9 @@ def classifier_files(manifest, inputs):
                         "primary": next(
                             key
                             for key, pair in inputs["taxonomy.json"]["categories"].items()
-                            if pair == {"lever": "Atención", "sublever": "Resolución"}
+                            if pair["lever"] == "Atención" and pair["sublever"] == "Resolución"
                         ),
                         "secondary": [],
-                        "evidence": {
-                            "quotes": (
-                                list(dict.fromkeys([row["Comment"], row["Comment"].strip()[-1:]]))
-                                if row["Comment"].strip()
-                                else []
-                            ),
-                            "reason": "La narrativa explicita el problema observado.",
-                        },
                     }
                     for row in payload["comments"]
                 ]
@@ -136,7 +129,20 @@ def reviewed_taxonomy(taxonomy, request):
         if row["Comment"].strip()
     ][:1]
     return {
-        **taxonomy,
+        "taxonomy": [
+            {
+                "lever": b["lever"],
+                "sublevers": [
+                    (
+                        {"name": sub, "criterion": label_criterion(b["lever"], sub)}
+                        if isinstance(sub, str)
+                        else sub
+                    )
+                    for sub in b["sublevers"]
+                ],
+            }
+            for b in taxonomy["taxonomy"]
+        ],
         "review": {
             "quotes": quotes,
             "reason": "Fronteras contrastadas con la narrativa del corpus.",
@@ -208,7 +214,11 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     assert response.status_code == 200, response.text
     classification = exported(response.json()["saved_paths"])
     assert list(classification["taxonomy.json"]["categories"].values()) == [
-        {"lever": branch["lever"], "sublever": sub}
+        {
+            "lever": branch["lever"],
+            "sublever": sub,
+            "criterion": label_criterion(branch["lever"], sub),
+        }
         for branch in TAXONOMY["taxonomy"]
         for sub in branch["sublevers"]
     ]
@@ -308,9 +318,9 @@ def test_all_projects_share_strict_zip_validation(stage):
 
     manifest = {
         "schema_version": {
-            "helix": "nps-lens-helix/4",
-            "classifier": "nps-lens-comments/4",
-            "designer": "nps-lens-taxonomy/3",
+            "helix": "nps-lens-helix/5",
+            "classifier": "nps-lens-comments/5",
+            "designer": "nps-lens-taxonomy/4",
         }[stage],
         "stage": stage,
         "instructions_version": INSTRUCTIONS_VERSION,

@@ -103,7 +103,16 @@ def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
         "nodes": [],
         "equivalences": {},
     }
-    artifact["taxonomy"] = {"taxonomy": [{"lever": "ChatGPT", "sublevers": ["Clasificado"]}]}
+    artifact["taxonomy"] = {
+        "taxonomy": [
+            {
+                "lever": "ChatGPT",
+                "sublevers": [
+                    {"name": "Clasificado", "criterion": "Clasificación explícita del texto."}
+                ],
+            }
+        ]
+    }
     artifact["comment_hashes"] = {
         key: digest(str(text))
         for key, text in zip(frame["_business_key"], frame["Comment"].fillna(""))

@@ -10,7 +10,12 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
-from nps_lens.analytics.nps_helix_link import build_incident_display_text, build_nps_topic
+from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_TOP_K_PER_INCIDENT
+from nps_lens.analytics.nps_helix_link import (
+    build_incident_text,
+    build_nps_topic,
+    retrieve_incident_candidates,
+)
 from nps_lens.analytics.taxonomy import MODES
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
@@ -22,13 +27,9 @@ from nps_lens.services.classification_protocol import (
     digest,
     encode,
     incident_classification_fingerprint,
+    taxonomy_fingerprint,
 )
-from nps_lens.services.semantic_validation import (
-    GroundedDecision,
-    Reason,
-    validate_decision,
-    validate_quote,
-)
+from nps_lens.services.semantic_validation import validate_quote
 from nps_lens.services.taxonomy_exchange import (
     TaxonomyExchange,
     bounded_batches,
@@ -48,17 +49,10 @@ class EvidenceLink(BaseModel):
     confidence: float = Field(ge=0, le=1)
     incident_quote: str = Field(min_length=1, max_length=2000)
     comment_quote: str = Field(min_length=1, max_length=2000)
-    reason: Reason = Field(max_length=1000)
 
 
 class IncidentClassification(CompactClassification):
-    # Helix responses produced by the external LLM can omit the advisory
-    # classification-level evidence block. Keep the field strict when present,
-    # but allow omission for linkless rows so a non-causal classification can
-    # still be imported. Rows with NPS links continue to require evidence.
-    evidence: GroundedDecision | None = None
-    rationale: str = Field(min_length=1, max_length=2000)
-    links: list[EvidenceLink] = Field(max_length=20)
+    links: list[EvidenceLink] = Field(max_length=LINK_TOP_K_PER_INCIDENT)
 
 
 class IncidentResponse(BaseModel):
@@ -108,15 +102,11 @@ class HelixExchange:
         if len(ids) != len(incidents) or not ids.is_unique or ids.str.strip().eq("").any():
             raise ValueError("Las incidencias requieren IDs únicos y no vacíos.")
         rows = [
-            {"id": key, "description": text, "source_service_n2": str(n2)}
-            for key, text, n2 in zip(
-                ids,
-                build_incident_display_text(incidents),
-                incidents.get("BBVA_SourceServiceN2", pd.Series("", index=incidents.index)).fillna(
-                    ""
-                ),
-            )
+            {"id": key, "description": text}
+            for key, text in zip(ids, build_incident_text(incidents))
         ]
+        for row, date in zip(rows, incident_occurrence_dates(incidents)[0]):
+            row["date"] = date.isoformat() if pd.notna(date) else ""
         labels = {
             mode: frame[["Palanca", "Subpalanca"]].to_numpy().tolist()
             for mode, frame in resolved.items()
@@ -140,13 +130,20 @@ class HelixExchange:
                 zip(analytical_response_ids(source), source["Comment"].fillna(""))
             )
         ]
+        for row, date in zip(
+            comments,
+            pd.to_datetime(
+                source.get("Fecha", pd.Series(pd.NaT, index=source.index)), errors="coerce"
+            ),
+        ):
+            row["date"] = date.isoformat() if pd.notna(date) else ""
         scopes = {
             mode: digest(
                 [
                     HELIX_SCHEMA,
                     INSTRUCTIONS_VERSION,
                     mode,
-                    catalogs[mode],
+                    taxonomy_fingerprint(catalogs[mode]),
                     comments,
                     (
                         self.taxonomy.state(context).get("artifacts", {}).get("COMPLETED", "")
@@ -158,6 +155,7 @@ class HelixExchange:
         }
         return {
             "frame": frame,
+            "incident_frame": incidents,
             "modes": list(resolved),
             "taxonomies": catalogs,
             "scopes": scopes,
@@ -174,6 +172,7 @@ class HelixExchange:
         current: dict[str, dict[str, Any]] = {}
         with self.repository._connect() as db:
             for mode, scope in inputs["scopes"].items():
+                semantic_fingerprint = taxonomy_fingerprint(inputs["taxonomies"][mode])
                 rows = db.execute(
                     "SELECT incident, fingerprint, payload FROM helix_classifications WHERE context=? AND scope=?",
                     (context_key(context), scope),
@@ -183,7 +182,10 @@ class HelixExchange:
                     if fingerprints.get(key) != fingerprint:
                         continue
                     item = strict_json(payload.encode())
-                    if item.get("instructions_version") != INSTRUCTIONS_VERSION:
+                    if (
+                        item.get("instructions_version") != INSTRUCTIONS_VERSION
+                        or item.get("taxonomy_fingerprint") != semantic_fingerprint
+                    ):
                         continue
                     for comment, expected in item.get("evidence_hashes", {}).items():
                         if comment not in evidence:
@@ -240,7 +242,6 @@ class HelixExchange:
         if not pending:
             return {"saved_paths": [], "saved_directory": None, "batches": 0, "pending": 0}
         job_id = uuid.uuid4().hex
-        batches = bounded_batches(pending, "incidents")
         catalogs = {
             mode: category_catalog(catalog) for mode, catalog in inputs["taxonomies"].items()
         }
@@ -249,27 +250,35 @@ class HelixExchange:
             for mode, catalog in catalogs.items()
         }
         mode = inputs["modes"][0]
-        evidence = bounded_batches(
-            (
+        comments = {row["id"]: row for row in inputs["comments"]}
+        candidates: dict[str, list[dict[str, Any]]] = {}
+        retrieved = retrieve_incident_candidates(inputs["frame"], inputs["incident_frame"])
+        for link in retrieved.itertuples(index=False):
+            row = comments[link.nps_id]
+            primary = category_ids[mode].get(
+                (row["taxonomies"][mode]["lever"], row["taxonomies"][mode]["sublever"])
+            )
+            if primary is None or catalogs[mode][primary]["lever"] == FALLBACK_LEVER:
+                continue
+            candidates.setdefault(str(link.incident_id), []).append(
                 {
                     "id": row["id"],
                     "Comment": row["Comment"],
-                    "primary": category_ids[mode].get(
-                        (row["taxonomies"][mode]["lever"], row["taxonomies"][mode]["sublever"])
-                    ),
+                    "primary": primary,
                     "secondary": [
                         category_ids[mode][(pair["lever"], pair["sublever"])]
                         for pair in row["secondary_classifications"]
                     ],
                 }
-                for row in inputs["comments"]
-            ),
-            "comments",
-        )
+            )
+        for row in pending:
+            row["candidates"] = candidates.get(row["id"], [])
+        batches = bounded_batches(pending, "incidents")
         manifest = {
             "schema_version": HELIX_SCHEMA,
             "instructions_version": INSTRUCTIONS_VERSION,
             "taxonomies_sha256": digest(catalogs),
+            "taxonomy_fingerprint": taxonomy_fingerprint(inputs["taxonomies"][mode]),
             "job_id": job_id,
             "stage": "helix",
             "taxonomy_scopes": inputs["scopes"],
@@ -279,13 +288,15 @@ class HelixExchange:
             ],
         }
         shared: dict[str, Any] = {"taxonomies.json": catalogs}
-        shared.update(
-            {f"comments/{key}.json": {"comments": rows} for key, rows in evidence.items()}
-        )
         result = write_numbered_zips(
             self.downloads, "incidencias_helix", manifest, batches, shared, "incidents"
         )
-        job = {"manifest": manifest, "batches": batches}
+        candidate_ids = {candidate["id"] for row in pending for candidate in row["candidates"]}
+        job = {
+            "manifest": manifest,
+            "batches": batches,
+            "comment_hashes": {key: digest(comments[key]) for key in candidate_ids},
+        }
         with self.repository._connect() as db:
             db.execute(
                 "INSERT INTO helix_exchange VALUES (?, ?, ?)",
@@ -314,6 +325,9 @@ class HelixExchange:
             raise ValueError(
                 "La selección, las taxonomías o el corpus han cambiado; exporta de nuevo."
             )
+        mode = inputs["modes"][0]
+        if manifest["taxonomy_fingerprint"] != taxonomy_fingerprint(inputs["taxonomies"][mode]):
+            raise ValueError("taxonomy_fingerprint incompatible; exporta de nuevo.")
         source = {row["id"]: row for row in inputs["incidents"]}
         comments = {row["id"]: row for row in inputs["comments"]}
         catalogs = {
@@ -332,57 +346,36 @@ class HelixExchange:
                 raise ValueError("IDs u orden de incidencias incorrectos.")
             for row, original in zip(response.classifications, expected):
                 if source.get(row.id) != {
-                    k: v for k, v in original.items() if k != "pending_taxonomies"
+                    k: v
+                    for k, v in original.items()
+                    if k not in {"pending_taxonomies", "candidates"}
                 }:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
                 mode = inputs["modes"][0]
                 expanded = row.expand(catalogs[mode])
-                if row.evidence is None:
-                    if row.links:
-                        raise ValueError(
-                            "Una clasificación Helix con vínculos NPS requiere evidence literal."
-                        )
-                else:
-                    validate_decision(row, catalogs[mode], original["description"])
                 primary = expanded["primary_classification"]
-                assigned = [
-                    (pair["lever"], pair["sublever"])
-                    for pair in [primary, *expanded["secondary_classifications"]]
-                ]
+                supplied = {candidate["id"] for candidate in original["candidates"]}
                 if len({link.nps_id for link in row.links}) != len(row.links):
                     raise ValueError("Vínculos NPS duplicados.")
                 for link in row.links:
                     comment = comments.get(link.nps_id)
-                    comment_pairs = (
-                        {
-                            (
-                                comment["taxonomies"][mode]["lever"],
-                                comment["taxonomies"][mode]["sublever"],
-                            ),
-                            *(
-                                (pair["lever"], pair["sublever"])
-                                for pair in comment["secondary_classifications"]
-                            ),
-                        }
-                        if comment
-                        else set()
-                    )
-                    if (
-                        not comment
-                        or not comment_pairs.intersection(assigned)
-                        or row.primary is None
-                    ):
-                        raise ValueError("Vínculo a comentario desconocido o a otra categoría.")
+                    if not comment or link.nps_id not in supplied:
+                        raise ValueError(
+                            "Vínculo a comentario desconocido o no candidato de esta incidencia."
+                        )
+                    if job["comment_hashes"].get(link.nps_id) != digest(comment):
+                        raise ValueError("La evidencia NPS ha cambiado; exporta de nuevo.")
+                    if row.primary is None:
+                        raise ValueError("Una incidencia sin clasificación no admite vínculos.")
                     validate_quote(link.incident_quote, original["description"])
                     validate_quote(link.comment_quote, comment["Comment"])
                     if primary["lever"] == "Sin clasificación temática":
                         raise ValueError("Las categorías de reserva no justifican vínculos NPS.")
                 validated[(mode, row.id)] = {
                     "instructions_version": INSTRUCTIONS_VERSION,
-                    "evidence": row.evidence.model_dump() if row.evidence is not None else None,
+                    "taxonomy_fingerprint": manifest["taxonomy_fingerprint"],
                     **primary,
                     "secondary_classifications": expanded["secondary_classifications"],
-                    "rationale": row.rationale,
                     "links": [link.model_dump() for link in row.links],
                     "evidence_hashes": {
                         link.nps_id: digest(comments[link.nps_id]) for link in row.links
@@ -445,7 +438,7 @@ class HelixExchange:
         focus: pd.DataFrame,
         incidents: pd.DataFrame,
         *,
-        max_days_apart: int = 90,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
     ) -> pd.DataFrame:
         mode = inputs["modes"][0]
         current = self.current(context, inputs)[mode]
@@ -477,7 +470,6 @@ class HelixExchange:
                     pair["lever"] + " > " + pair["sublever"]
                     for pair in [row, *row.get("secondary_classifications", [])]
                 ),
-                "llm_rationale": row["rationale"],
             }
             for key, row in current.items()
             if key in incident_ids
@@ -496,6 +488,5 @@ class HelixExchange:
                 "similarity",
                 "nps_topic",
                 "incident_topic",
-                "llm_rationale",
             ],
         )

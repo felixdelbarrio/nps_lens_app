@@ -23,40 +23,27 @@ la limitación sin inventar resultados.
 
 SEMANTIC_CRITERIA = """
 CRITERIO SEMÁNTICO COMÚN
-Lee la narrativa completa y separa tarea, síntoma, pruebas, causas descartadas,
-estado y resultado. Título, formulario, producto, canal, tecnología o una palabra
-coincidente son contexto, no prueba. Respeta negaciones, contrastes y correcciones:
-una comprobación satisfactoria no demuestra un fallo del componente comprobado.
-Prefiere el encaje específico respaldado por el texto tras revisar TODO el catálogo;
-no infieras causas, gravedad o especialidad. Usa una categoría genérica solo si no
-hay otra precisa. «Información insuficiente» exige que no exista una afirmación
-interpretable; «Tema no cubierto», un tema explícito sin encaje. Una valoración
-general inteligible no es insuficiente. No equilibres categorías ni adaptes sus
-fronteras a cada lote. Antes de entregar, relee buscando negaciones, alternativas,
-reservas o pruebas descartadas que invaliden la primera decisión. Mantén idéntico
-criterio entre lotes.
-"""
-
-DECISION_EVIDENCE = """
-EVIDENCIA
-Cada clasificación incluye evidence={"quotes":[...],"reason":"..."}. quotes lleva
-1–3 fragmentos literales mínimos que preserven negaciones/contraste (vacío solo si
-la fuente está vacía), sin datos personales ni el formulario completo. reason tiene
-12–2000 caracteres: explica la decisión y descarta la alternativa más cercana; no
-basta repetir la etiqueta. Con secundarios, cita evidencia independiente. Verificar
-que la cita es literal no valida su interpretación: realiza también la relectura.
+1. Clasifica únicamente el significado explícito del texto.
+2. Aplica el criterion de cada categoría; el nombre por sí solo no basta.
+3. No deduzcas causas técnicas a partir de síntomas.
+4. Respeta negaciones, correcciones y componentes validados correctamente.
+5. Una valoración genérica sin tema concreto pertenece a Experiencia global.
+6. Información insuficiente: solo si el significado no puede determinarse.
+7. Tema no cubierto: significado claro sin categoría que lo represente.
+8. Ante varias categorías plausibles, elige el síntoma principal explícito,
+   no una palabra incidental, título, plantilla o metadato administrativo.
+Mantén idénticos criterios entre lotes; no infieras problemas a partir del sentimiento.
 """
 
 LINK_EVIDENCE = """
 VÍNCULOS
-Cada link añade incident_quote y comment_quote literales (1–2000 caracteres) y
-reason (12–1000), justificando la misma tarea Y un síntoma compatible. Una categoría,
+Cada link añade incident_quote y comment_quote literales (1–2000 caracteres) que muestren la misma tarea Y un síntoma compatible. Una categoría,
 palabra, canal o sentimiento compartido solo filtra: no prueba el vínculo. Sin
 evidencia específica en ambos textos usa links=[]; nunca enlaces reservas ni generes
 todos los pares de una categoría. Contrasta de nuevo cada par reutilizado.
 """
 
-DESIGNER_INSTRUCTIONS = """CREA TAXONOMÍA · nps-lens-taxonomy/3
+DESIGNER_INSTRUCTIONS = """CREA TAXONOMÍA · nps-lens-taxonomy/4
 ENTRADA
 ZIP con manifest.json, INSTRUCCIONES.txt y comments/NNNNNN.json, cuyos lotes siguen
 manifest.batches y contienen {"comments":[{"id":"...","Comment":"..."}]}.
@@ -89,17 +76,19 @@ REGLAS
 
 SALIDA
 ZIP con exactamente manifest.json y taxonomy.json:
-{"taxonomy":[{"lever":"Palanca","sublevers":["Subpalanca"]}],
+{"taxonomy":[{"lever":"Palanca","sublevers":[{"name":"Subpalanca","criterion":"Frontera compacta de uso"}]}],
 "review":{"quotes":["cita literal"],"reason":"Cobertura, fronteras y contraejemplos"}}.
+Cada criterion es obligatorio (1–500 caracteres): define el uso y la frontera frente
+a categorías próximas, sin listas extensas ni ejemplos repetidos.
 review debe acreditar la revisión con citas reales. No incluyas IDs ni clasificaciones.
 """
 
-CLASSIFIER_INSTRUCTIONS = """CLASIFICA COMENTARIOS · nps-lens-comments/4
+CLASSIFIER_INSTRUCTIONS = """CLASIFICA COMENTARIOS · nps-lens-comments/5
 ENTRADA
 ZIP con manifest.json, INSTRUCCIONES.txt, taxonomy.json y comments/NNNNNN.json.
 Lee los lotes en manifest.batches; cada uno contiene
 {"comments":[{"id":"...","Comment":"..."}]}. Verifica taxonomy.json contra
-manifest.taxonomy_sha256. Su mapping categories (ID -> lever/sublever) es la única
+manifest.taxonomy_sha256. Su mapping categories (ID -> lever/sublever/criterion) es la única
 autoridad: no reconstruyas, traduzcas, renombres ni amplíes categorías.
 
 ASIGNACIÓN
@@ -117,8 +106,7 @@ ASIGNACIÓN
 
 SALIDA
 ZIP con manifest.json y un results/NNNNNN.json por lote completo, usando su ID:
-{"classifications":[{"id":"ID","primary":"c003","secondary":["c008"],
-"evidence":{"quotes":["cita"],"reason":"decisión y alternativa descartada"}}]}.
+{"classifications":[{"id":"ID","primary":"c003","secondary":["c008"]}]}.
 No uses etiquetas, objetos lever/sublever, primary_classification ni
 secondary_classifications. No incluyas corpus ni archivos extra.
 Procesa todos los lotes completos posibles; ante un límite real devuelve solo los
@@ -128,13 +116,15 @@ Conserva índice/total del nombre: 1_4_comentarios.zip ->
 orden, unicidad y 0–2 secundarios antes de entregar.
 """
 
-HELIX_INSTRUCTIONS = """CLASIFICA INCIDENCIAS · nps-lens-helix/4
+HELIX_INSTRUCTIONS = """CLASIFICA INCIDENCIAS · nps-lens-helix/5
 ENTRADA
-Lee manifest.json, taxonomies.json, incidents/*.json y todos los comments/*.json.
+Lee manifest.json, taxonomies.json e incidents/*.json.
 Valida taxonomies.json contra manifest.taxonomies_sha256. Solo existe la lente activa
-de manifest.taxonomy_scopes; su mapping ID -> lever/sublever es la única autoridad.
-Los comentarios NPS llevan id, Comment, primary y secondary. Indéxalos una vez si
-ayuda; no releas todo el corpus por incidencia.
+de manifest.taxonomy_scopes; su mapping ID -> lever/sublever/criterion es la única autoridad.
+Cada incidencia contiene description y candidates: solo esos comentarios pueden
+recibir vínculos. Cada candidato lleva id, Comment, primary y secondary. El retrieval
+local limita candidatos y temporalidad; ser candidato no demuestra un vínculo.
+manifest.taxonomy_fingerprint identifica exactamente el catálogo semántico utilizado.
 
 ASIGNACIÓN
 - Para cada incidencia devuelve primary según la descripción explícita. secondary
@@ -143,10 +133,9 @@ ASIGNACIÓN
   un fallo ni una consulta una caída; no inventes causas técnicas.
 - Sin texto interpretable usa Información insuficiente; con síntoma claro sin encaje,
   Tema no cubierto, si existen. Solo sin reserva aplicable usa primary=null. En esos
-  casos secondary=[] y links=[]. rationale no debe alegar falta de información cuando
-  sí hay un tema explícito.
-- links contiene hasta 20 comentarios cuya categoría primary/secondary sea compatible
-  Y cuya evidencia muestre la misma tarea o síntoma. No rellenes cuotas. confidence
+  casos links=[]. No confundas tema no cubierto con falta de información.
+- links contiene solo candidatos cuya evidencia muestre la misma tarea y síntoma.
+  Compartir categoría no prueba un vínculo y tener otra categoría no lo impide. No rellenes cuotas. confidence
   (0–1) es confianza semántica, no causalidad ni significación. La app aplica la
   ventana temporal; afinidad no demuestra causalidad. No elijas método causal,
   journeys ni entidades.
@@ -154,10 +143,9 @@ ASIGNACIÓN
 SALIDA
 ZIP con manifest.json y results/NNNNNN.json por lote:
 {"classifications":[{"id":"ID","primary":"c003","secondary":["c008"],
-"evidence":{"quotes":["cita"],"reason":"decisión y alternativa descartada"},
-"rationale":"Evidencia y límites","links":[{"nps_id":"ID","confidence":0.85,
-"incident_quote":"cita","comment_quote":"cita","reason":"misma tarea y síntoma"}]}]}.
-rationale tiene 1–2000 caracteres y evita datos personales. Conserva todos los IDs
+"links":[{"nps_id":"ID","confidence":0.85,
+"incident_quote":"cita","comment_quote":"cita"}]}]}.
+No incluyas reason, rationale ni evidence de clasificación. Conserva todos los IDs
 una vez y en orden. No uses etiquetas, lever/sublever, primary_classification ni
 secondary_classifications; no incluyas corpus, taxonomías, carpetas o archivos extra.
 Procesa todos los lotes completos posibles; ante un límite real entrega solo los
@@ -193,8 +181,8 @@ No incluyas datos originales. La razón debe justificar sustitución en ambas di
 PROJECT_INSTRUCTIONS = {
     "normalizer": NORMALIZER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
     "designer": DESIGNER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
-    "classifier": CLASSIFIER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA + DECISION_EVIDENCE,
-    "helix": (HELIX_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA + DECISION_EVIDENCE + LINK_EVIDENCE),
+    "classifier": CLASSIFIER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
+    "helix": (HELIX_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA + LINK_EVIDENCE),
 }
 
 if oversized := {

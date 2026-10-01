@@ -97,11 +97,12 @@ def test_manual_uses_discovered_skeleton_without_origin(exchange):
 def helix_fixture(exchange):
     handler, context, frame, client = exchange
     frame["Palanca"], frame["Subpalanca"] = "Atención", "Resolución"
+    frame["Comment"] = [f"No resuelven transferencia retenida {i}" for i in range(len(frame))]
     frame["Fecha"], frame["NPS"] = pd.Timestamp("2026-09-01"), 2
     incidents = pd.DataFrame(
         {
             "Incident Number": [f"INC-{i}" for i in range(201)],
-            "Detailed Description": "No resuelven el problema",
+            "Detailed Description": "No resuelven transferencia retenida",
             "Submit Date": pd.Timestamp("2026-09-01"),
             "BBVA_SourceServiceN2": "Web",
         }
@@ -122,33 +123,25 @@ def helix_response(request, nps_id, entity="Resolución"):
                             key
                             for catalog in request["taxonomies.json"].values()
                             for key, pair in catalog.items()
-                            if pair == {"lever": "Atención", "sublever": "Resolución"}
+                            if pair["lever"] == "Atención" and pair["sublever"] == "Resolución"
                         ),
                         "secondary": [],
-                        "evidence": {
-                            "quotes": (
-                                list(dict.fromkeys([row["description"], row["description"][-1:]]))
-                                if row["description"].strip()
-                                else []
-                            ),
-                            "reason": "La incidencia explicita el problema observado.",
-                        },
-                        "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
-                        "links": [
-                            {
-                                "nps_id": nps_id,
-                                "confidence": 0.9,
-                                "incident_quote": row["description"] or "Sin descripción",
-                                "comment_quote": next(
-                                    comment["Comment"]
-                                    for name, data in request.items()
-                                    if name.startswith("comments/")
-                                    for comment in data["comments"]
-                                    if comment["id"] == nps_id
-                                ),
-                                "reason": "Ambas narrativas explicitan el problema observado.",
-                            }
-                        ],
+                        "links": (
+                            [
+                                {
+                                    "nps_id": nps_id,
+                                    "confidence": 0.9,
+                                    "incident_quote": row["description"] or "Sin descripción",
+                                    "comment_quote": next(
+                                        comment["Comment"]
+                                        for comment in row["candidates"]
+                                        if comment["id"] == nps_id
+                                    ),
+                                }
+                            ]
+                            if any(c["id"] == nps_id for c in row["candidates"])
+                            else []
+                        ),
                     }
                     for row in payload["incidents"]
                 ]

@@ -115,7 +115,7 @@ def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch
     comments = [f"comment {i}" for i in range(4_003)] + ["comment 0", "comment 4001"]
     handler, ctx, frame = set_comments(exchange, monkeypatch, comments)
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
-    assert request["manifest.json"]["schema_version"] == "nps-lens-comments/4"
+    assert request["manifest.json"]["schema_version"] == "nps-lens-comments/5"
     assert [b["count"] for b in request["manifest.json"]["batches"]] == [500] * 8 + [3]
     assert request["manifest.json"]["taxonomy_sha256"] == digest(request["taxonomy.json"])
     for batch in request["manifest.json"]["batches"]:
@@ -195,35 +195,30 @@ def test_catalog_ids_deterministic_and_obsolete_assignments_require_reprocessing
                     "secondary_classifications": [],
                 }
             },
-            {},
         )
     assert handler.progress(ctx)["received"] == 0
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert sum(b["count"] for b in request["manifest.json"]["batches"]) == len(frame)
     response = classifier_files(request["manifest.json"], request)
     response["manifest"]["schema_version"] = "nps-lens-comments/2"
-    with pytest.raises(ValueError, match="incompatible.*comments/4"):
+    with pytest.raises(ValueError, match="incompatible.*comments/5"):
         handler.import_response(ctx, classifier_zip(response), "classifier")
     assert handler.progress(ctx)["received"] == 0
 
 
 def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
     handler, ctx, frame, original, _ = helix
+    frame.drop(frame.index[1:], inplace=True)
     incidents = pd.concat([original.iloc[:1]] * 2_005, ignore_index=True)
     incidents["Incident Number"] = [f"INC-{i}" for i in range(len(incidents))]
     incidents.loc[0, "Detailed Description"] = ""
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
-    assert request["manifest.json"]["schema_version"] == "nps-lens-helix/4"
+    assert request["manifest.json"]["schema_version"] == "nps-lens-helix/5"
     assert [b["count"] for b in request["manifest.json"]["batches"]] == [500, 500, 500, 500, 5]
     assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-0"
     assert handler.status(ctx, inputs)["received"] == 0
-    assert request["comments/000001.json"]["comments"][0] == {
-        "id": inputs["comments"][0]["id"],
-        "Comment": inputs["comments"][0]["Comment"],
-        "primary": "c001",
-        "secondary": [],
-    }
+    assert not any(name.startswith("comments/") for name in request)
     response = helix_response(request, inputs["comments"][0]["id"])
     response = {
         key: value
@@ -244,7 +239,7 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
     persisted = handler.current(ctx, inputs)["SOURCE"]["INC-500"]
     assert persisted["lever"] == "Atención" and persisted["links"][0]["confidence"] == 0.9
-    assert persisted["rationale"] == "Coincidencia de síntoma; no demuestra causalidad."
+    assert "rationale" not in persisted
 
 
 @pytest.mark.parametrize(
@@ -270,22 +265,33 @@ def test_helix_rejects_invalid_category_rationale_or_links(helix, changes):
         handler.import_response(ctx, inputs, zipped(response))
     assert handler.status(ctx, inputs)["received"] == 0
     response["manifest.json"]["schema_version"] = "nps-lens-helix/2"
-    with pytest.raises(ValueError, match="incompatible.*helix/4"):
+    with pytest.raises(ValueError, match="incompatible.*helix/5"):
         handler.import_response(ctx, inputs, zipped(response))
 
 
 def test_helix_secondary_evidence_and_link_coherence(exchange, monkeypatch):
-    handler, ctx, frame = set_comments(exchange, monkeypatch, ["dos temas", "otro"])
+    handler, ctx, frame = set_comments(
+        exchange, monkeypatch, ["transferencia retenida pendiente", "saldo incoherente contable"]
+    )
     frame.loc[1, ["Palanca", "Subpalanca"]] = ["Acceso", "Token"]
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     response["results"]["000001"]["classifications"][0]["secondary"] = ["c001"]
     handler.import_response(ctx, classifier_zip(response), "classifier")
     helix = HelixExchange(handler.taxonomy, handler.downloads)
-    incidents = pd.DataFrame({"Incident Number": ["INC"], "Detailed Description": ["dos temas"]})
+    frame["Fecha"] = pd.Timestamp("2026-09-01")
+    incidents = pd.DataFrame(
+        {
+            "Incident Number": ["INC"],
+            "Detailed Description": ["transferencia retenida pendiente"],
+            "Submit Date": [pd.Timestamp("2026-09-01")],
+        }
+    )
     inputs = helix.inputs(ctx, incidents, "SOURCE")
     request = exported(helix.export(ctx, inputs)["saved_paths"])
-    assert request["comments/000001.json"]["comments"][0]["secondary"] == ["c001"]
+    assert request["incidents/000001.json"]["incidents"][0]["candidates"][0]["secondary"] == [
+        "c001"
+    ]
     response = helix_response(request, inputs["comments"][0]["id"])
     row = response["results/000001.json"]["classifications"][0]
     row.update(primary="c001", secondary=["c002"])
@@ -297,7 +303,7 @@ def test_helix_secondary_evidence_and_link_coherence(exchange, monkeypatch):
     mismatched_row = mismatched["results/000001.json"]["classifications"][0]
     mismatched_row.update(primary="c001", secondary=[])
     mismatched_row["links"][0]["nps_id"] = inputs["comments"][1]["id"]
-    with pytest.raises(ValueError, match="otra categoría"):
+    with pytest.raises(ValueError, match="no candidato"):
         helix.import_response(ctx, inputs, zipped(mismatched))
     assert helix.import_response(ctx, inputs, zipped(response))["multiple"] == 1
     assert helix.current(ctx, inputs)["SOURCE"]["INC"]["secondary_classifications"] == [
@@ -305,7 +311,7 @@ def test_helix_secondary_evidence_and_link_coherence(exchange, monkeypatch):
     ]
 
 
-@pytest.mark.parametrize("stage", ["classifier", "helix", "evidence"])
+@pytest.mark.parametrize("stage", ["classifier", "helix"])
 def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypatch, stage):
     handler, ctx, frame = set_comments(
         exchange, monkeypatch, ["漢" * 60_000 + str(i) for i in range(2)]

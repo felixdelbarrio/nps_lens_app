@@ -33,3 +33,6 @@ Validación: 360 pruebas backend (81,79 % de cobertura), 35 frontend, recorrido
 E2E, compilación, tipado de 111 archivos y comprobaciones de estilo. Las pruebas
 incluyen WebApp, alternancia de marcos, persistencia tras reinicio, nuevos registros,
 invalidación de evidencia enlazada y selector vacío.
+
+La revisión posterior del flujo LLM y sus nuevos contratos se documenta en
+[iteration32-semantic-contract.md](iteration32-semantic-contract.md).

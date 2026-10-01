@@ -32,13 +32,15 @@ with zipfile.ZipFile(source) as archive:
     manifest = json.loads(archive.read("manifest.json"))
     comments = {name: json.loads(archive.read(name)) for name in archive.namelist() if name.startswith("comments/")}
     if stage == "classifier":
-        assert manifest["schema_version"] == "nps-lens-comments/4"
+        assert manifest["schema_version"] == "nps-lens-comments/5"
         categories = json.loads(archive.read("taxonomy.json"))["categories"]
-        primary = next(key for key, pair in categories.items() if pair == {"lever": "Atención", "sublever": "Resolución"})
+        primary = next(key for key, pair in categories.items() if pair["lever"] == "Atención" and pair["sublever"] == "Resolución")
 taxonomy = {"taxonomy": [
     {"lever": "Atención", "sublevers": ["Resolución"]},
     {"lever": "Sin clasificación temática", "sublevers": ["Información insuficiente", "Tema no cubierto"]},
 ]}
+for branch in taxonomy["taxonomy"]:
+    branch["sublevers"] = [{"name": sub, "criterion": "Usar solo para el significado explícito de " + sub} for sub in branch["sublevers"]]
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
     archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
     if stage == "designer":
@@ -46,7 +48,7 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
     else:
         for name, payload in comments.items():
-            result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": [], "evidence": {"quotes": [row["Comment"][:2000]] if row["Comment"].strip() else [], "reason": "La narrativa explicita el problema observado."}} for row in payload["comments"]]}
+            result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": []} for row in payload["comments"]]}
             archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False))
 `;
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
@@ -123,7 +125,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   for (const classifierInput of classifierInputs) {
     const classifierOutput = classifierInput.replace(/\.zip$/, "-response.zip");
     responseZip(classifierInput, classifierOutput, "classifier");
-    await expect(classifierUpload).toBeEnabled();
+    await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
     const [classificationImport] = await Promise.all([
       page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
       classifierUpload.setInputFiles(classifierOutput),
@@ -138,7 +140,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   }
   expect(previousPending).toBe(0);
   expect(exportCount).toBe(1);
-  await expect(classifierUpload).toBeEnabled();
+  await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
   await expect(page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");

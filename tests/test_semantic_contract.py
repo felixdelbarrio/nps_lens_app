@@ -18,27 +18,23 @@ from test_taxonomy_exchange import (
 from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
 from nps_lens.services.equivalence_exchange import EquivalenceExchange
-from nps_lens.services.semantic_validation import GroundedDecision, validate_decision
+from nps_lens.services.semantic_validation import validate_quote
 from nps_lens.services.taxonomy_prompts import (
-    INSTRUCTIONS_VERSION,
     MAX_PROJECT_INSTRUCTION_CHARS,
     PROJECT_INSTRUCTIONS,
     SEMANTIC_CRITERIA,
 )
 
 
-@pytest.mark.parametrize("change", ["missing", "invented", "obsolete"])
-def test_comments_reject_ungrounded_or_obsolete_response_atomically(exchange, change):
+@pytest.mark.parametrize("change", ["extra_reason", "obsolete"])
+def test_comments_reject_obsolete_response_atomically(exchange, change):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     request = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
-    last = response["results"]["000003"]["classifications"][-1]
-    if change == "missing":
-        last.pop("evidence")
-    elif change == "invented":
-        last["evidence"]["quotes"] = ["Una afirmación que no existe en el comentario"]
+    if change == "extra_reason":
+        response["results"]["000003"]["classifications"][-1]["reason"] = "Obsolete output"
     else:
         response["manifest"]["instructions_version"] = "obsolete"
     with pytest.raises(ValueError):
@@ -55,51 +51,6 @@ def test_helix_links_require_both_original_sources(helix, field):
     response["results/000001.json"]["classifications"][-1]["links"][0][field] = "Inventado"
     with pytest.raises(ValueError, match="cita literal"):
         handler.import_response(context, inputs, zipped(response))
-    assert handler.status(context, inputs)["received"] == 0
-
-
-def test_helix_accepts_missing_evidence_for_linkless_classification(helix):
-    handler, context, _, incidents, _ = helix
-    inputs = handler.inputs(context, incidents, "SOURCE")
-    request = exported(handler.export(context, inputs)["saved_paths"])
-    response = helix_response(request, inputs["comments"][0]["id"])
-    row = response["results/000001.json"]["classifications"][0]
-    row.pop("evidence")
-    row["links"] = []
-
-    status = handler.import_response(
-        context,
-        inputs,
-        zipped(
-            {
-                "manifest.json": response["manifest.json"],
-                "results/000001.json": response["results/000001.json"],
-            }
-        ),
-    )
-
-    assert status["received"] == 200
-    assert handler.current(context, inputs)["SOURCE"][row["id"]]["evidence"] is None
-
-
-def test_helix_rejects_missing_evidence_when_links_are_present(helix):
-    handler, context, _, incidents, _ = helix
-    inputs = handler.inputs(context, incidents, "SOURCE")
-    request = exported(handler.export(context, inputs)["saved_paths"])
-    response = helix_response(request, inputs["comments"][0]["id"])
-    response["results/000001.json"]["classifications"][0].pop("evidence")
-
-    with pytest.raises(ValueError, match="requiere evidence literal"):
-        handler.import_response(
-            context,
-            inputs,
-            zipped(
-                {
-                    "manifest.json": response["manifest.json"],
-                    "results/000001.json": response["results/000001.json"],
-                }
-            ),
-        )
     assert handler.status(context, inputs)["received"] == 0
 
 
@@ -141,8 +92,8 @@ def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exc
         if row["Comment"].strip()
     ][:4]
     taxonomy["review"]["quotes"] = quotes
-    taxonomy["review"]["reason"] = (
-        "Fronteras contrastadas con evidencia distribuida. " + ("x" * 2_050)
+    taxonomy["review"]["reason"] = "Fronteras contrastadas con evidencia distribuida. " + (
+        "x" * 2_050
     )
 
     result = handler.import_response(
@@ -190,52 +141,32 @@ def test_equivalences_require_explanation_and_current_policy(exchange):
     assert handler.taxonomy.registry(context).to_dict() == before
 
 
-def test_evidence_validation_does_not_claim_to_infer_semantics():
+def test_link_quotes_cannot_invent_or_invert_source_evidence():
     text = "Al firmar falla; validé el token y funciona OK."
-    decision = GroundedDecision(
-        quotes=["validé el token y funciona OK"],
-        reason="La comprobación del token resultó satisfactoria.",
-    )
-    decision.validate_source(text)
+    validate_quote("validé el token y funciona OK", text)
     with pytest.raises(ValueError, match="literal"):
-        GroundedDecision(
-            quotes=["El token falla"], reason="Una cita alterada invierte el significado."
-        ).validate_source(text)
-    assert INSTRUCTIONS_VERSION
+        validate_quote("El token falla", text)
 
 
-def test_evidence_validation_accepts_safe_extract_redactions_and_whitespace():
-    GroundedDecision(
-        quotes=["muchas veces no me habren los enlaces. queda en blanco"],
-        reason="La cita solo normaliza espacios del comentario original.",
-    ).validate_source("muchas veces no me habren los enlaces.  queda en blanco en la parte de carga")
-    GroundedDecision(
-        quotes=["Sr. , muy buena atencion, resolvio rapido el problema"],
-        reason="La cita omite un nombre propio sin insertar ni reordenar palabras.",
-    ).validate_source("Sr. Facundo Jonas , muy buena atencion, resolvio rapido el problema")
-    GroundedDecision(
-        quotes=["Necesitamos resumen Nº [dato omitido] correspondiente al mes Diciembre 2025"],
-        reason="La cita redacta un identificador sensible manteniendo el resto del texto.",
-    ).validate_source("Necesitamos resumen Nº 282-023686/3 correspondiente al mes Diciembre 2025")
-
-
-def test_secondary_evidence_can_share_one_quote_and_reserve_primary_can_keep_secondary():
-    text = "QUIERO CERRAR LA CUENTA Y LA ATENCION EN SUCURSAL NO ES MUY BUENA."
-    row = type("Decision", (), {})()
-    row.primary = "c001"
-    row.secondary = ["c002"]
-    row.evidence = GroundedDecision(
-        quotes=[text],
-        reason="El cierre no está cubierto y la mala atención es un tema independiente.",
-    )
-    validate_decision(
-        row,
-        {
-            "c001": {"lever": "Sin clasificación temática", "sublever": "Tema no cubierto"},
-            "c002": {"lever": "Atención", "sublever": "Calidad"},
-        },
-        text,
-    )
+@pytest.mark.parametrize(
+    "quote,text",
+    [
+        (
+            "muchas veces no me habren los enlaces. queda en blanco",
+            "muchas veces no me habren los enlaces.  queda en blanco en la parte de carga",
+        ),
+        (
+            "Sr. , muy buena atencion, resolvio rapido el problema",
+            "Sr. Facundo Jonas , muy buena atencion, resolvio rapido el problema",
+        ),
+        (
+            "Necesitamos resumen Nº [dato omitido] correspondiente al mes Diciembre 2025",
+            "Necesitamos resumen Nº 282-023686/3 correspondiente al mes Diciembre 2025",
+        ),
+    ],
+)
+def test_link_quotes_accept_safe_extract_redactions_and_whitespace(quote, text):
+    validate_quote(quote, text)
 
 
 def test_project_instructions_fit_chatgpt_without_losing_shared_safeguards():

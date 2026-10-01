@@ -66,10 +66,6 @@ def test_switching_framework_keeps_both_comment_classifications(exchange):
                         "id": row["id"],
                         "primary": "c001",
                         "secondary": [],
-                        "evidence": {
-                            "quotes": [row["Comment"]] if row["Comment"] else [],
-                            "reason": "La narrativa respalda la categoría seleccionada.",
-                        },
                     }
                     for row in batch["comments"]
                 ]

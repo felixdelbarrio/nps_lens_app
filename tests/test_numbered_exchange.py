@@ -84,7 +84,7 @@ def test_all_numbered_files_survive_restart_and_import_out_of_order(numbered):
             for r in requests
         ]
         assert all(e == evidence[0] for e in evidence)
-        assert sum(len(batch["comments"]) for batch in evidence[0].values()) == 9
+        assert evidence[0] == {}
     for index in [4, 1, 0, 3, 2]:
         restart()
         content = response(result["saved_paths"][index])
