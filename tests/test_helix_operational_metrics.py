@@ -16,13 +16,14 @@ from nps_lens.testing.fixtures import fixture_excel
 def test_build_helix_operational_benchmark_aggregates_support_orgs_only() -> None:
     helix = pd.DataFrame(
         {
-            "Incident Number": ["INC-1", "INC-2", "INC-3"],
+            "Incident Number": ["INC-1", "INC-1", "INC-2", "INC-3"],
             "Assigned Support Organization": [
-                "Producto, Tecnologia",
+                "Producto",
+                "Tecnologia",
                 "Operaciones",
                 "",
             ],
-            "Status": ["Assigned", "Resolved", "Closed"],
+            "Status": ["Assigned", "Resolved", "Resolved", "Closed"],
         }
     )
 
