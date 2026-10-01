@@ -10,7 +10,7 @@ import { exportClassification, classificationImportMessage, type ClassificationE
 import { PROJECT_NAMES } from "../utils/taxonomy";
 import { TAXONOMY_NAMES } from "../utils/taxonomy";
 
-type Status = { total:number; received:number; classified:number; unassigned:number; coverage:number; links:number; multiple:number; categories:Array<{lever:string;sublever:string;count:number}>; pending: number; taxonomies: Partial<Record<TaxonomyMode, {received:number;pending:number}>> };
+type Status = { total:number; received:number; classified:number; unassigned:number; coverage:number; links:number; linked_comments:number; max_comment_reuse:number; multiple:number; categories:Array<{lever:string;sublever:string;count:number}>; pending: number; taxonomies: Partial<Record<TaxonomyMode, {received:number;pending:number}>> };
 export function HelixClassifier({ context, mode, url, disabled, onChange }: { context: TaxonomyContext; mode: TaxonomyMode; url: string; disabled: boolean; onChange: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -26,7 +26,7 @@ export function HelixClassifier({ context, mode, url, disabled, onChange }: { co
     const body = new FormData();
     body.append("file", file);
     const result = await taxonomyRequest<Status>("/helix/import", context, { method: "POST", body });
-    const success = "Clasificaciones Helix validadas e importadas.";
+    const success = "Clasificaciones Helix importadas con formato y citas comprobados.";
     setMessage(`${success} ${classificationImportMessage(result.pending)}`);
     await mutate();
     await onChange();
@@ -36,7 +36,7 @@ export function HelixClassifier({ context, mode, url, disabled, onChange }: { co
     <ProjectUrlField context={context} field="helix_classifier_url" label={`URL · ${PROJECT_NAMES.helix}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role="helix" context={context} />
     <p>Lente activa: {TAXONOMY_NAMES[mode]}. El método causal se elige en Causalidad. Cada lente conserva sus propias clasificaciones.</p>
-    {data ? <><ExchangeProgress counts={data} unit="incidencias" metrics={[{label:"Con categoría",value:data.classified},{label:"Sin encaje",value:data.unassigned},{label:"Vínculos NPS",value:data.links},{...ADDITIONAL_TOPICS,value:data.multiple}]} /><p>Cobertura temática: {formatPercentage(data.coverage)}. Sin encaje significa procesada sin evidencia suficiente para asignar una categoría.</p>
+    {data ? <><ExchangeProgress counts={data} unit="incidencias" metrics={[{label:"Con categoría",value:data.classified},{label:"Sin encaje",value:data.unassigned},{label:"Vínculos NPS",value:data.links},{label:"Comentarios únicos vinculados",value:data.linked_comments},{...ADDITIONAL_TOPICS,value:data.multiple}]} /><p>Cobertura temática: {formatPercentage(data.coverage)}. Sin encaje incluye categorías de reserva y resultados sin categoría. Mayor reutilización: {formatVolume(data.max_comment_reuse)} incidencias por comentario. Las citas comprueban procedencia; la afinidad semántica requiere revisión.</p>
     {data.categories?.length ? <details><summary>Distribución de incidencias</summary><div className="table-scroll"><table><thead><tr><th>Palanca</th><th>Subpalanca</th><th>Incidencias</th></tr></thead><tbody>{data.categories.map(row => <tr key={`${row.lever}/${row.sublever}`}><td>{row.lever}</td><td>{row.sublever}</td><td>{formatVolume(row.count)}</td></tr>)}</tbody></table></div></details> : null}</> : null}
     {error ? <p role="status">{error.message}</p> : null}
     <div className="inline-actions"><button className="primary-button" disabled={locked || !data?.pending} onClick={() => void run(async () => { setExported(null); setExported(await exportClassification(context, "/helix/export")); })}>Descargar todos los ZIP de incidencias pendientes</button>

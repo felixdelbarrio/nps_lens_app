@@ -588,6 +588,34 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         assert f'"{removed_field}"' not in serialized_linking
 
 
+def test_helix_reingestion_keeps_latest_operational_state(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    context = {
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
+        "service_origin_n2": "",
+    }
+
+    for status in ("Assigned", "Resolved"):
+        source = _build_helix_fixture(tmp_path / f"helix-{status}.xlsx")
+        frame = pd.read_excel(source)
+        frame["Status"] = status
+        frame.to_excel(source, index=False)
+        with source.open("rb") as handle:
+            response = client.post(
+                "/api/uploads/helix",
+                data=context,
+                files={"file": (source.name, handle, "application/vnd.ms-excel")},
+            )
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    stored = app.state.dashboard_service._load_helix_df(UploadContext(**context))
+    assert len(stored) == 2
+    assert stored["Status"].eq("Resolved").all()
+
+
 def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(
     tmp_path: Path,
 ) -> None:

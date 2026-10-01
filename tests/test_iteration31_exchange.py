@@ -70,14 +70,14 @@ def test_exact_text_fanout_local_empty_restart_and_individual_fingerprints(excha
         "secondary_classifications": [],
     }
     response = classifier_files(request["manifest.json"], request)
-    response["results"]["000001"]["classifications"][0]["secondary"] = ["c003"]
+    response["results"]["000001"]["classifications"][0]["secondary"] = ["c004"]
     handler = restart(handler, frame, monkeypatch)
     result = handler.import_response(ctx, classifier_zip(response), "classifier")
     assert result["progress"] == {"total": 8, "received": 8, "pending": 0}
     values = handler.assignments(ctx, frame, "DISCOVERED")
     assert values[frame.iloc[2]._business_key] == values[frame.iloc[3]._business_key]
     assert values[frame.iloc[3]._business_key]["secondary_classifications"] == [
-        {"lever": "Sin clasificación temática", "sublever": "Tema no cubierto"}
+        {"lever": "Velocidad", "sublever": "Espera"}
     ]
     assert handler.export(ctx, "classifier")["saved_paths"] == []
     frame.loc[3, "Comment"] = "changed"
@@ -115,7 +115,7 @@ def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch
     comments = [f"comment {i}" for i in range(4_003)] + ["comment 0", "comment 4001"]
     handler, ctx, frame = set_comments(exchange, monkeypatch, comments)
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
-    assert request["manifest.json"]["schema_version"] == "nps-lens-comments/3"
+    assert request["manifest.json"]["schema_version"] == "nps-lens-comments/4"
     assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000] * 4 + [3]
     assert request["manifest.json"]["taxonomy_sha256"] == digest(request["taxonomy.json"])
     for batch in request["manifest.json"]["batches"]:
@@ -165,7 +165,7 @@ def test_classifier_rejects_compact_category_errors_atomically(exchange, changes
     assert handler.progress(ctx)["received"] == 0
 
 
-def test_catalog_ids_deterministic_and_legacy_persisted_labels_survive(exchange):
+def test_catalog_ids_deterministic_and_obsolete_assignments_require_reprocessing(exchange):
     assert category_catalog(TAXONOMY) == category_catalog(
         {
             "taxonomy": [
@@ -177,7 +177,7 @@ def test_catalog_ids_deterministic_and_legacy_persisted_labels_survive(exchange)
     handler, ctx, frame, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
-    # Pre-v3 artifact, using the existing domain format and fingerprints.
+    # An obsolete semantic contract must not be accepted as current.
     with handler.repository._connect() as db:
         handler._persist_assignments(
             db,
@@ -195,15 +195,16 @@ def test_catalog_ids_deterministic_and_legacy_persisted_labels_survive(exchange)
                     "secondary_classifications": [],
                 }
             },
+            {},
         )
-    assert handler.progress(ctx)["received"] == 1
+    assert handler.progress(ctx)["received"] == 0
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
-    assert sum(b["count"] for b in request["manifest.json"]["batches"]) == len(frame) - 1
+    assert sum(b["count"] for b in request["manifest.json"]["batches"]) == len(frame)
     response = classifier_files(request["manifest.json"], request)
     response["manifest"]["schema_version"] = "nps-lens-comments/2"
-    with pytest.raises(ValueError, match="incompatible.*comments/3"):
+    with pytest.raises(ValueError, match="incompatible.*comments/4"):
         handler.import_response(ctx, classifier_zip(response), "classifier")
-    assert handler.progress(ctx)["received"] == 1
+    assert handler.progress(ctx)["received"] == 0
 
 
 def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
@@ -213,7 +214,7 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
     incidents.loc[0, "Detailed Description"] = ""
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
-    assert request["manifest.json"]["schema_version"] == "nps-lens-helix/3"
+    assert request["manifest.json"]["schema_version"] == "nps-lens-helix/4"
     assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000, 1_000, 5]
     assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-0"
     assert handler.status(ctx, inputs)["received"] == 0
@@ -269,7 +270,7 @@ def test_helix_rejects_invalid_category_rationale_or_links(helix, changes):
         handler.import_response(ctx, inputs, zipped(response))
     assert handler.status(ctx, inputs)["received"] == 0
     response["manifest.json"]["schema_version"] = "nps-lens-helix/2"
-    with pytest.raises(ValueError, match="incompatible.*helix/3"):
+    with pytest.raises(ValueError, match="incompatible.*helix/4"):
         handler.import_response(ctx, inputs, zipped(response))
 
 

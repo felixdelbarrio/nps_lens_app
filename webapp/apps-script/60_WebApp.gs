@@ -2,14 +2,16 @@ function doGet(event) {
   const viewer = _viewer_();
   _assertViewer_(viewer);
   const requestedScope = String(event && event.parameter && event.parameter.scope || '').trim();
-  const publication = _publicationByKey_(requestedScope || _property_(NPS_LENS.selectedScopeProperty));
+  viewer.causalMethodLocked = String(event && event.parameter && event.parameter.source || '') === 'newsletter';
+  const publication = _entryPublication_(requestedScope, viewer.causalMethodLocked);
   viewer.scopeKey = publication ? publication.scopeKey : '';
   viewer.evolutionNpsVisible = _evolutionNpsVisible_();
   viewer.reportUrl = publication ? _reportUrl_(publication.scopeKey,viewer.evolutionNpsVisible) : '';
-  viewer.causalMethodLocked = String(event && event.parameter && event.parameter.source || '') === 'newsletter';
   viewer.shellDeferred = Boolean(publication);
-  viewer.publicationCatalog = _publicationCatalog_();
+  viewer.publicationCatalog = viewer.causalMethodLocked ? [] : _publicationCatalog_(true);
+  if (viewer.causalMethodLocked) viewer.isAdmin = false;
   if (viewer.isAdmin) {
+    viewer.newsletterCatalog = _publicationCatalog_(false);
     viewer.selectedScopeKey = (_selectedPublication_() || {}).scopeKey || '';
     viewer.administration = {version:NPS_LENS.version,generatedAt:publication ? publication.generatedAt : '',access:{
       email:viewer.email,role:viewer.role,source:viewer.adminSource,configurationReady:viewer.configurationReady}};

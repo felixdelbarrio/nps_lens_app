@@ -26,6 +26,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.classification_protocol import digest
+from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION
 from nps_lens.settings import persist_ui_prefs
 
 POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
@@ -218,6 +219,12 @@ class TaxonomyService:
                 continue
             item = self.artifact(sig)
             if item:
+                config = item.get("config", {})
+                if (
+                    config.get("method") == "chatgpt_zip"
+                    and config.get("instructions_version") != INSTRUCTIONS_VERSION
+                ):
+                    continue
                 if mode == "DISCOVERED" and item.get("taxonomy") != state.get(
                     "discovered_taxonomy"
                 ):

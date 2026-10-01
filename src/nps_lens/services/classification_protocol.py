@@ -8,10 +8,12 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nps_lens.services.semantic_validation import GroundedDecision
+
 CLASSIFICATION_BATCH_ROWS = 1_000
 CLASSIFICATION_BATCH_BYTES = 300_000
-CLASSIFIER_SCHEMA = "nps-lens-comments/3"
-HELIX_SCHEMA = "nps-lens-helix/3"
+CLASSIFIER_SCHEMA = "nps-lens-comments/4"
+HELIX_SCHEMA = "nps-lens-helix/4"
 
 
 def encode(value: Any) -> bytes:
@@ -20,6 +22,18 @@ def encode(value: Any) -> bytes:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(encode(value)).hexdigest()
+
+
+def comment_classification_fingerprint(comment: str) -> str:
+    """Hash only the source text that can change a comment's semantic category."""
+
+    return digest(comment)
+
+
+def incident_classification_fingerprint(incident: dict[str, Any]) -> str:
+    """Hash only narrative evidence; operational routing fields remain mutable."""
+
+    return digest(str(incident.get("description", "")))
 
 
 def category_catalog(taxonomy: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -36,6 +50,7 @@ class CompactClassification(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1)
     primary: Optional[str]
+    evidence: GroundedDecision
     secondary: list[str] = Field(default_factory=list, max_length=2)
 
     def expand(self, catalog: dict[str, dict[str, str]]) -> dict[str, Any]:

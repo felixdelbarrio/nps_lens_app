@@ -32,7 +32,7 @@ with zipfile.ZipFile(source) as archive:
     manifest = json.loads(archive.read("manifest.json"))
     comments = {name: json.loads(archive.read(name)) for name in archive.namelist() if name.startswith("comments/")}
     if stage == "classifier":
-        assert manifest["schema_version"] == "nps-lens-comments/3"
+        assert manifest["schema_version"] == "nps-lens-comments/4"
         categories = json.loads(archive.read("taxonomy.json"))["categories"]
         primary = next(key for key, pair in categories.items() if pair == {"lever": "Atención", "sublever": "Resolución"})
 taxonomy = {"taxonomy": [
@@ -42,10 +42,11 @@ taxonomy = {"taxonomy": [
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
     archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
     if stage == "designer":
+        taxonomy["review"] = {"quotes": [row["Comment"] for value in comments.values() for row in value["comments"] if row["Comment"].strip()][:1], "reason": "Fronteras contrastadas con la narrativa del corpus."}
         archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
     else:
         for name, payload in comments.items():
-            result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": []} for row in payload["comments"]]}
+            result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": [], "evidence": {"quotes": [row["Comment"][:2000]] if row["Comment"].strip() else [], "reason": "La narrativa explicita el problema observado."}} for row in payload["comments"]]}
             archive.writestr(name.replace("comments/", "results/"), json.dumps(result, ensure_ascii=False))
 `;
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);

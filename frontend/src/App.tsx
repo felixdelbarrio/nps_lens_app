@@ -1598,7 +1598,7 @@ export function App() {
                 <p className="eyebrow">Canal Web</p>
                 <h2>Preparar la edición para la WebApp</h2>
                 <p className="secondary-copy">
-                  Genera una edición estática con los filtros actuales, todas las pantallas de análisis
+                  Genera una edición estática del mes seleccionado (el último disponible si eliges Todos), todas las pantallas de análisis
                   y la presentación ejecutiva que utilizará la newsletter.
                 </p>
               </div>
@@ -1628,7 +1628,7 @@ export function App() {
             </div>
             <article className="note-card">
               <p className="secondary-copy">
-                La edición se comprime y ajusta automáticamente al límite de publicación. No incluye
+                La edición se comprime y valida contra el límite de publicación. No incluye
                 configuración administrativa ni telemetría.
               </p>
             </article>

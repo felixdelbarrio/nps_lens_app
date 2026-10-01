@@ -14,6 +14,7 @@ from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry, clean_label
 from nps_lens.platform.downloads import persist_download
 from nps_lens.services.classification_protocol import digest, encode
+from nps_lens.services.semantic_validation import Reason
 from nps_lens.services.taxonomy_exchange import (
     BATCH_ROWS,
     MAX_EXPANDED_BYTES,
@@ -24,13 +25,14 @@ from nps_lens.services.taxonomy_exchange import (
     read_response,
     validate_payload,
 )
-from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
+from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
 
 
 class ConceptGroup(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     canonical: str = Field(min_length=1, max_length=300)
     aliases: list[str] = Field(max_length=1000)
+    reason: Reason
 
     @field_validator("canonical")
     @classmethod
@@ -83,7 +85,8 @@ class EquivalenceExchange(TaxonomyExchange):
         if not inputs["comments"]:
             raise ValueError("No hay comentarios que exportar para esta compañía.")
         manifest = {
-            "schema_version": "nps-lens-normalization/1",
+            "schema_version": "nps-lens-normalization/2",
+            "instructions_version": INSTRUCTIONS_VERSION,
             "stage": "normalizer",
             "job_id": uuid.uuid4().hex,
             "owner": context.service_origin,
@@ -139,9 +142,15 @@ class EquivalenceExchange(TaxonomyExchange):
                 known.update([group["canonical"], *group["aliases"]])
             if any(alias not in known for group in groups for alias in group.aliases):
                 raise ValueError("La respuesta contiene alias ajenos al catálogo de esta compañía.")
-            dimensions[dimension] = [group.model_dump() for group in groups]
+            dimensions[dimension] = [group.model_dump(exclude={"reason"}) for group in groups]
         registry = EquivalenceRegistry.from_dict({"dimensions": dimensions})
         self.taxonomy.save_equivalences(context, registry)
+        state = self.taxonomy.state(context)
+        state["normalizer_review"] = {
+            "instructions_version": INSTRUCTIONS_VERSION,
+            "dimensions": response.model_dump()["dimensions"],
+        }
+        self.taxonomy.save_state(context, state)
         return {
             "owner": context.service_origin,
             "groups": sum(len(groups) for groups in dimensions.values()),

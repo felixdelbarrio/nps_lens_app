@@ -24,7 +24,15 @@ def test_concepts_are_owner_scoped_atomic_and_corpus_bound(exchange):
     response = {
         "manifest.json": files["manifest.json"],
         "equivalences.json": {
-            "dimensions": {"nps.Palanca": [{"canonical": "Soporte", "aliases": ["Atención"]}]}
+            "dimensions": {
+                "nps.Palanca": [
+                    {
+                        "canonical": "Soporte",
+                        "aliases": ["Atención"],
+                        "reason": "Ambos designan la misma atención al cliente.",
+                    }
+                ]
+            }
         },
     }
     invalid = copy.deepcopy(response)

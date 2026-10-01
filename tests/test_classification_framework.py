@@ -62,7 +62,15 @@ def test_switching_framework_keeps_both_comment_classifications(exchange):
         {
             name.replace("comments/", "results/"): {
                 "classifications": [
-                    {"id": row["id"], "primary": "c001", "secondary": []}
+                    {
+                        "id": row["id"],
+                        "primary": "c001",
+                        "secondary": [],
+                        "evidence": {
+                            "quotes": [row["Comment"]] if row["Comment"] else [],
+                            "reason": "La narrativa respalda la categoría seleccionada.",
+                        },
+                    }
                     for row in batch["comments"]
                 ]
             }
@@ -82,9 +90,7 @@ def test_switching_framework_keeps_both_comment_classifications(exchange):
     assert handler.taxonomy.resolve(ctx).iloc[-1].Palanca == ""
 
 
-def test_helix_new_comments_preserve_assignments_and_changed_link_only_invalidates_affected(
-    helix, monkeypatch
-):
+def test_helix_new_comments_invalidate_prior_absence_of_links(helix, monkeypatch):
     handler, ctx, frame, incidents, _ = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
@@ -102,14 +108,5 @@ def test_helix_new_comments_preserve_assignments_and_changed_link_only_invalidat
     monkeypatch.setattr(restarted, "source", lambda context: frame.copy())
     handler = HelixExchange(restarted, handler.downloads)
     updated = handler.inputs(ctx, incidents, "SOURCE")
-    assert updated["scopes"] == inputs["scopes"]
-    assert handler.status(ctx, updated)["pending"] == 0
-    incidents.loc[len(incidents)] = [
-        "INC-new",
-        "Nueva incidencia",
-        incidents.iloc[0]["Submit Date"],
-        "Web",
-    ]
-    assert handler.status(ctx, handler.inputs(ctx, incidents, "SOURCE"))["pending"] == 1
-    frame.loc[0, "Comment"] = "Cambió la evidencia enlazada"
-    assert handler.status(ctx, handler.inputs(ctx, incidents, "SOURCE"))["pending"] == 2
+    assert updated["scopes"] != inputs["scopes"]
+    assert handler.status(ctx, updated)["pending"] == len(incidents)

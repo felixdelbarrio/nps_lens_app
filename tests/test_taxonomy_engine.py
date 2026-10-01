@@ -21,6 +21,7 @@ from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.classification_protocol import digest
 from nps_lens.services.nps_service import NpsService
+from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 from nps_lens.settings import Settings
 
@@ -84,7 +85,11 @@ def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
         .sort_values("_business_key")
         .reset_index(drop=True)
     )
-    config = {"method": "chatgpt_zip", "taxonomy_sha256": "test", "instructions_version": "test"}
+    config = {
+        "method": "chatgpt_zip",
+        "taxonomy_sha256": "test",
+        "instructions_version": INSTRUCTIONS_VERSION,
+    }
     sig = signature(frame, "DISCOVERED", config, "")
     artifact = {
         "mode": "DISCOVERED",

@@ -99,6 +99,7 @@ src/nps_lens/services/equivalence_exchange.py
 src/nps_lens/services/helix_exchange.py
 src/nps_lens/services/helix_service.py
 src/nps_lens/services/nps_service.py
+src/nps_lens/services/semantic_validation.py
 src/nps_lens/services/taxonomy_discovery.py
 src/nps_lens/services/taxonomy_exchange.py
 src/nps_lens/services/taxonomy_prompts.py
@@ -120,6 +121,7 @@ src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
+tests/test_classification_framework.py
 tests/test_column_aliases.py
 tests/test_config_env.py
 tests/test_dashboard_cache.py
@@ -159,7 +161,9 @@ tests/test_platform_batch.py
 tests/test_platform_resources.py
 tests/test_plotly_theme.py
 tests/test_ppt_wrapped_table_layout.py
+tests/test_publication_llm_regressions.py
 tests/test_publication_scope.py
+tests/test_semantic_contract.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
 tests/test_taxonomy_engine.py
@@ -172,4 +176,5 @@ tests/test_upload_service.py
 tests/test_webapp_linking_diagnostics.py
 tests/test_webapp_parity.py
 tests/test_webapp_publication.py
+tests/test_webapp_scope_runtime.py
 tests/test_webapp_telemetry_privacy.py

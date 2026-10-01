@@ -7,12 +7,14 @@ def test_publication_scope_is_stable_and_separates_audience_from_edition() -> No
         year="2026",
         month="03",
         causal_method="executive_journeys",
+        edition_id="2026-09-30T20:00:00Z",
     )
     april = build_publication_scope(
         owner_support_company="BBVA México",
         year="2026",
         month="04",
         causal_method="executive_journeys",
+        edition_id="2026-09-30T20:00:00Z",
     )
     assert march["key"] != april["key"]
     assert march["audience_key"] == april["audience_key"]
@@ -28,6 +30,7 @@ def test_publication_scope_requires_an_exact_period() -> None:
             year="2026",
             month="Todos",
             causal_method="executive_journeys",
+            edition_id="2026-09-30T20:00:00Z",
         )
     except ValueError as error:
         assert "año, mes" in str(error)

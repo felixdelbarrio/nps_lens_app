@@ -8,7 +8,7 @@ from nps_lens.domain.causal_methods import get_causal_method_spec
 
 
 def build_publication_scope(
-    *, owner_support_company: str, year: str, month: str, causal_method: str
+    *, owner_support_company: str, year: str, month: str, causal_method: str, edition_id: str
 ) -> dict[str, Any]:
     """Return the immutable identity shared by local export, WebApp and newsletter."""
 
@@ -17,17 +17,23 @@ def build_publication_scope(
         "year": str(year).strip(),
         "month": str(month).strip(),
         "causal_method": str(causal_method).strip(),
+        "edition_id": str(edition_id).strip(),
     }
     missing = [
         key
-        for key in ("owner_support_company", "year", "month", "causal_method")
+        for key in ("owner_support_company", "year", "month", "causal_method", "edition_id")
         if not values[key]
     ]
     if missing or values["year"] == "Todos" or values["month"] == "Todos":
         raise ValueError(
             "Selecciona Owner Support Company, año, mes y método causal antes de preparar la edición web."
         )
-    canonical = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        values,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     scope_key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
     audience_canonical = json.dumps(
         {"owner_support_company": values["owner_support_company"]},

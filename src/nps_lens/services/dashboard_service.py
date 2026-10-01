@@ -526,6 +526,17 @@ class DashboardService:
                 ),
             )
 
+    def _comment_analysis_frame(
+        self, context: UploadContext, **scope: Any
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        frame = self._load_nps_df(context)
+        engine = self.analysis_engine("comments", context, **scope)
+        if engine["engine"] == "llm":
+            frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
+                context, frame, engine["active"]
+            )
+        return frame, engine
+
     def comments_scope(
         self,
         frame: pd.DataFrame,
@@ -576,7 +587,13 @@ class DashboardService:
             or self.taxonomy.state(context).get(preference) != "llm"
         ):
             return {"engine": "rules"}
-        return self.classification_status(kind, context, **scope)
+        status = self.classification_status(kind, context, **scope)
+        if not status["ready"]:
+            raise ValueError(
+                "El motor LLM seleccionado requiere clasificaciones vigentes con evidencia. "
+                "Exporta e importa los pendientes con las instrucciones actuales o selecciona el motor de reglas."
+            )
+        return status
 
     def classification_status(
         self,
@@ -883,7 +900,8 @@ class DashboardService:
             if column in combined.columns
         ]
         combined = (
-            combined.drop_duplicates(identity_columns, keep="last")
+            # Upload history is newest-first: retain the latest operational state.
+            combined.drop_duplicates(identity_columns, keep="first")
             if identity_columns
             else combined.drop_duplicates(keep="last")
         )
@@ -991,19 +1009,13 @@ class DashboardService:
         theme_mode: str = "light",
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
-        all_records = self._load_nps_df(context)
-        engine = self.analysis_engine(
-            "comments",
+        all_records, _ = self._comment_analysis_frame(
             context,
             pop_year=pop_year,
             pop_month=pop_month,
             score_channel=score_channel,
             nps_group=nps_group,
         )
-        if engine["engine"] == "llm":
-            all_records = TaxonomyExchange(self.taxonomy, Path(".")).apply(
-                context, all_records, engine["active"]
-            )
         resolved_channel = self._resolve_score_channel(all_records, score_channel)
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
@@ -1064,30 +1076,23 @@ class DashboardService:
             ).reset_index(drop=True)
         topics_bullets = explain_topics(topics_df, max_items=5)
 
-        topic_keys = topics_observed_in_channel(
-            scope_current_df,
-            gap_dimension,
-            resolved_channel,
-        )
-        gap_current_df = restrict_to_topics(scope_current_df, gap_dimension, topic_keys)
-        _, gap_base_window = default_windows(
+        gap_current_window, gap_base_window = default_windows(
             scope_history_df,
             pop_year=pop_year,
             pop_month=pop_month,
         )
+        gap_population = (
+            slice_by_window(scope_history_df, gap_current_window)
+            if gap_current_window is not None
+            else scope_history_df.iloc[:0]
+        )
+        topic_keys = topics_observed_in_channel(gap_population, gap_dimension, resolved_channel)
+        gap_current_df = restrict_to_topics(gap_population, gap_dimension, topic_keys)
         gap_base_df = (
             slice_by_window(scope_history_df, gap_base_window)
             if gap_base_window is not None
             else scope_history_df.iloc[:0]
         )
-        cohort_df = scope_current_df
-        if engine["engine"] == "llm":
-            cohort_df = analysis_current_df
-            gap_current_df = analysis_current_df
-            gap_base_df = self._apply_score_channel_filter(gap_base_df, resolved_channel)
-            gap_base_df = filter_by_nps_group(gap_base_df, resolved_group)
-            gap_base_df = gap_base_df.loc[gap_base_df["Palanca"].fillna("").ne("")]
-
         nps_explanation_bullets = daily_nps_explanation(period_scope)
 
         return {
@@ -1131,7 +1136,7 @@ class DashboardService:
                 "column_dimension": cohort_col,
                 "figure": self._serialize_figure(
                     chart_cohort_heatmap(
-                        cohort_df,
+                        scope_current_df,
                         theme,
                         row_dim=_COHORT_ROW_DIMENSIONS.get(cohort_row, "Palanca"),
                         col_dim=_COHORT_COLUMN_DIMENSIONS.get(cohort_col, "Canal"),
@@ -1234,11 +1239,15 @@ class DashboardService:
 
         topics: dict[str, dict[str, object]] = {}
         gaps: dict[str, dict[str, object]] = {}
-        metric_current = self._apply_population_filters(history_df, pop_year, pop_month)
-        _, gap_base_window = default_windows(
+        gap_current_window, gap_base_window = default_windows(
             history_df,
             pop_year=pop_year,
             pop_month=pop_month,
+        )
+        metric_current = (
+            slice_by_window(history_df, gap_current_window)
+            if gap_current_window is not None
+            else history_df.iloc[:0]
         )
         metric_base = (
             slice_by_window(history_df, gap_base_window)
@@ -1281,8 +1290,8 @@ class DashboardService:
                 "groups": groups,
                 "dimensions": dimensions,
                 "defaults": {
-                    "channel": _PREFERRED_SCORE_CHANNEL,
-                    "group": _PREFERRED_NPS_GROUP,
+                    "channel": self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL),
+                    "group": _PREFERRED_NPS_GROUP if _PREFERRED_NPS_GROUP in groups else POP_ALL,
                     "dimension": "Palanca",
                 },
             },
@@ -1309,19 +1318,13 @@ class DashboardService:
                 self._enrich_helix_links(self._load_helix_df(context))
             )
         else:
-            frame = self._load_nps_df(context)
-            engine = self.analysis_engine(
-                "comments",
+            frame, _ = self._comment_analysis_frame(
                 context,
                 pop_year=pop_year,
                 pop_month=pop_month,
                 score_channel=score_channel,
                 nps_group=nps_group,
             )
-            if engine["engine"] == "llm":
-                frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
-                    context, frame, engine["active"]
-                )
             resolved_channel = self._resolve_score_channel(frame, score_channel)
             resolved_group = self._resolve_nps_group(frame, nps_group)
             frame = self._apply_score_channel_filter(frame, resolved_channel)
@@ -1383,15 +1386,6 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
-        llm_status = self.analysis_engine(
-            "helix",
-            context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            score_channel=score_channel,
-            max_days_apart=max_days_apart,
-        )
-        use_llm = llm_status["engine"] == "llm"
         key = (
             "causal-analysis",
             *self._context_key(context),
@@ -1406,6 +1400,15 @@ class DashboardService:
         )
 
         def _build() -> dict[str, object]:
+            llm_status = self.analysis_engine(
+                "helix",
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                max_days_apart=max_days_apart,
+            )
+            use_llm = llm_status["engine"] == "llm"
             nps_frame = self._load_nps_df(context)
             inputs = None
             handler = HelixExchange(self.taxonomy, Path(".")) if use_llm else None
@@ -1910,7 +1913,13 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
-        scope_history_df = self._load_nps_df(context)
+        scope_history_df, _ = self._comment_analysis_frame(
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            nps_group=nps_group,
+        )
         if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
         topic_channel = self._resolve_score_channel(
@@ -2048,24 +2057,41 @@ class DashboardService:
             active_touchpoint_source = touchpoint_source or str(
                 self.settings.ui_defaults()["touchpoint_source"]
             )
+            history_df = self._load_nps_df(context)
+            if pop_year == POP_ALL or pop_month == POP_ALL:
+                available = self._apply_population_filters(history_df, pop_year, pop_month)
+                current_window, _ = default_windows(available)
+                if current_window is None:
+                    raise ValueError("No hay respuestas NPS en el periodo seleccionado.")
+                pop_year = str(current_window.start.year)
+                pop_month = f"{current_window.start.month:02d}"
             scope = build_publication_scope(
                 owner_support_company=context.service_origin,
                 year=pop_year,
                 month=pop_month,
                 causal_method=active_touchpoint_source,
+                edition_id=datetime.now(timezone.utc).isoformat(),
             )
-            history_df = self._load_nps_df(context)
+            history_df, _ = self._comment_analysis_frame(
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=_PREFERRED_SCORE_CHANNEL,
+                nps_group=nps_group,
+            )
             publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
             publish_group = self._resolve_nps_group(history_df, nps_group)
             causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
             causal_group = self._resolve_nps_group(history_df, POP_ALL)
-            dashboard = self.nps_dashboard(
-                context=context,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                nps_group=publish_group,
-                score_channel=publish_channel,
-                min_n=min_n,
+            dashboard = dict(
+                self.nps_dashboard(
+                    context=context,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    nps_group=publish_group,
+                    score_channel=publish_channel,
+                    min_n=min_n,
+                )
             )
             comments = self._build_comments_snapshot(
                 history_df=history_df,

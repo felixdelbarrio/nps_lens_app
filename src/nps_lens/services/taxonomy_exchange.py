@@ -26,11 +26,13 @@ from nps_lens.services.classification_protocol import (
     HELIX_SCHEMA,
     CompactCommentResponse,
     category_catalog,
+    comment_classification_fingerprint,
     digest,
     encode,
 )
+from nps_lens.services.semantic_validation import validate_decision
 from nps_lens.services.taxonomy_discovery import (
-    TaxonomyResponse,
+    TaxonomyDesignResponse,
     TaxonomyValidator,
 )
 from nps_lens.services.taxonomy_prompts import (
@@ -154,12 +156,13 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
     schema = {
         "classifier": CLASSIFIER_SCHEMA,
         "helix": HELIX_SCHEMA,
-        "normalizer": "nps-lens-normalization/1",
-    }.get(stage, "nps-lens-comments/2")
+        "normalizer": "nps-lens-normalization/2",
+    }.get(stage, "nps-lens-taxonomy/3")
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != schema
         or manifest.get("stage") != stage
+        or manifest.get("instructions_version") != INSTRUCTIONS_VERSION
         or not isinstance(manifest.get("job_id"), str)
         or not manifest["job_id"]
     ):
@@ -328,8 +331,9 @@ class TaxonomyExchange:
 
     def _manifest(self, job: dict[str, Any], stage: str) -> dict[str, Any]:
         return {
-            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-comments/2",
+            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-taxonomy/3",
             "job_id": job["id"],
+            "instructions_version": job["instructions_version"],
             "stage": stage,
             "corpus_sha256": job["corpus"],
             "taxonomy_mode": job["mode"],
@@ -354,7 +358,8 @@ class TaxonomyExchange:
             else ""
         )
         if (
-            artifact.get("taxonomy") != catalog
+            artifact.get("config", {}).get("instructions_version") != INSTRUCTIONS_VERSION
+            or artifact.get("taxonomy") != catalog
             or artifact.get("config", {}).get("manual_revision", "") != revision
         ):
             return {}
@@ -369,7 +374,10 @@ class TaxonomyExchange:
             for key, lever, sub in zip(
                 artifact.get("keys", []), artifact.get("lever", []), artifact.get("sublever", [])
             )
-            if lever and sub and key in comments and hashes.get(key) == digest(str(comments[key]))
+            if lever
+            and sub
+            and key in comments
+            and hashes.get(key) == comment_classification_fingerprint(comments[key])
         }
 
     def progress(self, context: UploadContext) -> dict[str, Any]:
@@ -465,6 +473,18 @@ class TaxonomyExchange:
                                 "instructions_version": INSTRUCTIONS_VERSION,
                             },
                             retained,
+                            {
+                                **self.taxonomy.classification_artifact(context, mode).get(
+                                    "evidence", {}
+                                ),
+                                **{
+                                    key: {
+                                        "quotes": [],
+                                        "reason": "Texto vacío: no contiene una afirmación interpretable.",
+                                    }
+                                    for key in empty_keys
+                                },
+                            },
                         )
                     self._clear_caches()
                     frame = frame.loc[~frame["_business_key"].isin(retained)]
@@ -518,6 +538,7 @@ class TaxonomyExchange:
             "instructions_version": INSTRUCTIONS_VERSION,
         }
         if not pending:
+            self._save(context, job)
             return self._write(job)
         result = write_numbered_zips(
             self.downloads,
@@ -544,6 +565,7 @@ class TaxonomyExchange:
         path = persist_download(content, f"nps-lens-{stage}-{job['id']}.zip", self.downloads)
         return {
             "job_id": job["id"],
+            "instructions_version": job["instructions_version"],
             "stage": stage,
             "saved_path": str(path),
             "batches": len(job["batches"]),
@@ -557,10 +579,24 @@ class TaxonomyExchange:
                 raise ValueError(
                     "El corpus ha cambiado o el ZIP pertenece a otro dataset. Exporta de nuevo."
                 )
-            taxonomy = validate_payload(TaxonomyResponse, files["taxonomy.json"], "taxonomy.json")
+            taxonomy = validate_payload(
+                TaxonomyDesignResponse, files["taxonomy.json"], "taxonomy.json"
+            )
+            job = self._load(context, manifest["job_id"])
+            if manifest != self._manifest(job, "designer"):
+                raise ValueError("El manifiesto del diseñador ha cambiado; exporta de nuevo.")
+            comments = frame["Comment"].fillna("").astype(str)
+            if comments.str.strip().ne("").any() and not taxonomy.review.quotes:
+                raise ValueError("La revisión de taxonomía requiere evidencia del corpus.")
+            if any(
+                not quote.strip() or not any(quote in text for text in comments)
+                for quote in taxonomy.review.quotes
+            ):
+                raise ValueError("La revisión contiene evidencia ajena al corpus.")
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
-            state["discovered_taxonomy"] = taxonomy.model_dump()
+            state["discovered_taxonomy"] = taxonomy.model_dump(exclude={"review"})
+            state["designer_review"] = taxonomy.review.model_dump()
             state["designer_progress"] = {
                 "received": len(frame),
                 "corpus": self._corpus(context, frame),
@@ -601,10 +637,18 @@ class TaxonomyExchange:
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")
+            for decision, original in zip(response.classifications, job["batches"][key]):
+                decision.expand(categories)
+                validate_decision(decision, categories, original["Comment"])
             validated[key] = encode(
                 {
                     "classifications": [
-                        {"id": row.id, **row.expand(categories)} for row in response.classifications
+                        {
+                            "id": row.id,
+                            **row.expand(categories),
+                            "evidence": row.evidence.model_dump(),
+                        }
+                        for row in response.classifications
                     ]
                 }
             ).decode()
@@ -620,16 +664,22 @@ class TaxonomyExchange:
                     raise ValueError("Un lote ya importado tiene un resultado diferente.")
             existing.update(validated)
             merged = retained
+            grounding = dict(
+                self.taxonomy.classification_artifact(context, mode).get("evidence", {})
+            )
             for payload in existing.values():
                 for row in strict_json(payload.encode())["classifications"]:
-                    value = {key: value for key, value in row.items() if key != "id"}
+                    value = {
+                        key: value for key, value in row.items() if key not in {"id", "evidence"}
+                    }
                     for business_key in job["groups"][row["id"]]:
                         if business_key in merged and merged[business_key] != value:
                             raise ValueError(
                                 "Un comentario ya tiene una respuesta diferente para esa taxonomía."
                             )
                         merged[business_key] = value
-            self._persist_assignments(db, context, frame, job, merged)
+                        grounding[business_key] = row["evidence"]
+            self._persist_assignments(db, context, frame, job, merged, grounding)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
                 "UPDATE taxonomy_exchange SET payload=? WHERE id=?",
@@ -660,6 +710,7 @@ class TaxonomyExchange:
         frame: Any,
         job: dict[str, Any],
         merged: dict[str, Any],
+        grounding: dict[str, Any],
     ) -> None:
         mode = job["mode"]
         assignments = [
@@ -689,9 +740,10 @@ class TaxonomyExchange:
                 if row["secondary_classifications"]
             },
             "nodes": [],
+            "evidence": {key: value for key, value in grounding.items() if key in merged},
             "taxonomy": job["taxonomy"],
             "comment_hashes": {
-                key: digest(str(comment))
+                key: comment_classification_fingerprint(comment)
                 for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
             },
             "equivalences": {},

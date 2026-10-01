@@ -13,13 +13,18 @@ from nps_lens.api.app import create_app
 from nps_lens.domain.models import UploadContext
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange, encode, read_zip
-from nps_lens.services.taxonomy_prompts import FALLBACK_LEVER, FALLBACK_SUBLEVERS
+from nps_lens.services.taxonomy_prompts import (
+    FALLBACK_LEVER,
+    FALLBACK_SUBLEVERS,
+    INSTRUCTIONS_VERSION,
+)
 from nps_lens.settings import Settings
 
 TAXONOMY = {
     "taxonomy": [
         {"lever": "Atención", "sublevers": ["Resolución"]},
         {"lever": FALLBACK_LEVER, "sublevers": list(FALLBACK_SUBLEVERS)},
+        {"lever": "Velocidad", "sublevers": ["Espera"]},
     ]
 }
 
@@ -104,6 +109,14 @@ def classifier_files(manifest, inputs):
                             if pair == {"lever": "Atención", "sublever": "Resolución"}
                         ),
                         "secondary": [],
+                        "evidence": {
+                            "quotes": (
+                                list(dict.fromkeys([row["Comment"], row["Comment"].strip()[-1:]]))
+                                if row["Comment"].strip()
+                                else []
+                            ),
+                            "reason": "La narrativa explicita el problema observado.",
+                        },
                     }
                     for row in payload["comments"]
                 ]
@@ -114,9 +127,31 @@ def classifier_files(manifest, inputs):
     }
 
 
+def reviewed_taxonomy(taxonomy, request):
+    quotes = [
+        row["Comment"]
+        for name, value in request.items()
+        if name.startswith("comments/")
+        for row in value["comments"]
+        if row["Comment"].strip()
+    ][:1]
+    return {
+        **taxonomy,
+        "review": {
+            "quotes": quotes,
+            "reason": "Fronteras contrastadas con la narrativa del corpus.",
+        },
+    }
+
+
 def designer_zip(handler, context, taxonomy=TAXONOMY):
     request = exported(handler.export(context, "designer")["saved_path"])
-    return zipped({"manifest.json": request["manifest.json"], "taxonomy.json": taxonomy})
+    return zipped(
+        {
+            "manifest.json": request["manifest.json"],
+            "taxonomy.json": reviewed_taxonomy(taxonomy, request),
+        }
+    )
 
 
 def classifier_zip(response):
@@ -151,7 +186,12 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
         files={
             "file": (
                 "response.zip",
-                zipped({"manifest.json": request["manifest.json"], "taxonomy.json": TAXONOMY}),
+                zipped(
+                    {
+                        "manifest.json": request["manifest.json"],
+                        "taxonomy.json": reviewed_taxonomy(TAXONOMY, request),
+                    }
+                ),
                 "application/zip",
             )
         },
@@ -268,11 +308,12 @@ def test_all_projects_share_strict_zip_validation(stage):
 
     manifest = {
         "schema_version": {
-            "helix": "nps-lens-helix/3",
-            "classifier": "nps-lens-comments/3",
-            "designer": "nps-lens-comments/2",
+            "helix": "nps-lens-helix/4",
+            "classifier": "nps-lens-comments/4",
+            "designer": "nps-lens-taxonomy/3",
         }[stage],
         "stage": stage,
+        "instructions_version": INSTRUCTIONS_VERSION,
         "job_id": "test",
     }
     member = "taxonomy.json" if stage == "designer" else "results/000001.json"

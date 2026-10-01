@@ -50,6 +50,15 @@ def test_discovered_pending_preserves_existing_and_reclassifies_changed_text(exc
     assert resolved.Palanca.eq("Atención").all()
 
 
+def test_comment_classification_survives_non_semantic_record_updates(exchange):
+    handler, context, frame, _ = exchange
+    discover(handler, context)
+    frame.loc[0, ["NPS", "Fecha", "Canal"]] = [10, pd.Timestamp("2026-09-30"), "App"]
+
+    assert handler.progress(context)["pending"] == 0
+    assert handler.export(context, stage="classifier")["saved_paths"] == []
+
+
 def test_manual_origin_priority_renames_deletes_and_empty_categories(exchange):
     handler, context, frame, _ = exchange
     frame["Palanca"], frame["Subpalanca"] = "Origen", "Anterior"
@@ -115,8 +124,30 @@ def helix_response(request, nps_id, entity="Resolución"):
                             if pair == {"lever": "Atención", "sublever": "Resolución"}
                         ),
                         "secondary": [],
+                        "evidence": {
+                            "quotes": (
+                                list(dict.fromkeys([row["description"], row["description"][-1:]]))
+                                if row["description"].strip()
+                                else []
+                            ),
+                            "reason": "La incidencia explicita el problema observado.",
+                        },
                         "rationale": "Coincidencia de síntoma; no demuestra causalidad.",
-                        "links": [{"nps_id": nps_id, "confidence": 0.9}],
+                        "links": [
+                            {
+                                "nps_id": nps_id,
+                                "confidence": 0.9,
+                                "incident_quote": row["description"] or "Sin descripción",
+                                "comment_quote": next(
+                                    comment["Comment"]
+                                    for name, data in request.items()
+                                    if name.startswith("comments/")
+                                    for comment in data["comments"]
+                                    if comment["id"] == nps_id
+                                ),
+                                "reason": "Ambas narrativas explicitan el problema observado.",
+                            }
+                        ],
                     }
                     for row in payload["incidents"]
                 ]
@@ -163,6 +194,27 @@ def test_helix_partial_pending_atomic_and_stale(helix):
     assert handler.status(ctx, updated)["pending"] == 1
     with pytest.raises(ValueError, match="cambiado"):
         handler.import_response(ctx, updated, zipped(response))
+
+
+def test_helix_classification_survives_operational_status_updates(helix):
+    handler, ctx, _, incidents, _ = helix
+    incidents["Status"] = "Assigned"
+    incidents["Last Modified Date"] = pd.Timestamp("2026-09-01")
+    inputs = handler.inputs(ctx, incidents, "SOURCE")
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
+    response = helix_response(request, inputs["comments"][0]["id"])
+    assert handler.import_response(ctx, inputs, zipped(response))["ready"]
+
+    incidents["Status"] = "Resolved"
+    incidents["Last Modified Date"] = pd.Timestamp("2026-09-30")
+    incidents["BBVA_SourceServiceN2"] = "App"
+    updated = handler.inputs(ctx, incidents, "SOURCE")
+
+    assert [row["description"] for row in updated["incidents"]] == [
+        row["description"] for row in inputs["incidents"]
+    ]
+    assert handler.status(ctx, updated)["received"] == len(incidents)
+    assert handler.export(ctx, updated)["saved_paths"] == []
 
 
 @pytest.mark.parametrize(
@@ -377,11 +429,16 @@ def test_manual_missing_catalog_can_be_recreated(exchange):
 
 def test_helix_flat_annotations_kpis_and_concise_validation(helix):
     handler, ctx, _, incidents, _ = helix
+    incidents.loc[0, "Detailed Description"] = "Consulta sin detalles suficientes"
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, inputs["comments"][0]["id"])
     first = response["results/000001.json"]["classifications"][0]
-    first.update(entity="", primary=None, secondary=[], links=[])
+    first["entity"] = "unexpected"
+    with pytest.raises(ValueError, match="formato inválido"):
+        handler.import_response(ctx, inputs, zipped(response))
+    first.pop("entity")
+    first.update(primary=None, secondary=[], links=[])
     status = handler.import_response(ctx, inputs, zipped(response))
     assert status["total"] == status["received"] == 201
     assert status["classified"] == status["links"] == 200

@@ -18,7 +18,10 @@ heredando la compañía seleccionada.
    resultados LLM al alternar marcos. Los nuevos comentarios/incidencias quedan
    pendientes; no invalidan los registros ya procesados. Cambiar el catálogo o la
    revisión manual exige reclasificar esa taxonomía. Un cambio en evidencia NPS
-   enlazada invalida solo las incidencias que dependían de ella.
+   enlazada invalida solo las incidencias que dependían de ella. Actualizar estado,
+   fechas, responsable o enrutamiento operativo de una incidencia Helix conserva su
+   categoría; solo un cambio de narrativa o taxonomía exige reclasificarla. En NPS,
+   los cambios de metadatos conservan la categoría mientras el ID y Comment no cambien.
 3. Crear Taxonomía exporta los comentarios; su respuesta contiene `manifest.json`
    y `taxonomy.json`. Su importación habilita el catálogo Descubierta para elegirlo.
 4. Clasifica comentarios exporta solo pendientes de la lente elegida. Cada lote

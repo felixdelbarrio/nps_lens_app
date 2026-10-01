@@ -5,6 +5,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from nps_lens.services.semantic_validation import GroundedDecision
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,
     FALLBACK_SUBLEVERS,
@@ -50,6 +51,10 @@ class TaxonomyBranch(_StrictModel):
 
 class TaxonomyResponse(_StrictModel):
     taxonomy: list[TaxonomyBranch] = Field(min_length=1, max_length=MAX_LEVERS)
+
+
+class TaxonomyDesignResponse(TaxonomyResponse):
+    review: GroundedDecision
 
 
 class TaxonomyValidator:
