@@ -92,6 +92,9 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
         "/api/taxonomy/comments/engine", params={**params, "pop_month": "10"}
     ).json()
     assert not status["ready"] and status["engine"] == "rules"
+    dashboard = client.get("/api/dashboard/nps", params={**params, "pop_month": "10"})
+    assert dashboard.status_code == 200
+    assert dashboard.json()["kpis"]["samples"] == 205
     assert (
         client.put(
             "/api/taxonomy/comments/engine", params={**params, "pop_month": "10", "engine": "llm"}

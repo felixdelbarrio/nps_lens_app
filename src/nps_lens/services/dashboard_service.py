@@ -587,13 +587,7 @@ class DashboardService:
             or self.taxonomy.state(context).get(preference) != "llm"
         ):
             return {"engine": "rules"}
-        status = self.classification_status(kind, context, **scope)
-        if not status["ready"]:
-            raise ValueError(
-                "El motor LLM seleccionado requiere clasificaciones vigentes con evidencia. "
-                "Exporta e importa los pendientes con las instrucciones actuales o selecciona el motor de reglas."
-            )
-        return status
+        return self.classification_status(kind, context, **scope)
 
     def classification_status(
         self,
