@@ -23,7 +23,12 @@ from nps_lens.services.classification_protocol import (
     encode,
     incident_classification_fingerprint,
 )
-from nps_lens.services.semantic_validation import Reason, validate_decision, validate_quote
+from nps_lens.services.semantic_validation import (
+    GroundedDecision,
+    Reason,
+    validate_decision,
+    validate_quote,
+)
 from nps_lens.services.taxonomy_exchange import (
     TaxonomyExchange,
     bounded_batches,
@@ -47,6 +52,11 @@ class EvidenceLink(BaseModel):
 
 
 class IncidentClassification(CompactClassification):
+    # Helix responses produced by the external LLM can omit the advisory
+    # classification-level evidence block. Keep the field strict when present,
+    # but allow omission for linkless rows so a non-causal classification can
+    # still be imported. Rows with NPS links continue to require evidence.
+    evidence: GroundedDecision | None = None
     rationale: str = Field(min_length=1, max_length=2000)
     links: list[EvidenceLink] = Field(max_length=20)
 
@@ -327,7 +337,13 @@ class HelixExchange:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
                 mode = inputs["modes"][0]
                 expanded = row.expand(catalogs[mode])
-                validate_decision(row, catalogs[mode], original["description"])
+                if row.evidence is None:
+                    if row.links:
+                        raise ValueError(
+                            "Una clasificación Helix con vínculos NPS requiere evidence literal."
+                        )
+                else:
+                    validate_decision(row, catalogs[mode], original["description"])
                 primary = expanded["primary_classification"]
                 assigned = [
                     (pair["lever"], pair["sublever"])
@@ -363,7 +379,7 @@ class HelixExchange:
                         raise ValueError("Las categorías de reserva no justifican vínculos NPS.")
                 validated[(mode, row.id)] = {
                     "instructions_version": INSTRUCTIONS_VERSION,
-                    "evidence": row.evidence.model_dump(),
+                    "evidence": row.evidence.model_dump() if row.evidence is not None else None,
                     **primary,
                     "secondary_classifications": expanded["secondary_classifications"],
                     "rationale": row.rationale,

@@ -58,6 +58,51 @@ def test_helix_links_require_both_original_sources(helix, field):
     assert handler.status(context, inputs)["received"] == 0
 
 
+def test_helix_accepts_missing_evidence_for_linkless_classification(helix):
+    handler, context, _, incidents, _ = helix
+    inputs = handler.inputs(context, incidents, "SOURCE")
+    request = exported(handler.export(context, inputs)["saved_paths"])
+    response = helix_response(request, inputs["comments"][0]["id"])
+    row = response["results/000001.json"]["classifications"][0]
+    row.pop("evidence")
+    row["links"] = []
+
+    status = handler.import_response(
+        context,
+        inputs,
+        zipped(
+            {
+                "manifest.json": response["manifest.json"],
+                "results/000001.json": response["results/000001.json"],
+            }
+        ),
+    )
+
+    assert status["received"] == 200
+    assert handler.current(context, inputs)["SOURCE"][row["id"]]["evidence"] is None
+
+
+def test_helix_rejects_missing_evidence_when_links_are_present(helix):
+    handler, context, _, incidents, _ = helix
+    inputs = handler.inputs(context, incidents, "SOURCE")
+    request = exported(handler.export(context, inputs)["saved_paths"])
+    response = helix_response(request, inputs["comments"][0]["id"])
+    response["results/000001.json"]["classifications"][0].pop("evidence")
+
+    with pytest.raises(ValueError, match="requiere evidence literal"):
+        handler.import_response(
+            context,
+            inputs,
+            zipped(
+                {
+                    "manifest.json": response["manifest.json"],
+                    "results/000001.json": response["results/000001.json"],
+                }
+            ),
+        )
+    assert handler.status(context, inputs)["received"] == 0
+
+
 def test_identical_incidents_cannot_drift_between_batches(helix):
     handler, context, _, incidents, _ = helix
     inputs = handler.inputs(context, incidents, "SOURCE")
