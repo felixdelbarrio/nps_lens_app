@@ -373,7 +373,7 @@ class HelixExchange:
                     },
                 }
         existing = self.current(context, inputs)
-        decisions: dict[tuple[str, str, str], tuple[Any, ...]] = {}
+        decisions: dict[tuple[str, str], tuple[Any, ...]] = {}
         for mode in inputs["modes"]:
             candidates = {
                 **existing[mode],
