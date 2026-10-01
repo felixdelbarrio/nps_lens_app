@@ -54,6 +54,7 @@ def test_comment_classification_survives_non_semantic_record_updates(exchange):
     handler, context, frame, _ = exchange
     discover(handler, context)
     frame.loc[0, ["NPS", "Fecha", "Canal"]] = [10, pd.Timestamp("2026-09-30"), "App"]
+    frame.loc[0, "_business_key"] = "reingested-without-stable-external-id"
 
     assert handler.progress(context)["pending"] == 0
     assert handler.export(context, stage="classifier")["saved_paths"] == []

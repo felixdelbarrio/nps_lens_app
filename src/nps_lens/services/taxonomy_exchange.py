@@ -366,7 +366,7 @@ class TaxonomyExchange:
         hashes = artifact.get("comment_hashes", {})
         comments = dict(zip(frame["_business_key"], frame["Comment"].fillna("")))
         secondary = artifact.get("secondary_classifications", {})
-        return {
+        by_key = {
             key: {
                 "primary_classification": {"lever": lever, "sublever": sub},
                 "secondary_classifications": secondary.get(key, []),
@@ -374,11 +374,20 @@ class TaxonomyExchange:
             for key, lever, sub in zip(
                 artifact.get("keys", []), artifact.get("lever", []), artifact.get("sublever", [])
             )
-            if lever
-            and sub
-            and key in comments
-            and hashes.get(key) == comment_classification_fingerprint(comments[key])
+            if lever and sub
         }
+        by_fingerprint = {hashes[key]: value for key, value in by_key.items() if hashes.get(key)}
+        retained = {}
+        for key, comment in comments.items():
+            fingerprint = comment_classification_fingerprint(comment)
+            value = (
+                by_key.get(key)
+                if hashes.get(key) == fingerprint
+                else by_fingerprint.get(fingerprint)
+            )
+            if value is not None:
+                retained[key] = value
+        return retained
 
     def progress(self, context: UploadContext) -> dict[str, Any]:
         frame = self._frame(context)
