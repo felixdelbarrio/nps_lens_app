@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nps_lens.services.semantic_validation import GroundedDecision
 
-CLASSIFICATION_BATCH_ROWS = 1_000
+CLASSIFICATION_BATCH_ROWS = 500
 CLASSIFICATION_BATCH_BYTES = 300_000
 CLASSIFIER_SCHEMA = "nps-lens-comments/4"
 HELIX_SCHEMA = "nps-lens-helix/4"

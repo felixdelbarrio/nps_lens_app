@@ -26,7 +26,7 @@ from nps_lens.services.taxonomy_service import TaxonomyService
 
 @pytest.fixture(autouse=True)
 def production_batches(exchange, monkeypatch):
-    monkeypatch.setattr("nps_lens.services.taxonomy_exchange.CLASSIFICATION_BATCH_ROWS", 1_000)
+    monkeypatch.setattr("nps_lens.services.taxonomy_exchange.CLASSIFICATION_BATCH_ROWS", 500)
 
 
 def set_comments(exchange, monkeypatch, comments):
@@ -116,14 +116,14 @@ def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch
     handler, ctx, frame = set_comments(exchange, monkeypatch, comments)
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert request["manifest.json"]["schema_version"] == "nps-lens-comments/4"
-    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000] * 4 + [3]
+    assert [b["count"] for b in request["manifest.json"]["batches"]] == [500] * 8 + [3]
     assert request["manifest.json"]["taxonomy_sha256"] == digest(request["taxonomy.json"])
     for batch in request["manifest.json"]["batches"]:
         assert batch["sha256"] == digest(request[f"comments/{batch['id']}.json"])
     response = classifier_files(request["manifest.json"], request)
     response["results"] = {"000001": response["results"]["000001"]}
     result = handler.import_response(ctx, classifier_zip(response), "classifier")
-    assert result["progress"]["received"] == 1_001
+    assert result["progress"]["received"] == 501
     handler = restart(handler, frame, monkeypatch)
     next_request = exported(handler.export(ctx, "classifier")["saved_paths"])
     pending = [
@@ -132,8 +132,8 @@ def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch
         if name.startswith("comments/")
         for row in batch["comments"]
     ]
-    assert len(pending) == 3_003
-    assert not set(pending).intersection(comments[:1_000])
+    assert len(pending) == 3_503
+    assert not set(pending).intersection(comments[:500])
     response = classifier_files(next_request["manifest.json"], next_request)
     assert (
         handler.import_response(ctx, classifier_zip(response), "classifier")["progress"]["pending"]
@@ -215,7 +215,7 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     assert request["manifest.json"]["schema_version"] == "nps-lens-helix/4"
-    assert [b["count"] for b in request["manifest.json"]["batches"]] == [1_000, 1_000, 5]
+    assert [b["count"] for b in request["manifest.json"]["batches"]] == [500, 500, 500, 500, 5]
     assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-0"
     assert handler.status(ctx, inputs)["received"] == 0
     assert request["comments/000001.json"]["comments"][0] == {
@@ -233,16 +233,16 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
     response["results/000001.json"]["classifications"][0].update(
         primary=None, secondary=[], links=[]
     )
-    assert handler.import_response(ctx, inputs, zipped(response))["received"] == 1_000
+    assert handler.import_response(ctx, inputs, zipped(response))["received"] == 500
     handler = restart(handler, frame, monkeypatch)
     assert handler.status(ctx, inputs)["unassigned"] == 1
     next_request = exported(handler.export(ctx, inputs)["saved_paths"])
-    assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [1_000, 5]
-    assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-1000"
+    assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [500, 500, 500, 5]
+    assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-500"
     response = helix_response(next_request, inputs["comments"][0]["id"])
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
-    persisted = handler.current(ctx, inputs)["SOURCE"]["INC-1000"]
+    persisted = handler.current(ctx, inputs)["SOURCE"]["INC-500"]
     assert persisted["lever"] == "Atención" and persisted["links"][0]["confidence"] == 0.9
     assert persisted["rationale"] == "Coincidencia de síntoma; no demuestra causalidad."
 

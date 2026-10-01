@@ -18,7 +18,7 @@ from test_taxonomy_exchange import (
 from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
 from nps_lens.services.equivalence_exchange import EquivalenceExchange
-from nps_lens.services.semantic_validation import GroundedDecision
+from nps_lens.services.semantic_validation import GroundedDecision, validate_decision
 from nps_lens.services.taxonomy_prompts import (
     INSTRUCTIONS_VERSION,
     MAX_PROJECT_INSTRUCTION_CHARS,
@@ -157,6 +157,40 @@ def test_evidence_validation_does_not_claim_to_infer_semantics():
             quotes=["El token falla"], reason="Una cita alterada invierte el significado."
         ).validate_source(text)
     assert INSTRUCTIONS_VERSION
+
+
+def test_evidence_validation_accepts_safe_extract_redactions_and_whitespace():
+    GroundedDecision(
+        quotes=["muchas veces no me habren los enlaces. queda en blanco"],
+        reason="La cita solo normaliza espacios del comentario original.",
+    ).validate_source("muchas veces no me habren los enlaces.  queda en blanco en la parte de carga")
+    GroundedDecision(
+        quotes=["Sr. , muy buena atencion, resolvio rapido el problema"],
+        reason="La cita omite un nombre propio sin insertar ni reordenar palabras.",
+    ).validate_source("Sr. Facundo Jonas , muy buena atencion, resolvio rapido el problema")
+    GroundedDecision(
+        quotes=["Necesitamos resumen Nº [dato omitido] correspondiente al mes Diciembre 2025"],
+        reason="La cita redacta un identificador sensible manteniendo el resto del texto.",
+    ).validate_source("Necesitamos resumen Nº 282-023686/3 correspondiente al mes Diciembre 2025")
+
+
+def test_secondary_evidence_can_share_one_quote_and_reserve_primary_can_keep_secondary():
+    text = "QUIERO CERRAR LA CUENTA Y LA ATENCION EN SUCURSAL NO ES MUY BUENA."
+    row = type("Decision", (), {})()
+    row.primary = "c001"
+    row.secondary = ["c002"]
+    row.evidence = GroundedDecision(
+        quotes=[text],
+        reason="El cierre no está cubierto y la mala atención es un tema independiente.",
+    )
+    validate_decision(
+        row,
+        {
+            "c001": {"lever": "Sin clasificación temática", "sublever": "Tema no cubierto"},
+            "c002": {"lever": "Atención", "sublever": "Calidad"},
+        },
+        text,
+    )
 
 
 def test_project_instructions_fit_chatgpt_without_losing_shared_safeguards():
