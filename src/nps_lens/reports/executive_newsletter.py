@@ -6,26 +6,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.causal_evidence import link_confidence_label, scenario_impact_score
 from nps_lens.analytics.channel_topic_scope import restrict_to_topics, topics_observed_in_channel
 from nps_lens.analytics.drivers import grouped_driver_stats
+from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
+from nps_lens.domain.privacy import redact_operational_snippet
+from nps_lens.reports.coherence import validate_metric_payload
 from nps_lens.services.analytics.kpis_service import format_metric, format_percentage, format_volume
-
-_WATCH_LABELS = (
-    "Funcionamiento continuo",
-    "Pagos/transferencias",
-    "Agregar funcionalidad",
-    "Uso",
-)
-_CONNECTION_TERMS = (
-    "problemas con transferencias",
-    "dispersión de nómina",
-    "pagos masivos",
-    "no funciona bien",
-    "estado de cuenta",
-    "login",
-    "interface",
-    "actualización",
-)
 
 
 def _dict(value: object) -> dict[str, Any]:
@@ -46,11 +33,6 @@ def _number(value: object) -> float | None:
 
 def _normalized(value: object) -> str:
     return " ".join(str(value or "").casefold().split())
-
-
-def _first_matching_label(labels: list[str], target: str) -> str:
-    key = _normalized(target)
-    return next((label for label in labels if _normalized(label) == key), "")
 
 
 def _period_label(period_start: date, period_end: date) -> str:
@@ -79,14 +61,11 @@ def _focus_rows(current_df: pd.DataFrame, *, topic_channel: str) -> list[dict[st
     if current_df is None or current_df.empty or "Palanca" not in current_df.columns:
         return []
     topic_keys = topics_observed_in_channel(current_df, "Palanca", topic_channel)
-    source = restrict_to_topics(current_df, "Palanca", topic_keys)
+    source = actionable_rows(restrict_to_topics(current_df, "Palanca", topic_keys))
     grouped = grouped_driver_stats(source, "Palanca")
     if grouped.empty:
         return []
     grouped["detractor_volume"] = grouped["det_count"].fillna(0)
-    labels = grouped["Palanca"].astype(str).tolist()
-    preferred = [_first_matching_label(labels, label) for label in _WATCH_LABELS]
-    preferred = [label for label in preferred if label]
     ranked = (
         grouped.sort_values(
             ["detractor_volume", "detractor_rate", "n"], ascending=[False, False, False]
@@ -94,7 +73,7 @@ def _focus_rows(current_df: pd.DataFrame, *, topic_channel: str) -> list[dict[st
         .astype(str)
         .tolist()
     )
-    order = list(dict.fromkeys(preferred + ranked))[:4]
+    order = ranked[:4]
     lookup = grouped.set_index("Palanca", drop=False)
     rows: list[dict[str, object]] = []
     for label in order:
@@ -110,19 +89,14 @@ def _focus_rows(current_df: pd.DataFrame, *, topic_channel: str) -> list[dict[st
     return rows
 
 
-def _scenario_priority(card: dict[str, object]) -> tuple[int, float]:
-    title = _normalized(card.get("title"))
-    term_rank = next(
-        (index for index, term in enumerate(_CONNECTION_TERMS) if term in title),
-        len(_CONNECTION_TERMS),
-    )
-    return term_rank, -float(_number(card.get("linked_pairs")) or 0)
-
-
 def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
     scenario_block = _dict(linking.get("scenarios"))
     cards = [card for card in _list(scenario_block.get("cards")) if isinstance(card, dict)]
-    selected = sorted(cards, key=_scenario_priority)[:4]
+    selected = sorted(
+        (card for card in cards if scenario_impact_score(card) > -1000),
+        key=scenario_impact_score,
+        reverse=True,
+    )[:4]
     connections: list[dict[str, object]] = []
     for card in selected:
         comments = [
@@ -132,10 +106,15 @@ def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
             {
                 "topic": str(card.get("title") or card.get("nps_topic") or "Tópico observado"),
                 "semantic_links": int(_number(card.get("linked_pairs")) or 0),
+                "evidence_reason": card.get(
+                    "evidence_reason",
+                    "Evidencia semántica compatible; requiere validación operativa.",
+                ),
+                "confidence_label": link_confidence_label(str(card.get("causal_engine", "rules"))),
                 "comments": [
-                    str(item.get("comment") or "").strip()
+                    redact_operational_snippet(str(item.get("comment") or "")).strip()
                     for item in comments
-                    if str(item.get("comment") or "").strip()
+                    if redact_operational_snippet(str(item.get("comment") or "")).strip()
                 ][:2],
             }
         )
@@ -152,6 +131,7 @@ def build_executive_newsletter(
     period_end: date,
 ) -> dict[str, object]:
     """Build the single, publication-time editorial model used by every newsletter renderer."""
+    validate_metric_payload(period_kpis)
     period = _dict(period_kpis.get("period"))
     display = _dict(period.get("display"))
     deltas = _dict(period.get("deltas"))
@@ -179,11 +159,6 @@ def build_executive_newsletter(
         if focus
         else {"label": "la experiencia digital", "nps": "n/d", "detractors": "n/d", "opinions": "0"}
     )
-    functioning = next(
-        (row for row in focus if _normalized(row.get("label")) == "funcionamiento continuo"), None
-    )
-    if functioning is not None:
-        primary = functioning
     connections = _connections(linking)
 
     quotes: list[str] = []
@@ -210,7 +185,7 @@ def build_executive_newsletter(
             signals.append(
                 {
                     "label": label,
-                    "reason": f"{connection['semantic_links']} vínculos semánticos con incidencias relacionadas.",
+                    "reason": f"{connection['semantic_links']} vínculos. {connection['confidence_label']}. {connection['evidence_reason']}",
                 }
             )
 
@@ -223,9 +198,14 @@ def build_executive_newsletter(
         "lead": (
             f"La lectura del periodo sitúa {primary['label']} en el centro de la señal: "
             f"NPS {primary['nps']}, {primary['detractors']} detractores y "
-            f"{primary['opinions']} opiniones. Las relaciones con Helix se presentan como "
-            "evidencia semántica, no como causalidad demostrada."
+            f"{primary['opinions']} opiniones. "
+            + (
+                str(connections[0]["evidence_reason"])
+                if connections
+                else "No hay evidencia suficiente para sostener causalidad."
+            )
         ),
+        "signal_quality": signal_quality(current_df),
         "scorecard": scorecard,
         "quotes": quotes,
         "signals": signals[:5],

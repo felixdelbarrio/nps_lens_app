@@ -50,8 +50,29 @@ function _publicationByKey_(scopeKey) {
   const key = String(scopeKey || '').trim();
   const rows = _publicationRows_();
   if (!rows.length) return null;
-  return rows.find(item => item.scopeKey === key) || rows.sort((a, b) =>
-    new Date(b.importedAt || 0).getTime() - new Date(a.importedAt || 0).getTime())[0];
+  if (key) return rows.find(item => item.scopeKey === key) || null;
+  return _latestPublications_()[0] || null;
+}
+
+function _latestPublications_() {
+  const latest = new Map();
+  const ordered = _publicationRows_().slice().sort((a, b) =>
+    new Date(b.generatedAt || 0).getTime() - new Date(a.generatedAt || 0).getTime() ||
+    new Date(b.importedAt || 0).getTime() - new Date(a.importedAt || 0).getTime());
+  ordered.forEach(item => {
+    if (!latest.has(item.audienceKey)) latest.set(item.audienceKey, item);
+  });
+  return Array.from(latest.values());
+}
+
+function _entryPublication_(scopeKey, newsletter) {
+  const requested = _publicationByKey_(scopeKey);
+  if (scopeKey && !requested) throw new Error('El ámbito solicitado no está publicado.');
+  if (newsletter) {
+    if (!scopeKey) throw new Error('La newsletter no identifica su edición.');
+    return requested;
+  }
+  return requested ? _latestPublications_().find(item => item.audienceKey === requested.audienceKey) : null;
 }
 
 function _selectedPublication_() { return _publicationByKey_(_property_(NPS_LENS.selectedScopeProperty)); }
@@ -178,9 +199,9 @@ function _publicationFolder_() {
   return _folderDescriptor_(id);
 }
 
-function _publicationCatalog_() {
+function _publicationCatalog_(latestOnly) {
   const showEvolutionNps = _evolutionNpsVisible_();
-  return _publicationRows_().map(item => ({
+  return (latestOnly ? _latestPublications_() : _publicationRows_()).map(item => ({
     scopeKey:item.scopeKey,audienceKey:item.audienceKey,label:[item.ownerSupportCompany,item.year,item.month,item.causalMethodLabel].join(' · '),
     ownerSupportCompany:item.ownerSupportCompany,year:item.year,month:item.month,causalMethod:item.causalMethod,
     causalMethodLabel:item.causalMethodLabel,generatedAt:item.generatedAt,presentationUrl:_reportUrl_(item.scopeKey,showEvolutionNps)
@@ -275,6 +296,15 @@ function _discardPublicationUploadSession_(session) {
 
 function _importPublicationArchiveBlob_(archiveBlob) {
   const viewer = _viewer_(); _assertAdmin_(viewer);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    _clearPublicationCache_();
+    return _storePublicationArchive_(archiveBlob, viewer);
+  } finally { lock.releaseLock(); }
+}
+
+function _storePublicationArchive_(archiveBlob, viewer) {
   const archiveName = String(archiveBlob.getName() || 'publicacion.zip'), archiveBytes = archiveBlob.getBytes();
   if (!archiveName.toLowerCase().endsWith('.zip')) throw new Error('La edición debe ser un fichero ZIP.');
   if (!archiveBytes.length || archiveBytes.length > NPS_LENS.maxPublicationBytes) throw new Error('La edición debe ocupar entre 1 byte y 30 MB.');
@@ -290,10 +320,13 @@ function _importPublicationArchiveBlob_(archiveBlob) {
   if (!reportName || !compactReportName || reportName === compactReportName || !reportBlob || !compactReportBlob || reports.length !== 2) {
     throw new Error('Las presentaciones PPTX no coinciden con el manifiesto de la edición.');
   }
-  const destination = _publicationFolder_(), previous = _publicationRows_().find(item => item.scopeKey === edition.scope.key);
-  const shellProperty = _publicationShellProperty_(edition.scope.key), previousShellFileId = _property_(shellProperty);
-  const compactPptxProperty = _compactPptxProperty_(edition.scope.key), previousCompactPptxFileId = _property_(compactPptxProperty);
-  const compactSlidesProperty = _compactSlidesProperty_(edition.scope.key), previousCompactSlidesFileId = _property_(compactSlidesProperty);
+  if (_publicationRows_().some(item => item.scopeKey === edition.scope.key)) {
+    throw new Error('Esta edición ya está publicada. Genera un nuevo snapshot para actualizar el ámbito.');
+  }
+  const destination = _publicationFolder_();
+  const shellProperty = _publicationShellProperty_(edition.scope.key);
+  const compactPptxProperty = _compactPptxProperty_(edition.scope.key);
+  const compactSlidesProperty = _compactSlidesProperty_(edition.scope.key);
   const previousSelectedScope = _property_(NPS_LENS.selectedScopeProperty);
   const newsletterInsight = JSON.stringify(_newsletterInsight_(edition));
   let snapshotFileId='', shellFileId='', pptxFileId='', slidesFileId='', compactPptxFileId='', compactSlidesFileId='', committed=false;
@@ -319,16 +352,15 @@ function _importPublicationArchiveBlob_(archiveBlob) {
     properties.setProperties({[shellProperty]:shellFileId,[NPS_LENS.selectedScopeProperty]:s.key});
     properties.setProperty(compactPptxProperty,compactPptxFileId);
     properties.setProperty(compactSlidesProperty,compactSlidesFileId);
-    if(previous) sheet.getRange(previous.row,1,1,PUBLICATION_HEADERS.length).setValues([row]); else sheet.appendRow(row);
+    sheet.appendRow(row);
     committed = true; _clearPublicationCache_();
     _cacheEncodedSnapshot_(shellFileId, Utilities.base64EncodeWebSafe(shellBytes));
-    if(previous) [previous.snapshotFileId,previous.pptxFileId,previous.slidesFileId,previousShellFileId,previousCompactPptxFileId,previousCompactSlidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(error){}});
   } catch(error) {
     if (!committed) {
       const properties = PropertiesService.getScriptProperties();
-      if(previousShellFileId) properties.setProperty(shellProperty,previousShellFileId); else properties.deleteProperty(shellProperty);
-      if(previousCompactPptxFileId) properties.setProperty(compactPptxProperty,previousCompactPptxFileId); else properties.deleteProperty(compactPptxProperty);
-      if(previousCompactSlidesFileId) properties.setProperty(compactSlidesProperty,previousCompactSlidesFileId); else properties.deleteProperty(compactSlidesProperty);
+      properties.deleteProperty(shellProperty);
+      properties.deleteProperty(compactPptxProperty);
+      properties.deleteProperty(compactSlidesProperty);
       if(previousSelectedScope) properties.setProperty(NPS_LENS.selectedScopeProperty,previousSelectedScope); else properties.deleteProperty(NPS_LENS.selectedScopeProperty);
       [snapshotFileId,shellFileId,pptxFileId,slidesFileId,compactPptxFileId,compactSlidesFileId].forEach(id=>{try{if(id)DriveApp.getFileById(id).setTrashed(true);}catch(ignore){}});
     }

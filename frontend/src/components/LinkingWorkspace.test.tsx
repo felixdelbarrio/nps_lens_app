@@ -24,8 +24,7 @@ const payload = {
   scenarios: { cards: [{
     title: "Escenario", identity_rows: [
       { label: "Tópico NPS ancla", value: "Pagos" },
-      { label: "Organizaciones responsables observadas", value: "Equipo" },
-      { label: "Duración media histórica de resolución (semanas)", value: "1,20" }
+      { label: "Organizaciones de las incidencias enlazadas", value: "Equipo" }
     ],
     incident_records: [{ incident_id: "INC1", summary: "Error <script>alert(1)</script>", summary_segments: [
       { text: "Error", bold: true }, { text: " <script>alert(1)</script>", bold: false }
@@ -58,8 +57,9 @@ describe("Causal topic filters", () => {
 
   it("renders the canonical identity and safe precomputed emphasis", () => {
     const { container } = render(<LinkingWorkspace linking={payload} tab="scenarios" onTabChange={() => {}} />);
-    expect(container.querySelectorAll("dt")).toHaveLength(3);
-    expect(screen.getByText("1,20")).toBeInTheDocument();
+    expect(container.querySelectorAll("dt")).toHaveLength(2);
+    expect(screen.getByText("Organizaciones de las incidencias enlazadas")).toBeInTheDocument();
+    expect(screen.getByText("Equipo")).toBeInTheDocument();
     expect(screen.getByText("Error").tagName).toBe("STRONG");
     expect(container.querySelector("script")).toBeNull();
     expect(screen.queryByRole("columnheader", { name: /segments/ })).not.toBeInTheDocument();
@@ -72,4 +72,20 @@ it("shows full link totals instead of the capped evidence sample", () => {
   render(<LinkingWorkspace linking={linking} tab="scenarios" onTabChange={() => {}} />);
   expect(screen.getByRole("heading", { name: "375 incidencias enlazadas" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "118 comentarios enlazados" })).toBeInTheDocument();
+});
+
+it("uses server confidence labels without changing the existing table payload", () => {
+  const table = [{ "Tópico NPS ancla": "Pagos", "Similitud textual": "90%" }];
+  const linking = {
+    ...payload,
+    entity_summary: {
+      ...payload.entity_summary,
+      table,
+      column_labels: { "Similitud textual": "CONFIANZA SEMÁNTICA" }
+    }
+  };
+  render(<LinkingWorkspace linking={linking} tab="entity-summary" onTabChange={() => {}} />);
+  expect(screen.getByRole("columnheader", { name: "CONFIANZA SEMÁNTICA" })).toBeInTheDocument();
+  expect(screen.getByText("90,0%")).toBeInTheDocument();
+  expect(table[0]["Similitud textual"]).toBe("90%");
 });

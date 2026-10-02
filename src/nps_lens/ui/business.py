@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.drivers import grouped_driver_stats
+from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.ui.population import POP_ALL
 
 
@@ -183,6 +184,7 @@ def driver_delta_table(
     if merged.empty:
         return pd.DataFrame()
 
+    merged = actionable_rows(merged)
     merged["delta_nps"] = merged["nps_current"] - merged["nps_baseline"]
     merged["value"] = merged[dimension]
     # Sort by deterioration first (most negative)

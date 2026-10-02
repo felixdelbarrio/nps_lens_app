@@ -66,3 +66,19 @@ Para backend se proporcionó `NPS_LENS_SERVICE_ORIGIN_BUUG` al proceso de prueba
 porque el entorno de shell no tenía esa variable obligatoria. No se modificó `.env`.
 No se ha ejecutado una sesión real de ChatGPT ni se garantiza cuántos lotes completará;
 la reproducción del adjunto valida el ahorro y el contrato de transporte.
+
+## Simplificación posterior del intercambio
+
+La descarga prepara ahora todos los pendientes en una carpeta con ZIP numerados,
+un lote por archivo, tanto para comentarios como para Helix. Sustituye los topes
+de 4.000/2.000 por intercambio y la generación automática después de importar.
+Se mantienen 1.000 elementos / 300.000 bytes por lote y la evidencia NPS completa
+en cada ZIP Helix. Las respuestas se pueden importar en cualquier orden; la
+retención conserva tres series completas. El contrato vigente y las instrucciones
+de uso están en `taxonomy-project-instructions.md`.
+
+Validación de esta simplificación: `make ci` correcto (34 pruebas frontend,
+compilación y recorrido E2E); `make typecheck` correcto; `make test`: 357 pruebas
+aprobadas, cobertura 84,31 %, incluidas las regresiones de WebApp. Ocho pruebas
+nuevas cubren series completas, importación fuera de orden tras reinicio,
+reexportación de pendientes, validación de manifiestos y fallo atómico de escritura.

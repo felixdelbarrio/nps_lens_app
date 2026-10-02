@@ -135,7 +135,10 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   }, [linking.navigation]);
   const situationMetadata = asRows(situation.metadata);
   const entitySummaryKpis = asRows(entitySummary.kpis);
-  const entitySummaryRows = asRows(entitySummary.table);
+  const entityColumnLabels = asRecord(entitySummary.column_labels);
+  const entitySummaryRows = asRows(entitySummary.table).map(row => Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [asString(entityColumnLabels[key], key), value])
+  ));
   const situationEvidence = asRecord(situation.evidence);
   const [evidenceTopic, setEvidenceTopic] = useState("");
   const [journeyTopic, setJourneyTopic] = useState("");

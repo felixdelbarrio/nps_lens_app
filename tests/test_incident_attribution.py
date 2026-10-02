@@ -133,7 +133,6 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
                 "incidents": 5,
                 "responses": 120,
                 "support_organizations": "Producto + Tecnologia",
-                "historical_resolution_weeks": 6,
             }
         ]
     )
@@ -167,11 +166,12 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
         "group": "DETRACTOR",
         "palanca": "Acceso",
         "subpalanca": "Login",
-        "comment": "no puedo entrar a la aplicacion de empresas",
+        "comment": "No puedo entrar a la aplicación de empresas",
     }
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
-    assert "2 comentarios VoC" in out.iloc[0]["chain_story"]
-    assert "subpalanca Login" in out.iloc[0]["chain_story"]
+    assert "5 comentarios afectados" in out.iloc[0]["chain_story"]
+    assert out.iloc[0]["observed_symptom"] == "Login"
+    assert out.iloc[0]["evidence_level"] == "INDICIO_SEMANTICO"
     assert out.iloc[0]["support_organizations"] == "Producto + Tecnologia"
 
 

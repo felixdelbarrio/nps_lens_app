@@ -721,12 +721,10 @@ export type TaxonomyStatus = {
   detection: { state: "COMPLETE" | "PARTIAL" | "MISSING" | "NO_TEXT"; rows: number; missing: number; usable_comments: number; originals_unavailable?: number };
   active: TaxonomyMode;
   requested_active: TaxonomyMode;
-  default: TaxonomyMode;
   policy: "ACTIVE_ONLY" | "SOURCE_AND_ACTIVE" | "ALL_AVAILABLE";
   restored: boolean;
   discovery_local_available?: boolean;
   discovered_catalog_available: boolean;
-  llm_active: TaxonomyMode;
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {

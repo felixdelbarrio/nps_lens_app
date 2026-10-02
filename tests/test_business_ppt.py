@@ -148,7 +148,6 @@ def _sample_payload() -> dict:
                 "incidents": 5,
                 "responses": 120,
                 "support_organizations": "Producto + Tecnologia",
-                "historical_resolution_weeks": 6.0,
                 "incident_records": [
                     {
                         "incident_id": "INC00001",
@@ -404,7 +403,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         )
     )
     causal_slide = prs.slides[6]
-    assert causal_slide.shapes[4].text == "SCORE MEDIO ENLAZADO"
+    assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
     assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
     assert causal_slide.shapes[2].text == ""
     assert causal_slide.shapes[5].text == ""

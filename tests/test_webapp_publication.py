@@ -133,7 +133,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "_encodedSnapshot_" in webapp
     assert "DecompressionStream" in app
     assert "snapshot_load" in app
-    assert "viewer.publicationCatalog = _publicationCatalog_()" in webapp
+    assert "viewer.causalMethodLocked ? [] : _publicationCatalog_(true)" in webapp
     assert "delete edition.snapshots" in publication
     assert "NPS_LENS_SHELL_" in publication
     assert "function getPublishedDataset(" in webapp
@@ -174,7 +174,7 @@ def test_newsletter_locks_the_published_causal_method() -> None:
 
     assert "?source=newsletter&scope=" in newsletter
     assert "viewer.causalMethodLocked" in webapp
-    assert "viewer.causalMethodLocked?'disabled':''" in app
+    assert "if(viewer.causalMethodLocked||scopeCatalog.length<2)" in app
 
 
 def test_newsletter_and_webapp_are_responsive_on_mobile() -> None:

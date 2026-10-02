@@ -32,16 +32,19 @@ with zipfile.ZipFile(source) as archive:
     manifest = json.loads(archive.read("manifest.json"))
     comments = {name: json.loads(archive.read(name)) for name in archive.namelist() if name.startswith("comments/")}
     if stage == "classifier":
-        assert manifest["schema_version"] == "nps-lens-comments/3"
+        assert manifest["schema_version"] == "nps-lens-comments/5"
         categories = json.loads(archive.read("taxonomy.json"))["categories"]
-        primary = next(key for key, pair in categories.items() if pair == {"lever": "Atención", "sublever": "Resolución"})
+        primary = next(key for key, pair in categories.items() if pair["lever"] == "Atención" and pair["sublever"] == "Resolución")
 taxonomy = {"taxonomy": [
     {"lever": "Atención", "sublevers": ["Resolución"]},
     {"lever": "Sin clasificación temática", "sublevers": ["Información insuficiente", "Tema no cubierto"]},
 ]}
+for branch in taxonomy["taxonomy"]:
+    branch["sublevers"] = [{"name": sub, "criterion": "Usar solo para el significado explícito de " + sub} for sub in branch["sublevers"]]
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
     archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
     if stage == "designer":
+        taxonomy["review"] = {"quotes": [row["Comment"] for value in comments.values() for row in value["comments"] if row["Comment"].strip()][:1], "reason": "Fronteras contrastadas con la narrativa del corpus."}
         archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
     else:
         for name, payload in comments.items():
@@ -51,8 +54,8 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
   execFileSync(path.resolve(__dirname, "../../.venv/bin/python"), ["-c", script, input, output, stage]);
 }
 
-async function exportedPath(page: import("@playwright/test").Page, title: string, automatic = false) {
-  const pattern = automatic ? /Siguiente ZIP preparado en (.+?\.zip)/ : /ZIP guardado en (.+?\.zip)/;
+async function exportedPath(page: import("@playwright/test").Page, title: string) {
+  const pattern = /ZIP guardado en (.+?\.zip)/;
   const message = await page.locator("article").filter({has:page.getByRole("heading", {name:title,exact:true})}).last().getByText(pattern).textContent();
   const match = message?.match(pattern);
   if (!match) throw new Error(`No se encontró la ruta del ZIP en: ${message}`);
@@ -93,7 +96,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
   await page.getByRole("button", { name: /Taxonomy Studio/i }).click();
-  await expect(page.getByLabel("Taxonomía a utilizar")).toHaveValue("SOURCE");
+  await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await expect(page.getByText("Normalización · tabla de equivalencias")).toHaveCount(0);
   await page.getByRole("tab",{name:"Análisis con LLM"}).click();
   await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
@@ -103,16 +106,26 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
-  await page.getByLabel("Lente activa").selectOption("DISCOVERED");
-  await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
-  await page.getByRole("button", { name: "Exportar comentarios pendientes" }).click();
-  let classifierInput = await exportedPath(page, "Clasifica comentarios");
+  await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
+  let exportCount = 0;
+  page.on("request", request => {
+    if (request.url().includes("/discovery/classifier/export") && request.method() === "POST") exportCount++;
+  });
+  const [classificationExport] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/discovery/classifier/export") && response.request().method() === "POST"),
+    page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" }).click(),
+  ]);
+  expect(classificationExport.ok(), await classificationExport.text()).toBeTruthy();
+  const { saved_paths: classifierInputs } = await classificationExport.json();
+  expect(classifierInputs.length).toBeGreaterThan(0);
+  await expect(page.getByRole("region", { name: "ZIP preparados" })).toBeVisible();
   const classifierUpload = page.getByLabel("Importar ZIP de comentarios clasificados");
   let previousPending = Infinity;
-  while (previousPending > 0) {
+  for (const classifierInput of classifierInputs) {
     const classifierOutput = classifierInput.replace(/\.zip$/, "-response.zip");
     responseZip(classifierInput, classifierOutput, "classifier");
-    await expect(classifierUpload).toBeEnabled();
+    await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
     const [classificationImport] = await Promise.all([
       page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
       classifierUpload.setInputFiles(classifierOutput),
@@ -124,17 +137,14 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
     expect(progress.received + progress.pending).toBe(progress.total);
     previousPending = progress.pending;
     await expect(page.getByText(/Importación validada/)).toBeVisible();
-    if (previousPending > 0) {
-      const nextInput = await exportedPath(page, "Clasifica comentarios", true);
-      expect(nextInput).not.toBe(classifierInput);
-      classifierInput = nextInput;
-    }
   }
-  await expect(classifierUpload).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Exportar comentarios pendientes" })).toBeDisabled();
+  expect(previousPending).toBe(0);
+  expect(exportCount).toBe(1);
+  await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
+  await expect(page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
-  await page.getByLabel("Lente activa").selectOption("DISCOVERED");
-  await expect(page.getByLabel("Lente activa")).toHaveValue("DISCOVERED");
+  await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.getByRole("button", { name: /Insights/i }).click();
   await page.getByRole("tab", { name: "Comentarios", exact: true }).click();

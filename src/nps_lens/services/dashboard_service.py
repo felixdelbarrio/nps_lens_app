@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional, Sequence, cast
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, link_confidence_label
 from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
@@ -57,6 +58,7 @@ from nps_lens.analytics.nps_helix_link import (
     nps_matchable_mask,
     weekly_aggregates,
 )
+from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
 from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.nps_math import (
     daily_metrics,
@@ -84,6 +86,7 @@ from nps_lens.domain.helix_links import (
 )
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import equivalence_key
+from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.base import ValidationIssue
@@ -98,6 +101,7 @@ from nps_lens.platform.publication import (
     build_static_data_snapshot,
 )
 from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
+from nps_lens.reports.coherence import ReportCoherenceError, validate_classification_context
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
@@ -108,6 +112,7 @@ from nps_lens.services.analytics import (
     format_percentage,
 )
 from nps_lens.services.analytics.kpis_service import compute_score_kpis
+from nps_lens.services.classification_protocol import taxonomy_fingerprint
 from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 from nps_lens.services.taxonomy_service import TaxonomyService
@@ -384,7 +389,9 @@ class DashboardService:
     def __init__(self, repository: SqliteNpsRepository, settings: Settings) -> None:
         self.repository = repository
         self.settings = settings
-        self.taxonomy = TaxonomyService(repository, settings.equivalences_path)
+        self.taxonomy = TaxonomyService(
+            repository, settings.equivalences_path, settings.dotenv_path
+        )
         self.helix_store = HelixIncidentStore(settings.data_dir / "helix")
         self._migrate_helix_owner_context()
         self.logger = logging.getLogger(__name__)
@@ -510,13 +517,7 @@ class DashboardService:
             if cached is not None:
                 self._frame_cache.move_to_end(key)
                 return cached
-            state = self.taxonomy.state(context)
-            mode = (
-                None
-                if state.get("restored") or self.taxonomy.lens_override
-                else (state["active"] if state["active"] in ("SOURCE", "COMPLETED") else "SOURCE")
-            )
-            frame = self.taxonomy.resolve(context, mode=mode)
+            frame = self.taxonomy.resolve(context)
             frame["match_status"] = nps_matchable_mask(frame).map(
                 {True: "matchable", False: "non_matchable"}
             )
@@ -529,6 +530,17 @@ class DashboardService:
                     self._frame_cache_limit,
                 ),
             )
+
+    def _comment_analysis_frame(
+        self, context: UploadContext, **scope: Any
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        frame = self._load_nps_df(context)
+        engine = self.analysis_engine("comments", context, **scope)
+        if engine["engine"] == "llm":
+            frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
+                context, frame, engine["active"]
+            )
+        return frame, engine
 
     def comments_scope(
         self,
@@ -594,7 +606,7 @@ class DashboardService:
         max_days_apart: int = 90,
     ) -> dict[str, Any]:
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context)
+        mode = self.taxonomy.state(context)["active"]
         total = received = 0
         reason = ""
         try:
@@ -666,7 +678,7 @@ class DashboardService:
                 context,
                 exc,
             )
-            return HelixOperationalBenchmark({}, {}, None)
+            return HelixOperationalBenchmark({})
 
     def resolve_context(
         self,
@@ -887,7 +899,8 @@ class DashboardService:
             if column in combined.columns
         ]
         combined = (
-            combined.drop_duplicates(identity_columns, keep="last")
+            # Upload history is newest-first: retain the latest operational state.
+            combined.drop_duplicates(identity_columns, keep="first")
             if identity_columns
             else combined.drop_duplicates(keep="last")
         )
@@ -995,19 +1008,13 @@ class DashboardService:
         theme_mode: str = "light",
     ) -> dict[str, object]:
         theme = get_theme(theme_mode)
-        all_records = self._load_nps_df(context)
-        engine = self.analysis_engine(
-            "comments",
+        all_records, _ = self._comment_analysis_frame(
             context,
             pop_year=pop_year,
             pop_month=pop_month,
             score_channel=score_channel,
             nps_group=nps_group,
         )
-        if engine["engine"] == "llm":
-            all_records = TaxonomyExchange(self.taxonomy, Path(".")).apply(
-                context, all_records, engine["active"]
-            )
         resolved_channel = self._resolve_score_channel(all_records, score_channel)
         resolved_group = self._resolve_nps_group(all_records, nps_group)
         scope_history_df = all_records
@@ -1061,37 +1068,32 @@ class DashboardService:
         period_scope_kpis = cast(dict[str, Any], period_scope.get("kpis", {}))
         period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
-        topics_df = self._topics_df(analysis_current_df)
+        quality = signal_quality(analysis_current_df)
+        topics_df = self._topics_df(actionable_rows(analysis_current_df))
         if not topics_df.empty:
             topics_df = topics_df.sort_values(
                 ["n", "cluster_id"], ascending=[False, True]
             ).reset_index(drop=True)
         topics_bullets = explain_topics(topics_df, max_items=5)
+        topics_bullets += [quality["message"], *quality["warnings"]]
 
-        topic_keys = topics_observed_in_channel(
-            scope_current_df,
-            gap_dimension,
-            resolved_channel,
-        )
-        gap_current_df = restrict_to_topics(scope_current_df, gap_dimension, topic_keys)
-        _, gap_base_window = default_windows(
+        gap_current_window, gap_base_window = default_windows(
             scope_history_df,
             pop_year=pop_year,
             pop_month=pop_month,
         )
+        gap_population = (
+            slice_by_window(scope_history_df, gap_current_window)
+            if gap_current_window is not None
+            else scope_history_df.iloc[:0]
+        )
+        topic_keys = topics_observed_in_channel(gap_population, gap_dimension, resolved_channel)
+        gap_current_df = restrict_to_topics(gap_population, gap_dimension, topic_keys)
         gap_base_df = (
             slice_by_window(scope_history_df, gap_base_window)
             if gap_base_window is not None
             else scope_history_df.iloc[:0]
         )
-        cohort_df = scope_current_df
-        if engine["engine"] == "llm":
-            cohort_df = analysis_current_df
-            gap_current_df = analysis_current_df
-            gap_base_df = self._apply_score_channel_filter(gap_base_df, resolved_channel)
-            gap_base_df = filter_by_nps_group(gap_base_df, resolved_group)
-            gap_base_df = gap_base_df.loc[gap_base_df["Palanca"].fillna("").ne("")]
-
         nps_explanation_bullets = daily_nps_explanation(period_scope)
 
         return {
@@ -1103,6 +1105,7 @@ class DashboardService:
                 resolved_group,
                 resolved_channel,
             ),
+            "signal_quality": quality,
             "kpis": period_scope_kpis,
             "scope": scope_kpis,
             "overview": {
@@ -1135,7 +1138,7 @@ class DashboardService:
                 "column_dimension": cohort_col,
                 "figure": self._serialize_figure(
                     chart_cohort_heatmap(
-                        cohort_df,
+                        scope_current_df,
                         theme,
                         row_dim=_COHORT_ROW_DIMENSIONS.get(cohort_row, "Palanca"),
                         col_dim=_COHORT_COLUMN_DIMENSIONS.get(cohort_col, "Canal"),
@@ -1238,11 +1241,15 @@ class DashboardService:
 
         topics: dict[str, dict[str, object]] = {}
         gaps: dict[str, dict[str, object]] = {}
-        metric_current = self._apply_population_filters(history_df, pop_year, pop_month)
-        _, gap_base_window = default_windows(
+        gap_current_window, gap_base_window = default_windows(
             history_df,
             pop_year=pop_year,
             pop_month=pop_month,
+        )
+        metric_current = (
+            slice_by_window(history_df, gap_current_window)
+            if gap_current_window is not None
+            else history_df.iloc[:0]
         )
         metric_base = (
             slice_by_window(history_df, gap_base_window)
@@ -1277,7 +1284,9 @@ class DashboardService:
                 topics[channel][group] = {
                     "figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                     "rows": self._serialize_rows(topics_df),
-                    "insights": explain_topics(topics_df, max_items=5),
+                    "insights": explain_topics(topics_df, max_items=5)
+                    + [signal_quality(current)["message"], *signal_quality(current)["warnings"]],
+                    "signal_quality": signal_quality(current),
                 }
         return {
             "controls": {
@@ -1285,8 +1294,8 @@ class DashboardService:
                 "groups": groups,
                 "dimensions": dimensions,
                 "defaults": {
-                    "channel": _PREFERRED_SCORE_CHANNEL,
-                    "group": _PREFERRED_NPS_GROUP,
+                    "channel": self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL),
+                    "group": _PREFERRED_NPS_GROUP if _PREFERRED_NPS_GROUP in groups else POP_ALL,
                     "dimension": "Palanca",
                 },
             },
@@ -1313,19 +1322,13 @@ class DashboardService:
                 self._enrich_helix_links(self._load_helix_df(context))
             )
         else:
-            frame = self._load_nps_df(context)
-            engine = self.analysis_engine(
-                "comments",
+            frame, _ = self._comment_analysis_frame(
                 context,
                 pop_year=pop_year,
                 pop_month=pop_month,
                 score_channel=score_channel,
                 nps_group=nps_group,
             )
-            if engine["engine"] == "llm":
-                frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
-                    context, frame, engine["active"]
-                )
             resolved_channel = self._resolve_score_channel(frame, score_channel)
             resolved_group = self._resolve_nps_group(frame, nps_group)
             frame = self._apply_score_channel_filter(frame, resolved_channel)
@@ -1387,15 +1390,6 @@ class DashboardService:
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
-        llm_status = self.analysis_engine(
-            "helix",
-            context,
-            pop_year=pop_year,
-            pop_month=pop_month,
-            score_channel=score_channel,
-            max_days_apart=max_days_apart,
-        )
-        use_llm = llm_status["engine"] == "llm"
         key = (
             "causal-analysis",
             *self._context_key(context),
@@ -1410,6 +1404,15 @@ class DashboardService:
         )
 
         def _build() -> dict[str, object]:
+            llm_status = self.analysis_engine(
+                "helix",
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                max_days_apart=max_days_apart,
+            )
+            use_llm = llm_status["engine"] == "llm"
             nps_frame = self._load_nps_df(context)
             inputs = None
             handler = HelixExchange(self.taxonomy, Path(".")) if use_llm else None
@@ -1454,6 +1457,7 @@ class DashboardService:
                 "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
                 "touchpoint_source": active_source,
                 "causal_engine": "llm" if use_llm else "rules",
+                "signal_quality": signal_quality(nps_slice),
             }
             diagnostic_inputs: dict[str, Any] = dict(
                 nps=nps_slice,
@@ -1835,14 +1839,14 @@ class DashboardService:
                     "summary": (
                         (
                             "Asociaciones importadas de Helix Classifier para la lente activa. "
-                            "La confianza del LLM es semántica; no demuestra causalidad. "
+                            "La fuerza de evidencia se evalúa por tarea, síntoma, temporalidad y recurrencia. "
                             "Se conservan los filtros de periodo, ámbito y población."
                         )
                         if analysis.get("causal_engine") == "llm"
                         else f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
                         f"{float(min_similarity):.2f}, al menos {LINK_MIN_SHARED_TERMS} términos específicos compartidos, "
                         f"hasta {LINK_TOP_K_PER_INCIDENT} comentarios por incidencia y ventana de ±{int(max_days_apart)} días. "
-                        "Las coincidencias textuales no demuestran causalidad."
+                        + EVIDENCE_COPY["INDICIO_SEMANTICO"][1]
                     ),
                     "metrics": self._build_situation_narrative_metrics(
                         method_label=method_spec.label,
@@ -1891,14 +1895,112 @@ class DashboardService:
                 ),
                 "table_title": method_spec.table_title,
                 "table": self._serialize_rows(entity_summary_df),
+                "column_labels": {
+                    "Similitud textual": link_confidence_label(
+                        str(analysis.get("causal_engine", "rules"))
+                    )
+                },
                 "topic_figures": topic_views,
                 "empty_state": method_spec.table_empty_message,
             },
+            "signal_quality": analysis.get("signal_quality", {}),
             "scenarios": {
                 "title": "Evidencia por tópico",
-                "subtitle": f"Orden: vínculos, incidencias, comentarios y similitud ({method_spec.label.lower()}).",
+                "subtitle": f"Orden por impacto: detracción, confianza, recurrencia y evidencia ({method_spec.label.lower()}).",
                 "cards": scenario_cards,
             },
+        }
+
+    def _report_classification_context(
+        self,
+        context: UploadContext,
+        *,
+        pop_year: str,
+        pop_month: str,
+        score_channel: Optional[str],
+        max_days_apart: int,
+    ) -> dict[str, Any]:
+        state = self.taxonomy.state(context)
+        mode = state["active"]
+        fingerprint = taxonomy_fingerprint(self.taxonomy.catalog(context, mode))
+        engine = (
+            state.get("causal_engine", "rules") if self.settings.auth_mode == "local" else "rules"
+        )
+        scope = {
+            "company": context.service_origin,
+            "channel": score_channel or POP_ALL,
+            "year": pop_year,
+            "month": pop_month,
+            "max_days_apart": max_days_apart,
+        }
+        artifacts: dict[str, dict[str, Any]] = {}
+        comment_date = incident_date = "No aplica (reglas/fuente)"
+        if mode == "DISCOVERED":
+            comment_artifact = self.taxonomy.classification_artifact(context, mode)
+            if comment_artifact.get("taxonomy_fingerprint") != fingerprint:
+                raise ReportCoherenceError(
+                    "Regenera la clasificación de comentarios con la taxonomía diseñada activa."
+                )
+            visible = self.comments_scope(
+                self._load_nps_df(context),
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                nps_group=POP_ALL,
+            )
+            valid = TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
+            if len(valid) != len(visible):
+                raise ReportCoherenceError(
+                    "Regenera la clasificación de comentarios: hay asignaciones ausentes o desactualizadas en el ámbito del reporte."
+                )
+            comment_date = comment_artifact.get("created_at", "Fecha no disponible")
+        for kind, preference, label in (
+            ("comments", "comment_engine", "comentarios"),
+            ("helix", "causal_engine", "incidencias Helix"),
+        ):
+            if self.settings.auth_mode != "local" or state.get(preference) != "llm":
+                continue
+            status = self.classification_status(
+                kind,
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                max_days_apart=max_days_apart,
+            )
+            if not status.get("ready") or status.get("engine") != "llm":
+                raise ReportCoherenceError(
+                    f"Regenera la clasificación de {label} para la taxonomía y ámbito activos. {status.get('reason', '')}"
+                )
+            if kind == "comments":
+                artifact = self.taxonomy.classification_artifact(context, mode)
+                artifact_fingerprint = artifact.get("taxonomy_fingerprint")
+                comment_date = artifact.get("created_at", "Fecha no disponible")
+            else:
+                handler = HelixExchange(self.taxonomy, Path("."))
+                inputs = handler.inputs(context, self._load_helix_df(context), mode)
+                current = handler.current(context, inputs)[mode]
+                fingerprints = {row.get("taxonomy_fingerprint") for row in current.values()}
+                artifact_fingerprint = next(iter(fingerprints)) if len(fingerprints) == 1 else None
+                incident_date = (
+                    max((row.get("classified_at", "") for row in current.values()), default="")
+                    or "Fecha no disponible"
+                )
+            artifacts[label] = {
+                "taxonomy_fingerprint": artifact_fingerprint,
+                "scope": scope,
+                "causal_engine": engine,
+            }
+        validate_classification_context(
+            fingerprint, artifacts, expected_scope=scope, causal_engine=engine
+        )
+        return {
+            "taxonomy_mode": mode,
+            "taxonomy_fingerprint": fingerprint,
+            "causal_engine": engine,
+            "comment_classified_at": comment_date,
+            "incident_classified_at": incident_date,
+            "scope": scope,
         }
 
     def generate_ppt_report(
@@ -1914,7 +2016,20 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
-        scope_history_df = self._load_nps_df(context)
+        report_context = self._report_classification_context(
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            max_days_apart=max_days_apart,
+        )
+        scope_history_df, _ = self._comment_analysis_frame(
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            nps_group=nps_group,
+        )
         if scope_history_df.empty:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
         topic_channel = self._resolve_score_channel(
@@ -1965,40 +2080,29 @@ class DashboardService:
         broken_journeys_df = pd.DataFrame()
         include_causal_section = False
 
-        try:
-            causal = self._causal_analysis_bundle(
-                context=context,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                score_channel=topic_channel,
-                min_similarity=min_similarity,
-                max_days_apart=max_days_apart,
+        causal = self._causal_analysis_bundle(
+            context=context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=topic_channel,
+            min_similarity=min_similarity,
+            max_days_apart=max_days_apart,
+            touchpoint_source=active_touchpoint_source,
+        )
+        if bool(causal["ready"]):
+            focus_name = self._focus_name(str(causal["focus_group"]))
+            attribution_all_df = cast(pd.DataFrame, causal["chains"])
+            attribution_df = select_causal_scenarios(
+                attribution_all_df,
+                max_rows=len(attribution_all_df),
+            )
+            mode_payload = cast(dict[str, object], causal["mode_payload"])
+            broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
+            entity_summary_kpis = self._build_entity_summary_kpis(
+                attribution_all_df,
                 touchpoint_source=active_touchpoint_source,
             )
-            if bool(causal["ready"]):
-                focus_name = self._focus_name(str(causal["focus_group"]))
-                attribution_all_df = cast(pd.DataFrame, causal["chains"])
-                attribution_df = select_causal_scenarios(
-                    attribution_all_df,
-                    max_rows=len(attribution_all_df),
-                )
-                mode_payload = cast(dict[str, object], causal["mode_payload"])
-                broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
-                entity_summary_kpis = self._build_entity_summary_kpis(
-                    attribution_all_df,
-                    touchpoint_source=active_touchpoint_source,
-                )
-                include_causal_section = not attribution_df.empty
-        except Exception as exc:
-            include_causal_section = False
-            attribution_df = pd.DataFrame()
-            attribution_all_df = pd.DataFrame()
-            entity_summary_kpis = []
-            broken_journeys_df = pd.DataFrame()
-            self.logger.warning(
-                "No se pudo construir el bloque causal Helix para la PPT; se generará fallback: %s",
-                exc,
-            )
+            include_causal_section = not attribution_df.empty
 
         report = generate_business_review_ppt(
             service_origin=context.service_origin,
@@ -2018,6 +2122,7 @@ class DashboardService:
             report_dimension_analysis=resolved_report_dimension_analysis,
             period_kpis=period_kpis,
             include_causal_section=include_causal_section,
+            report_context=report_context,
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(
@@ -2052,24 +2157,41 @@ class DashboardService:
             active_touchpoint_source = touchpoint_source or str(
                 self.settings.ui_defaults()["touchpoint_source"]
             )
+            history_df = self._load_nps_df(context)
+            if pop_year == POP_ALL or pop_month == POP_ALL:
+                available = self._apply_population_filters(history_df, pop_year, pop_month)
+                current_window, _ = default_windows(available)
+                if current_window is None:
+                    raise ValueError("No hay respuestas NPS en el periodo seleccionado.")
+                pop_year = str(current_window.start.year)
+                pop_month = f"{current_window.start.month:02d}"
             scope = build_publication_scope(
                 owner_support_company=context.service_origin,
                 year=pop_year,
                 month=pop_month,
                 causal_method=active_touchpoint_source,
+                edition_id=datetime.now(timezone.utc).isoformat(),
             )
-            history_df = self._load_nps_df(context)
+            history_df, _ = self._comment_analysis_frame(
+                context,
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=_PREFERRED_SCORE_CHANNEL,
+                nps_group=nps_group,
+            )
             publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
             publish_group = self._resolve_nps_group(history_df, nps_group)
             causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
             causal_group = self._resolve_nps_group(history_df, POP_ALL)
-            dashboard = self.nps_dashboard(
-                context=context,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                nps_group=publish_group,
-                score_channel=publish_channel,
-                min_n=min_n,
+            dashboard = dict(
+                self.nps_dashboard(
+                    context=context,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    nps_group=publish_group,
+                    score_channel=publish_channel,
+                    min_n=min_n,
+                )
             )
             comments = self._build_comments_snapshot(
                 history_df=history_df,
@@ -2185,7 +2307,7 @@ class DashboardService:
                 "manifest": {
                     "generated_at": generated_at,
                     "scope": scope,
-                    "privacy": "No incluye configuración administrativa ni telemetría.",
+                    "privacy": "Snippets e identificadores redactados; sin configuración administrativa ni telemetría.",
                     "report": report.file_name,
                     "report_without_evolution": report.compact_file_name,
                 },
@@ -2423,10 +2545,7 @@ class DashboardService:
             "avg_similarity",
         ):
             summary[column] = _numeric_series(summary, column, default=np.nan).round(3)
-        summary = summary.sort_values(
-            ["linked_pairs", "linked_incidents", "linked_comments", "avg_similarity", "nps_topic"],
-            ascending=[False, False, False, False, True],
-        )
+        summary = select_causal_scenarios(summary, max_rows=len(summary))
         columns = [
             "nps_topic",
             "anchor_topic",
@@ -2493,21 +2612,17 @@ class DashboardService:
                             "label": "Organizaciones de las incidencias enlazadas",
                             "value": str(card.get("support_organizations") or "n/d"),
                         },
-                        {
-                            "label": "Duración media histórica de resolución (semanas)",
-                            "value": format_metric(row.get("historical_resolution_weeks")),
-                        },
                     ],
                     "rank": index,
                     "title": title,
                     "statement": (
                         f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "
                         f"{int(row.get('linked_incidents', 0) or 0)} incidencias y "
-                        f"{int(row.get('linked_comments', 0) or 0)} comentarios. La similitud textual no demuestra causalidad."
+                        f"{int(row.get('linked_comments', 0) or 0)} comentarios. {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}"
                     ),
                     "spotlight_metrics": [
                         {
-                            "label": "Score medio enlazado",
+                            "label": "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
                             "value": format_metric(row.get("avg_nps")),
                         },
                         {
@@ -2519,15 +2634,16 @@ class DashboardService:
                             "value": str(int(row.get("linked_incidents", 0) or 0)),
                         },
                         {
-                            "label": "Similitud textual",
+                            "label": link_confidence_label(str(row.get("causal_engine", "rules"))),
                             "value": format_percentage(row.get("avg_similarity")),
                         },
                     ],
                     "flow_steps": [
-                        "Incidencias Helix",
-                        "Vínculos semánticos",
-                        title or "Tópico NPS",
-                        "Comentarios VoC",
+                        str(row.get("affected_task") or "Tarea pendiente de validación"),
+                        str(row.get("observed_symptom") or title),
+                        f"{int(row.get('linked_incidents', 0) or 0)} incidencias Helix",
+                        f"Nota media {format_metric(row.get('avg_nps'))}",
+                        str(row.get("operational_recommendation") or "Validar evidencia operativa"),
                     ],
                 }
             )
@@ -2821,10 +2937,15 @@ class DashboardService:
         ]
 
     def _topics_df(self, frame: pd.DataFrame) -> pd.DataFrame:
+        frame = actionable_rows(frame)
         comment_column = "Comment" if "Comment" in frame.columns else ""
         if not comment_column:
             return pd.DataFrame()
-        topics = summarize_taxonomy(frame)
+        safe = frame.copy()
+        safe[comment_column] = (
+            safe[comment_column].fillna("").astype(str).map(redact_operational_snippet)
+        )
+        topics = summarize_taxonomy(safe)
         return pd.DataFrame([topic.__dict__ for topic in topics])
 
     def _build_linking_evidence_table(
@@ -2857,10 +2978,20 @@ class DashboardService:
 
         evidence = links_df.copy().sort_values("similarity", ascending=False).head(int(max_rows))
         evidence["detractor_comment"] = (
-            evidence["nps_id"].astype(str).map(comment_map).fillna("").str.slice(0, 220)
+            evidence["nps_id"]
+            .astype(str)
+            .map(comment_map)
+            .fillna("")
+            .map(redact_operational_snippet)
+            .str.slice(0, 220)
         )
         evidence["incident_summary"] = (
-            evidence["incident_id"].astype(str).map(incident_map).fillna("").str.slice(0, 220)
+            evidence["incident_id"]
+            .astype(str)
+            .map(incident_map)
+            .fillna("")
+            .map(redact_operational_snippet)
+            .str.slice(0, 220)
         )
         return evidence[
             [
@@ -3152,10 +3283,15 @@ class DashboardService:
                 return value.isoformat()
             return value
 
-        return [
-            {str(key): _json_safe_scalar(value) for key, value in row.items()}
-            for row in serialized.to_dict(orient="records")
-        ]
+        return cast(
+            list[dict[str, object]],
+            redact_public_payload(
+                [
+                    {str(key): _json_safe_scalar(value) for key, value in row.items()}
+                    for row in serialized.to_dict(orient="records")
+                ]
+            ),
+        )
 
     @staticmethod
     def _normalize_timestamp(value: object) -> Optional[str]:

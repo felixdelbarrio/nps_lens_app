@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import re
 import stat
+import tempfile
 import uuid
 import zipfile
 import zlib
@@ -16,20 +16,24 @@ from typing import Any, Iterable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from nps_lens.analytics.signal_quality import audit_classifications
 from nps_lens.analytics.taxonomy import signature
 from nps_lens.domain.models import UploadContext
 from nps_lens.platform.downloads import persist_download
 from nps_lens.services.classification_protocol import (
     CLASSIFICATION_BATCH_BYTES,
     CLASSIFICATION_BATCH_ROWS,
-    CLASSIFIER_MAX_ITEMS,
     CLASSIFIER_SCHEMA,
     HELIX_SCHEMA,
     CompactCommentResponse,
     category_catalog,
+    comment_classification_fingerprint,
+    digest,
+    encode,
+    taxonomy_fingerprint,
 )
 from nps_lens.services.taxonomy_discovery import (
-    TaxonomyResponse,
+    TaxonomyDesignResponse,
     TaxonomyValidator,
 )
 from nps_lens.services.taxonomy_prompts import (
@@ -47,10 +51,6 @@ MAX_MEMBERS = 4096
 BATCH_ROWS = 200
 BATCH_BYTES = 80_000
 MAX_RETAINED_JOBS = 3
-
-
-def encode(value: Any) -> bytes:
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
 
 
 def bounded_batches(
@@ -77,10 +77,6 @@ def bounded_batches(
     if rows:
         batches[f"{len(batches) + 1:06d}"] = rows
     return batches
-
-
-def digest(value: Any) -> str:
-    return hashlib.sha256(encode(value)).hexdigest()
 
 
 def strict_json(raw: bytes) -> Any:
@@ -114,6 +110,75 @@ def validate_payload(model: type[Model], payload: Any, filename: str) -> Model:
             f"{filename}: formato inválido en {location}. "
             "Revisa las instrucciones del proyecto y vuelve a generar este lote. No se importó nada."
         ) from exc
+
+
+_CLASSIFIER_FIELDS = frozenset({"id", "primary", "secondary"})
+_CLASSIFIER_IGNORABLE_ANNOTATIONS = frozenset({"evidence", "reason", "rationale"})
+
+
+def normalize_classifier_payload(payload: Any) -> Any:
+    """Drop only known non-semantic LLM annotations at the exchange boundary.
+
+    The persisted contract remains exactly ``id/primary/secondary`` and every unknown
+    extra field is still rejected by the strict Pydantic model. This makes imports
+    resilient to explanatory prose that some LLMs add despite the ZIP instructions,
+    without silently accepting schema drift.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    rows = payload.get("classifications")
+    if not isinstance(rows, list):
+        return payload
+
+    normalized: list[Any] = []
+    changed = False
+    for row in rows:
+        if not isinstance(row, dict):
+            normalized.append(row)
+            continue
+        extras = set(row) - _CLASSIFIER_FIELDS
+        if extras and extras <= _CLASSIFIER_IGNORABLE_ANNOTATIONS:
+            normalized.append(
+                {key: value for key, value in row.items() if key in _CLASSIFIER_FIELDS}
+            )
+            changed = True
+        else:
+            normalized.append(row)
+    if not changed:
+        return payload
+    return {**payload, "classifications": normalized}
+
+
+def normalize_reserve_secondaries(
+    response: CompactCommentResponse, catalog: dict[str, dict[str, str]]
+) -> CompactCommentResponse:
+    """Remove fallback categories when an LLM emits them as secondary topics.
+
+    Fallbacks describe the absence of a classifiable secondary topic, so persisting one
+    as an additional topic would violate the domain invariant.  We repair only this
+    deterministic contradiction; unknown categories, duplicate topics and every other
+    semantic/schema error remain strict and are rejected by ``expand``.
+    """
+    fallback_ids = {key for key, category in catalog.items() if category["lever"] == FALLBACK_LEVER}
+    if not fallback_ids:
+        return response
+
+    changed = False
+    classifications = []
+    for row in response.classifications:
+        ids = [row.primary, *row.secondary]
+        if len(ids) != len(set(ids)) or any(key not in catalog for key in ids):
+            raise ValueError(
+                "ID de categoría desconocido en la taxonomía o temas secundarios inválidos."
+            )
+        secondary = [key for key in row.secondary if key not in fallback_ids]
+        if secondary != row.secondary:
+            row = row.model_copy(update={"secondary": secondary})
+            changed = True
+        classifications.append(row)
+    if not changed:
+        return response
+    return response.model_copy(update={"classifications": classifications})
 
 
 def read_zip(content: bytes) -> dict[str, Any]:
@@ -161,12 +226,13 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
     schema = {
         "classifier": CLASSIFIER_SCHEMA,
         "helix": HELIX_SCHEMA,
-        "normalizer": "nps-lens-normalization/1",
-    }.get(stage, "nps-lens-comments/2")
+        "normalizer": "nps-lens-normalization/2",
+    }.get(stage, "nps-lens-taxonomy/4")
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != schema
         or manifest.get("stage") != stage
+        or manifest.get("instructions_version") != INSTRUCTIONS_VERSION
         or not isinstance(manifest.get("job_id"), str)
         or not manifest["job_id"]
     ):
@@ -186,6 +252,79 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
             f"El ZIP de respuesta debe contener únicamente manifest.json y {expected}."
         )
     return manifest, files
+
+
+def validate_manifest(manifest: dict[str, Any], expected: dict[str, Any]) -> set[str]:
+    """A response belongs to the exact batches advertised by its input ZIP."""
+    batches = manifest.get("batches")
+    known = {row["id"]: row for row in expected["batches"]}
+    if not isinstance(batches, list) or not batches or manifest != {**expected, "batches": batches}:
+        raise ValueError("El manifiesto no coincide con la exportación.")
+    ids: set[str] = set()
+    for batch in batches:
+        key = batch.get("id") if isinstance(batch, dict) else None
+        if not isinstance(key, str) or key in ids or known.get(key) != batch:
+            raise ValueError("El manifiesto contiene un lote desconocido, alterado o repetido.")
+        ids.add(key)
+    return ids
+
+
+def write_numbered_zips(
+    downloads: Path,
+    label: str,
+    manifest: dict[str, Any],
+    batches: dict[str, list[dict[str, Any]]],
+    shared: dict[str, Any],
+    field: str,
+) -> dict[str, Any]:
+    """Publish a complete folder atomically, compressing shared evidence only once."""
+    instructions = PROJECT_INSTRUCTIONS[manifest["stage"]].encode()
+    expanded = len(instructions)
+    if len(shared) + 3 > MAX_MEMBERS:
+        raise ValueError("Demasiados ficheros para un intercambio ZIP.")
+    base = io.BytesIO()
+    with zipfile.ZipFile(base, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("INSTRUCCIONES.txt", instructions)
+        for name, payload in shared.items():
+            raw = encode(payload)
+            expanded += len(raw)
+            if len(raw) > MAX_MEMBER_BYTES or expanded > MAX_EXPANDED_BYTES:
+                raise ValueError(
+                    "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                )
+            archive.writestr(name, raw)
+    base_content = base.getvalue()
+    if len(base_content) > MAX_ZIP_BYTES:
+        raise ValueError("El ZIP de entrada supera 32 MiB.")
+    directory = downloads / f"{label}-{datetime.now():%Y%m%d-%H%M%S}-{manifest['job_id']}"
+    downloads.mkdir(parents=True, exist_ok=True)
+    paths = []
+    with tempfile.TemporaryDirectory(prefix=".nps-lens-", dir=downloads) as temporary:
+        for index, batch in enumerate(manifest["batches"], 1):
+            key = batch["id"]
+            parts = {
+                "manifest.json": encode({**manifest, "batches": [batch]}),
+                f"{field}/{key}.json": encode({field: batches[key]}),
+            }
+            if (
+                any(len(raw) > MAX_MEMBER_BYTES for raw in parts.values())
+                or expanded + sum(map(len, parts.values())) > MAX_EXPANDED_BYTES
+            ):
+                raise ValueError(
+                    "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                )
+            output = io.BytesIO(base_content)
+            with zipfile.ZipFile(output, "a", zipfile.ZIP_DEFLATED) as archive:
+                for name, raw in parts.items():
+                    archive.writestr(name, raw)
+            content = output.getvalue()
+            if len(content) > MAX_ZIP_BYTES:
+                raise ValueError("El ZIP de entrada supera 32 MiB.")
+            name = f"{index}_{len(batches)}_{label}.zip"
+            persist_download(content, name, Path(temporary))
+            paths.append(str(directory / name))
+        Path(temporary).rename(directory)
+    return {"saved_paths": paths, "saved_directory": str(directory), "batches": len(paths)}
 
 
 class TaxonomyExchange:
@@ -262,12 +401,16 @@ class TaxonomyExchange:
 
     def _manifest(self, job: dict[str, Any], stage: str) -> dict[str, Any]:
         return {
-            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-comments/2",
+            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-taxonomy/4",
             "job_id": job["id"],
+            "instructions_version": job["instructions_version"],
             "stage": stage,
             "corpus_sha256": job["corpus"],
             "taxonomy_mode": job["mode"],
             "manual_revision": job["manual_revision"],
+            "taxonomy_fingerprint": (
+                taxonomy_fingerprint(job["taxonomy"]) if stage == "classifier" else None
+            ),
             "taxonomy_sha256": (
                 digest({"categories": category_catalog(job["taxonomy"])})
                 if stage == "classifier"
@@ -288,14 +431,15 @@ class TaxonomyExchange:
             else ""
         )
         if (
-            artifact.get("taxonomy") != catalog
+            artifact.get("config", {}).get("instructions_version") != INSTRUCTIONS_VERSION
+            or artifact.get("taxonomy_fingerprint") != taxonomy_fingerprint(catalog)
             or artifact.get("config", {}).get("manual_revision", "") != revision
         ):
             return {}
         hashes = artifact.get("comment_hashes", {})
         comments = dict(zip(frame["_business_key"], frame["Comment"].fillna("")))
         secondary = artifact.get("secondary_classifications", {})
-        return {
+        by_key = {
             key: {
                 "primary_classification": {"lever": lever, "sublever": sub},
                 "secondary_classifications": secondary.get(key, []),
@@ -303,13 +447,25 @@ class TaxonomyExchange:
             for key, lever, sub in zip(
                 artifact.get("keys", []), artifact.get("lever", []), artifact.get("sublever", [])
             )
-            if lever and sub and key in comments and hashes.get(key) == digest(str(comments[key]))
+            if lever and sub and lever.strip() and sub.strip()
         }
+        by_fingerprint = {hashes[key]: value for key, value in by_key.items() if hashes.get(key)}
+        retained = {}
+        for key, comment in comments.items():
+            fingerprint = comment_classification_fingerprint(comment)
+            value = (
+                by_key.get(key)
+                if hashes.get(key) == fingerprint
+                else by_fingerprint.get(fingerprint)
+            )
+            if value is not None:
+                retained[key] = value
+        return retained
 
     def progress(self, context: UploadContext) -> dict[str, Any]:
         frame = self._frame(context)
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context)
+        mode = self.taxonomy.state(context)["active"]
         catalog = self.taxonomy.catalog(context, mode)
         assignments = self.assignments(context, frame, mode) if catalog["taxonomy"] else {}
         received = len(assignments)
@@ -364,7 +520,7 @@ class TaxonomyExchange:
         frame = self._frame(context)
         full_frame = frame
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.llm_mode(context) if pending else "DISCOVERED"
+        mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
         taxonomy = self.taxonomy.catalog(context, mode) if pending else None
         revision = state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
         groups: dict[str, list[str]] = {}
@@ -374,7 +530,11 @@ class TaxonomyExchange:
             retained = self.assignments(context, frame, mode)
             frame = frame.loc[~frame["_business_key"].isin(retained)]
             fallback = {"lever": FALLBACK_LEVER, "sublever": FALLBACK_SUBLEVERS[0]}
-            if fallback in category_catalog(taxonomy).values():
+            categories = category_catalog(taxonomy)
+            if any(
+                all(pair[field] == fallback[field] for field in fallback)
+                for pair in categories.values()
+            ):
                 empty_keys = frame.loc[frame["Comment"].fillna("").eq(""), "_business_key"]
                 if len(empty_keys):
                     retained.update(
@@ -405,13 +565,17 @@ class TaxonomyExchange:
             for key, comment in zip(frame["_business_key"], frame["Comment"].fillna("")):
                 if comment in groups:
                     groups[comment].append(key)
-                elif len(groups) < CLASSIFIER_MAX_ITEMS:
+                else:
                     groups[comment] = [key]
             rows = [{"id": str(i), "Comment": text} for i, text in enumerate(groups, 1)]
             if not rows:
-                return {"stage": "complete", "saved_path": None, "batches": 0}
+                return {
+                    "stage": "complete",
+                    "saved_paths": [],
+                    "saved_directory": None,
+                    "batches": 0,
+                }
             batches = bounded_batches(rows, "comments")
-            total = sum(len(encode({"comments": rows})) for rows in batches.values())
         else:
             if frame.empty:
                 raise ValueError("No hay comentarios que exportar.")
@@ -431,7 +595,7 @@ class TaxonomyExchange:
                 total += cost
             if rows:
                 batches[f"{len(batches) + 1:06d}"] = rows
-        if total > MAX_EXPANDED_BYTES // 2 or len(batches) > MAX_MEMBERS - 4:
+        if not pending and (total > MAX_EXPANDED_BYTES // 2 or len(batches) > MAX_MEMBERS - 4):
             raise ValueError(
                 "Corpus demasiado grande para un intercambio ZIP (64 MiB o 4092 lotes). Divide el dataset explícitamente."
             )
@@ -446,10 +610,19 @@ class TaxonomyExchange:
             "stage": "classifier" if pending else "designer",
             "instructions_version": INSTRUCTIONS_VERSION,
         }
-        result = self._write(job)
-        if pending:
+        if not pending:
             self._save(context, job)
-        return result
+            return self._write(job)
+        result = write_numbered_zips(
+            self.downloads,
+            "comentarios",
+            self._manifest(job, "classifier"),
+            batches,
+            {"taxonomy.json": {"categories": categories}},
+            "comments",
+        )
+        self._save(context, job)
+        return {**result, "job_id": job["id"], "stage": "classifier"}
 
     def _write(self, job: dict[str, Any]) -> dict[str, Any]:
         stage = job["stage"]
@@ -457,10 +630,6 @@ class TaxonomyExchange:
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             archive.writestr("manifest.json", encode(self._manifest(job, stage)))
             archive.writestr("INSTRUCCIONES.txt", PROJECT_INSTRUCTIONS[stage])
-            if stage == "classifier":
-                archive.writestr(
-                    "taxonomy.json", encode({"categories": category_catalog(job["taxonomy"])})
-                )
             for key, rows in job["batches"].items():
                 archive.writestr(f"comments/{key}.json", encode({"comments": rows}))
         content = output.getvalue()
@@ -469,6 +638,7 @@ class TaxonomyExchange:
         path = persist_download(content, f"nps-lens-{stage}-{job['id']}.zip", self.downloads)
         return {
             "job_id": job["id"],
+            "instructions_version": job["instructions_version"],
             "stage": stage,
             "saved_path": str(path),
             "batches": len(job["batches"]),
@@ -482,10 +652,25 @@ class TaxonomyExchange:
                 raise ValueError(
                     "El corpus ha cambiado o el ZIP pertenece a otro dataset. Exporta de nuevo."
                 )
-            taxonomy = validate_payload(TaxonomyResponse, files["taxonomy.json"], "taxonomy.json")
+            taxonomy = validate_payload(
+                TaxonomyDesignResponse, files["taxonomy.json"], "taxonomy.json"
+            )
+            job = self._load(context, manifest["job_id"])
+            if manifest != self._manifest(job, "designer"):
+                raise ValueError("El manifiesto del diseñador ha cambiado; exporta de nuevo.")
+            comments = frame["Comment"].fillna("").astype(str)
+            if comments.str.strip().ne("").any() and not taxonomy.review.quotes:
+                raise ValueError("La revisión de taxonomía requiere evidencia del corpus.")
+            if any(
+                not quote.strip() or not any(quote in text for text in comments)
+                for quote in taxonomy.review.quotes
+            ):
+                raise ValueError("La revisión contiene evidencia ajena al corpus.")
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
-            state["discovered_taxonomy"] = taxonomy.model_dump()
+            state["discovered_taxonomy"] = taxonomy.model_dump(exclude={"review"})
+            state["taxonomy_fingerprint"] = taxonomy_fingerprint(state["discovered_taxonomy"])
+            state["designer_review"] = taxonomy.review.model_dump()
             state["designer_progress"] = {
                 "received": len(frame),
                 "corpus": self._corpus(context, frame),
@@ -510,8 +695,7 @@ class TaxonomyExchange:
             != self.taxonomy.state(context).get("artifacts", {}).get(mode, "")
         ):
             raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")
-        if manifest != self._manifest(job, "classifier"):
-            raise ValueError("El manifiesto no coincide con la exportación.")
+        allowed_batches = validate_manifest(manifest, self._manifest(job, "classifier"))
         if self._corpus(context, frame) != job["corpus"]:
             raise ValueError("El corpus ha cambiado. Exporta un nuevo ZIP; no se importó nada.")
         if job["taxonomy"] is None:
@@ -521,16 +705,27 @@ class TaxonomyExchange:
             raise ValueError("No hay resultados de clasificación.")
         validated = {}
         for key, payload in files.items():
-            if key not in job["batches"]:
-                raise ValueError("Fichero de resultado no esperado.")
-            response = validate_payload(CompactCommentResponse, payload, f"results/{key}.json")
+            if key not in allowed_batches:
+                raise ValueError("Fichero de resultado no esperado en este ZIP.")
+            response = validate_payload(
+                CompactCommentResponse,
+                normalize_classifier_payload(payload),
+                f"results/{key}.json",
+            )
             expected = [row["id"] for row in job["batches"][key]]
             if [row.id for row in response.classifications] != expected:
                 raise ValueError("Los IDs y el orden deben coincidir exactamente con el lote.")
+            response = normalize_reserve_secondaries(response, categories)
+            for decision in response.classifications:
+                decision.expand(categories)
             validated[key] = encode(
                 {
                     "classifications": [
-                        {"id": row.id, **row.expand(categories)} for row in response.classifications
+                        {
+                            "id": row.id,
+                            **row.expand(categories),
+                        }
+                        for row in response.classifications
                     ]
                 }
             ).decode()
@@ -555,6 +750,15 @@ class TaxonomyExchange:
                                 "Un comentario ya tiene una respuesta diferente para esa taxonomía."
                             )
                         merged[business_key] = value
+            audit = audit_classifications(
+                dict(zip(frame["_business_key"], frame["Comment"].fillna(""))), merged
+            )
+            if audit["review_required"]:
+                raise ValueError(
+                    f"Clasificación sospechosa: {audit['suspicious_count']} comentarios interpretables en Información insuficiente. "
+                    "Revisa y regenera la clasificación; no se importó ningún cambio. "
+                    f"IDs para auditoría: {', '.join(audit['suspicious_ids'][:20])}"
+                )
             self._persist_assignments(db, context, frame, job, merged)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
@@ -567,6 +771,7 @@ class TaxonomyExchange:
             )
         self._clear_caches()
         return {
+            "classification_audit": audit,
             "job_id": job["id"],
             "stage": job["stage"],
             "received": len(existing),
@@ -595,7 +800,7 @@ class TaxonomyExchange:
         config = {
             "method": "chatgpt_zip",
             "taxonomy_mode": mode,
-            "taxonomy_sha256": digest(job["taxonomy"]),
+            "taxonomy_fingerprint": taxonomy_fingerprint(job["taxonomy"]),
             "manual_revision": job["manual_revision"],
             "instructions_version": job["instructions_version"],
         }
@@ -615,9 +820,10 @@ class TaxonomyExchange:
                 if row["secondary_classifications"]
             },
             "nodes": [],
+            "taxonomy_fingerprint": taxonomy_fingerprint(job["taxonomy"]),
             "taxonomy": job["taxonomy"],
             "comment_hashes": {
-                key: digest(str(comment))
+                key: comment_classification_fingerprint(comment)
                 for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
             },
             "equivalences": {},
