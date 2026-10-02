@@ -2,22 +2,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Sequence
 
-import numpy as np
 import pandas as pd
 
-from nps_lens.ingest.helix_dates import coerce_helix_datetime_series
-
 _SUPPORT_ORG_SPLIT_RE = re.compile(r"[\n,;|]+")
-_MAX_REASONABLE_RESOLUTION_WEEKS = 104.0
-
-_INCIDENT_ID_CANDIDATES = (
-    "Incident Number",
-    "ID de la Incidencia",
-    "incident_id",
-    "id",
-)
+_INCIDENT_ID_CANDIDATES = ("Incident Number", "ID de la Incidencia", "incident_id", "id")
 _SUPPORT_ORG_CANDIDATES = (
     "Assigned Support Organization",
     "Assigned Support Organisation",
@@ -25,47 +15,16 @@ _SUPPORT_ORG_CANDIDATES = (
     "Support Organization",
     "Support Organisation",
 )
-_OPENED_AT_CANDIDATES = (
-    "Submit Date",
-    "SubmitDate",
-    "Submitted Date",
-    "CreatedDate",
-    "Created Date",
-    "Open Date",
-    "Fecha apertura",
-    "Fecha Apertura",
-    "Fecha creación",
-    "Fecha creacion",
-    "Fecha",
-    "bbva_startdatetime",
-)
-_RESOLVED_AT_CANDIDATES = (
-    "Closed Date",
-    "ClosedDate",
-    "Resolved Date",
-    "ResolvedDate",
-    "Resolution Date",
-    "Last Resolved Date",
-    "Fecha cierre",
-    "Fecha Cierre",
-    "Fecha resolución",
-    "Fecha resolucion",
-    "bbva_closeddate",
-    "closed_at",
-)
 
 
 @dataclass(frozen=True)
 class HelixOperationalBenchmark:
     incident_to_support_orgs: dict[str, tuple[str, ...]]
-    support_org_resolution_weeks: dict[str, float]
-    overall_resolution_weeks: Optional[float]
 
 
 @dataclass(frozen=True)
 class HelixOperationalMetrics:
     support_organizations: str
-    historical_resolution_weeks: float
 
 
 def _normalize_name(value: object) -> str:
@@ -75,7 +34,6 @@ def _normalize_name(value: object) -> str:
 def _resolve_columns(frame: pd.DataFrame, candidates: Sequence[str]) -> list[str]:
     if frame is None or frame.empty:
         return []
-
     normalized_to_column = {_normalize_name(column): str(column) for column in frame.columns}
     matched: list[str] = []
     seen: set[str] = set()
@@ -102,10 +60,7 @@ def _resolve_columns(frame: pd.DataFrame, candidates: Sequence[str]) -> list[str
 
 
 def _coalesce_text_columns(
-    frame: pd.DataFrame,
-    candidates: Sequence[str],
-    *,
-    default: str = "",
+    frame: pd.DataFrame, candidates: Sequence[str], *, default: str = ""
 ) -> pd.Series:
     output = pd.Series([default] * len(frame), index=frame.index, dtype=object)
     for column in _resolve_columns(frame, candidates):
@@ -114,139 +69,44 @@ def _coalesce_text_columns(
     return output.astype(str).fillna("").str.strip()
 
 
-def _coalesce_datetime_columns(frame: pd.DataFrame, candidates: Sequence[str]) -> pd.Series:
-    output = pd.Series([pd.NaT] * len(frame), index=frame.index, dtype="datetime64[ns]")
-    for column in _resolve_columns(frame, candidates):
-        candidate = coerce_helix_datetime_series(frame[column])
-        output = output.where(output.notna(), candidate)
-    return pd.to_datetime(output, errors="coerce")
-
-
 def _unique_preserve_order(values: Sequence[object]) -> tuple[str, ...]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        out.append(normalized)
-        seen.add(normalized)
-    return tuple(out)
+    return tuple(
+        dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip())
+    )
 
 
 def _split_support_orgs(value: object) -> tuple[str, ...]:
-    if isinstance(value, list):
-        return _unique_preserve_order(value)
     text = str(value or "").strip()
     if not text:
         return tuple()
-    if not _SUPPORT_ORG_SPLIT_RE.search(text):
-        return (text,)
     return _unique_preserve_order(_SUPPORT_ORG_SPLIT_RE.split(text))
-
-
-def _existing_duration(value: object) -> float:
-    parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-    return float(parsed) if pd.notna(parsed) else float("nan")
 
 
 def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationalBenchmark:
     if helix_df is None or helix_df.empty:
-        return HelixOperationalBenchmark({}, {}, None)
-
-    base = pd.DataFrame(index=helix_df.index)
-    base["incident_id"] = _coalesce_text_columns(helix_df, _INCIDENT_ID_CANDIDATES)
-    base["support_orgs"] = _coalesce_text_columns(helix_df, _SUPPORT_ORG_CANDIDATES).map(
+        return HelixOperationalBenchmark({})
+    incident_ids = _coalesce_text_columns(helix_df, _INCIDENT_ID_CANDIDATES)
+    support_orgs = _coalesce_text_columns(helix_df, _SUPPORT_ORG_CANDIDATES).map(
         _split_support_orgs
     )
-    base["opened_at"] = _coalesce_datetime_columns(helix_df, _OPENED_AT_CANDIDATES)
-    base["resolved_at"] = _coalesce_datetime_columns(helix_df, _RESOLVED_AT_CANDIDATES)
-    base = base[base["incident_id"].astype(str).str.strip().ne("")].copy()
-    if base.empty:
-        return HelixOperationalBenchmark({}, {}, None)
-
-    base["resolution_weeks"] = np.nan
-    valid_resolution_dates = base["opened_at"].notna() & base["resolved_at"].notna()
-    if bool(valid_resolution_dates.any()):
-        resolution_weeks = (
-            base.loc[valid_resolution_dates, "resolved_at"]
-            - base.loc[valid_resolution_dates, "opened_at"]
-        ).dt.total_seconds() / (86400.0 * 7.0)
-        base.loc[valid_resolution_dates, "resolution_weeks"] = resolution_weeks.where(
-            resolution_weeks.notna()
-            & resolution_weeks.ge(0.0)
-            & resolution_weeks.le(_MAX_REASONABLE_RESOLUTION_WEEKS)
-        )
-
-    incident_to_support_orgs: dict[str, tuple[str, ...]] = {}
-    for incident_id, group in base.groupby("incident_id", dropna=False, observed=True):
-        collected: list[str] = []
-        for support_orgs in group["support_orgs"].tolist():
-            if isinstance(support_orgs, tuple):
-                collected.extend(list(support_orgs))
-        incident_to_support_orgs[str(incident_id).strip()] = _unique_preserve_order(collected)
-
-    exploded = base.explode("support_orgs").copy()
-    exploded["support_orgs"] = (
-        exploded["support_orgs"].where(exploded["support_orgs"].notna(), "").astype(str).str.strip()
-    )
-    exploded = exploded[
-        exploded["support_orgs"].ne("")
-        & pd.to_numeric(exploded["resolution_weeks"], errors="coerce").notna()
-    ].copy()
-
-    support_org_resolution_weeks: dict[str, float] = {}
-    if not exploded.empty:
-        support_org_resolution_weeks = {
-            str(support_org).strip(): float(
-                pd.to_numeric(group["resolution_weeks"], errors="coerce").mean()
+    mapping: dict[str, tuple[str, ...]] = {}
+    for incident_id, organizations in zip(incident_ids, support_orgs):
+        if incident_id:
+            mapping[incident_id] = _unique_preserve_order(
+                (*mapping.get(incident_id, ()), *organizations)
             )
-            for support_org, group in exploded.groupby("support_orgs", observed=True)
-            if str(support_org).strip()
-        }
-
-    overall_values = pd.to_numeric(base["resolution_weeks"], errors="coerce").dropna()
-    overall_resolution_weeks = float(overall_values.mean()) if not overall_values.empty else None
-    return HelixOperationalBenchmark(
-        incident_to_support_orgs=incident_to_support_orgs,
-        support_org_resolution_weeks=support_org_resolution_weeks,
-        overall_resolution_weeks=overall_resolution_weeks,
-    )
+    return HelixOperationalBenchmark(mapping)
 
 
 def summarize_operational_metrics_for_incidents(
-    incident_ids: Sequence[object],
-    benchmark: HelixOperationalBenchmark,
+    incident_ids: Sequence[object], benchmark: HelixOperationalBenchmark
 ) -> HelixOperationalMetrics:
-    unique_incident_ids = _unique_preserve_order(incident_ids)
-    if not unique_incident_ids:
-        return HelixOperationalMetrics("", float("nan"))
-
-    support_orgs: list[str] = []
-    duration_samples: list[float] = []
-    seen_orgs: set[str] = set()
-    for incident_id in unique_incident_ids:
-        incident_support_orgs = benchmark.incident_to_support_orgs.get(
-            str(incident_id).strip(), tuple()
-        )
-        for support_org in incident_support_orgs:
-            normalized_support_org = str(support_org).strip()
-            if not normalized_support_org:
-                continue
-            if normalized_support_org not in seen_orgs:
-                support_orgs.append(normalized_support_org)
-                seen_orgs.add(normalized_support_org)
-            duration = benchmark.support_org_resolution_weeks.get(normalized_support_org)
-            if duration is not None and np.isfinite(float(duration)):
-                duration_samples.append(float(duration))
-
-    historical_resolution_weeks = (
-        float(np.mean(duration_samples)) if duration_samples else float("nan")
+    organizations = _unique_preserve_order(
+        organization
+        for incident_id in _unique_preserve_order(incident_ids)
+        for organization in benchmark.incident_to_support_orgs.get(incident_id, ())
     )
-    return HelixOperationalMetrics(
-        support_organizations=" · ".join(support_orgs),
-        historical_resolution_weeks=historical_resolution_weeks,
-    )
+    return HelixOperationalMetrics(" · ".join(organizations))
 
 
 def enrich_rationale_with_operational_metrics(
@@ -259,74 +119,38 @@ def enrich_rationale_with_operational_metrics(
         return pd.DataFrame()
     if rationale_df.empty or links_df is None or links_df.empty:
         return rationale_df.copy()
-
-    topic_to_incidents: dict[str, tuple[str, ...]] = {}
-    if {"nps_topic", "incident_id"}.issubset(links_df.columns):
-        topic_links = links_df.loc[:, ["nps_topic", "incident_id"]].copy()
-        topic_links["nps_topic"] = topic_links["nps_topic"].astype(str).str.strip()
-        topic_links["incident_id"] = topic_links["incident_id"].astype(str).str.strip()
-        topic_links = topic_links[
-            topic_links["nps_topic"].ne("") & topic_links["incident_id"].ne("")
-        ]
-        topic_to_incidents = {
-            str(topic).strip(): _unique_preserve_order(group["incident_id"].tolist())
-            for topic, group in topic_links.groupby("nps_topic", observed=True)
-        }
-
+    topic_links = links_df.loc[:, ["nps_topic", "incident_id"]].copy()
+    topic_links = topic_links.assign(
+        nps_topic=topic_links["nps_topic"].astype(str).str.strip(),
+        incident_id=topic_links["incident_id"].astype(str).str.strip(),
+    )
+    topic_links = topic_links[topic_links["nps_topic"].ne("") & topic_links["incident_id"].ne("")]
+    topic_to_incidents = {
+        str(topic): _unique_preserve_order(group["incident_id"].tolist())
+        for topic, group in topic_links.groupby("nps_topic", observed=True)
+    }
     out = rationale_df.copy()
-    if "support_organizations" not in out.columns:
-        out["support_organizations"] = ""
-    if "historical_resolution_weeks" not in out.columns:
-        out["historical_resolution_weeks"] = np.nan
-
-    support_organizations: list[str] = []
-    historical_resolution_weeks: list[float] = []
-    for _, row in out.iterrows():
-        topic = str(row.get("nps_topic", "") or "").strip()
-        metrics = summarize_operational_metrics_for_incidents(
-            topic_to_incidents.get(topic, tuple()),
-            benchmark,
-        )
-        support_organizations.append(metrics.support_organizations)
-        historical_resolution_weeks.append(
-            metrics.historical_resolution_weeks
-            if np.isfinite(metrics.historical_resolution_weeks)
-            else _existing_duration(row.get("historical_resolution_weeks"))
-        )
-
-    out["support_organizations"] = support_organizations
-    out["historical_resolution_weeks"] = historical_resolution_weeks
+    out["support_organizations"] = [
+        summarize_operational_metrics_for_incidents(
+            topic_to_incidents.get(str(topic or "").strip(), ()), benchmark
+        ).support_organizations
+        for topic in out.get("nps_topic", pd.Series("", index=out.index))
+    ]
     return out
 
 
 def enrich_chain_with_operational_metrics(
-    chain_df: pd.DataFrame,
-    *,
-    benchmark: HelixOperationalBenchmark,
+    chain_df: pd.DataFrame, *, benchmark: HelixOperationalBenchmark
 ) -> pd.DataFrame:
     if chain_df is None:
         return pd.DataFrame()
     if chain_df.empty:
         return chain_df.copy()
-
     out = chain_df.copy()
-    if "support_organizations" not in out.columns:
-        out["support_organizations"] = ""
-    if "historical_resolution_weeks" not in out.columns:
-        out["historical_resolution_weeks"] = np.nan
-
-    support_organizations: list[str] = []
-    historical_resolution_weeks: list[float] = []
-    for _, row in out.iterrows():
-        incident_ids = list(dict.fromkeys(pair[0] for pair in row["evidence_pairs"]))
-        metrics = summarize_operational_metrics_for_incidents(incident_ids, benchmark)
-        support_organizations.append(metrics.support_organizations)
-        historical_resolution_weeks.append(
-            metrics.historical_resolution_weeks
-            if np.isfinite(metrics.historical_resolution_weeks)
-            else _existing_duration(row.get("historical_resolution_weeks"))
-        )
-
-    out["support_organizations"] = support_organizations
-    out["historical_resolution_weeks"] = historical_resolution_weeks
+    out["support_organizations"] = [
+        summarize_operational_metrics_for_incidents(
+            tuple(dict.fromkeys(pair[0] for pair in pairs)), benchmark
+        ).support_organizations
+        for pairs in out["evidence_pairs"]
+    ]
     return out

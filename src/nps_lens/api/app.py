@@ -878,7 +878,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> tuple[HelixExchange, UploadContext, dict[str, Any]]:
         handler = exchange(request, dashboard_layer)
         context = taxonomy_context(request)
-        mode = dashboard_layer.taxonomy.llm_mode(context)
+        mode = dashboard_layer.taxonomy.state(context)["active"]
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
         return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), mode)
 

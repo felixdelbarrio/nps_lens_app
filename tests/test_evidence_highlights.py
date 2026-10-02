@@ -59,7 +59,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
                 "avg_nps": 2,
                 "avg_similarity": 0.7,
                 "support_organizations": "Equipo",
-                "historical_resolution_weeks": 1.234,
                 "incident_records": [
                     {
                         "incident_id": "INC1",
@@ -74,8 +73,13 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
     service = object.__new__(DashboardService)
     card = service._build_linking_scenario_cards(capped)[0]
     assert card["incident_records"][0]["summary_segments"] == segments
-    assert card["identity_rows"][-1]["value"] == "1,23"
-    assert len(card["identity_rows"]) == 3
+    assert card["identity_rows"] == [
+        {"label": "Tópico NPS ancla", "value": "Pagos"},
+        {
+            "label": "Organizaciones de las incidencias enlazadas",
+            "value": "Equipo",
+        },
+    ]
     summary = service._build_entity_summary_df(chains, touchpoint_source="broken_journeys")
     assert list(summary.columns) == [
         "Tópico NPS ancla",

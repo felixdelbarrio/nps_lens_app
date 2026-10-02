@@ -7,6 +7,10 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.causal_evidence import scenario_impact_score
+from nps_lens.analytics.signal_quality import actionable_rows
+from nps_lens.reports.coherence import validate_delta_rows
+
 
 @dataclass(frozen=True)
 class MarkdownSegment:
@@ -39,7 +43,8 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
 
     if delta_df is None or delta_df.empty:
         return pd.DataFrame(columns=getattr(delta_df, "columns", []))
-    work = delta_df.copy()
+    validate_delta_rows(delta_df.to_dict("records"))
+    work = actionable_rows(delta_df)
     work["delta_nps"] = _numeric_series(work, "delta_nps")
     work["n_current"] = _numeric_series(work, "n_current").fillna(0.0)
     work = work.dropna(subset=["delta_nps"])
@@ -62,7 +67,7 @@ def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
 
     if gap_df is None or gap_df.empty:
         return pd.DataFrame(columns=getattr(gap_df, "columns", []))
-    work = gap_df.copy()
+    work = actionable_rows(gap_df)
     work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
     work["n"] = _numeric_series(work, "n").fillna(0.0)
     work = work.dropna(subset=["gap_vs_base"])
@@ -83,7 +88,9 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
 
     if chain_df is None or chain_df.empty:
         return pd.DataFrame(columns=getattr(chain_df, "columns", []))
-    work = chain_df.copy()
+    work = actionable_rows(chain_df)
+    if work.empty:
+        return work
     for column in (
         "linked_pairs",
         "linked_incidents",
@@ -99,9 +106,11 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     work["_scenario_label"] = (
         work[label_column].astype(str) if label_column is not None else work.index.astype(str)
     )
+    work["impact_score"] = work.apply(scenario_impact_score, axis=1)
     return (
         work.sort_values(
             [
+                "impact_score",
                 "linked_pairs",
                 "linked_incidents",
                 "linked_comments",
@@ -109,7 +118,7 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
                 "avg_similarity",
                 "_scenario_label",
             ],
-            ascending=[False, False, False, False, False, True],
+            ascending=[False, False, False, False, False, False, True],
         )
         .head(max_rows)
         .drop(columns="_scenario_label")

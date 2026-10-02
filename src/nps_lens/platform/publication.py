@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from nps_lens.domain.privacy import redact_public_payload
+
 MAX_PUBLICATION_BYTES = 30 * 1024 * 1024
 MAX_PUBLICATION_JSON_BYTES = 20 * 1024 * 1024
 PUBLICATION_SCHEMA_VERSION = "5.0"
@@ -217,7 +219,7 @@ def build_publication_archive(
     file_name: str,
     max_bytes: int = MAX_PUBLICATION_BYTES,
 ) -> PublicationArtifact:
-    publication = _strict_json_value(publication)
+    publication = redact_public_payload(_strict_json_value(publication))
     if not isinstance(publication, dict):
         raise TypeError("La publicación debe ser un objeto JSON.")
     snapshots = publication.get("snapshots", {})

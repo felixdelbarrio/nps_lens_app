@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.causal_evidence import link_confidence_label
 from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
     DesignTokens,
@@ -15,6 +16,7 @@ from nps_lens.design.tokens import (
     plotly_nps_score_scale,
     plotly_risk_scale,
 )
+from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
 
@@ -951,10 +953,7 @@ def chart_causal_entity_bar(
     tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
     tmp["avg_similarity"] = pd.to_numeric(tmp.get("avg_similarity"), errors="coerce").fillna(0.0)
     tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
-    tmp = tmp.sort_values(
-        ["linked_pairs", "avg_similarity", "avg_nps"],
-        ascending=[False, False, True],
-    ).head(int(top_k))
+    tmp = select_causal_scenarios(tmp, max_rows=int(top_k))
     if tmp.empty:
         return None
 
@@ -987,7 +986,8 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title="Similitud textual (%)",
+                title=link_confidence_label(str(tmp.iloc[0].get("causal_engine", "rules")))
+                + " (%)",
                 tickfont=dict(size=10),
             )
         ),

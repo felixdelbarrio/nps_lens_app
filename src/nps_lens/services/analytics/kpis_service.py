@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.core.metrics import summarize
+from nps_lens.reports.coherence import validate_metric_payload
 from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL
 
 _KPI_ORDER = ("comments", "nps_average", "classic_nps", "detractor_rate", "promoter_rate")
@@ -429,6 +430,7 @@ def _kpi_payload(
     }
     if note:
         payload["note"] = note
+    validate_metric_payload(payload)
     return payload
 
 
@@ -456,6 +458,7 @@ def _comparison_payload(
     }
     if note:
         payload["note"] = note
+    validate_metric_payload(payload)
     return payload
 
 

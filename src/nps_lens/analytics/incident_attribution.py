@@ -11,12 +11,18 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from nps_lens.analytics.causal_evidence import (
+    CausalEvidenceEvaluator,
+    link_confidence_label,
+    scenario_impact_score,
+)
 from nps_lens.analytics.evidence_highlights import evidence_segments
 from nps_lens.analytics.nps_helix_link import (
     build_incident_display_text,
     build_incident_topic,
     build_nps_topic,
 )
+from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.core.nps_math import classify_nps_scores
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
@@ -25,6 +31,7 @@ from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS,
     TOUCHPOINT_SOURCE_PALANCA,
 )
+from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
@@ -164,7 +171,6 @@ CHAIN_COLUMNS = [
     "incidents",
     "responses",
     "support_organizations",
-    "historical_resolution_weeks",
     "presentation_mode",
     "journey_route",
     "journey_evidence_pattern",
@@ -650,7 +656,7 @@ def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame
             ]
         )
 
-    df = nps_focus_df.copy()
+    df = actionable_rows(nps_focus_df)
     df["nps_id"] = analytical_response_ids(df)
     df["nps_score"] = pd.to_numeric(df.get("NPS"), errors="coerce")
     comment_series = df.get("Comment")
@@ -712,6 +718,12 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         .str.strip()
     )
     df["incident_date"] = incident_occurrence_dates(df)[0]
+    close_column = next(
+        (c for c in ("Closed Date", "Last Resolved Date", "Fecha de cierre") if c in df), None
+    )
+    df["incident_close_date"] = (
+        pd.to_datetime(df[close_column], errors="coerce") if close_column else pd.NaT
+    )
     df["incident_summary"] = build_incident_display_text(df).fillna("").astype(str).str.strip()
     url_candidates = [
         "Incident URL",
@@ -778,6 +790,7 @@ def _prepare_helix_chain_ref(helix_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         [
             "incident_id",
             "incident_date",
+            "incident_close_date",
             "incident_summary",
             "incident_url",
             "incident_topic",
@@ -849,9 +862,20 @@ def _prepare_enriched_links(
         .astype(str)
         .str.strip()
     )
-    enriched["comment_txt"] = enriched["comment_txt"].fillna("").astype(str).str.strip()
-    enriched["comment_norm"] = enriched["comment_norm"].fillna("").astype(str).str.strip()
-    enriched["incident_summary"] = enriched["incident_summary"].fillna("").astype(str).str.strip()
+    enriched = actionable_rows(enriched)
+    enriched["comment_txt"] = (
+        enriched["comment_txt"].fillna("").astype(str).map(redact_operational_snippet).str.strip()
+    )
+    enriched["comment_norm"] = (
+        enriched["comment_norm"].fillna("").astype(str).map(redact_operational_snippet).str.strip()
+    )
+    enriched["incident_summary"] = (
+        enriched["incident_summary"]
+        .fillna("")
+        .astype(str)
+        .map(redact_operational_snippet)
+        .str.strip()
+    )
     enriched["incident_topic"] = (
         enriched.get("incident_topic", pd.Series([""] * len(enriched), index=enriched.index))
         .fillna("")
@@ -958,60 +982,6 @@ def _resolved_source_topic_series(frame: pd.DataFrame) -> pd.Series:
         .str.strip()
     )
     return resolved_source_topic.where(resolved_source_topic.ne(""), fallback_topic)
-
-
-def _chain_story_for_source(
-    *,
-    touchpoint_source: str,
-    topic_label: str,
-    touchpoint: str,
-    palanca: str,
-    subpalanca: str,
-    helix_source_service_n2: str,
-    journey_route: str,
-    journey_cx_readout: str,
-    journey_evidence_pattern: str,
-    incident_sample_count: int,
-    incident_sample_label: str,
-    comment_sample_count: int,
-    comment_sample_label: str,
-    anchor_topic: str,
-) -> str:
-    source = str(touchpoint_source or TOUCHPOINT_SOURCE_DOMAIN).strip()
-    if source == TOUCHPOINT_SOURCE_EXECUTIVE_JOURNEYS:
-        return (
-            f"{journey_route}. {journey_cx_readout} "
-            f"Patrón buscado en el catálogo: {journey_evidence_pattern}. "
-            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
-            f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
-        )
-    if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
-        return (
-            f"{journey_route}. {journey_cx_readout} "
-            f"Keywords del cluster: {journey_evidence_pattern}. "
-            f"En la ventana analizada se observan {incident_sample_count} incidencias Helix "
-            f"({incident_sample_label}) y {comment_sample_count} comentarios VoC como {comment_sample_label}."
-        )
-    if source == TOUCHPOINT_SOURCE_PALANCA:
-        return (
-            f"{incident_sample_count} incidencias Helix ({incident_sample_label}) afectan el "
-            f"touchpoint {touchpoint or 'detectado'} y se concentran en la palanca {topic_label}. "
-            f"El tópico NPS ancla es {anchor_topic or 'n/d'} y aparecen en "
-            f"{comment_sample_count} comentarios VoC como {comment_sample_label}."
-        )
-    if source == TOUCHPOINT_SOURCE_BBVA_SOURCE_N2:
-        return (
-            f"{incident_sample_count} incidencias Helix ({incident_sample_label}) convergen en el "
-            f"Source Service N2 {helix_source_service_n2 or topic_label} y aparecen en "
-            f"{comment_sample_count} comentarios VoC como {comment_sample_label}. "
-            f"El tópico NPS ancla es {anchor_topic or 'n/d'}."
-        )
-    return (
-        f"{incident_sample_count} incidencias Helix ({incident_sample_label}) degradan la "
-        f"subpalanca {topic_label or subpalanca}, se manifiestan en el touchpoint "
-        f"{touchpoint or topic_label} y aparecen en {comment_sample_count} comentarios VoC como "
-        f"{comment_sample_label}."
-    )
 
 
 def build_broken_journey_catalog(
@@ -1709,12 +1679,6 @@ def build_incident_attribution_chains(
                 and not grp["journey_touchpoint"].mode(dropna=True).empty
                 else ""
             )
-            journey_route = (
-                str(grp["journey_route"].mode(dropna=True).iloc[0])
-                if "journey_route" in grp.columns
-                and not grp["journey_route"].mode(dropna=True).empty
-                else ""
-            )
             journey_evidence_pattern = (
                 str(grp["journey_evidence_pattern"].mode(dropna=True).iloc[0])
                 if "journey_evidence_pattern" in grp.columns
@@ -1746,7 +1710,6 @@ def build_incident_attribution_chains(
                 and not grp["helix_source_service_n2"].mode(dropna=True).empty
                 else ""
             )
-            journey_route = ""
             journey_evidence_pattern = ""
             journey_cx_readout = ""
         if is_executive_mode or is_broken_mode:
@@ -1778,10 +1741,14 @@ def build_incident_attribution_chains(
         incident_records = [
             {
                 "incident_id": str(r.get("incident_id", "")).strip(),
-                "summary": " ".join(str(r.get("incident_summary", "") or "").split()),
+                "summary": redact_operational_snippet(
+                    str(r.get("incident_quote") or r.get("incident_summary") or "")
+                ),
                 "url": str(r.get("incident_url", "") or "").strip(),
                 "summary_segments": evidence_segments(
-                    " ".join(str(r.get("incident_summary", "") or "").split()),
+                    redact_operational_snippet(
+                        str(r.get("incident_quote") or r.get("incident_summary") or "")
+                    ),
                     highlights_by_incident.get(str(r.get("incident_id", "")), set()),
                 ),
             }
@@ -1800,7 +1767,9 @@ def build_incident_attribution_chains(
         ]
         comment_records = []
         for _, r in comment_ranked.iterrows():
-            comment = " ".join(str(r.get("comment_norm") or r.get("comment_txt") or "").split())
+            comment = redact_operational_snippet(
+                str(r.get("comment_quote") or r.get("comment_txt") or "")
+            )
             if not comment:
                 continue
             comment_record = {
@@ -1853,49 +1822,36 @@ def build_incident_attribution_chains(
                 }
             )
         )
-        historical_resolution_weeks = _safe_float(
-            pd.to_numeric(
-                grp.get("historical_resolution_weeks", pd.Series(dtype=float)),
-                errors="coerce",
-            ).mean(),
-            default=np.nan,
-        )
-
-        incident_ids = [
-            str(rec.get("incident_id", "")).strip()
-            for rec in incident_records
-            if str(rec.get("incident_id", "")).strip()
-        ]
-        incident_sample_count = len(incident_examples)
-        comment_sample_count = len(comment_records)
-        incident_sample_label = (
-            ", ".join(incident_ids[:3])
-            if incident_ids
-            else f"{incident_sample_count} incidencias Helix"
-        )
-        if len(incident_ids) > 3:
-            incident_sample_label = f"{incident_sample_label} y {len(incident_ids) - 3} más"
-        comment_sample_label = " | ".join(comment_examples[:2])
         source_topics = _source_topics_for_group(grp)
         anchor_topic = source_topics[0] if source_topics else ""
-        story = _chain_story_for_source(
-            touchpoint_source=source_mode,
-            topic_label=topic_label,
-            touchpoint=touchpoint,
-            palanca=palanca,
-            subpalanca=subpalanca,
-            helix_source_service_n2=helix_source_service_n2,
-            journey_route=journey_route,
-            journey_cx_readout=journey_cx_readout,
-            journey_evidence_pattern=journey_evidence_pattern,
-            incident_sample_count=incident_sample_count,
-            incident_sample_label=incident_sample_label,
-            comment_sample_count=comment_sample_count,
-            comment_sample_label=comment_sample_label,
-            anchor_topic=anchor_topic,
+        evidence = CausalEvidenceEvaluator(
+            max_days_apart=(
+                int(grp["causal_window_days"].iloc[0]) if "causal_window_days" in grp else 90
+            )
+        ).evaluate_scenario(grp)
+        engine = (
+            "llm" if "causal_engine" in grp and grp["causal_engine"].eq("llm").all() else "rules"
         )
+        task = (
+            str(grp.get("affected_task", pd.Series(dtype=str)).dropna().iloc[0])
+            if "affected_task" in grp and grp["affected_task"].fillna("").ne("").any()
+            else "Tarea pendiente de validación"
+        )
+        symptom = (
+            str(grp.get("observed_symptom", pd.Series(dtype=str)).dropna().iloc[0])
+            if "observed_symptom" in grp and grp["observed_symptom"].fillna("").ne("").any()
+            else subpalanca
+        )
+        recommendation = f"Validar y reproducir {symptom or 'el síntoma observado'}; contrastar resolución y recuperación de la nota."
+        route = f"{task} → {symptom} → {linked_incidents} incidencias Helix → {linked_comments} comentarios afectados, nota media {avg_nps:.2f} → {recommendation}"
         rows.append(
             {
+                **evidence,
+                "causal_engine": engine,
+                "link_confidence_label": link_confidence_label(engine),
+                "affected_task": redact_operational_snippet(task),
+                "observed_symptom": redact_operational_snippet(symptom),
+                "operational_recommendation": recommendation,
                 "nps_topic": topic_label,
                 "anchor_topic": anchor_topic,
                 "source_topics": source_topics,
@@ -1916,14 +1872,13 @@ def build_incident_attribution_chains(
                 "incident_examples": incident_examples,
                 "comment_examples": comment_examples,
                 "comment_records": comment_records,
-                "chain_story": story,
+                "chain_story": f"{route} {evidence['evidence_reason']}",
                 "incident_rate_per_100_responses": incident_rate_per_100_responses,
                 "incidents": incidents_total,
                 "responses": responses_total,
                 "support_organizations": support_organizations,
-                "historical_resolution_weeks": historical_resolution_weeks,
                 "presentation_mode": source_mode,
-                "journey_route": journey_route,
+                "journey_route": route,
                 "journey_evidence_pattern": journey_evidence_pattern,
                 "journey_cx_readout": journey_cx_readout,
             }
@@ -1933,10 +1888,11 @@ def build_incident_attribution_chains(
         return _empty_chain_df()
 
     out = pd.DataFrame(rows)
+    out["impact_score"] = out.apply(scenario_impact_score, axis=1)
     out = out.sort_values(
-        ["linked_pairs", "linked_incidents", "linked_comments", "avg_similarity", "nps_topic"],
-        ascending=[False, False, False, False, True],
+        ["impact_score", "linked_pairs", "nps_topic"],
+        ascending=[False, False, True],
     ).reset_index(drop=True)
     if int(top_k) > 0:
         out = out.head(int(top_k)).reset_index(drop=True)
-    return out[CHAIN_COLUMNS].copy()
+    return out.copy()

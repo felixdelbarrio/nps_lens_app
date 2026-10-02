@@ -560,7 +560,6 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert [row["label"] for row in identity] == [
         "Tópico NPS ancla",
         "Organizaciones de las incidencias enlazadas",
-        "Duración media histórica de resolución (semanas)",
     ]
     assert len({row["NPS Topic"] for row in evidence_rows}) <= 10
     assert (
@@ -586,6 +585,34 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "action_lane",
     ):
         assert f'"{removed_field}"' not in serialized_linking
+
+
+def test_helix_reingestion_keeps_latest_operational_state(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    client = TestClient(app)
+    context = {
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
+        "service_origin_n2": "",
+    }
+
+    for status in ("Assigned", "Resolved"):
+        source = _build_helix_fixture(tmp_path / f"helix-{status}.xlsx")
+        frame = pd.read_excel(source)
+        frame["Status"] = status
+        frame.to_excel(source, index=False)
+        with source.open("rb") as handle:
+            response = client.post(
+                "/api/uploads/helix",
+                data=context,
+                files={"file": (source.name, handle, "application/vnd.ms-excel")},
+            )
+        assert response.status_code == 200
+        assert response.json()["status"] == "completed"
+
+    stored = app.state.dashboard_service._load_helix_df(UploadContext(**context))
+    assert len(stored) == 2
+    assert stored["Status"].eq("Resolved").all()
 
 
 def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(
@@ -633,7 +660,7 @@ def test_dashboard_linking_endpoint_does_not_500_with_problematic_helix_dates(
     assert "El dataset Helix aún no está cargado" not in payload.get("empty_state", "")
 
 
-def test_generate_ppt_report_falls_back_to_nps_when_causal_helix_block_fails(
+def test_generate_ppt_report_does_not_silently_hide_failed_causal_analysis(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -667,23 +694,18 @@ def test_generate_ppt_report_falls_back_to_nps_when_causal_helix_block_fails(
 
     monkeypatch.setattr(service, "_compute_linking_core", _boom)
 
-    report = service.generate_ppt_report(
-        context=UploadContext(
-            service_origin="BBVA México",
-            service_origin_n1="Senda",
-            service_origin_n2="",
-        ),
-        pop_year="2026",
-        pop_month="03",
-        nps_group="Todos",
-        score_channel="Web",
-    )
-
-    assert report.content
-    assert report.slide_count > 0
-    texts = _ppt_texts(report.content)
-    assert any("NPS" in text for text in texts)
-    assert not any("Journeys de detracción" in text for text in texts)
+    with pytest.raises(RuntimeError, match="causal unavailable"):
+        service.generate_ppt_report(
+            context=UploadContext(
+                service_origin="BBVA México",
+                service_origin_n1="Senda",
+                service_origin_n2="",
+            ),
+            pop_year="2026",
+            pop_month="03",
+            nps_group="Todos",
+            score_channel="Web",
+        )
 
 
 def test_helix_links_resolve_incident_number_through_record_id() -> None:

@@ -3,7 +3,8 @@ from __future__ import annotations
 import unicodedata
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from typing_extensions import Annotated
 
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,
@@ -27,9 +28,21 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class TaxonomyLeaf(_StrictModel):
+    name: str = Field(min_length=1)
+    criterion: str = Field(min_length=1, max_length=500)
+
+    @field_validator("name", "criterion")
+    @classmethod
+    def trimmed(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("name and criterion must be non-empty and trimmed")
+        return value
+
+
 class TaxonomyBranch(_StrictModel):
     lever: str = Field(min_length=1)
-    sublevers: list[str] = Field(min_length=1, max_length=MAX_SUBLEVERS)
+    sublevers: list[TaxonomyLeaf] = Field(min_length=1, max_length=MAX_SUBLEVERS)
 
     @field_validator("lever")
     @classmethod
@@ -38,18 +51,24 @@ class TaxonomyBranch(_StrictModel):
             raise ValueError("lever must not contain surrounding whitespace")
         return value
 
-    @field_validator("sublevers")
-    @classmethod
-    def unique_sublevers(cls, values: list[str]) -> list[str]:
-        if any(not value.strip() or value != value.strip() for value in values):
-            raise ValueError("sublevers must be non-empty and trimmed")
-        if len(values) != len(set(values)):
-            raise ValueError("sublevers must be unique within a lever")
-        return values
-
 
 class TaxonomyResponse(_StrictModel):
     taxonomy: list[TaxonomyBranch] = Field(min_length=1, max_length=MAX_LEVERS)
+
+
+class TaxonomyReview(_StrictModel):
+    """Bounded corpus review retained with the designed semantic catalog."""
+
+    quotes: list[Annotated[str, StringConstraints(min_length=1, max_length=2000)]] = Field(
+        max_length=MAX_LEVERS * MAX_SUBLEVERS
+    )
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=12, max_length=5_000)
+    ]
+
+
+class TaxonomyDesignResponse(TaxonomyResponse):
+    review: TaxonomyReview
 
 
 class TaxonomyValidator:
@@ -59,12 +78,16 @@ class TaxonomyValidator:
             return unicodedata.normalize("NFKC", value).casefold()
 
         levers = [normalized(branch.lever) for branch in taxonomy.taxonomy]
-        sublevers = [normalized(sub) for branch in taxonomy.taxonomy for sub in branch.sublevers]
+        sublevers = [
+            normalized(sub.name) for branch in taxonomy.taxonomy for sub in branch.sublevers
+        ]
         if len(levers) != len(set(levers)) or len(sublevers) != len(set(sublevers)):
             raise TaxonomyDiscoveryError(
                 DiscoveryErrorCode.INVALID_TAXONOMY, "La taxonomía contiene categorías duplicadas."
             )
-        categories = {branch.lever: set(branch.sublevers) for branch in taxonomy.taxonomy}
+        categories = {
+            branch.lever: {sub.name for sub in branch.sublevers} for branch in taxonomy.taxonomy
+        }
         if categories.get(FALLBACK_LEVER) != set(FALLBACK_SUBLEVERS):
             raise TaxonomyDiscoveryError(
                 DiscoveryErrorCode.INVALID_TAXONOMY,

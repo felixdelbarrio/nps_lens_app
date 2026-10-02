@@ -24,7 +24,15 @@ def test_concepts_are_owner_scoped_atomic_and_corpus_bound(exchange):
     response = {
         "manifest.json": files["manifest.json"],
         "equivalences.json": {
-            "dimensions": {"nps.Palanca": [{"canonical": "Soporte", "aliases": ["Atención"]}]}
+            "dimensions": {
+                "nps.Palanca": [
+                    {
+                        "canonical": "Soporte",
+                        "aliases": ["Atención"],
+                        "reason": "Ambos designan la misma atención al cliente.",
+                    }
+                ]
+            }
         },
     }
     invalid = copy.deepcopy(response)
@@ -56,8 +64,8 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
     frame.loc[404, ["Palanca", "Subpalanca"]] = ["Acceso", "Token"]
     frame["Fecha"], frame["NPS"] = pd.Timestamp("2026-10-01"), 2
     frame.loc[:199, "Fecha"] = pd.Timestamp("2026-09-01")
-    handler.taxonomy.configure(ctx, {"llm_active": "SOURCE"})
-    files = exported(handler.export(ctx, "classifier")["saved_path"])
+    handler.taxonomy.configure(ctx, {"active": "SOURCE"})
+    files = exported(handler.export(ctx, "classifier")["saved_paths"])
     result = classifier_files(files["manifest.json"], files)
     result["results"] = {"000001": result["results"]["000001"]}
     for row in result["results"]["000001"]["classifications"]:
@@ -84,6 +92,9 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
         "/api/taxonomy/comments/engine", params={**params, "pop_month": "10"}
     ).json()
     assert not status["ready"] and status["engine"] == "rules"
+    dashboard = client.get("/api/dashboard/nps", params={**params, "pop_month": "10"})
+    assert dashboard.status_code == 200
+    assert dashboard.json()["kpis"]["samples"] == 205
     assert (
         client.put(
             "/api/taxonomy/comments/engine", params={**params, "pop_month": "10", "engine": "llm"}
@@ -91,9 +102,9 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
         == 409
     )
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
-    handler.taxonomy.configure(ctx, {"llm_active": "COMPLETED"})
+    handler.taxonomy.configure(ctx, {"active": "COMPLETED"})
     assert handler.progress(ctx)["received"] == 0
-    handler.taxonomy.configure(ctx, {"llm_active": "SOURCE"})
+    handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     assert handler.progress(ctx)["received"] == 200
 
 
@@ -103,7 +114,7 @@ def test_helix_toggle_uses_visible_window_and_llm_links_obey_dates(helix, monkey
     dashboard = client.app.state.dashboard_service
     monkeypatch.setattr(dashboard, "_load_helix_df", lambda *args, **kwargs: incidents)
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    files = exported(handler.export(ctx, inputs)["saved_path"])
+    files = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(files, inputs["comments"][0]["id"])
     partial = {name: value for name, value in response.items() if name != "results/000002.json"}
     handler.import_response(ctx, inputs, zipped(partial))
