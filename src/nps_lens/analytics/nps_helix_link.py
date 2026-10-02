@@ -15,6 +15,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
 )
+from nps_lens.analytics.signal_quality import is_reserve_category
 from nps_lens.analytics.text_mining import STOPWORDS_ES, preprocess_text
 from nps_lens.core.nps_math import focus_mask, normalize_focus_group, valid_nps_scores
 from nps_lens.domain.normalization import semantic_series
@@ -113,7 +114,9 @@ def build_nps_text(df: pd.DataFrame) -> pd.Series:
 
 
 def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
-    return build_nps_text(df).str.contains(r"[^\W\d_]", regex=True, na=False)
+    return build_nps_text(df).str.contains(r"[^\W\d_]", regex=True, na=False) & ~build_nps_topic(
+        df
+    ).map(is_reserve_category)
 
 
 _DETAIL_LABEL = re.compile(
@@ -151,26 +154,31 @@ def _detail_signal(text: str) -> str:
 def build_incident_text(df: pd.DataFrame) -> pd.Series:
     """Narrative evidence without administrative template fields or repeated values."""
     fields = [
-        "summary",
-        "Description",
-        "Short Description",
+        "Detailed Description",
+        "Detailed Decription",
+        "bbva_detaileddescription",
+        "Descripción",
         "BBVA_ExecutiveDescription",
         "BBVA_FinalImpact",
         "BBVA_RootCauseMain",
         "BBVA_RootCause1",
         "BBVA_RootCauseExecutive",
         "Resolution",
-        "Detailed Description",
-        "Detailed Decription",
-        "bbva_detaileddescription",
-        "Descripción",
+        "Description",
+        "Short Description",
+        "summary",
     ]
     compact = pd.Series("", index=df.index, dtype="string")
     seen = []
     for name in fields:
         for column in _ordered_cols_ci(df, [name]):
             part = _txt_series(df, column)
-            if name.startswith("Detailed"):
+            if name in {
+                "Detailed Description",
+                "Detailed Decription",
+                "bbva_detaileddescription",
+                "Descripción",
+            }:
                 # Parse each distinct template once, retaining labelled narrative only.
                 lookup = {value: _detail_signal(value) for value in part.unique()}
                 part = part.map(lookup).astype("string")

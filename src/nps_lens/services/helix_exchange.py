@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,10 @@ class EvidenceLink(BaseModel):
     confidence: float = Field(ge=0, le=1)
     incident_quote: str = Field(min_length=1, max_length=2000)
     comment_quote: str = Field(min_length=1, max_length=2000)
+    same_task: bool = False
+    same_symptom: bool = False
+    affected_task: str = Field(default="", max_length=160)
+    observed_symptom: str = Field(default="", max_length=160)
 
 
 class IncidentClassification(CompactClassification):
@@ -432,6 +437,7 @@ class HelixExchange:
                     if primary["lever"] == "Sin clasificación temática":
                         raise ValueError("Las categorías de reserva no justifican vínculos NPS.")
                 validated[(mode, row.id)] = {
+                    "classified_at": datetime.now(timezone.utc).isoformat(),
                     "instructions_version": INSTRUCTIONS_VERSION,
                     "taxonomy_fingerprint": manifest["taxonomy_fingerprint"],
                     **primary,
@@ -466,6 +472,10 @@ class HelixExchange:
                         "Narrativas idénticas tienen categorías diferentes entre lotes. Revisa el criterio; no se importó nada."
                     )
                 decisions[identity] = decision
+        # Re-importing the same decision must preserve its original classification time.
+        for (mode, key), value in validated.items():
+            if key in existing[mode]:
+                value["classified_at"] = existing[mode][key]["classified_at"]
         if any(
             key in existing[mode] and existing[mode][key] != value
             for (mode, key), value in validated.items()
@@ -525,6 +535,15 @@ class HelixExchange:
                 "nps_id": link["nps_id"],
                 "incident_id": key,
                 "similarity": link["confidence"],
+                "confidence": link["confidence"],
+                "comment_quote": link["comment_quote"],
+                "incident_quote": link["incident_quote"],
+                "same_task": link.get("same_task", False),
+                "same_symptom": link.get("same_symptom", False),
+                "affected_task": link.get("affected_task", ""),
+                "observed_symptom": link.get("observed_symptom", ""),
+                "causal_engine": "llm",
+                "causal_window_days": max_days_apart,
                 "nps_topic": nps_topics[link["nps_id"]],
                 "incident_topic": " · ".join(
                     pair["lever"] + " > " + pair["sublever"]
@@ -548,5 +567,14 @@ class HelixExchange:
                 "similarity",
                 "nps_topic",
                 "incident_topic",
+                "confidence",
+                "comment_quote",
+                "incident_quote",
+                "same_task",
+                "same_symptom",
+                "affected_task",
+                "observed_symptom",
+                "causal_engine",
+                "causal_window_days",
             ],
         )

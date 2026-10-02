@@ -28,6 +28,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
+from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, link_confidence_label
 from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
@@ -37,6 +38,7 @@ from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
 from nps_lens.analytics.nps_helix_link import build_nps_topic
+from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
 from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.nps_math import valid_nps_scores
 from nps_lens.design.tokens import (
@@ -45,7 +47,9 @@ from nps_lens.design.tokens import (
     executive_report_palette,
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
+from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
+from nps_lens.reports.coherence import validate_metric_payload
 from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
     select_negative_delta_rows,
@@ -224,7 +228,7 @@ def _wrap_label(
 
 
 def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
-    clean = " ".join(str(text or "").split())
+    clean = " ".join(redact_operational_snippet(str(text or "")).split())
     if not clean:
         return ""
     for marker in ["Síntoma:", "Sintoma:", "Descripcion:", "Descripción:"]:
@@ -358,6 +362,7 @@ def _coerce_nps_records(nps_df: Optional[pd.DataFrame]) -> pd.DataFrame:
         out.get(comment_col, pd.Series([""] * len(out), index=out.index))
         .astype(str)
         .fillna("")
+        .map(redact_operational_snippet)
         .str.strip()
     )
     if "nps_topic" in out.columns:
@@ -435,11 +440,8 @@ def _period_overview(
         if aggregate_payload
         else compute_score_kpis(current_nps_df)
     )
-    temporal_kpis = (
-        period_block.get("temporal", {})
-        if isinstance(period_block.get("temporal"), dict)
-        else build_period_boundary_kpis(current_nps_df)
-    )
+    temporal_kpis = period_block or build_period_boundary_kpis(current_nps_df)
+    validate_metric_payload(temporal_kpis)
     temporal_base = temporal_kpis.get("base_kpis", {})
     temporal_actual = temporal_kpis.get("kpis", {})
     temporal_deltas = temporal_kpis.get("deltas", {})
@@ -471,7 +473,7 @@ def _period_overview(
     )
     driver_col = "Subpalanca" if "Subpalanca" in current_nps_df.columns else "Palanca"
     topic_keys = topics_observed_in_channel(current_nps_df, driver_col, topic_channel)
-    driver_source = restrict_to_topics(current_nps_df, driver_col, topic_keys)
+    driver_source = actionable_rows(restrict_to_topics(current_nps_df, driver_col, topic_keys))
     if driver_col not in driver_source.columns:
         driver_col = "Palanca"
     pain_point = ""
@@ -493,6 +495,7 @@ def _period_overview(
                 if not promoter_counts.empty:
                     strength_point = str(promoter_counts.index[0])
     return {
+        "signal_quality": signal_quality(current_nps_df),
         "comments": _safe_int(
             aggregate_payload.get("comments", aggregate_kpis.comments), default=0
         ),
@@ -983,7 +986,11 @@ def _build_journey_summary_figure(
     fig.update_layout(margin=dict(l=left_margin, r=102, t=14, b=38), bargap=0.22)
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="Similitud textual", side="right", font=dict(size=15)),
+            title=dict(
+                text=link_confidence_label(str(plot_df.iloc[0].get("causal_engine", "rules"))),
+                side="right",
+                font=dict(size=15),
+            ),
             tickmode="array",
             tickvals=[0, 1, 2, 3, 4],
             tickfont=dict(size=14),
@@ -2133,7 +2140,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["red"],
             ),
             (
-                "Score medio enlazado",
+                "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
                 _fmt_num_or_nd(row.get("avg_nps", np.nan)),
                 BBVA_COLORS["green"],
             ),
@@ -2143,7 +2150,7 @@ def _build_causal_scenarios(
                 BBVA_COLORS["sky"],
             ),
             (
-                "Similitud textual",
+                link_confidence_label(str(row.get("causal_engine", "rules"))),
                 _fmt_pct_or_nd(row.get("avg_similarity", np.nan), decimals=0),
                 BBVA_COLORS["blue"],
             ),
@@ -2213,6 +2220,13 @@ def _build_presentation_context(
     period_kpis: Optional[dict[str, object]] = None,
 ) -> PresentationContext:
     period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    if selected_nps_df is not None:
+        selected_nps_df = selected_nps_df.copy()
+        for col in ("Comment", "Comentario", "comment_txt", "_text_norm"):
+            if col in selected_nps_df:
+                selected_nps_df[col] = (
+                    selected_nps_df[col].fillna("").astype(str).map(redact_operational_snippet)
+                )
     selected_raw = _coerce_nps_records(selected_nps_df)
     compare_raw = _coerce_nps_records(comparison_nps_df)
     current_period, baseline_period = _split_period_frames(
@@ -2256,6 +2270,7 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
     )
+    validate_metric_payload(resolved_period_kpis)
     channel_key = str(topic_channel or "").strip().casefold()
     channel_values = selected_raw["Canal"].fillna("").astype(str).str.strip()
     channel_selected = (
@@ -2299,7 +2314,9 @@ def _build_presentation_context(
         if "band" in channel_selected.columns
         else channel_selected.copy()
     )
-    text_topics = _text_topics_table(detractor_raw, top_k=EDITORIAL_LIMITS.max_text_chart_clusters)
+    text_topics = _text_topics_table(
+        actionable_rows(detractor_raw), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
+    )
     if not text_topics.empty:
         text_topics = text_topics.loc[
             ~text_topics["top_terms"].map(
@@ -2824,7 +2841,8 @@ def _fill_template_deck(
     )
     _set_template_text(
         comparison.shapes[12],
-        f"Entre los tópicos observados en {topic_channel}, la mejor señal por volumen promotor se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.",
+        f"Entre los tópicos observados en {topic_channel}, la mejor señal por volumen promotor se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.\n"
+        + str(context.overview.get("signal_quality", {}).get("message", "")),
         size=13,
         color=BBVA_COLORS["ink"],
     )
@@ -3076,7 +3094,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[4],
-            "SCORE MEDIO ENLAZADO",
+            "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
             size=12,
             bold=False,
             color=BBVA_COLORS["blue"],
@@ -3093,7 +3111,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[7],
-            "SIMILITUD TEXTUAL",
+            link_confidence_label(str(row.get("causal_engine", "rules"))),
             size=12,
             bold=False,
             color=BBVA_COLORS["blue"],
@@ -3116,7 +3134,7 @@ def _fill_template_deck(
         slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · No demuestran causalidad.",
+            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}",
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3193,8 +3211,11 @@ def generate_business_review_ppt(
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
     include_causal_section: bool = True,
+    report_context: Optional[dict[str, object]] = None,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
+    if attribution_df is not None and not attribution_df.empty:
+        attribution_df = pd.DataFrame(redact_public_payload(attribution_df.to_dict("records")))
     dimension_mode = str(report_dimension_analysis or "palanca").strip().lower()
     if dimension_mode not in {"palanca", "subpalanca"}:
         dimension_mode = "palanca"
@@ -3238,6 +3259,19 @@ def generate_business_review_ppt(
     )
 
     buff = BytesIO()
+    metadata = report_context or {}
+    quality = signal_quality(selected_nps_df if selected_nps_df is not None else pd.DataFrame())
+    report_note = (
+        f"Taxonomía activa: {metadata.get('taxonomy_mode', 'No disponible')}\n"
+        f"Fingerprint: {metadata.get('taxonomy_fingerprint', 'No disponible')}\n"
+        f"Motor causal: {metadata.get('causal_engine', 'rules')}\n"
+        f"Fecha de clasificación comentarios: {metadata.get('comment_classified_at', 'No disponible')}\n"
+        f"Fecha de clasificación incidencias: {metadata.get('incident_classified_at', 'No disponible')}\n"
+        f"Ámbito: {metadata.get('scope', {})}\n{quality['message']}\n"
+        + " ".join(quality["warnings"])
+    )
+    for slide in prs.slides:
+        slide.notes_slide.notes_text_frame.text = report_note
     prs.save(buff)
     content = buff.getvalue()
     compact_prs = Presentation(BytesIO(content))

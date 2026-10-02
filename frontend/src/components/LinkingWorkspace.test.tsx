@@ -73,3 +73,19 @@ it("shows full link totals instead of the capped evidence sample", () => {
   expect(screen.getByRole("heading", { name: "375 incidencias enlazadas" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "118 comentarios enlazados" })).toBeInTheDocument();
 });
+
+it("uses server confidence labels without changing the existing table payload", () => {
+  const table = [{ "Tópico NPS ancla": "Pagos", "Similitud textual": "90%" }];
+  const linking = {
+    ...payload,
+    entity_summary: {
+      ...payload.entity_summary,
+      table,
+      column_labels: { "Similitud textual": "CONFIANZA SEMÁNTICA" }
+    }
+  };
+  render(<LinkingWorkspace linking={linking} tab="entity-summary" onTabChange={() => {}} />);
+  expect(screen.getByRole("columnheader", { name: "CONFIANZA SEMÁNTICA" })).toBeInTheDocument();
+  expect(screen.getByText("90%")).toBeInTheDocument();
+  expect(table[0]["Similitud textual"]).toBe("90%");
+});

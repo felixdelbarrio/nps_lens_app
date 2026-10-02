@@ -372,9 +372,7 @@ def test_classifier_drops_fallback_categories_from_secondary_topics(exchange):
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
     categories = request["taxonomy.json"]["categories"]
-    fallback = next(
-        key for key, value in categories.items() if value["lever"] == FALLBACK_LEVER
-    )
+    fallback = next(key for key, value in categories.items() if value["lever"] == FALLBACK_LEVER)
     legitimate_secondary = next(
         key
         for key, value in categories.items()
@@ -388,9 +386,7 @@ def test_classifier_drops_fallback_categories_from_secondary_topics(exchange):
     assert result["received"] == len(request["manifest.json"]["batches"])
     resolved = handler.assignments(ctx, handler._frame(ctx), "DISCOVERED")
     first = resolved[next(iter(resolved))]
-    assert first["secondary_classifications"] == [
-        {"lever": "Velocidad", "sublever": "Espera"}
-    ]
+    assert first["secondary_classifications"] == [{"lever": "Velocidad", "sublever": "Espera"}]
 
 
 def test_classifier_still_rejects_unknown_schema_drift(exchange):

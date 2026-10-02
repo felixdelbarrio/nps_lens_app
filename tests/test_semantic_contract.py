@@ -26,15 +26,15 @@ from nps_lens.services.taxonomy_prompts import (
 )
 
 
-@pytest.mark.parametrize("change", ["extra_reason", "obsolete"])
+@pytest.mark.parametrize("change", ["unknown_field", "obsolete"])
 def test_comments_reject_obsolete_response_atomically(exchange, change):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     request = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
-    if change == "extra_reason":
-        response["results"]["000003"]["classifications"][-1]["reason"] = "Obsolete output"
+    if change == "unknown_field":
+        response["results"]["000003"]["classifications"][-1]["unknown_field"] = "Unsupported output"
     else:
         response["manifest"]["instructions_version"] = "obsolete"
     with pytest.raises(ValueError):

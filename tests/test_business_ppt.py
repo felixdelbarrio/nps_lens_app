@@ -403,7 +403,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         )
     )
     causal_slide = prs.slides[6]
-    assert causal_slide.shapes[4].text == "SCORE MEDIO ENLAZADO"
+    assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
     assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
     assert causal_slide.shapes[2].text == ""
     assert causal_slide.shapes[5].text == ""

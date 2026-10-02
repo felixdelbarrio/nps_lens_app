@@ -29,6 +29,10 @@ CRITERIO SEMÁNTICO COMÚN
 4. Respeta negaciones, correcciones y componentes validados correctamente.
 5. Una valoración genérica sin tema concreto pertenece a Experiencia global.
 6. Información insuficiente: solo si el significado no puede determinarse.
+Un texto corto interpretable nunca es insuficiente: «PÉSIMO» = Experiencia global;
+«No funciona bien la página» = disponibilidad/error; «Muy lenta» = rendimiento;
+«No funcionó el token» = credenciales/token. «NO» puede ser insuficiente.
+Si falta una categoría adecuada usa Tema no cubierto, nunca inventes una categoría.
 7. Tema no cubierto: significado claro sin categoría que lo represente.
 8. Ante varias categorías plausibles, elige el síntoma principal explícito,
    no una palabra incidental, título, plantilla o metadato administrativo.
@@ -64,6 +68,15 @@ REGLAS
 - Clasifica qué ocurre, no dónde: journey, producto, servicio, canal, departamento
   y tecnología no son categorías por defecto. No segmentes por sentimiento, nota,
   identidad, frecuencia, lote ni comentario. Describe lo observado, no causas supuestas.
+- Separa tarea afectada, síntoma observado, causa técnica confirmada, canal,
+  severidad y resultado NPS. Solo tarea/síntoma definen la categoría; los demás
+  son contexto, nunca causas inferidas. Cada subpalanca implica una acción correctiva
+  distinta y una frontera explícita; no mezcla síntomas heterogéneos.
+- Evita «Uso», «Diseño UX» y «No funciona bien/falla» como cajones genéricos.
+  Distingue, si el corpus lo sustenta, cierre de sesión, token en blanco,
+  transferencia inmediata no disponible, sueldos bloqueados, depósito de cheque
+  no disponible, carga documental fallida, interrupción por encuesta, lentitud,
+  saldo no actualizado y descarga de comprobante no disponible.
 - Audita fronteras con positivos, negativos, negaciones, casos ambiguos y multitema.
   Evita duplicados, cajones de sastre y categorías mayoritarias no interpretables.
 - Una opinión genérica inteligible («bien», «mal») requiere Experiencia global /
@@ -127,6 +140,10 @@ local limita candidatos y temporalidad; ser candidato no demuestra un vínculo.
 manifest.taxonomy_fingerprint identifica exactamente el catálogo semántico utilizado.
 
 ASIGNACIÓN
+- Prioridad: descripción narrativa, síntoma, tarea, causa confirmada, resolución;
+  routing Helix y título administrativo solo son contexto. Si el título dice
+  «Acceso / Claves / Token» pero la descripción dice «no tiene opción de depósito
+  de cheque», clasifica Cheques / Depósito de cheque físico no disponible si existe.
 - Para cada incidencia devuelve primary según la descripción explícita. secondary
   admite 0–2 IDs conocidos solo para síntomas independientes, nunca duda. Distingue
   tarea, síntoma, alcance, estado, resolución y causa confirmada. Una petición no es
@@ -144,12 +161,14 @@ SALIDA
 ZIP con manifest.json y results/NNNNNN.json por lote:
 {"classifications":[{"id":"ID","primary":"c003","secondary":["c008"],
 "links":[{"nps_id":"ID","confidence":0.85,
-"incident_quote":"cita","comment_quote":"cita"}]}]}.
+"incident_quote":"cita","comment_quote":"cita","same_task":true,
+"same_symptom":true,"affected_task":"tarea explícita","observed_symptom":"síntoma explícito"}]}]}.
+Valida same_task y same_symptom por significado en ambas citas, nunca por categoría.
+Conserva tarea y síntoma breves, sin nombres ni identificadores personales.
 No incluyas reason, rationale ni evidence de clasificación. Conserva todos los IDs
 una vez y en orden. No uses etiquetas, lever/sublever, primary_classification ni
 secondary_classifications; no incluyas corpus, taxonomías, carpetas o archivos extra.
-Procesa todos los lotes completos posibles; ante un límite real entrega solo los
-terminados e indica cuáles faltan. Cada ZIP es independiente. Conserva índice/total:
+Ante un límite entrega lotes completos e indica los pendientes. Conserva índice/total:
 1_3_incidencias_helix.zip -> 1_3_incidencias_helix_clasificadas.zip.
 Antes de entregar valida campos, catálogo, citas, links, conteos, IDs y orden.
 """

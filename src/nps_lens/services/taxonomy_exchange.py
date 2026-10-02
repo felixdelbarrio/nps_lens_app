@@ -16,6 +16,7 @@ from typing import Any, Iterable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from nps_lens.analytics.signal_quality import audit_classifications
 from nps_lens.analytics.taxonomy import signature
 from nps_lens.domain.models import UploadContext
 from nps_lens.platform.downloads import persist_download
@@ -158,9 +159,7 @@ def normalize_reserve_secondaries(
     deterministic contradiction; unknown categories, duplicate topics and every other
     semantic/schema error remain strict and are rejected by ``expand``.
     """
-    fallback_ids = {
-        key for key, category in catalog.items() if category["lever"] == FALLBACK_LEVER
-    }
+    fallback_ids = {key for key, category in catalog.items() if category["lever"] == FALLBACK_LEVER}
     if not fallback_ids:
         return response
 
@@ -751,6 +750,15 @@ class TaxonomyExchange:
                                 "Un comentario ya tiene una respuesta diferente para esa taxonomía."
                             )
                         merged[business_key] = value
+            audit = audit_classifications(
+                dict(zip(frame["_business_key"], frame["Comment"].fillna(""))), merged
+            )
+            if audit["review_required"]:
+                raise ValueError(
+                    f"Clasificación sospechosa: {audit['suspicious_count']} comentarios interpretables en Información insuficiente. "
+                    "Revisa y regenera la clasificación; no se importó ningún cambio. "
+                    f"IDs para auditoría: {', '.join(audit['suspicious_ids'][:20])}"
+                )
             self._persist_assignments(db, context, frame, job, merged)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
@@ -763,6 +771,7 @@ class TaxonomyExchange:
             )
         self._clear_caches()
         return {
+            "classification_audit": audit,
             "job_id": job["id"],
             "stage": job["stage"],
             "received": len(existing),

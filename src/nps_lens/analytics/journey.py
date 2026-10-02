@@ -6,6 +6,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from nps_lens.analytics.signal_quality import actionable_rows
+
 
 @dataclass(frozen=True)
 class RouteCandidate:
@@ -26,7 +28,7 @@ def build_routes(
     """MVP journey routes:
     palanca -> subpalanca -> topic -> incident_category (if incidents provided)
     """
-    data = nps_df.copy()
+    data = actionable_rows(nps_df)
     data["is_detractor"] = (pd.to_numeric(data["NPS"], errors="coerce") <= 6).astype(int)
     data["topic"] = data[sublever_col].fillna("")
 
