@@ -86,6 +86,6 @@ it("uses server confidence labels without changing the existing table payload", 
   };
   render(<LinkingWorkspace linking={linking} tab="entity-summary" onTabChange={() => {}} />);
   expect(screen.getByRole("columnheader", { name: "CONFIANZA SEMÁNTICA" })).toBeInTheDocument();
-  expect(screen.getByText("90%")).toBeInTheDocument();
+  expect(screen.getByText("90,0%")).toBeInTheDocument();
   expect(table[0]["Similitud textual"]).toBe("90%");
 });

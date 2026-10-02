@@ -14,6 +14,7 @@ src/nps_lens.egg-info/requires.txt
 src/nps_lens.egg-info/top_level.txt
 src/nps_lens/analytics/__init__.py
 src/nps_lens/analytics/causal.py
+src/nps_lens/analytics/causal_evidence.py
 src/nps_lens/analytics/changepoints.py
 src/nps_lens/analytics/channel_topic_scope.py
 src/nps_lens/analytics/drivers.py
@@ -27,6 +28,7 @@ src/nps_lens/analytics/linking_diagnostics.py
 src/nps_lens/analytics/linking_policy.py
 src/nps_lens/analytics/nps_gaps.py
 src/nps_lens/analytics/nps_helix_link.py
+src/nps_lens/analytics/signal_quality.py
 src/nps_lens/analytics/taxonomy.py
 src/nps_lens/analytics/text_mining.py
 src/nps_lens/api/__init__.py
@@ -53,6 +55,7 @@ src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
 src/nps_lens/domain/models.py
 src/nps_lens/domain/normalization.py
+src/nps_lens/domain/privacy.py
 src/nps_lens/domain/publication_scope.py
 src/nps_lens/domain/record_identity.py
 src/nps_lens/ingest/__init__.py
@@ -85,6 +88,7 @@ src/nps_lens/platform/webapp_preview.py
 src/nps_lens/quality/__init__.py
 src/nps_lens/quality/profiling.py
 src/nps_lens/reports/__init__.py
+src/nps_lens/reports/coherence.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
 src/nps_lens/reports/executive_newsletter.py
@@ -145,6 +149,7 @@ tests/test_iteration28_taxonomy_helix.py
 tests/test_iteration30_workflows.py
 tests/test_iteration31_exchange.py
 tests/test_iteration32_semantics.py
+tests/test_iteration33_evidence.py
 tests/test_knowledge_cache.py
 tests/test_linking_precision.py
 tests/test_llm_insight_response.py

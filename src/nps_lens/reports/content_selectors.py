@@ -9,6 +9,7 @@ import pandas as pd
 
 from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.signal_quality import actionable_rows
+from nps_lens.reports.coherence import validate_delta_rows
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
 
     if delta_df is None or delta_df.empty:
         return pd.DataFrame(columns=getattr(delta_df, "columns", []))
+    validate_delta_rows(delta_df.to_dict("records"))
     work = actionable_rows(delta_df)
     work["delta_nps"] = _numeric_series(work, "delta_nps")
     work["n_current"] = _numeric_series(work, "n_current").fillna(0.0)

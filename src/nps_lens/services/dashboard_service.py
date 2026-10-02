@@ -1935,6 +1935,25 @@ class DashboardService:
         }
         artifacts: dict[str, dict[str, Any]] = {}
         comment_date = incident_date = "No aplica (reglas/fuente)"
+        if mode == "DISCOVERED":
+            comment_artifact = self.taxonomy.classification_artifact(context, mode)
+            if comment_artifact.get("taxonomy_fingerprint") != fingerprint:
+                raise ReportCoherenceError(
+                    "Regenera la clasificación de comentarios con la taxonomía diseñada activa."
+                )
+            visible = self.comments_scope(
+                self._load_nps_df(context),
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                nps_group=POP_ALL,
+            )
+            valid = TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
+            if len(valid) != len(visible):
+                raise ReportCoherenceError(
+                    "Regenera la clasificación de comentarios: hay asignaciones ausentes o desactualizadas en el ámbito del reporte."
+                )
+            comment_date = comment_artifact.get("created_at", "Fecha no disponible")
         for kind, preference, label in (
             ("comments", "comment_engine", "comentarios"),
             ("helix", "causal_engine", "incidencias Helix"),

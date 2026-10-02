@@ -60,6 +60,12 @@ def exported(path):
 
 @pytest.fixture(name="exchange")
 def exchange_fixture(tmp_path, monkeypatch):
+    # Settings.from_env() intentionally requires an explicit service-origin hierarchy.
+    # Keep this shared fixture hermetic instead of relying on a developer/CI .env.
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "Bank")
+    monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"Bank":["Web"]}')
+    monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "Bank")
+    monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN_N1", "Web")
     settings = replace(
         Settings.from_env(),
         database_path=tmp_path / "test.db",

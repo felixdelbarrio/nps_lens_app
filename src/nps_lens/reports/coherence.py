@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Mapping
+from typing import Any, Hashable, Iterable, Mapping
 
 
 class ReportCoherenceError(ValueError):
@@ -39,7 +39,7 @@ def assert_metric_equal(headline: Any, table: Any, name: str) -> None:
         a, b = float(headline), float(table)
         if math.isnan(a) and math.isnan(b):
             return
-        if math.isclose(a, b, abs_tol=1e-8, rel_tol=1e-8):
+        if math.isfinite(a) and math.isfinite(b) and math.isclose(a, b, abs_tol=1e-8, rel_tol=1e-8):
             return
     except (TypeError, ValueError):
         pass
@@ -55,6 +55,17 @@ def validate_metric_payload(payload: Any) -> None:
             validate_metric_payload(item)
     elif isinstance(payload, dict):
         actual, baseline, deltas = (payload.get(k) for k in ("kpis", "base_kpis", "deltas"))
+        for values in (actual, baseline):
+            if isinstance(values, dict):
+                pro, det, neutral = (
+                    values.get(k) for k in ("promoter_rate", "detractor_rate", "neutral_rate")
+                )
+                if pro is not None and det is not None and values.get("classic_nps") is not None:
+                    assert_metric_equal(
+                        values["classic_nps"], (pro - det) * 100, "NPS clásico y pesos porcentuales"
+                    )
+                if pro is not None and det is not None and neutral is not None:
+                    assert_metric_equal(pro + det + neutral, 1, "Pesos porcentuales")
         if isinstance(actual, dict) and isinstance(baseline, dict) and isinstance(deltas, dict):
             for name, delta in deltas.items():
                 a, b = actual.get(name), baseline.get(name)
@@ -77,3 +88,15 @@ def validate_metric_payload(payload: Any) -> None:
         for value in payload.values():
             if isinstance(value, (dict, list)):
                 validate_metric_payload(value)
+
+
+def validate_delta_rows(rows: Iterable[Mapping[Hashable, Any]]) -> None:
+    for row in rows:
+        if all(key in row for key in ("delta_nps", "nps_current", "nps_baseline")):
+            current, baseline = row["nps_current"], row["nps_baseline"]
+            expected = (
+                float(current) - float(baseline)
+                if current is not None and baseline is not None
+                else None
+            )
+            assert_metric_equal(row["delta_nps"], expected, "Delta NPS por tema")

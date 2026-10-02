@@ -49,7 +49,7 @@ from nps_lens.design.tokens import (
 from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
-from nps_lens.reports.coherence import validate_metric_payload
+from nps_lens.reports.coherence import assert_metric_equal, validate_metric_payload
 from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
     select_negative_delta_rows,
@@ -779,7 +779,7 @@ def _build_topic_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> 
     required = {dimension, "NPS"}
     if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
         return pd.DataFrame(columns=cols)
-    work = _normalize_presentation_categories(source_df, columns=[dimension])
+    work = _normalize_presentation_categories(actionable_rows(source_df), columns=[dimension])
     work = work.dropna(subset=[dimension, "NPS"]).copy()
     work[dimension] = work[dimension].astype(str).str.strip()
     work["NPS"] = valid_nps_scores(work["NPS"])
@@ -2816,6 +2816,14 @@ def _fill_template_deck(
 
     comparison = prs.slides[1]
     delta = _safe_float(context.overview.get("classic_delta"), default=float("nan"))
+    table_delta = _dict_payload(
+        _dict_payload(_dict_payload(context.period_kpis.get("period")).get("deltas")).get(
+            "classic_nps"
+        )
+    ).get("value")
+    assert_metric_equal(
+        delta, table_delta if table_delta is not None else float("nan"), "Titular NPS mensual"
+    )
     _set_template_text(
         comparison.shapes[4],
         f"Evolución del NPS clásico mensual ({_safe_date(context.period_start)} a {_safe_date(context.period_end)})",
@@ -3076,6 +3084,10 @@ def _fill_template_deck(
         title = str(row.get("nps_topic") or f"Escenario de evidencia {offset + 1}").replace(
             " > ", " / "
         )
+        task = str(row.get("affected_task") or "")
+        symptom = str(row.get("observed_symptom") or "")
+        if task and symptom and task != "Tarea pendiente de validación":
+            title = f"{task} → {symptom}"
         title_shape = slide.shapes[1]
         full_title = title
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
@@ -3129,13 +3141,18 @@ def _fill_template_deck(
         slide.shapes[9].left = Inches(0.38)
         slide.shapes[9].top = Inches(4.90)
         slide.shapes[9].width = Inches(9.37)
-        slide.shapes[9].height = Inches(0.48)
+        slide.shapes[9].height = Inches(0.58)
         slide.shapes[9].fill.solid()
         slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}",
-            size=11,
+            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}"
+            + (
+                f"\n{row['operational_recommendation']}"
+                if row.get("operational_recommendation")
+                else ""
+            ),
+            size=9,
             bold=True,
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
@@ -3223,6 +3240,8 @@ def generate_business_review_ppt(
     if not REPORT_TEMPLATE.exists():
         raise FileNotFoundError(f"No se encuentra la plantilla ejecutiva: {REPORT_TEMPLATE}")
     prs = Presentation(str(REPORT_TEMPLATE))
+    prs.core_properties.author = "NPS Lens"
+    prs.core_properties.last_modified_by = "NPS Lens"
     prs.core_properties.subject = "NPS Lens · comentarios e incidencias"
     prs.core_properties.keywords = f"BBVA,NPS,incidencias,{REPORT_DESIGN_VERSION}"
     prs.core_properties.comments = f"NPS Lens report design: {REPORT_DESIGN_VERSION}"
@@ -3270,8 +3289,14 @@ def generate_business_review_ppt(
         f"Ámbito: {metadata.get('scope', {})}\n{quality['message']}\n"
         + " ".join(quality["warnings"])
     )
-    for slide in prs.slides:
-        slide.notes_slide.notes_text_frame.text = report_note
+    for index, slide in enumerate(prs.slides):
+        scenario_note = ""
+        if index >= 6 and index - 6 < len(context.causal.scenarios):
+            row = context.causal.scenarios[index - 6].row
+            scenario_note = (
+                "\n" + str(row.get("chain_story", "")) + "\n" + str(row.get("evidence_reason", ""))
+            )
+        slide.notes_slide.notes_text_frame.text = report_note + scenario_note
     prs.save(buff)
     content = buff.getvalue()
     compact_prs = Presentation(BytesIO(content))

@@ -166,7 +166,7 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
         "group": "DETRACTOR",
         "palanca": "Acceso",
         "subpalanca": "Login",
-        "comment": "no puedo entrar a la aplicacion de empresas",
+        "comment": "No puedo entrar a la aplicación de empresas",
     }
     assert "5 incidencias Helix" in out.iloc[0]["chain_story"]
     assert "5 comentarios afectados" in out.iloc[0]["chain_story"]
