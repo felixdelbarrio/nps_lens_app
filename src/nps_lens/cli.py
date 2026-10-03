@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Annotated
 
 import typer
 import uvicorn
@@ -26,8 +26,8 @@ def _service() -> NpsService:
 
 @app.command()
 def serve(
-    host: Optional[str] = typer.Option(None, help="API host"),
-    port: Optional[int] = typer.Option(None, help="API port"),
+    host: Annotated[str | None, typer.Option("--host", help="API host")] = None,
+    port: Annotated[int | None, typer.Option("--port", help="API port")] = None,
 ) -> None:
     load_runtime_dotenv()
     settings = Settings.from_env()
@@ -42,10 +42,10 @@ def serve(
 
 @app.command()
 def ingest(
-    excel_path: Path = typer.Argument(..., exists=True),
-    service_origin: Optional[str] = typer.Option(None),
-    service_origin_n1: Optional[str] = typer.Option(None),
-    service_origin_n2: str = typer.Option(""),
+    excel_path: Annotated[Path, typer.Argument(exists=True)],
+    service_origin: Annotated[str | None, typer.Option("--service-origin")] = None,
+    service_origin_n1: Annotated[str | None, typer.Option("--service-origin-n1")] = None,
+    service_origin_n2: Annotated[str, typer.Option("--service-origin-n2")] = "",
 ) -> None:
     service = _service()
     context = UploadContext(
@@ -63,9 +63,9 @@ def ingest(
 
 @app.command()
 def summary(
-    service_origin: Optional[str] = typer.Option(None),
-    service_origin_n1: Optional[str] = typer.Option(None),
-    service_origin_n2: str = typer.Option(""),
+    service_origin: Annotated[str | None, typer.Option("--service-origin")] = None,
+    service_origin_n1: Annotated[str | None, typer.Option("--service-origin-n1")] = None,
+    service_origin_n2: Annotated[str, typer.Option("--service-origin-n2")] = "",
 ) -> None:
     service = _service()
     context = None
