@@ -518,7 +518,15 @@ class DashboardService:
                 return cached
             frame = self.taxonomy.resolve(context)
             requested = self.taxonomy.lens_override or self.taxonomy.state(context)["active"]
-            frame.attrs["classification_pending"] = frame.attrs.get("taxonomy_mode") != requested
+            frame.attrs["classification_pending"] = frame.attrs.get(
+                "taxonomy_mode"
+            ) != requested or (
+                (requested != "SOURCE" or frame.attrs.get("classification_engine") == "llm")
+                and bool(
+                    frame["Palanca"].fillna("").eq("").all()
+                    or frame["Subpalanca"].fillna("").eq("").all()
+                )
+            )
             frame["match_status"] = nps_matchable_mask(frame).map(
                 {True: "matchable", False: "non_matchable"}
             )

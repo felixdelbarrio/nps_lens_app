@@ -161,7 +161,7 @@ def test_source_does_not_satisfy_pending_discovered_and_export_is_diagnosed(heli
     active = service._load_nps_df(ctx)
     assert active.attrs["classification_pending"]
     assert active.match_status.eq("non_matchable").all()
-    payload = service.linking_payload(context=ctx)
+    payload = service.linking_dashboard(context=ctx)
     assert payload["diagnostics"]["evaluation_state"] == "NOT_EVALUATED"
     assert payload["diagnostics"]["evaluation_reason"] == "classification_pending"
     assert payload["diagnostics"]["nps_matchable"] == 0
