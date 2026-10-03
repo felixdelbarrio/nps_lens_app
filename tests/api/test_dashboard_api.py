@@ -554,7 +554,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Incident Summary",
         "Detractor Comment",
         "Tasa Foco",
-        "Similarity",
+        "Similitud textual",
+        "Confianza semántica",
     ]
     identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
     assert [row["label"] for row in identity] == [

@@ -12,6 +12,7 @@ import pandas as pd
 
 from nps_lens.analytics.causal_evidence import (
     CausalEvidenceEvaluator,
+    engine_quality,
     link_confidence_label,
     scenario_impact_score,
 )
@@ -201,6 +202,7 @@ def summarize_attribution_chains(attribution_df: Optional[pd.DataFrame]) -> dict
 
 
 BROKEN_JOURNEY_COLUMNS = [
+    "causal_engine",
     "journey_id",
     "journey_label",
     "touchpoint",
@@ -999,6 +1001,11 @@ def build_broken_journey_catalog(
         cluster_rows.append(
             {
                 "journey_cluster": int(cluster_id),
+                "causal_engine": (
+                    "llm"
+                    if "causal_engine" in grp and grp["causal_engine"].eq("llm").all()
+                    else "rules"
+                ),
                 "journey_label": label,
                 "touchpoint": touchpoint,
                 "palanca": palanca,
@@ -1033,8 +1040,9 @@ def build_broken_journey_catalog(
     if catalog.empty:
         return _empty_broken_journey_df(), pd.DataFrame()
 
+    catalog["__quality"] = catalog.apply(engine_quality, axis=1)
     catalog = catalog.sort_values(
-        ["linked_incidents", "linked_comments", "avg_text_similarity", "journey_label"],
+        ["linked_incidents", "linked_comments", "__quality", "journey_label"],
         ascending=[False, False, False, True],
     ).reset_index(drop=True)
     catalog["journey_id"] = [
@@ -1049,6 +1057,7 @@ def build_broken_journey_catalog(
     catalog = catalog[
         [
             "journey_cluster",
+            "causal_engine",
             "journey_id",
             "journey_label",
             "touchpoint",

@@ -1441,6 +1441,8 @@ class DashboardService:
         ).hexdigest()
         evidence_signature = (
             frame_signature,
+            self.taxonomy.lens_override or self.taxonomy.state(context)["active"],
+            active_frame.attrs.get("classification_pending", False),
             active_frame.attrs["classification_signature"],
             self._data_revision(context)[2],
             json.dumps(self.settings.service_origin_n2_map, sort_keys=True),
@@ -1513,7 +1515,7 @@ class DashboardService:
             base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
             if active_frame.attrs.get("classification_pending") or (
                 (
-                    active_frame.attrs.get("taxonomy_mode") != "SOURCE"
+                    active_frame.attrs.get("taxonomy_mode", "SOURCE") != "SOURCE"
                     or active_frame.attrs.get("classification_engine") == "llm"
                 )
                 and bool(
