@@ -1,6 +1,6 @@
 """NPS Lens — multi-fuente VoC analytics (NPS + texto + incidencias).
 
-This package is designed to run on Python 3.9.x in corporate environments.
+This package is designed to run on Python 3.12.x in corporate environments.
 """
 
 __all__ = ["__version__", "PIPELINE_VERSION"]

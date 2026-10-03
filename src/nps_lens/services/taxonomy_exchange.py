@@ -359,6 +359,7 @@ class TaxonomyExchange:
                     zip(
                         frame["_business_key"].astype(str),
                         frame["Comment"].astype("string").fillna(""),
+                        strict=False,
                     )
                 ),
             ]
@@ -437,7 +438,7 @@ class TaxonomyExchange:
         ):
             return {}
         hashes = artifact.get("comment_hashes", {})
-        comments = dict(zip(frame["_business_key"], frame["Comment"].fillna("")))
+        comments = dict(zip(frame["_business_key"], frame["Comment"].fillna(""), strict=False))
         secondary = artifact.get("secondary_classifications", {})
         by_key = {
             key: {
@@ -445,7 +446,10 @@ class TaxonomyExchange:
                 "secondary_classifications": secondary.get(key, []),
             }
             for key, lever, sub in zip(
-                artifact.get("keys", []), artifact.get("lever", []), artifact.get("sublever", [])
+                artifact.get("keys", []),
+                artifact.get("lever", []),
+                artifact.get("sublever", []),
+                strict=False,
             )
             if lever and sub and lever.strip() and sub.strip()
         }
@@ -562,7 +566,9 @@ class TaxonomyExchange:
                     self._clear_caches()
                     frame = frame.loc[~frame["_business_key"].isin(retained)]
             # Sorted business keys choose stable representatives; text is never normalized.
-            for key, comment in zip(frame["_business_key"], frame["Comment"].fillna("")):
+            for key, comment in zip(
+                frame["_business_key"], frame["Comment"].fillna(""), strict=False
+            ):
                 if comment in groups:
                     groups[comment].append(key)
                 else:
@@ -668,6 +674,11 @@ class TaxonomyExchange:
                 raise ValueError("La revisión contiene evidencia ajena al corpus.")
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
+            proposed = taxonomy.model_dump(exclude={"review"})
+            if state["active"] == "DISCOVERED" and state.get("discovered_taxonomy") != proposed:
+                state["proposed_discovered_taxonomy"] = proposed
+                self.taxonomy.save_state(context, state)
+                return {"stage": "designer", "imported": True, "activation_required": True}
             state["discovered_taxonomy"] = taxonomy.model_dump(exclude={"review"})
             state["taxonomy_fingerprint"] = taxonomy_fingerprint(state["discovered_taxonomy"])
             state["designer_review"] = taxonomy.review.model_dump()
@@ -751,7 +762,7 @@ class TaxonomyExchange:
                             )
                         merged[business_key] = value
             audit = audit_classifications(
-                dict(zip(frame["_business_key"], frame["Comment"].fillna(""))), merged
+                dict(zip(frame["_business_key"], frame["Comment"].fillna(""), strict=False)), merged
             )
             if audit["review_required"]:
                 raise ValueError(
@@ -804,16 +815,19 @@ class TaxonomyExchange:
             "manual_revision": job["manual_revision"],
             "instructions_version": job["instructions_version"],
         }
-        sig = signature(frame, "DISCOVERED", config)
+        sig = signature(frame, "DISCOVERED", {**config, "assignments": merged})
         artifact = {
-            "mode": "DISCOVERED",
+            "mode": mode,
+            "engine": "llm",
+            "prompt_version": job["instructions_version"],
+            "model_version": None,
             "signature": sig,
             "keys": frame["_business_key"].tolist(),
             "config": config,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "lever": [row["lever"] for row in assignments],
             "sublever": [row["sublever"] for row in assignments],
-            "provenance": ["chatgpt_zip"] * len(assignments),
+            "provenance": ["llm"] * len(assignments),
             "secondary_classifications": {
                 key: row["secondary_classifications"]
                 for key, row in merged.items()
@@ -824,15 +838,17 @@ class TaxonomyExchange:
             "taxonomy": job["taxonomy"],
             "comment_hashes": {
                 key: comment_classification_fingerprint(comment)
-                for key, comment in zip(frame["_business_key"], frame["Comment"].fillna(""))
+                for key, comment in zip(
+                    frame["_business_key"], frame["Comment"].fillna(""), strict=False
+                )
             },
             "equivalences": {},
         }
         state = self.taxonomy.state(context)
         state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[mode] = sig
         db.execute(
-            "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
-            (sig, context_key(context), "DISCOVERED", encode(artifact).decode()),
+            "INSERT OR IGNORE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+            (sig, context_key(context), mode, encode(artifact).decode()),
         )
         db.execute(
             "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",

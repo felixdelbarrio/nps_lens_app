@@ -19,7 +19,7 @@
   const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen de evidencia'],['scenarios','Análisis de escenarios de evidencia']];
   const settingsViews = [['evolution','Evolución NPS'],['telemetry','Telemetría'],['adoption','Adopción'],['publication','Publicación']];
   let linkingViews = rows(linking.navigation).length ? rows(linking.navigation).map(item => [item.id, item.label]) : fallbackLinkingViews;
-  const insightSections = [...(viewer.evolutionNpsVisible===false?[]:[['summary','Evolución NPS']]),['nps-analysis','Comentarios'],['linking','Causalidad']];
+  const insightSections = [...(viewer.evolutionNpsVisible===false?[]:[['summary','Evolución NPS']]),['nps-analysis','Comentarios'],['linking','Evidencia Helix ↔ VoC']];
   const areas = [
     {id:'insights',label:'Insights',sections:insightSections},
     {id:'data',label:'Datos',sections:[['nps','NPS'],['helix','Helix']]}

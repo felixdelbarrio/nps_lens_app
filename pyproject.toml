@@ -7,7 +7,7 @@ name = "nps-lens"
 version = "0.1.0"
 description = "NPS Lens — análisis avanzado de NPS + VoC multi-fuente (MVP Senda MX)."
 readme = "README.md"
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.12,<3.13"
 
 dependencies = [
   "pandas>=2.0,<2.3",
@@ -18,17 +18,13 @@ dependencies = [
   "fastapi>=0.115,<1.0",
   "uvicorn>=0.30,<1.0",
   "python-multipart>=0.0.9,<0.1",
-  "typer>=0.12,<0.13",
+  "typer>=0.27.2,<0.28",
   "rich>=13.0,<14.0",
   "plotly>=5.18,<6.0",
   "python-pptx>=1.0.2,<2.0",
   "kaleido>=0.2.1,<0.3.0",
   "scikit-learn>=1.3,<1.6",
-  "statsmodels>=0.14,<0.15",
-  "networkx>=3.1,<3.4",
-  "ruptures>=1.1.8,<2.0",
   "openpyxl>=3.1,<3.2",
-  "typing_extensions>=4.7,<5.0",
 ]
 [[project.authors]]
 name = "NPS Lens"
@@ -60,15 +56,15 @@ nps-lens = "nps_lens.cli:app"
 
 [tool.black]
 line-length = 100
-target-version = [ "py39",]
+target-version = [ "py312",]
 
 [tool.ruff]
 line-length = 240
-target-version = "py39"
+target-version = "py312"
 fix = true
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 strict = true
 warn_unused_configs = true
 files = ["src/nps_lens"]
@@ -87,11 +83,10 @@ module = [
   "nps_lens.reports.executive_ppt",
   "nps_lens.core.store",
   "nps_lens.platform.*",
-  "nps_lens.application.service",
 ]
 ignore_errors = true
 [[tool.mypy.overrides]]
-module = [ "ruptures.*", "networkx.*", "statsmodels.*", "sklearn.*", "plotly.*", "webview.*",]
+module = [ "sklearn.*", "plotly.*", "webview.*",]
 ignore_missing_imports = true
 
 [tool.setuptools.package-dir]
@@ -103,7 +98,6 @@ ignore = [ "PLR0913", "PLR2004", "UP007",]
 
 [tool.ruff.lint.per-file-ignores]
 "src/nps_lens/api/app.py" = ["B008"]
-"src/nps_lens/cli.py" = ["B008"]
 
 [tool.pytest.ini_options]
 addopts = "-q --cov=src/nps_lens --cov-report=term-missing --cov-fail-under=80"
@@ -123,17 +117,8 @@ omit = [
   "src/nps_lens/logging.py",
   "src/nps_lens/cli.py",
   "src/nps_lens/desktop.py",
-  "src/nps_lens/platform/batch.py",
-  "src/nps_lens/analytics/changepoints.py",
-  "src/nps_lens/analytics/causal.py",
-  "src/nps_lens/analytics/journey.py",
   "src/nps_lens/analytics/nps_helix_link.py",
-  "src/nps_lens/llm/client.py",
-  "src/nps_lens/llm/pack.py",
-  "src/nps_lens/llm/schemas.py",
-  "src/nps_lens/ingest/incidents.py",
   "src/nps_lens/ingest/nps_thermal.py",
-  "src/nps_lens/ingest/reviews.py",
 ]
 
 [tool.coverage.report]

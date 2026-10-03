@@ -39,3 +39,6 @@ LINK_MAX_DAYS_APART = 90
 # Evidence samples are bounded; totals and organization metrics use all accepted pairs.
 LINK_MAX_VISIBLE_INCIDENTS = 50
 LINK_MAX_VISIBLE_COMMENTS = 50
+
+LINK_MAX_FEATURES = 50000
+LINK_EVIDENCE_CHUNK_SIZE = 128

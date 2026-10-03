@@ -145,6 +145,7 @@ def test_empty_linking_dashboard_exposes_scope_funnel(tmp_path: Path, monkeypatc
             "summary": ["error login"],
         }
     )
+    nps.attrs["classification_signature"] = "source-test"
     monkeypatch.setattr(service, "_load_nps_df", lambda _: nps)
     monkeypatch.setattr(
         service,

@@ -136,7 +136,7 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
     assert executive_ppt._period_overview(frame)["pain_point"] == "Token"
 
 
-def test_impact_promotes_severity_and_evidence_over_volume():
+def test_ranking_prioritizes_unique_incidents_before_semantic_quality():
     strong = dict(
         nps_topic="Token",
         linked_comments=8,
@@ -160,7 +160,7 @@ def test_impact_promotes_severity_and_evidence_over_volume():
     reserve = strong | dict(nps_topic="Sin clasificación temática > Información insuficiente")
     assert scenario_impact_score(strong) > scenario_impact_score(weak)
     result = select_causal_scenarios(pd.DataFrame([weak, reserve, strong]), max_rows=10)
-    assert result.nps_topic.tolist() == ["Token", "Lentitud"]
+    assert result.nps_topic.tolist() == ["Lentitud", "Token"]
     assert select_causal_scenarios(pd.DataFrame([reserve]), max_rows=10).empty
 
 
@@ -333,7 +333,7 @@ def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(mo
     text = "\n".join(
         shape.text for slide in deck.slides for shape in slide.shapes if shape.has_text_frame
     )
-    assert "CONFIANZA SEMÁNTICA" in text
+    assert "SIMILITUD SEMÁNTICA" in text
     assert "NOTA MEDIA DE COMENTARIOS ENLAZADOS" in text
     assert "No demuestran causalidad" not in text
     for secret in ("12345678", "Acme", "Juan Pérez", "juan@example", "4444", "ABC999"):
@@ -419,3 +419,52 @@ def test_reporting_rejects_selected_llm_engine_instead_of_silent_rules_fallback(
         service.generate_ppt_report(
             context=ctx, pop_year="2026", pop_month="09", score_channel="Web"
         )
+
+
+def test_journey_match_rejects_generic_and_tied_signals():
+    from nps_lens.analytics.incident_attribution import _executive_journey_match
+
+    args = dict(
+        nps_topic="",
+        touchpoint="",
+        palanca="",
+        subpalanca="",
+        incident_topic="",
+        incident_summary="",
+        comment_txt="pago rechazado",
+    )
+    catalog = [{"name": "one", "keywords": ["pago"]}]
+    assert _executive_journey_match(**args, catalog=catalog) is None
+    catalog = [
+        {"name": "one", "keywords": ["pago", "rechazado"]},
+        {"name": "two", "keywords": ["pago", "rechazado"]},
+    ]
+    assert _executive_journey_match(**args, catalog=catalog) is None
+    assert _executive_journey_match(**args, catalog=catalog[:1])["name"] == "one"
+
+
+def test_links_assign_every_supported_topic_without_pair_inflation():
+    from nps_lens.analytics.nps_helix_link import link_incidents_to_nps_topics, weekly_aggregates
+
+    nps = pd.DataFrame(
+        {
+            "ID": ["a", "b", "c"],
+            "_business_key": ["a", "b", "c"],
+            "Comment": ["transferencias rechazadas"] * 3,
+            "Palanca": ["Mayoritaria", "Mayoritaria", "Minoritaria"],
+            "Subpalanca": ["Transferir"] * 3,
+            "NPS": [2] * 3,
+            "Fecha": pd.to_datetime(["2026-09-01"] * 3),
+        }
+    )
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["i"],
+            "summary": ["transferencias rechazadas"],
+            "Fecha": pd.to_datetime(["2026-09-01"]),
+        }
+    )
+    assignments, links = link_incidents_to_nps_topics(nps, helix)
+    assert len(links) == 3 and len(assignments) == 2
+    _, topics = weekly_aggregates(nps, helix, assignments)
+    assert topics.incidents.tolist() == [1, 1]

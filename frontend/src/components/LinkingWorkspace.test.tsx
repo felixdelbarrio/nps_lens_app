@@ -81,11 +81,11 @@ it("uses server confidence labels without changing the existing table payload", 
     entity_summary: {
       ...payload.entity_summary,
       table,
-      column_labels: { "Similitud textual": "CONFIANZA SEMÁNTICA" }
+      column_labels: { "Similitud textual": "SIMILITUD SEMÁNTICA" }
     }
   };
   render(<LinkingWorkspace linking={linking} tab="entity-summary" onTabChange={() => {}} />);
-  expect(screen.getByRole("columnheader", { name: "CONFIANZA SEMÁNTICA" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "SIMILITUD SEMÁNTICA" })).toBeInTheDocument();
   expect(screen.getByText("90,0%")).toBeInTheDocument();
   expect(table[0]["Similitud textual"]).toBe("90%");
 });

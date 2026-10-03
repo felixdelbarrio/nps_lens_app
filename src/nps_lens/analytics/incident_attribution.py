@@ -9,7 +9,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
 
 from nps_lens.analytics.causal_evidence import (
     CausalEvidenceEvaluator,
@@ -216,7 +215,6 @@ BROKEN_JOURNEY_COLUMNS = [
     "linked_comments",
     "avg_similarity",
     "avg_nps",
-    "semantic_cohesion",
 ]
 
 _GENERIC_LABELS = {
@@ -231,43 +229,6 @@ _GENERIC_LABELS = {
     "sincomentarios",
     "no comment",
     "no comments",
-}
-
-_BROKEN_JOURNEY_STOPWORDS = {
-    "app",
-    "apps",
-    "bbva",
-    "cliente",
-    "clientes",
-    "comentario",
-    "comentarios",
-    "con",
-    "del",
-    "desde",
-    "dia",
-    "dias",
-    "el",
-    "en",
-    "error",
-    "esta",
-    "este",
-    "la",
-    "las",
-    "los",
-    "muy",
-    "no",
-    "para",
-    "pero",
-    "portal",
-    "por",
-    "que",
-    "se",
-    "sin",
-    "sobre",
-    "una",
-    "uno",
-    "web",
-    "ya",
 }
 
 
@@ -545,35 +506,6 @@ def _broken_journey_title_case(value: object) -> str:
     return " ".join(tok.capitalize() for tok in tokens[:3]).strip()
 
 
-def _broken_journey_keywords(vectorizer: TfidfVectorizer, matrix, mask: pd.Series) -> list[str]:
-    if matrix.shape[1] == 0:
-        return []
-    feature_names = vectorizer.get_feature_names_out()
-    if len(feature_names) == 0:
-        return []
-    weights = np.asarray(matrix[mask.to_numpy()].mean(axis=0)).ravel()
-    if weights.size == 0:
-        return []
-    order = np.argsort(weights)[::-1]
-    out: list[str] = []
-    for idx in order.tolist():
-        if weights[idx] <= 0:
-            break
-        token = str(feature_names[idx]).strip().lower()
-        if (
-            not token
-            or token in _BROKEN_JOURNEY_STOPWORDS
-            or len(token) < 3
-            or token.isdigit()
-            or token.replace(" ", "") in _BROKEN_JOURNEY_STOPWORDS
-        ):
-            continue
-        out.append(token)
-        if len(out) >= 5:
-            break
-    return out
-
-
 def _touchpoint(
     palanca: object,
     subpalanca: object,
@@ -629,15 +561,23 @@ def _executive_journey_match(
     )
     best: Optional[dict[str, object]] = None
     best_score = 0
+    second_score = 0
     active_catalog = catalog or list(_default_executive_journey_catalog())
     for journey in active_catalog:
         keywords = _catalog_keywords(journey.get("keywords"))
-        score = sum(1 for kw in keywords if str(kw) in haystack)
+        score = sum(
+            1
+            for kw in keywords
+            if re.search(r"(?<!\w)" + re.escape(_norm(kw)) + r"(?!\w)", haystack)
+        )
         if score > best_score:
+            second_score = best_score
             best = dict(journey)
             best["keywords"] = keywords
             best_score = score
-    return best if best_score > 0 else None
+        else:
+            second_score = max(second_score, score)
+    return best if best_score >= 2 and best_score - second_score >= 1 else None
 
 
 def _prepare_nps_chain_ref(nps_focus_df: Optional[pd.DataFrame]) -> pd.DataFrame:
@@ -906,6 +846,7 @@ def _prepare_enriched_links(
             enriched["subpalanca"],
             enriched["incident_topic"],
             enriched["helix_source_service_n2"],
+            strict=False,
         )
     ]
     enriched = enriched.sort_values(
@@ -1014,64 +955,25 @@ def build_broken_journey_catalog(
         return _empty_broken_journey_df(), pd.DataFrame()
 
     enriched["source_nps_topic"] = enriched["nps_topic"].astype(str).str.strip()
-    enriched["semantic_text"] = (
-        enriched["palanca"].fillna("")
-        + " "
-        + enriched["subpalanca"].fillna("")
-        + " "
-        + enriched["helix_source_service_n2"].fillna("")
-        + " "
-        + enriched["incident_topic"].fillna("")
-        + " "
-        + enriched["source_nps_topic"].fillna("")
-        + " "
-        + enriched["incident_summary"].fillna("")
-        + " "
-        + enriched["comment_norm"].where(
-            enriched["comment_norm"].astype(str).str.strip().ne(""),
-            enriched["comment_txt"],
-        )
-    ).astype(str)
-
-    texts = enriched["semantic_text"].astype(str).str.strip().tolist()
-    if not texts:
-        return _empty_broken_journey_df(), pd.DataFrame()
-
-    vectorizer = TfidfVectorizer(
-        strip_accents="unicode",
-        lowercase=True,
-        ngram_range=(1, 2),
-        max_features=384,
-    )
-    try:
-        matrix = vectorizer.fit_transform(texts)
-    except ValueError:
-        # Single-character labels may have no TF-IDF vocabulary; evidence still exists.
-        vectorizer = TfidfVectorizer(vocabulary={"__empty__": 0})
-        matrix = vectorizer.fit_transform([""] * len(enriched))
     # A source route is atomic: detail and aggregate time series must share the
     # same assignment. Sorted routes and content IDs are independent of row order,
     # ranking, incident multiplicity and unrelated routes entering the window.
-    routes = list(zip(enriched["palanca"], enriched["subpalanca"]))
+    routes = list(zip(enriched["palanca"], enriched["subpalanca"], strict=False))
     route_codes = {route: idx for idx, route in enumerate(sorted(set(routes)))}
     enriched["journey_cluster"] = [route_codes[route] for route in routes]
-    enriched["semantic_score"] = 0.0
-    for positions in enriched.groupby("journey_cluster").indices.values():
-        subset = matrix[positions]
-        centroid = np.asarray(subset.mean(axis=0)).ravel()
-        norm = np.linalg.norm(centroid)
-        scores = np.asarray(subset @ centroid).ravel() / norm if norm else np.zeros(len(positions))
-        enriched.loc[enriched.index[positions], "semantic_score"] = np.clip(scores, 0, 1)
-
     cluster_rows: list[dict[str, object]] = []
     for cluster_id, grp in enriched.groupby("journey_cluster", dropna=False, observed=True):
         grp = grp.copy()
         palanca = _dominant_non_generic(grp["palanca"])
         subpalanca = _dominant_non_generic(grp["subpalanca"])
         helix_source_n2 = _dominant_non_generic(grp["helix_source_service_n2"])
-        keywords = _broken_journey_keywords(
-            vectorizer, matrix, enriched["journey_cluster"] == cluster_id
-        )
+        keywords = sorted(
+            {
+                str(term)
+                for terms in grp.get("matched_terms", pd.Series(dtype=object))
+                for term in (terms if isinstance(terms, (list, tuple)) else [])
+            }
+        )[:5]
         touchpoint = subpalanca or helix_source_n2
         if not touchpoint:
             touchpoint = " / ".join(
@@ -1091,7 +993,6 @@ def build_broken_journey_catalog(
             pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
             default=np.nan,
         )
-        semantic_cohesion = _safe_float(grp["semantic_score"].mean(), default=0.0)
         keyword_text = ", ".join(_broken_journey_title_case(word) for word in keywords[:4])
         cluster_rows.append(
             {
@@ -1120,7 +1021,6 @@ def build_broken_journey_catalog(
                 "linked_comments": linked_comments,
                 "avg_similarity": avg_similarity,
                 "avg_nps": avg_nps,
-                "semantic_cohesion": semantic_cohesion,
             }
         )
 
@@ -1129,7 +1029,7 @@ def build_broken_journey_catalog(
         return _empty_broken_journey_df(), pd.DataFrame()
 
     catalog = catalog.sort_values(
-        ["linked_pairs", "semantic_cohesion", "avg_similarity", "journey_label"],
+        ["linked_incidents", "linked_comments", "avg_similarity", "journey_label"],
         ascending=[False, False, False, True],
     ).reset_index(drop=True)
     catalog["journey_id"] = [
@@ -1159,7 +1059,6 @@ def build_broken_journey_catalog(
             "linked_comments",
             "avg_similarity",
             "avg_nps",
-            "semantic_cohesion",
         ]
     ].copy()
 
@@ -1314,6 +1213,7 @@ def build_causal_topic_map(
                 ),
                 enriched["incident_summary"],
                 enriched["comment_txt"],
+                strict=False,
             )
         ]
         enriched["entity_id"] = [
@@ -1586,6 +1486,7 @@ def build_incident_attribution_chains(
                     ),
                     enriched["incident_summary"],
                     enriched["comment_txt"],
+                    strict=False,
                 )
             ]
         enriched["journey_id"] = [
@@ -1731,11 +1632,13 @@ def build_incident_attribution_chains(
         highlights_by_incident: dict[str, set[str]] = {}
         highlights_by_comment: dict[str, set[str]] = {}
         for incident_id, terms in zip(
-            grp["incident_id"], grp.get("matched_terms", [[]] * len(grp))
+            grp["incident_id"], grp.get("matched_terms", [[]] * len(grp)), strict=False
         ):
             if isinstance(terms, (list, tuple)):
                 highlights_by_incident.setdefault(str(incident_id), set()).update(terms)
-        for comment_id, terms in zip(grp["nps_id"], grp.get("matched_terms", [[]] * len(grp))):
+        for comment_id, terms in zip(
+            grp["nps_id"], grp.get("matched_terms", [[]] * len(grp)), strict=False
+        ):
             if isinstance(terms, (list, tuple)):
                 highlights_by_comment.setdefault(str(comment_id), set()).update(terms)
         incident_records = [
@@ -1890,8 +1793,8 @@ def build_incident_attribution_chains(
     out = pd.DataFrame(rows)
     out["impact_score"] = out.apply(scenario_impact_score, axis=1)
     out = out.sort_values(
-        ["impact_score", "linked_pairs", "nps_topic"],
-        ascending=[False, False, True],
+        ["linked_incidents", "linked_comments", "impact_score", "nps_topic"],
+        ascending=[False, False, False, True],
     ).reset_index(drop=True)
     if int(top_k) > 0:
         out = out.head(int(top_k)).reset_index(drop=True)

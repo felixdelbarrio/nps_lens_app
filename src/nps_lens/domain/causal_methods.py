@@ -114,7 +114,7 @@ CAUSAL_METHOD_SPECS = {
         navigation_label="Journeys rotos",
         navigation_title="Journeys rotos",
         navigation_subtitle=(
-            "Cada escenario resume un journey roto detectado automáticamente y el touchpoint donde converge la evidencia."
+            "Cada escenario resume un journey con fricción observada y el touchpoint donde converge la evidencia."
         ),
         chart_title="Journeys rotos con más vínculos semánticos",
         table_title="Detalle de journeys rotos detectados",

@@ -19,19 +19,19 @@
 **NPS Lens** es una plataforma para convertir señales de Voz del Cliente en **insights accionables**, combinando:
 
 - **NPS** (score 0-10 + texto + palanca/subpalanca/canal/segmento)
-- **Incidencias Helix** (tickets/bugs) para correlación y causalidad pragmática
+- **Incidencias Helix** (tickets/bugs) para asociación operativa
 - (Opcional) **Reviews** (stores) / **Feedback in‑app** (roadmap)
 
-La aplicación une métricas + verbatims + evidencias multi‑fuente y genera un **LLM Deep‑Dive Pack** “copy/paste ready” para investigación asistida por LLM, con trazabilidad y versión de pipeline.
+La aplicación une métricas, verbatims y evidencia trazable; exporta PPT, newsletter y WebApp desde la clasificación activa.
 
 ---
 
 ## Para qué sirve (valor de negocio)
 
 - Detectar **drivers reales** de detracción (y también de promoción) por palanca/subpalanca/canal.
-- Priorizar **causas raíz plausibles** con *causalidad pragmática* (no solo correlación).
+- Priorizar asociaciones observadas con incidencias y comentarios únicos.
 - Construir **journeys de caída** (ruta: palanca → subpalanca → tópico → incidencia → impacto en Score).
-- Operar como **plataforma**: UI para exploración + Batch para generación de artefactos versionados.
+- Operar como **plataforma**: UI para exploración y artifacts versionados en SQLite.
 - Entregar un “paquete ejecutivo” reproducible: KPIs, hipótesis, evidencias, acciones sugeridas, trazabilidad.
 
 ---
@@ -47,15 +47,9 @@ flowchart LR
   C --> D[Mining tópicos + drivers]
   C --> E[Linking semántico
 NPS↔Helix]
-  D --> F[Hipótesis causales
-ranked]
+  D --> F[Evidencia observada]
   E --> F
-  F --> G[LLM Deep‑Dive Pack
-(Markdown + JSON)]
-  F --> H[Acciones / Experimentos]
-  G --> I[Knowledge Cache
-(aprendizaje incremental)]
-  I --> F
+  F --> H[PPT / newsletter / WebApp]
 ```
 
 ---
@@ -68,7 +62,7 @@ ranked]
   Clasifica taxonomía y Helix Classifier. Sus URLs se editan en la aplicación y se
   guardan al salir del campo. Consulta [el flujo de la iteración 28](docs/iteration28.md).
 
-- **Python 3.9.13** (entorno corporativo)
+- **Python 3.12.14** (entorno corporativo)
 - `make` (macOS / Linux)
 - (Opcional) `xcode-select --install` en macOS para builds nativas.
 
@@ -97,11 +91,6 @@ make typecheck
 make lint
 ```
 
-### Ejecutar en modo plataforma (batch)
-```bash
-make platform CONFIG=configs/batch.json
-```
-
 ### Build binaria (PyInstaller)
 - macOS / Linux (local):
 ```bash
@@ -120,7 +109,7 @@ La experiencia operativa se organiza así:
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
 - **Evolución NPS**: KPIs, evolución temporal y comparativas cruzadas afectados por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
 - **Comentarios**: filtros sincronizados de `Canal` y `Grupo Score`; contiene comentarios, cambios históricos y brechas.
-- **Causalidad**: conecta incidencias Helix y comentarios NPS mediante el método causal configurado; usa la atribución opcional N1/N2 del Canal y oculta `Grupo Score`.
+- **Evidencia Helix ↔ VoC**: conecta incidencias Helix y comentarios NPS mediante el vista de evidencia configurado; usa la atribución opcional N1/N2 del Canal y oculta `Grupo Score`.
 - **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
 
 Semántica:
@@ -129,7 +118,7 @@ Semántica:
 - **NPS clásico** es el índice `% promotores - % detractores`.
 - **NPS** se mantiene como nombre de fuente/dominio.
 
-Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se calculan siempre sobre todas las opiniones; Canal solo selecciona los tópicos o el ámbito causal. En Causalidad, una asignación opcional permite vincular valores N1/N2 de Helix a un Canal y, sin asignación, se utilizan todos los comentarios, canales e incidencias de la compañía. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
+Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se calculan siempre sobre todas las opiniones; Canal solo selecciona los tópicos o el ámbito de evidencia. En Evidencia Helix ↔ VoC, una asignación opcional permite vincular valores N1/N2 de Helix a un Canal y, sin asignación, se utilizan todos los comentarios, canales e incidencias de la compañía. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
 
 ---
 
@@ -147,7 +136,7 @@ Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se 
 ## Estructura del repo (alto nivel)
 
 - `frontend/` → UI React (exploración interactiva)
-- `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, LLM packs)
+- `src/nps_lens/` → núcleo (ingesta, analítica, linking, plataforma, clasificación semántica)
 - `tests/` → tests unitarios y de plataforma
 - `docs/` → documentación técnica y operativa
 - `.github/workflows/` → `test`, `typecheck`, `ci`, `codeql` y `release` multi-plataforma

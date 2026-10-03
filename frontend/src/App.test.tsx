@@ -275,7 +275,7 @@ const linkingPayloadAvailable = {
     },
     metadata: [
       {
-        label: "Flujo causal",
+        label: "Flujo de evidencia",
         value: "Incidencias + comentario + tópico NPS -> Journey ejecutivo -> NPS"
       },
       { label: "Foco analítico", value: "Journeys de detracción" }
@@ -581,7 +581,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO")
     );
-    await user.click(screen.getByRole("tab", { name: "Causalidad" }));
+    await user.click(screen.getByRole("tab", { name: "Evidencia Helix ↔ VoC" }));
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("App");
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
 
@@ -692,7 +692,7 @@ describe("App", () => {
       ).toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("tab", { name: "Causalidad" }));
+    await user.click(screen.getByRole("tab", { name: "Evidencia Helix ↔ VoC" }));
     await waitFor(() =>
       expect(screen.getByText("2 journeys de detracción con vínculos para detractores")).toBeInTheDocument()
     );
@@ -708,7 +708,7 @@ describe("App", () => {
     expect(
       Boolean(linksMetric.compareDocumentPosition(focusMetric) & Node.DOCUMENT_POSITION_FOLLOWING)
     ).toBe(true);
-    expect(screen.getByText(/Flujo causal:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Flujo de evidencia:/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Timeline causal (diario)" })).not.toBeInTheDocument();
     expect(
       screen.queryByText("No hay suficiente base cruzada para construir el timeline causal.")

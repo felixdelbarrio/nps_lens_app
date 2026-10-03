@@ -490,7 +490,7 @@ def select_best_business_axis_for_hotspots(
                 label_rows.append((str(lab), nlab, toks))
 
         matched_idx: set[int] = set()
-        for idx, (txt_norm, tok_set) in enumerate(zip(helix_norm, helix_tokens)):
+        for idx, (txt_norm, tok_set) in enumerate(zip(helix_norm, helix_tokens, strict=False)):
             best_label = ""
             best_score = 0.0
             for lab, nlab, ltoks in label_rows:
