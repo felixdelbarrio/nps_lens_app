@@ -148,7 +148,7 @@ def test_llm_low_overlap_export_import_and_independent_scores(helix):
 
 
 def test_source_does_not_satisfy_pending_discovered_and_export_is_diagnosed(helix):
-    handler, ctx, _, incidents, _ = helix
+    handler, ctx, _, incidents, client = helix
     from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 
     exchange = TaxonomyExchange(handler.taxonomy, handler.downloads)
@@ -157,6 +157,14 @@ def test_source_does_not_satisfy_pending_discovered_and_export_is_diagnosed(heli
     ]
     exchange.import_response(ctx, designer_zip(exchange, ctx), "designer")
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    service = client.app.state.dashboard_service
+    active = service._load_nps_df(ctx)
+    assert active.attrs["classification_pending"]
+    assert active.match_status.eq("non_matchable").all()
+    payload = service.linking_payload(context=ctx)
+    assert payload["diagnostics"]["evaluation_state"] == "NOT_EVALUATED"
+    assert payload["diagnostics"]["evaluation_reason"] == "classification_pending"
+    assert payload["diagnostics"]["nps_matchable"] == 0
     inputs = handler.inputs(ctx, incidents, "DISCOVERED")
     result = handler.export(ctx, inputs)
     assert result["diagnostics"]["evaluation_state"] == "NOT_EVALUATED"

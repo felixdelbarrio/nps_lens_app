@@ -119,6 +119,8 @@ def build_nps_text(df: pd.DataFrame) -> pd.Series:
 
 
 def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
+    if df.attrs.get("classification_pending"):
+        return pd.Series(False, index=df.index)
     return build_nps_text(df).str.contains(r"[^\W\d_]", regex=True, na=False) & ~build_nps_topic(
         df
     ).map(is_reserve_category)
