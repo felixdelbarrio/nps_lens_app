@@ -766,9 +766,7 @@ def _prepare_enriched_links(
     links["nps_id"] = (
         links.get("nps_id", pd.Series("", index=links.index)).fillna("").astype(str).str.strip()
     )
-    links["text_similarity"] = pd.to_numeric(links.get("text_similarity"), errors="coerce").fillna(
-        0.0
-    )
+    links["text_similarity"] = pd.to_numeric(links.get("text_similarity"), errors="coerce")
     links["nps_topic"] = links.get("nps_topic", "").fillna("").astype(str).str.strip()
     links = links[
         links["incident_id"].astype(str).str.strip().ne("")
@@ -937,7 +935,7 @@ def build_broken_journey_catalog(
     """Group validated links by the resolved taxonomy route, without forcing a cluster count.
 
     Equivalences belong to the upstream taxonomy resolver. These identities deliberately
-    preserve its exact labels (including SOURCE and frozen lenses). Text text_similarity
+    preserve its exact labels (including SOURCE and frozen lenses). Text similarity
     describes cohesion, never splits a route or silently merges unrelated categories.
     """
 

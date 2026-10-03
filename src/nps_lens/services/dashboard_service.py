@@ -1988,7 +1988,7 @@ class DashboardService:
                 "table_title": method_spec.table_title,
                 "table": self._serialize_rows(entity_summary_df),
                 "column_labels": {
-                    "Similitud textual": link_confidence_label(
+                    "Calidad del vínculo": link_confidence_label(
                         str(analysis.get("causal_engine", "rules"))
                     )
                 },
@@ -2646,12 +2646,12 @@ class DashboardService:
             "linked_incidents",
             "linked_comments",
             "linked_pairs",
-            "avg_text_similarity",
+            "Calidad del vínculo",
             "avg_nps",
         ]
         if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
-        summary["avg_text_similarity"] = summary.apply(engine_quality, axis=1).map(
+        summary["Calidad del vínculo"] = summary.apply(engine_quality, axis=1).map(
             format_percentage
         )
         return summary[columns].rename(
@@ -2662,7 +2662,6 @@ class DashboardService:
                 "linked_incidents": "Incidencias relacionadas",
                 "linked_comments": "Comentarios relacionados",
                 "linked_pairs": "Vínculos semánticos",
-                "avg_text_similarity": "Similitud textual",
                 "avg_nps": "Nota media (0–10)",
             }
         )
