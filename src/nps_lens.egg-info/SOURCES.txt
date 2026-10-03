@@ -121,6 +121,7 @@ tests/test_iteration30_workflows.py
 tests/test_iteration31_exchange.py
 tests/test_iteration32_semantics.py
 tests/test_iteration33_evidence.py
+tests/test_iteration35_linking.py
 tests/test_linking_precision.py
 tests/test_local_processes.py
 tests/test_normalization_registry.py

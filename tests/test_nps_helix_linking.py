@@ -45,9 +45,9 @@ def test_link_incidents_to_nps_topics_sparse_chunked_path() -> None:
     )
 
     assert not assign_df.empty
-    assert {"incident_id", "nps_topic", "similarity"}.issubset(assign_df.columns)
+    assert {"incident_id", "nps_topic", "text_similarity"}.issubset(assign_df.columns)
     assert not links_df.empty
-    assert links_df["similarity"].min() >= 0.01
+    assert links_df["text_similarity"].min() >= 0.01
 
 
 def test_link_incidents_to_nps_topics_handles_empty_text() -> None:

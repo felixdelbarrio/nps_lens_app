@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,9 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SHARED_TERMS,
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
+    evaluation_diagnostic,
+    temporal_mask,
+    temporal_scope_mask,
 )
 from nps_lens.analytics.signal_quality import is_reserve_category
 from nps_lens.analytics.text_mining import STOPWORDS_ES, preprocess_text
@@ -116,6 +119,8 @@ def build_nps_text(df: pd.DataFrame) -> pd.Series:
 
 
 def nps_matchable_mask(df: pd.DataFrame) -> pd.Series:
+    if df.attrs.get("classification_pending"):
+        return pd.Series(False, index=df.index)
     return build_nps_text(df).str.contains(r"[^\W\d_]", regex=True, na=False) & ~build_nps_topic(
         df
     ).map(is_reserve_category)
@@ -254,10 +259,11 @@ def filter_linkable_incidents(df: pd.DataFrame) -> pd.DataFrame:
 class EvidenceLink:
     nps_id: str
     incident_id: str
-    similarity: float
+    text_similarity: float
     nps_topic: str
     incident_topic: str
     matched_terms: tuple[str, ...] = ()
+    semantic_confidence: float | None = None
 
 
 def _safe_id(series: pd.Series) -> pd.Series:
@@ -267,28 +273,41 @@ def _safe_id(series: pd.Series) -> pd.Series:
 def retrieve_incident_candidates(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
-    min_similarity: float = LINK_MIN_SIMILARITY,
     max_features: int = LINK_MAX_FEATURES,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
     evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
+    acceptance: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None = None,
 ) -> pd.DataFrame:
-    """Shared batched retrieval; candidates are not semantic proof of a link."""
+    """Shared batched retrieval; acceptance is optional and runs after candidate ordering."""
 
-    if nps_detractors.empty or helix_incidents.empty:
-        return pd.DataFrame(
-            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
+    empty = pd.DataFrame(columns=EvidenceLink.__dataclass_fields__)
+    empty.attrs.update(
+        evaluation_diagnostic(
+            eligible=len(helix_incidents),
+            reason=(
+                "classification_pending"
+                if nps_detractors.attrs.get("classification_pending")
+                else "no_candidates"
+            ),
         )
+    )
+    empty.attrs["classification_signature"] = nps_detractors.attrs.get(
+        "classification_signature", ""
+    )
+    if nps_detractors.attrs.get("classification_pending"):
+        return empty
+    if nps_detractors.empty or helix_incidents.empty:
+        return empty
 
     nps_text = build_nps_text(nps_detractors)
-    matchable = nps_text.str.contains(r"[^\W\d_]", regex=True, na=False)
+    matchable = nps_matchable_mask(nps_detractors)
     nps = nps_detractors.loc[matchable].copy()
     nps_text = nps_text.loc[matchable].map(preprocess_text)
     helix = filter_linkable_incidents(helix_incidents)
+    empty.attrs.update(evaluation_diagnostic(eligible=len(helix)))
     if helix.empty or nps.empty:
-        return pd.DataFrame(
-            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-        )
+        return empty
 
     nps["nps_id"] = analytical_response_ids(nps)
     helix["incident_id"] = _safe_id(
@@ -306,23 +325,11 @@ def retrieve_incident_candidates(
     # Restrict the semantic search space before vectorisation.  Previously every incident in the
     # historical export competed for a period even when it could never pass the temporal policy.
     if max_days_apart is not None:
-        dated_nps = nps["nps_date"].dropna()
-        if not dated_nps.empty:
-            delta = pd.Timedelta(days=max(0, int(max_days_apart)))
-            relevant = helix["incident_date"].between(
-                dated_nps.min() - delta, dated_nps.max() + delta
-            )
-            helix = helix.loc[relevant].copy()
-            if helix.empty:
-                return pd.DataFrame(
-                    columns=[
-                        "nps_id",
-                        "incident_id",
-                        "similarity",
-                        "nps_topic",
-                        "incident_topic",
-                    ]
-                )
+        helix = helix.loc[
+            temporal_scope_mask(nps["nps_date"], helix["incident_date"], max_days_apart)
+        ]
+        if helix.empty:
+            return empty
 
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
@@ -333,11 +340,9 @@ def retrieve_incident_candidates(
     helix_text = helix_text.map(preprocess_text)
     corpus = nps_text.tolist() + helix_text.tolist()
     if not any(str(t).strip() for t in corpus):
-        return pd.DataFrame(
-            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-        )
+        return empty
 
-    # Literal narrative evidence only. Character fragments inflated similarity on
+    # Literal narrative evidence only. Character fragments inflated text_similarity on
     # unrelated words and accounted for most of the vectorizer's memory footprint.
     stopwords = sorted(
         {strip_accents_unicode(word) for word in STOPWORDS_ES}
@@ -394,46 +399,43 @@ def retrieve_incident_candidates(
         word_matrix = word_vec.fit_transform(corpus)
     except ValueError:
         # Empty vocabulary after cleaning
-        return pd.DataFrame(
-            columns=["nps_id", "incident_id", "similarity", "nps_topic", "incident_topic"]
-        )
+        return empty
 
     split = len(nps)
     word_nps, word_inc = word_matrix[:split], word_matrix[split:]
     incident_ids = helix["incident_id"].to_numpy()
     incident_topics = helix["incident_topic"].to_numpy()
     incident_dates = helix["incident_date"].to_numpy(dtype="datetime64[ns]")
-    # Evidence links: incident -> top detractor comments with sparse/chunked similarity.
+    # Evidence links: incident -> top detractor comments with sparse/chunked text_similarity.
     nps_ids = nps["nps_id"].to_numpy()
     nps_topics = nps["nps_topic"].to_numpy()
     nps_dates = nps["nps_date"].to_numpy(dtype="datetime64[ns]")
 
     word_features = word_vec.get_feature_names_out()
-    # Gate before top-k: two distinct shared content words, not a bigram counted twice.
-    unigram_columns = np.flatnonzero(np.char.find(word_features.astype(str), " ") < 0)
-    incidence = word_inc[:, unigram_columns].astype(bool).astype(np.int32)
-    responses = word_nps[:, unigram_columns].astype(bool).astype(np.int32)
-    specific_columns = [
-        i
-        for i, column in enumerate(unigram_columns)
-        if word_features[column] not in LINK_CONTEXT_TERMS
-    ]
-    specific_incidence = incidence[:, specific_columns]
-    specific_responses = responses[:, specific_columns]
+    if acceptance is not None:
+        unigram_columns = np.flatnonzero(np.char.find(word_features.astype(str), " ") < 0)
+        incidence = word_inc[:, unigram_columns].astype(bool).astype(np.int32)
+        responses = word_nps[:, unigram_columns].astype(bool).astype(np.int32)
+        specific_columns = [
+            i
+            for i, column in enumerate(unigram_columns)
+            if word_features[column] not in LINK_CONTEXT_TERMS
+        ]
+        specific_incidence, specific_responses = (
+            incidence[:, specific_columns],
+            responses[:, specific_columns],
+        )
     links: List[EvidenceLink] = []
     chunk = max(1, int(evidence_chunk_size))
     per_incident_k = max(1, int(top_k_per_incident))
+    candidate_count = with_candidates = 0
     max_days = int(max_days_apart) if max_days_apart is not None else None
     for start in range(0, word_inc.shape[0], chunk):
         end = min(start + chunk, word_inc.shape[0])
-        shared = incidence[start:end] @ responses.T
-        specific = specific_incidence[start:end] @ specific_responses.T
-        sim_block = (
-            (word_inc[start:end] @ word_nps.T)
-            .multiply(shared >= LINK_MIN_SHARED_TERMS)
-            .multiply(specific > 0)
-            .tocsr()
-        )
+        sim_block = (word_inc[start:end] @ word_nps.T).tocsr()
+        if acceptance is not None:
+            shared = (incidence[start:end] @ responses.T).tocsr()
+            specific = (specific_incidence[start:end] @ specific_responses.T).tocsr()
         sim_block.eliminate_zeros()
         for bi in range(sim_block.shape[0]):
             inc_row = start + bi
@@ -443,50 +445,77 @@ def retrieve_incident_candidates(
             row = sim_block.getrow(bi)
             candidate_idx = row.indices
             candidate_vals = row.data
+            # LLM top-N includes zero-overlap candidates; never allocate the full pair matrix.
+            if acceptance is None:
+                eligible_idx = (
+                    np.flatnonzero(temporal_mask(nps_dates, inc_date, max_days))
+                    if max_days is not None
+                    else np.arange(len(nps))
+                )
+                missing = eligible_idx[~np.isin(eligible_idx, candidate_idx)]
+                missing = missing[np.argsort(nps_ids[missing].astype(str))][:per_incident_k]
+                candidate_idx = np.concatenate((candidate_idx, missing))
+                candidate_vals = np.concatenate(
+                    (candidate_vals, np.zeros(len(missing), dtype=np.float32))
+                )
             if max_days is not None:
-                if pd.isna(inc_date):
-                    continue
-                candidate_dates = nps_dates[candidate_idx]
-                day_delta = np.abs((candidate_dates - inc_date) / np.timedelta64(1, "D"))
-                valid = np.isfinite(day_delta) & (day_delta <= max_days)
-                candidate_idx = candidate_idx[valid]
-                candidate_vals = candidate_vals[valid]
+                valid = temporal_mask(nps_dates[candidate_idx], inc_date, max_days)
+                candidate_idx, candidate_vals = candidate_idx[valid], candidate_vals[valid]
             if not len(candidate_idx):
                 continue
-            order = np.lexsort((nps_ids[candidate_idx].astype(str), -candidate_vals))[
-                :per_incident_k
-            ]
+            candidate_count += (
+                len(candidate_idx) if acceptance else min(per_incident_k, len(candidate_idx))
+            )
+            with_candidates += 1
+            order = np.lexsort((nps_ids[candidate_idx].astype(str), -candidate_vals))
             idx, vals = candidate_idx[order], candidate_vals[order]
+            if acceptance is not None:
+                keep = acceptance(
+                    vals,
+                    shared.getrow(bi)[:, idx].toarray().ravel(),
+                    specific.getrow(bi)[:, idx].toarray().ravel(),
+                )
+                idx, vals = idx[keep], vals[keep]
+            idx, vals = idx[:per_incident_k], vals[:per_incident_k]
             for j, sim in zip(idx.tolist(), vals.tolist(), strict=False):
                 s = float(sim)
-                if s < float(min_similarity):
-                    continue
+                matched_terms = tuple(
+                    sorted(
+                        feature
+                        for feature in word_features[
+                            word_inc.getrow(inc_row).multiply(word_nps.getrow(int(j))).indices
+                        ]
+                        if " " not in feature
+                    )
+                )
                 links.append(
                     EvidenceLink(
                         nps_id=str(nps_ids[j]),
                         incident_id=inc_id,
-                        similarity=s,
+                        text_similarity=s,
                         nps_topic=str(nps_topics[j]),
                         incident_topic=inc_topic,
-                        matched_terms=tuple(
-                            sorted(
-                                feature
-                                for feature in word_features[
-                                    word_inc.getrow(inc_row)
-                                    .multiply(word_nps.getrow(int(j)))
-                                    .indices
-                                ]
-                                if " " not in feature
-                            )
-                        ),
+                        matched_terms=matched_terms,
                     )
                 )
 
     links_df = pd.DataFrame([e.__dict__ for e in links], columns=EvidenceLink.__dataclass_fields__)
     links_df = (
-        links_df.sort_values("similarity", ascending=False)
+        links_df.sort_values("text_similarity", ascending=False)
         .drop_duplicates(["incident_id", "nps_id"])
         .reset_index(drop=True)
+    )
+    links_df.attrs.update(
+        evaluation_diagnostic(
+            eligible=len(helix),
+            candidate_count=candidate_count,
+            with_candidates=with_candidates,
+            matches=len(links_df) if acceptance else 0,
+            reason="evaluation_pending" if acceptance is None and candidate_count else "",
+        )
+    )
+    links_df.attrs["classification_signature"] = nps_detractors.attrs.get(
+        "classification_signature", ""
     )
     return links_df
 
@@ -500,17 +529,20 @@ def link_incidents_to_nps_topics(
     evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def accept(similarities: np.ndarray, shared: np.ndarray, specific: np.ndarray) -> np.ndarray:
+        return (similarities >= min_similarity) & (shared >= LINK_MIN_SHARED_TERMS) & (specific > 0)
+
     links = retrieve_incident_candidates(
         nps_detractors,
         helix_incidents,
-        min_similarity,
-        max_features,
-        top_k_per_incident,
-        evidence_chunk_size,
-        max_days_apart,
+        max_features=max_features,
+        top_k_per_incident=top_k_per_incident,
+        evidence_chunk_size=evidence_chunk_size,
+        max_days_apart=max_days_apart,
+        acceptance=accept,
     )
     assignments = links.drop_duplicates(["incident_id", "nps_topic"])[
-        ["incident_id", "nps_topic", "similarity", "incident_topic"]
+        ["incident_id", "nps_topic", "text_similarity", "incident_topic"]
     ].reset_index(drop=True)
     return assignments, links
 

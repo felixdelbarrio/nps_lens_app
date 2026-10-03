@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from nps_lens.analytics.linking_policy import evaluation_diagnostic
 from nps_lens.analytics.nps_helix_link import nps_matchable_mask
 from nps_lens.domain.helix import SOURCE_SERVICE_N1, SOURCE_SERVICE_N2
 from nps_lens.domain.normalization import semantic_series
@@ -35,7 +36,15 @@ def linking_diagnostics(
         "helix_quality": len(period) - len(eligible),
         "helix_without_evidence": len(eligible) - linked_incidents,
     }
+    evaluation = evaluation_diagnostic(
+        eligible=len(eligible),
+        candidate_count=int(links.attrs.get("candidate_count", 0)),
+        with_candidates=int(links.attrs.get("incidents_with_candidates", 0)),
+        matches=len(links),
+        reason=str(links.attrs.get("evaluation_reason", "")) if links.empty else "",
+    )
     return {
+        **evaluation,
         "nps_total": len(nps),
         "nps_focus": len(focus),
         "nps_matchable": matchable,

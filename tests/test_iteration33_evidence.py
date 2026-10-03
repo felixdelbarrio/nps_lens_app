@@ -56,7 +56,8 @@ def link(**overrides):
             nps_group="DETRACTOR",
             palanca="Acceso",
             subpalanca="Token no generado",
-            confidence=0.9,
+            semantic_confidence=0.9,
+            causal_engine="llm",
             same_task=True,
             same_symptom=True,
             linked_comments=3,
@@ -72,18 +73,18 @@ def link(**overrides):
 @pytest.mark.parametrize(
     ("changes", "level"),
     [
-        ({}, "CAUSA_PROBABLE_DE_DETRACCION"),
-        ({"linked_incidents": 1}, "CAUSA_OPERATIVA_PLAUSIBLE"),
-        ({"avg_score": 9}, "CAUSA_OPERATIVA_PLAUSIBLE"),
-        ({"detractor_rate": 0.5}, "CAUSA_OPERATIVA_PLAUSIBLE"),
+        ({}, "EVIDENCIA_OPERATIVA_RECURRENTE"),
+        ({"linked_incidents": 1}, "ASOCIACION_OPERATIVA_CONSISTENTE"),
+        ({"avg_score": 9}, "ASOCIACION_OPERATIVA_CONSISTENTE"),
+        ({"detractor_rate": 0.5}, "ASOCIACION_OPERATIVA_CONSISTENTE"),
         ({"same_task": False}, "INDICIO_SEMANTICO"),
         ({"same_symptom": False}, "INDICIO_SEMANTICO"),
         ({"comment_quote": ""}, "INDICIO_SEMANTICO"),
         ({"comment_date": None}, "INDICIO_SEMANTICO"),
-        ({"comment_date": "2026-08-31"}, "INDICIO_SEMANTICO"),
+        ({"comment_date": "2026-08-31"}, "EVIDENCIA_OPERATIVA_RECURRENTE"),
         ({"comment_date": "2027-01-01"}, "INDICIO_SEMANTICO"),
         ({"incident_close_date": "2026-08-01"}, "INDICIO_SEMANTICO"),
-        ({"confidence": 0.1}, "CAUSALIDAD_NO_ACREDITADA"),
+        ({"semantic_confidence": 0.1}, "CAUSALIDAD_NO_ACREDITADA"),
         ({"incident_id": ""}, "SIN_EVIDENCIA"),
         ({"subpalanca": "Información insuficiente"}, "SIN_EVIDENCIA"),
     ],
@@ -104,7 +105,7 @@ def test_duplicate_pairs_do_not_inflate_recurrence_and_unknown_pairs_do_not_inhe
     rows = pd.DataFrame([row] * 10)
     assert (
         CausalEvidenceEvaluator().evaluate_scenario(rows)["evidence_level"]
-        == "CAUSA_OPERATIVA_PLAUSIBLE"
+        == "ASOCIACION_OPERATIVA_CONSISTENTE"
     )
     rows = pd.DataFrame([row, row | {"nps_id": "n2", "incident_id": "i2", "same_task": False}])
     assert (
@@ -143,7 +144,7 @@ def test_ranking_prioritizes_unique_incidents_before_semantic_quality():
         linked_incidents=4,
         avg_nps=2,
         detractor_rate=1,
-        avg_similarity=0.9,
+        avg_text_similarity=0.9,
         quote_coverage=1,
         narrative_coverage=1,
         freshness=0.9,
@@ -154,7 +155,7 @@ def test_ranking_prioritizes_unique_incidents_before_semantic_quality():
         linked_incidents=40,
         avg_nps=9,
         detractor_rate=0.1,
-        avg_similarity=0.35,
+        avg_text_similarity=0.35,
         quote_coverage=0,
     )
     reserve = strong | dict(nps_topic="Sin clasificación temática > Información insuficiente")
@@ -313,7 +314,7 @@ def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(mo
     payload = _sample_payload()
     attribution = payload["attribution"].copy()
     attribution["causal_engine"] = "llm"
-    attribution["evidence_reason"] = "Causa operativa plausible de detracción."
+    attribution["evidence_reason"] = "Asociación operativa consistente."
     attribution.at[0, "incident_examples"] = [PII]
     attribution.at[0, "comment_examples"] = [PII]
     attribution.at[0, "comment_records"] = [{"comment_id": "n1", "comment": PII}]
@@ -333,7 +334,7 @@ def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(mo
     text = "\n".join(
         shape.text for slide in deck.slides for shape in slide.shapes if shape.has_text_frame
     )
-    assert "SIMILITUD SEMÁNTICA" in text
+    assert "CONFIANZA SEMÁNTICA" in text
     assert "NOTA MEDIA DE COMENTARIOS ENLAZADOS" in text
     assert "No demuestran causalidad" not in text
     for secret in ("12345678", "Acme", "Juan Pérez", "juan@example", "4444", "ABC999"):
@@ -352,7 +353,7 @@ def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(mo
         period_end=date(2026, 2, 9),
     )
     assert "Juan Pérez" not in json.dumps(newsletter, ensure_ascii=False)
-    assert "Causa operativa plausible" in newsletter["lead"]
+    assert "Asociación operativa consistente" in newsletter["lead"]
 
 
 def test_enrichment_preserves_literal_evidence_and_evaluates_operational_journey():
@@ -362,7 +363,7 @@ def test_enrichment_preserves_literal_evidence_and_evaluates_operational_journey
                 nps_id=f"n{i}",
                 incident_id=f"i{i % 2}",
                 nps_topic="Acceso > Token",
-                similarity=0.9,
+                text_similarity=0.9,
                 causal_engine="llm",
                 affected_task="Generar token",
                 observed_symptom="Pantalla en blanco",
@@ -388,7 +389,7 @@ def test_enrichment_preserves_literal_evidence_and_evaluates_operational_journey
         }
     )
     result = build_incident_attribution_chains(links, nps, helix, top_k=0)
-    assert result.iloc[0]["evidence_level"] == "CAUSA_PROBABLE_DE_DETRACCION"
+    assert result.iloc[0]["evidence_level"] == "EVIDENCIA_OPERATIVA_RECURRENTE"
     assert result.iloc[0]["linked_comments"] == 3
     assert (
         "Generar token → Pantalla en blanco → 2 incidencias Helix"
