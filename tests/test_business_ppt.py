@@ -249,7 +249,6 @@ def _sample_payload() -> dict:
                 "linked_comments": 32,
                 "avg_similarity": 0.88,
                 "avg_nps": 4.2,
-                "semantic_cohesion": 0.87,
             },
             {
                 "journey_label": "Uso / Practicidad / Facilidad de uso",
@@ -262,7 +261,6 @@ def _sample_payload() -> dict:
                 "linked_comments": 4,
                 "avg_similarity": 0.81,
                 "avg_nps": 5.0,
-                "semantic_cohesion": 0.85,
             },
         ]
     )
@@ -314,7 +312,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Confianza", "value": "82%"},
+            {"label": "Similitud semántica", "value": "82%"},
             {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
@@ -930,7 +928,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
 
     assert any("acumulado histórico" in t for t in texts)
     assert len(prs.slides) == 6
-    assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
+    assert not any("Evidencia Helix ↔ VoC en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
 
 

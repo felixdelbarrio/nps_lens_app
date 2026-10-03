@@ -88,7 +88,7 @@ const MAIN_AREAS = [
 const INSIGHT_TABS = [
   { id: "summary", label: "Evolución NPS" },
   { id: "nps-analysis", label: "Comentarios" },
-  { id: "linking", label: "Causalidad" }
+  { id: "linking", label: "Evidencia Helix ↔ VoC" }
 ];
 
 const INGEST_TABS = [
@@ -962,7 +962,7 @@ export function App() {
             <p className="eyebrow">Filters</p>
             <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Sincronizados para Comentarios, Causalidad y reportes ejecutivos
+              Sincronizados para Comentarios, Evidencia Helix ↔ VoC y reportes ejecutivos
             </p>
           </div>
         </div>
@@ -1351,7 +1351,7 @@ export function App() {
         <section className="surface-card stack-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Causalidad</p>
+              <p className="eyebrow">Evidencia Helix ↔ VoC</p>
               <h2>Base cruzada y readiness operativo</h2>
             </div>
           </div>

@@ -152,13 +152,6 @@ class HelixExchange:
         )
         exchange = TaxonomyExchange(self.taxonomy, self.downloads)
         classified = exchange.assignments(context, source, mode)
-        if classified:
-            frame = frame.copy()
-            for column, field in (("Palanca", "lever"), ("Subpalanca", "sublever")):
-                mapped = frame["_business_key"].map(
-                    {key: row["primary_classification"][field] for key, row in classified.items()}
-                )
-                frame[column] = mapped.fillna(frame[column])
         resolved = {mode: frame}
         catalogs = {mode: self.taxonomy.catalog(context, mode) for mode in resolved}
         if any(not catalog["taxonomy"] for catalog in catalogs.values()):
@@ -168,9 +161,9 @@ class HelixExchange:
             raise ValueError("Las incidencias requieren IDs únicos y no vacíos.")
         rows = [
             {"id": key, "description": text}
-            for key, text in zip(ids, build_incident_text(incidents))
+            for key, text in zip(ids, build_incident_text(incidents), strict=False)
         ]
-        for row, date in zip(rows, incident_occurrence_dates(incidents)[0]):
+        for row, date in zip(rows, incident_occurrence_dates(incidents)[0], strict=False):
             row["date"] = date.isoformat() if pd.notna(date) else ""
         labels = {
             mode: frame[["Palanca", "Subpalanca"]].to_numpy().tolist()
@@ -192,7 +185,7 @@ class HelixExchange:
                 },
             }
             for i, (key, comment) in enumerate(
-                zip(analytical_response_ids(source), source["Comment"].fillna(""))
+                zip(analytical_response_ids(source), source["Comment"].fillna(""), strict=False)
             )
         ]
         for row, date in zip(
@@ -200,6 +193,7 @@ class HelixExchange:
             pd.to_datetime(
                 source.get("Fecha", pd.Series(pd.NaT, index=source.index)), errors="coerce"
             ),
+            strict=False,
         ):
             row["date"] = date.isoformat() if pd.notna(date) else ""
         scopes = {
@@ -409,7 +403,7 @@ class HelixExchange:
             expected = job["batches"][key]
             if [row.id for row in response.classifications] != [row["id"] for row in expected]:
                 raise ValueError("IDs u orden de incidencias incorrectos.")
-            for row, original in zip(response.classifications, expected):
+            for row, original in zip(response.classifications, expected, strict=False):
                 if source.get(row.id) != {
                     k: v
                     for k, v in original.items()
@@ -495,10 +489,6 @@ class HelixExchange:
                     for (mode, key), value in validated.items()
                 ],
             )
-            db.execute(
-                "DELETE FROM helix_classifications WHERE context=? AND scope NOT IN (SELECT scope FROM helix_classifications WHERE context=? GROUP BY scope ORDER BY MAX(rowid) DESC LIMIT 9)",
-                (context_key(context), context_key(context)),
-            )
         return self.status(context, inputs)
 
     def links(
@@ -517,7 +507,7 @@ class HelixExchange:
             raise ValueError(
                 "Importa la respuesta Helix completa para la lente activa antes de usar causalidad LLM."
             )
-        nps_topics = dict(zip(analytical_response_ids(focus), build_nps_topic(focus)))
+        nps_topics = dict(zip(analytical_response_ids(focus), build_nps_topic(focus), strict=False))
         nps_dates = dict(
             zip(
                 analytical_response_ids(focus),
@@ -525,10 +515,15 @@ class HelixExchange:
                     focus.get("Fecha", pd.Series(index=focus.index, dtype="datetime64[ns]")),
                     errors="coerce",
                 ),
+                strict=False,
             )
         )
         incident_dates = dict(
-            zip(incidents["Incident Number"].astype(str), incident_occurrence_dates(incidents)[0])
+            zip(
+                incidents["Incident Number"].astype(str),
+                incident_occurrence_dates(incidents)[0],
+                strict=False,
+            )
         )
         rows = [
             {

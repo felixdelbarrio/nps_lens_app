@@ -10,7 +10,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer, strip_accents_unico
 
 from nps_lens.analytics.linking_policy import (
     LINK_CONTEXT_TERMS,
+    LINK_EVIDENCE_CHUNK_SIZE,
     LINK_MAX_DAYS_APART,
+    LINK_MAX_FEATURES,
     LINK_MIN_SHARED_TERMS,
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
@@ -266,9 +268,9 @@ def retrieve_incident_candidates(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
     min_similarity: float = LINK_MIN_SIMILARITY,
-    max_features: int = 50000,
+    max_features: int = LINK_MAX_FEATURES,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
-    evidence_chunk_size: int = 128,
+    evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
 ) -> pd.DataFrame:
     """Shared batched retrieval; candidates are not semantic proof of a link."""
@@ -455,7 +457,7 @@ def retrieve_incident_candidates(
                 :per_incident_k
             ]
             idx, vals = candidate_idx[order], candidate_vals[order]
-            for j, sim in zip(idx.tolist(), vals.tolist()):
+            for j, sim in zip(idx.tolist(), vals.tolist(), strict=False):
                 s = float(sim)
                 if s < float(min_similarity):
                     continue
@@ -493,9 +495,9 @@ def link_incidents_to_nps_topics(
     nps_detractors: pd.DataFrame,
     helix_incidents: pd.DataFrame,
     min_similarity: float = LINK_MIN_SIMILARITY,
-    max_features: int = 50000,
+    max_features: int = LINK_MAX_FEATURES,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
-    evidence_chunk_size: int = 128,
+    evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
     max_days_apart: int | None = LINK_MAX_DAYS_APART,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     links = retrieve_incident_candidates(
@@ -507,7 +509,7 @@ def link_incidents_to_nps_topics(
         evidence_chunk_size,
         max_days_apart,
     )
-    assignments = links.drop_duplicates("incident_id")[
+    assignments = links.drop_duplicates(["incident_id", "nps_topic"])[
         ["incident_id", "nps_topic", "similarity", "incident_topic"]
     ].reset_index(drop=True)
     return assignments, links

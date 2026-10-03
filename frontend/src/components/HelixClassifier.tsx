@@ -35,7 +35,7 @@ export function HelixClassifier({ context, mode, url, disabled, onChange }: { co
   return <article className="settings-subsection"><h3>{PROJECT_NAMES.helix}</h3>
     <ProjectUrlField context={context} field="helix_classifier_url" label={`URL · ${PROJECT_NAMES.helix}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role="helix" context={context} />
-    <p>Lente activa: {TAXONOMY_NAMES[mode]}. El método causal se elige en Causalidad. Cada lente conserva sus propias clasificaciones.</p>
+    <p>Lente activa: {TAXONOMY_NAMES[mode]}. El método causal se elige en Evidencia Helix ↔ VoC. Cada lente conserva sus propias clasificaciones.</p>
     {data ? <><ExchangeProgress counts={data} unit="incidencias" metrics={[{label:"Con categoría",value:data.classified},{label:"Sin encaje",value:data.unassigned},{label:"Vínculos NPS",value:data.links},{label:"Comentarios únicos vinculados",value:data.linked_comments},{...ADDITIONAL_TOPICS,value:data.multiple}]} /><p>Cobertura temática: {formatPercentage(data.coverage)}. Sin encaje incluye categorías de reserva y resultados sin categoría. Mayor reutilización: {formatVolume(data.max_comment_reuse)} incidencias por comentario. Las citas comprueban procedencia; la afinidad semántica requiere revisión.</p>
     {data.categories?.length ? <details><summary>Distribución de incidencias</summary><div className="table-scroll"><table><thead><tr><th>Palanca</th><th>Subpalanca</th><th>Incidencias</th></tr></thead><tbody>{data.categories.map(row => <tr key={`${row.lever}/${row.sublever}`}><td>{row.lever}</td><td>{row.sublever}</td><td>{formatVolume(row.count)}</td></tr>)}</tbody></table></div></details> : null}</> : null}
     {error ? <p role="status">{error.message}</p> : null}

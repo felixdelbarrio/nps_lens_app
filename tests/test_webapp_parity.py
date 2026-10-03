@@ -9,7 +9,7 @@ def test_apps_script_webapp_preserves_local_navigation_and_causal_detail() -> No
     shared_views = [
         "Evolución NPS",
         "Comentarios",
-        "Causalidad",
+        "Evidencia Helix ↔ VoC",
         "Agregados por periodo",
         "NPS clásico vs detractores",
         "Brechas NPS",

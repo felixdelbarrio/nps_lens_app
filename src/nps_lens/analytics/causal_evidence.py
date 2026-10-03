@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART
 from nps_lens.analytics.signal_quality import is_reserve_category
 
 EVIDENCE_COPY = {
@@ -28,14 +29,14 @@ EVIDENCE_COPY = {
         "Causa probable de detracción: misma tarea, mismo síntoma y recurrencia.",
     ),
     "CAUSALIDAD_NO_ACREDITADA": (
-        "Causalidad no acreditada",
+        "Asociación no acreditada",
         "No hay evidencia suficiente para sostener causalidad.",
     ),
 }
 
 
 def link_confidence_label(engine: str) -> str:
-    return "CONFIANZA SEMÁNTICA" if engine == "llm" else "SIMILITUD TEXTUAL"
+    return "SIMILITUD SEMÁNTICA" if engine == "llm" else "SIMILITUD TEXTUAL"
 
 
 def number(value: Any, default: float = 0.0) -> float:
@@ -74,7 +75,7 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
 
 
 class CausalEvidenceEvaluator:
-    def __init__(self, max_days_apart: int = 90) -> None:
+    def __init__(self, max_days_apart: int = LINK_MAX_DAYS_APART) -> None:
         self.max_days_apart = max_days_apart
 
     def evaluate(self, link: Mapping[str, Any]) -> dict[str, Any]:

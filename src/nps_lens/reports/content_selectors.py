@@ -110,15 +110,14 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     return (
         work.sort_values(
             [
-                "impact_score",
-                "linked_pairs",
                 "linked_incidents",
                 "linked_comments",
                 "responses",
+                "impact_score",
                 "avg_similarity",
                 "_scenario_label",
             ],
-            ascending=[False, False, False, False, False, False, True],
+            ascending=[False, False, False, False, False, True],
         )
         .head(max_rows)
         .drop(columns="_scenario_label")

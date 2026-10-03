@@ -877,11 +877,8 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
     tmp = journey_df.copy()
     tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
     tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
-    tmp["semantic_cohesion"] = pd.to_numeric(tmp.get("semantic_cohesion"), errors="coerce").fillna(
-        0.0
-    )
     tmp = tmp.sort_values(
-        ["linked_pairs", "semantic_cohesion", "avg_nps"],
+        ["linked_incidents", "linked_comments", "avg_nps"],
         ascending=[False, False, True],
     ).head(int(top_k))
     if tmp.empty:
@@ -905,7 +902,6 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
             "palanca": True,
             "subpalanca": True,
             "journey_keywords": True,
-            "semantic_cohesion": ":.2f",
             "avg_nps": ":.2f",
         },
     )
@@ -1162,7 +1158,7 @@ def chart_nps_timeseries_with_changepoints(
             return warn_c
         return neutral
 
-    for p, lvl in zip(points, levels):
+    for p, lvl in zip(points, levels, strict=False):
         fig.add_vline(
             x=p,
             line_width=2,
