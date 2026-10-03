@@ -817,14 +817,17 @@ class TaxonomyExchange:
         }
         sig = signature(frame, "DISCOVERED", {**config, "assignments": merged})
         artifact = {
-            "mode": "DISCOVERED",
+            "mode": mode,
+            "engine": "llm",
+            "prompt_version": job["instructions_version"],
+            "model_version": None,
             "signature": sig,
             "keys": frame["_business_key"].tolist(),
             "config": config,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "lever": [row["lever"] for row in assignments],
             "sublever": [row["sublever"] for row in assignments],
-            "provenance": ["chatgpt_zip"] * len(assignments),
+            "provenance": ["llm"] * len(assignments),
             "secondary_classifications": {
                 key: row["secondary_classifications"]
                 for key, row in merged.items()
@@ -845,7 +848,7 @@ class TaxonomyExchange:
         state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[mode] = sig
         db.execute(
             "INSERT OR IGNORE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
-            (sig, context_key(context), "DISCOVERED", encode(artifact).decode()),
+            (sig, context_key(context), mode, encode(artifact).decode()),
         )
         db.execute(
             "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",

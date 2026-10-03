@@ -3072,7 +3072,7 @@ class DashboardService:
                 max_days_apart=max_days_apart,
             )
         else:
-            links_df = imported_links
+            links_df = imported_links.loc[imported_links["similarity"] >= min_similarity]
             assignments_df = links_df.sort_values("similarity", ascending=False).drop_duplicates(
                 ["incident_id", "nps_topic"]
             )[["incident_id", "nps_topic", "similarity", "incident_topic"]]

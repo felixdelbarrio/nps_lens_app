@@ -202,6 +202,7 @@ class HelixExchange:
                     HELIX_SCHEMA,
                     INSTRUCTIONS_VERSION,
                     mode,
+                    frame.attrs["classification_signature"],
                     taxonomy_fingerprint(catalogs[mode]),
                     comments,
                     (
