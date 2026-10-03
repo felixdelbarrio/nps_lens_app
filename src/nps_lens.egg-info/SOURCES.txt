@@ -96,6 +96,7 @@ tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
 tests/test_classification_framework.py
+tests/test_cli.py
 tests/test_column_aliases.py
 tests/test_config_env.py
 tests/test_dashboard_cache.py

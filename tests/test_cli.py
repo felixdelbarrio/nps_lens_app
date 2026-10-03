@@ -6,7 +6,6 @@ from typer.testing import CliRunner
 
 from nps_lens.cli import app
 
-
 runner = CliRunner()
 
 
