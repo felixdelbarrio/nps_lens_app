@@ -301,7 +301,7 @@ def test_helix_secondary_evidence_and_link_coherence(exchange, monkeypatch):
     mismatched_row = mismatched["results/000001.json"]["classifications"][0]
     mismatched_row.update(primary="c001", secondary=[])
     mismatched_row["links"][0]["nps_id"] = inputs["comments"][1]["id"]
-    with pytest.raises(ValueError, match="no candidato"):
+    with pytest.raises(ValueError, match="cita literal"):
         helix.import_response(ctx, inputs, zipped(mismatched))
     assert helix.import_response(ctx, inputs, zipped(response))["multiple"] == 1
     assert helix.current(ctx, inputs)["SOURCE"]["INC"]["secondary_classifications"] == [

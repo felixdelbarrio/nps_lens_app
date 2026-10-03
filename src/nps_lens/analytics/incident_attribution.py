@@ -158,7 +158,8 @@ CHAIN_COLUMNS = [
     "linked_comments",
     "linked_pairs",
     "evidence_pairs",
-    "avg_similarity",
+    "avg_text_similarity",
+    "avg_semantic_confidence",
     "avg_nps",
     "focus_rate_high_incidence",
     "incident_records",
@@ -213,7 +214,8 @@ BROKEN_JOURNEY_COLUMNS = [
     "linked_pairs",
     "linked_incidents",
     "linked_comments",
-    "avg_similarity",
+    "avg_text_similarity",
+    "avg_semantic_confidence",
     "avg_nps",
 ]
 
@@ -764,7 +766,9 @@ def _prepare_enriched_links(
     links["nps_id"] = (
         links.get("nps_id", pd.Series("", index=links.index)).fillna("").astype(str).str.strip()
     )
-    links["similarity"] = pd.to_numeric(links.get("similarity"), errors="coerce").fillna(0.0)
+    links["text_similarity"] = pd.to_numeric(links.get("text_similarity"), errors="coerce").fillna(
+        0.0
+    )
     links["nps_topic"] = links.get("nps_topic", "").fillna("").astype(str).str.strip()
     links = links[
         links["incident_id"].astype(str).str.strip().ne("")
@@ -850,7 +854,7 @@ def _prepare_enriched_links(
         )
     ]
     enriched = enriched.sort_values(
-        ["similarity", "incident_date", "nps_date"],
+        ["text_similarity", "incident_date", "nps_date"],
         ascending=[False, False, False],
         na_position="last",
     ).drop_duplicates(["incident_id", "nps_id"])
@@ -899,14 +903,14 @@ def _source_topics_for_group(grp: pd.DataFrame) -> list[str]:
     topic_counts = (
         grp.assign(
             __source_topic=grp[topic_column].astype(str).str.strip(),
-            __similarity=pd.to_numeric(grp.get("similarity"), errors="coerce").fillna(0.0),
+            __similarity=pd.to_numeric(grp.get("text_similarity"), errors="coerce").fillna(0.0),
         )
         .loc[lambda frame: frame["__source_topic"].ne("")]
         .groupby("__source_topic", dropna=False, observed=True)
-        .agg(linked_pairs=("incident_id", "count"), avg_similarity=("__similarity", "mean"))
+        .agg(linked_pairs=("incident_id", "count"), avg_text_similarity=("__similarity", "mean"))
         .reset_index()
         .sort_values(
-            ["linked_pairs", "avg_similarity", "__source_topic"],
+            ["linked_pairs", "avg_text_similarity", "__source_topic"],
             ascending=[False, False, True],
         )
     )
@@ -933,7 +937,7 @@ def build_broken_journey_catalog(
     """Group validated links by the resolved taxonomy route, without forcing a cluster count.
 
     Equivalences belong to the upstream taxonomy resolver. These identities deliberately
-    preserve its exact labels (including SOURCE and frozen lenses). Text similarity
+    preserve its exact labels (including SOURCE and frozen lenses). Text text_similarity
     describes cohesion, never splits a route or silently merges unrelated categories.
     """
 
@@ -988,7 +992,7 @@ def build_broken_journey_catalog(
         linked_pairs = int(len(grp[["incident_id", "nps_id"]].drop_duplicates()))
         linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
         linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
-        avg_similarity = _safe_float(grp["similarity"].mean(), default=0.0)
+        avg_text_similarity = _safe_float(grp["text_similarity"].mean(), default=0.0)
         avg_nps = _safe_float(
             pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
             default=np.nan,
@@ -1019,7 +1023,10 @@ def build_broken_journey_catalog(
                 "linked_pairs": linked_pairs,
                 "linked_incidents": linked_incidents,
                 "linked_comments": linked_comments,
-                "avg_similarity": avg_similarity,
+                "avg_text_similarity": avg_text_similarity,
+                "avg_semantic_confidence": pd.to_numeric(
+                    grp.get("semantic_confidence", pd.Series(dtype=float)), errors="coerce"
+                ).mean(),
                 "avg_nps": avg_nps,
             }
         )
@@ -1029,7 +1036,7 @@ def build_broken_journey_catalog(
         return _empty_broken_journey_df(), pd.DataFrame()
 
     catalog = catalog.sort_values(
-        ["linked_incidents", "linked_comments", "avg_similarity", "journey_label"],
+        ["linked_incidents", "linked_comments", "avg_text_similarity", "journey_label"],
         ascending=[False, False, False, True],
     ).reset_index(drop=True)
     catalog["journey_id"] = [
@@ -1057,7 +1064,8 @@ def build_broken_journey_catalog(
             "linked_pairs",
             "linked_incidents",
             "linked_comments",
-            "avg_similarity",
+            "avg_text_similarity",
+            "avg_semantic_confidence",
             "avg_nps",
         ]
     ].copy()
@@ -1120,16 +1128,16 @@ def _select_topic_entities(
     divided between entities without returning to individual survey records.
     """
     identity = ["source_nps_topic", id_column, label_column]
-    frame = frame.sort_values("similarity", ascending=False).drop_duplicates(
+    frame = frame.sort_values("text_similarity", ascending=False).drop_duplicates(
         ["source_nps_topic", "incident_id", "nps_id"]
     )
     votes = (
         frame.groupby(identity, dropna=False, observed=True)
-        .agg(linked_pairs=("incident_id", "size"), avg_similarity=("similarity", "mean"))
+        .agg(linked_pairs=("incident_id", "size"), avg_text_similarity=("text_similarity", "mean"))
         .reset_index()
     )
     winners = votes.sort_values(
-        ["source_nps_topic", "linked_pairs", "avg_similarity", label_column, id_column],
+        ["source_nps_topic", "linked_pairs", "avg_text_similarity", label_column, id_column],
         ascending=[True, False, False, True, True],
     ).drop_duplicates("source_nps_topic")[identity]
     details = (
@@ -1622,11 +1630,11 @@ def build_incident_attribution_chains(
             )
 
         inc_ranked = grp.sort_values(
-            ["similarity", "incident_date"], ascending=[False, False]
+            ["text_similarity", "incident_date"], ascending=[False, False]
         ).drop_duplicates(["incident_id"])
         inc_ranked = _limit_ranked_examples(inc_ranked, max_incident_examples)
         comment_ranked = grp.sort_values(
-            ["nps_score", "similarity"], ascending=[True, False], na_position="last"
+            ["nps_score", "text_similarity"], ascending=[True, False], na_position="last"
         ).drop_duplicates(["nps_id"])
         comment_ranked = _limit_ranked_examples(comment_ranked, max_comment_examples)
         highlights_by_incident: dict[str, set[str]] = {}
@@ -1706,7 +1714,7 @@ def build_incident_attribution_chains(
             pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
             default=np.nan,
         )
-        avg_similarity = _safe_float(grp["similarity"].mean(), default=0.0)
+        avg_text_similarity = _safe_float(grp["text_similarity"].mean(), default=0.0)
         linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
         linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
         incidents_total = _safe_float(
@@ -1768,7 +1776,10 @@ def build_incident_attribution_chains(
                 "evidence_pairs": list(
                     grp[["incident_id", "nps_id"]].itertuples(index=False, name=None)
                 ),
-                "avg_similarity": avg_similarity,
+                "avg_text_similarity": avg_text_similarity,
+                "avg_semantic_confidence": pd.to_numeric(
+                    grp.get("semantic_confidence", pd.Series(dtype=float)), errors="coerce"
+                ).mean(),
                 "avg_nps": avg_nps,
                 "focus_rate_high_incidence": focus_rate_high_incidence,
                 "incident_records": incident_records,

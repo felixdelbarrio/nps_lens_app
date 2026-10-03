@@ -48,7 +48,7 @@ def test_hotspot_metrics_bundle_keeps_timeline_counts_coherent() -> None:
             "incident_id": ["INC1", "INC2", "INC3"],
             "nps_id": ["n1", "n2", "n3"],
             "nps_topic": ["Pagos > Transferencias", "Pagos > SPEI", "Acceso > Token"],
-            "similarity": [0.91, 0.88, 0.73],
+            "text_similarity": [0.91, 0.88, 0.73],
         }
     )
 
@@ -103,7 +103,7 @@ def test_build_hotspot_daily_breakdown_uses_rank_map_and_timeline_rows() -> None
             "incident_date": pd.to_datetime(["2026-02-02", "2026-02-05", "2026-02-05"]),
             "hot_rank": [1, 1, 2],
             "hot_term": ["transferencias", "transferencias", "token"],
-            "similarity": [0.9, 0.8, 0.7],
+            "text_similarity": [0.9, 0.8, 0.7],
         }
     )
     timeline = pd.DataFrame(
@@ -153,7 +153,7 @@ def test_build_hotspot_daily_breakdown_uses_full_timeline_scope_not_only_represe
             "incident_id": ["INC1", "INC4"],
             "hot_rank": [1, 2],
             "hot_term": ["transferencias", "token"],
-            "similarity": [0.9, 0.8],
+            "text_similarity": [0.9, 0.8],
         }
     )
     # Timeline carries all incidents by day and hotspot-level incident_ids for full assignment.
@@ -315,7 +315,7 @@ def test_align_hotspot_evidence_to_axis_prioritizes_aligned_terms() -> None:
             ],
             "incident_summary": ["s1", "s2", "s3"],
             "detractor_comment": ["c1", "c2", "c3"],
-            "similarity": [0.7, 0.6, 0.8],
+            "text_similarity": [0.7, 0.6, 0.8],
             "hot_term": ["pagos", "seguridad", "transferencias"],
             "hot_rank": [2, 1, 3],
             "mention_incidents": [10, 4, 8],

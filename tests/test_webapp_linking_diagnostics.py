@@ -29,7 +29,11 @@ const diagnostics = {nps_total:100, nps_focus:20, nps_matchable:15,
   nps_non_matchable:5, linked_incidents:0, nps_coverage_pct:0,
   scope_requested_n1_n2:['<img src=x onerror=alert(1)>'],
   exclusions:{non_matchable:5}, principal_exclusion_reason:'non_matchable'};
+diagnostics.evaluation_state = 'NOT_EVALUATED';
+diagnostics.evaluation_message = 'Vínculos no evaluados: clasificación pendiente';
 const html = linkingDiagnostics(diagnostics);
+assert.ok(html.includes(diagnostics.evaluation_message));
+assert.ok(linkingDiagnostics({...diagnostics, evaluation_state:'EVALUATED_NO_MATCH', evaluation_message:'Candidatos evaluados sin vínculos aceptados'}).includes('Candidatos evaluados sin vínculos aceptados'));
 assert.ok(html.includes('Respuestas no analizables'));
 assert.ok(html.includes('<td>5</td>'));
 assert.ok(html.includes('<td>0</td>'));

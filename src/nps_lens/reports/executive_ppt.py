@@ -28,7 +28,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
-from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, link_confidence_label
+from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, engine_quality, link_confidence_label
 from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
@@ -105,24 +105,6 @@ class BusinessPptResult:
     compact_file_name: str
     compact_content: bytes
     saved_path: str = ""
-
-
-@dataclass(frozen=True)
-class ZoomIncident:
-    incident_id: str
-    incident_date: Optional[pd.Timestamp]
-    nps_topic: str
-    incident_summary: str
-    detractor_comment: str
-    similarity: float
-    hot_term: str
-    mention_incidents: int = 0
-    mention_comments: int = 0
-    hotspot_incidents: int = 0
-    hotspot_comments: int = 0
-    hotspot_links: int = 0
-    sample_incidents: str = ""
-    sample_comments: str = ""
 
 
 def _rgb(hex_code: str) -> RGBColor:
@@ -828,7 +810,7 @@ def _build_journey_table(
         "links",
         "comments",
         "nps",
-        "similarity",
+        "text_similarity",
     ]
     if (
         str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
@@ -841,7 +823,7 @@ def _build_journey_table(
             errors="coerce",
         ).fillna(0.0)
         source["similarity_sort"] = pd.to_numeric(
-            source.get("avg_similarity"),
+            source.get("avg_text_similarity"),
             errors="coerce",
         ).fillna(0.0)
         source["nps_sort"] = pd.to_numeric(
@@ -882,8 +864,8 @@ def _build_journey_table(
                 .fillna(0)
                 .astype(int),
                 "nps": pd.to_numeric(_first_existing_series(out, "avg_nps"), errors="coerce"),
-                "similarity": pd.to_numeric(
-                    _first_existing_series(out, "avg_similarity"),
+                "text_similarity": pd.to_numeric(
+                    _first_existing_series(out, "avg_text_similarity"),
                     errors="coerce",
                 ).fillna(0.0),
             }
@@ -929,8 +911,8 @@ def _build_journey_table(
             .fillna(0)
             .astype(int),
             "nps": pd.to_numeric(_first_existing_series(source, "avg_nps"), errors="coerce"),
-            "similarity": pd.to_numeric(
-                _first_existing_series(source, "avg_similarity"),
+            "text_similarity": pd.to_numeric(
+                _first_existing_series(source, "avg_text_similarity"),
                 errors="coerce",
             ).fillna(0.0),
         }
@@ -2153,7 +2135,7 @@ def _build_causal_scenarios(
             ),
             (
                 link_confidence_label(str(row.get("causal_engine", "rules"))),
-                _fmt_pct_or_nd(row.get("avg_similarity", np.nan), decimals=0),
+                _fmt_pct_or_nd(engine_quality(row), decimals=0),
                 BBVA_COLORS["blue"],
             ),
         ]
@@ -2783,6 +2765,7 @@ def _fill_template_deck(
     context: PresentationContext,
     dimension_mode: str,
     include_causal_section: bool,
+    linking_diagnostics: Optional[dict[str, object]] = None,
 ) -> None:
     if len(prs.slides) != 9:
         raise ValueError("La plantilla ejecutiva BBVA debe contener exactamente 9 diapositivas.")
@@ -2811,7 +2794,7 @@ def _fill_template_deck(
     _set_template_text(
         cover.shapes[1],
         f"{scope} · {context.period_label} · Método de agrupación: "
-        f"{method.label if include_causal_section else 'No aplicado (sin evidencia Helix)'}",
+        f"{method.label if include_causal_section else (linking_diagnostics or {}).get('evaluation_message', 'Vínculos no evaluados')}",
         size=12,
         color="FFFFFF",
     )
@@ -3133,7 +3116,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[6],
-            _fmt_pct_or_nd(row.get("avg_similarity"), decimals=0),
+            _fmt_pct_or_nd(engine_quality(row), decimals=0),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3230,6 +3213,7 @@ def generate_business_review_ppt(
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
     include_causal_section: bool = True,
+    linking_diagnostics: Optional[dict[str, object]] = None,
     report_context: Optional[dict[str, object]] = None,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
@@ -3271,6 +3255,7 @@ def generate_business_review_ppt(
         context=context,
         dimension_mode=dimension_mode,
         include_causal_section=include_causal_section,
+        linking_diagnostics=linking_diagnostics,
     )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")

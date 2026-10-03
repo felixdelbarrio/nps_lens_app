@@ -206,7 +206,11 @@ def build_executive_newsletter(
             + (
                 str(connections[0]["evidence_reason"])
                 if connections
-                else "No hay evidencia suficiente para sostener causalidad."
+                else str(
+                    _dict(linking.get("diagnostics")).get(
+                        "evaluation_message", "Vínculos no evaluados"
+                    )
+                )
             )
         ),
         "signal_quality": signal_quality(current_df),

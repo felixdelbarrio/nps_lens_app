@@ -84,7 +84,7 @@ def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
 
 
 def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Order evidence by transparent counts and semantic similarity."""
+    """Order evidence by unique populations and engine-specific quality."""
 
     if chain_df is None or chain_df.empty:
         return pd.DataFrame(columns=getattr(chain_df, "columns", []))
@@ -96,7 +96,7 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
         "linked_incidents",
         "linked_comments",
         "responses",
-        "avg_similarity",
+        "avg_text_similarity",
     ):
         work[column] = _numeric_series(work, column).fillna(0.0)
     label_column = next(
@@ -114,10 +114,9 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
                 "linked_comments",
                 "responses",
                 "impact_score",
-                "avg_similarity",
                 "_scenario_label",
             ],
-            ascending=[False, False, False, False, False, True],
+            ascending=[False, False, False, False, True],
         )
         .head(max_rows)
         .drop(columns="_scenario_label")

@@ -6,12 +6,17 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
-from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, LINK_TOP_K_PER_INCIDENT
+from nps_lens.analytics.linking_policy import (
+    LINK_MAX_DAYS_APART,
+    LINK_TOP_K_PER_INCIDENT,
+    evaluation_diagnostic,
+    temporal_mask,
+)
 from nps_lens.analytics.nps_helix_link import (
     build_incident_text,
     build_nps_topic,
@@ -150,6 +155,12 @@ class HelixExchange:
             if mode in available
             else source.assign(Palanca="", Subpalanca="")
         )
+        frame.attrs["classification_signature"] = frame.attrs.get(
+            "classification_signature", digest([mode, "classification_pending"])
+        )
+        frame.attrs["classification_pending"] = mode not in available or bool(
+            frame["Palanca"].fillna("").eq("").any() | frame["Subpalanca"].fillna("").eq("").any()
+        )
         exchange = TaxonomyExchange(self.taxonomy, self.downloads)
         classified = exchange.assignments(context, source, mode)
         resolved = {mode: frame}
@@ -200,6 +211,9 @@ class HelixExchange:
             mode: digest(
                 [
                     HELIX_SCHEMA,
+                    "tfidf-ranked-semantic-acceptance",
+                    LINK_MAX_DAYS_APART,
+                    LINK_TOP_K_PER_INCIDENT,
                     INSTRUCTIONS_VERSION,
                     mode,
                     frame.attrs["classification_signature"],
@@ -312,7 +326,11 @@ class HelixExchange:
         mode = inputs["modes"][0]
         comments = {row["id"]: row for row in inputs["comments"]}
         candidates: dict[str, list[dict[str, Any]]] = {}
-        retrieved = retrieve_incident_candidates(inputs["frame"], inputs["incident_frame"])
+        pending_ids = {row["id"] for row in pending}
+        pending_frame = inputs["incident_frame"].loc[
+            inputs["incident_frame"]["Incident Number"].astype(str).isin(pending_ids)
+        ]
+        retrieved = retrieve_incident_candidates(inputs["frame"], pending_frame)
         for link in retrieved.itertuples(index=False):
             row = comments[link.nps_id]
             primary = category_ids[mode].get(
@@ -325,6 +343,7 @@ class HelixExchange:
                     "id": row["id"],
                     "Comment": row["Comment"],
                     "primary": primary,
+                    "text_similarity": float(str(link.text_similarity)),
                     "secondary": [
                         category_ids[mode][(pair["lever"], pair["sublever"])]
                         for pair in row["secondary_classifications"]
@@ -333,6 +352,19 @@ class HelixExchange:
             )
         for row in pending:
             row["candidates"] = candidates.get(row["id"], [])
+        diagnostic = {
+            "classification_signature": inputs["frame"].attrs["classification_signature"],
+            **evaluation_diagnostic(
+                eligible=int(retrieved.attrs.get("eligible_incidents", len(pending))),
+                candidate_count=sum(len(row["candidates"]) for row in pending),
+                with_candidates=sum(bool(row["candidates"]) for row in pending),
+                reason=(
+                    "classification_pending"
+                    if inputs["frame"].attrs.get("classification_pending")
+                    else "evaluation_pending" if candidates else "no_candidates"
+                ),
+            ),
+        }
         batches = bounded_batches(pending, "incidents")
         manifest = {
             "schema_version": HELIX_SCHEMA,
@@ -342,6 +374,7 @@ class HelixExchange:
             "job_id": job_id,
             "stage": "helix",
             "taxonomy_scopes": inputs["scopes"],
+            "linking_diagnostics": diagnostic,
             "batches": [
                 {"id": key, "count": len(rows), "sha256": digest({"incidents": rows})}
                 for key, rows in batches.items()
@@ -366,7 +399,7 @@ class HelixExchange:
                 "DELETE FROM helix_exchange WHERE context=? AND id NOT IN (SELECT id FROM helix_exchange WHERE context=? ORDER BY rowid DESC LIMIT 3)",
                 (context_key(context), context_key(context)),
             )
-        return {**result, "pending": len(pending)}
+        return {**result, "pending": len(pending), "diagnostics": diagnostic}
 
     def import_response(
         self, context: UploadContext, inputs: dict[str, Any], content: bytes
@@ -437,6 +470,10 @@ class HelixExchange:
                     "taxonomy_fingerprint": manifest["taxonomy_fingerprint"],
                     **primary,
                     "secondary_classifications": expanded["secondary_classifications"],
+                    "candidates": {
+                        candidate["id"]: candidate["text_similarity"]
+                        for candidate in original["candidates"]
+                    },
                     "links": [link.model_dump() for link in row.links],
                     "evidence_hashes": {
                         link.nps_id: digest(comments[link.nps_id]) for link in row.links
@@ -530,8 +567,8 @@ class HelixExchange:
             {
                 "nps_id": link["nps_id"],
                 "incident_id": key,
-                "similarity": link["confidence"],
-                "confidence": link["confidence"],
+                "text_similarity": row["candidates"][link["nps_id"]],
+                "semantic_confidence": link["confidence"],
                 "comment_quote": link["comment_quote"],
                 "incident_quote": link["incident_quote"],
                 "same_task": link.get("same_task", False),
@@ -550,20 +587,19 @@ class HelixExchange:
             if key in incident_ids
             for link in row["links"]
             if link["nps_id"] in nps_topics
-            and pd.notna(nps_dates.get(link["nps_id"]))
-            and pd.notna(incident_dates.get(key))
-            and abs((nps_dates[link["nps_id"]].normalize() - incident_dates[key].normalize()).days)
-            <= max_days_apart
+            and temporal_mask(
+                nps_dates.get(link["nps_id"]), incident_dates.get(key), max_days_apart
+            )
         ]
-        return pd.DataFrame(
+        result = pd.DataFrame(
             rows,
             columns=[
                 "nps_id",
                 "incident_id",
-                "similarity",
+                "text_similarity",
                 "nps_topic",
                 "incident_topic",
-                "confidence",
+                "semantic_confidence",
                 "comment_quote",
                 "incident_quote",
                 "same_task",
@@ -574,3 +610,31 @@ class HelixExchange:
                 "causal_window_days",
             ],
         )
+
+        candidates = {
+            key: [
+                comment
+                for comment in current[key]["candidates"]
+                if comment in nps_topics
+                and temporal_mask(nps_dates.get(comment), incident_dates.get(key), max_days_apart)
+            ]
+            for key in incident_ids
+        }
+        result.attrs = cast(
+            Any,
+            {
+                **result.attrs,
+                **evaluation_diagnostic(
+                    eligible=len(incident_ids),
+                    candidate_count=sum(map(len, candidates.values())),
+                    with_candidates=sum(bool(values) for values in candidates.values()),
+                    matches=len(result),
+                    reason=(
+                        "classification_pending"
+                        if inputs["frame"].attrs.get("classification_pending")
+                        else ""
+                    ),
+                ),
+            },
+        )
+        return result

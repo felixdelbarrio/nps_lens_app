@@ -116,7 +116,7 @@ def _sample_payload() -> dict:
                 "La app no me deja entrar desde ayer.",
                 "Se bloquea la tarjeta y me quedo sin poder pagar.",
             ],
-            "similarity": [0.92, 0.88, 0.84],
+            "text_similarity": [0.92, 0.88, 0.84],
         }
     )
 
@@ -141,7 +141,7 @@ def _sample_payload() -> dict:
                 "linked_incidents": 5,
                 "linked_comments": 2,
                 "linked_pairs": 5,
-                "avg_similarity": 0.89,
+                "avg_text_similarity": 0.89,
                 "avg_nps": 1.5,
                 "focus_rate_high_incidence": 0.47,
                 "incident_rate_per_100_responses": 8.5,
@@ -247,7 +247,7 @@ def _sample_payload() -> dict:
                 "linked_pairs": 46,
                 "linked_incidents": 26,
                 "linked_comments": 32,
-                "avg_similarity": 0.88,
+                "avg_text_similarity": 0.88,
                 "avg_nps": 4.2,
             },
             {
@@ -259,7 +259,7 @@ def _sample_payload() -> dict:
                 "linked_pairs": 5,
                 "linked_incidents": 3,
                 "linked_comments": 4,
-                "avg_similarity": 0.81,
+                "avg_text_similarity": 0.81,
                 "avg_nps": 5.0,
             },
         ]
@@ -1079,7 +1079,7 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "journey"] == "Operativa crítica fallida"
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
-    assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)
+    assert {"touchpoint", "subpalanca", "links", "text_similarity"}.issubset(table.columns)
 
 
 def test_scenario_many_incidents_use_one_bounded_id_bullet():
