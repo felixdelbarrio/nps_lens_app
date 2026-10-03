@@ -4,6 +4,7 @@ import json
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -121,7 +122,7 @@ class TaxonomyService:
         revision = self._source_revision()
         cached = self._state_cache.get(key)
         if cached and cached[0] == revision:
-            return dict(cached[1])
+            return deepcopy(cached[1])
         with self.repository._connect() as connection:
             row = connection.execute(
                 "SELECT payload FROM taxonomy_state WHERE context = ?", (context_key(context),)
@@ -143,7 +144,7 @@ class TaxonomyService:
         if len(self._state_cache) >= 4:
             self._state_cache.clear()
         self._state_cache[key] = (revision, state)
-        return dict(state)
+        return deepcopy(state)
 
     def save_state(self, context: UploadContext, state: dict[str, Any]) -> None:
         with self.repository._connect() as connection:
@@ -252,7 +253,53 @@ class TaxonomyService:
         frame = self.source(context) if frame is None else frame
         registry = self.registry(context)
         available = self.available(context, frame, registry)
-        return self._resolve_available(frame, mode, registry, available, self.state(context))
+        state = self.state(context)
+        resolved = self._resolve_available(frame, mode, registry, available, state)
+        selected = resolved.attrs["taxonomy_mode"]
+        engine = "rules"
+        if not state.get("restored") and state.get("comment_engine") == "llm":
+            from nps_lens.services.taxonomy_exchange import TaxonomyExchange
+
+            resolved = TaxonomyExchange(self, Path(".")).apply(context, resolved, selected)
+            engine = "llm"
+        if state.get("restored"):
+            resolved.attrs["classification_signature"] = (available[selected] or {}).get(
+                "classification_signature", state["restored"]["checksum"]
+            )
+            return resolved
+        parent = (
+            self.classification_artifact(context, selected)
+            if engine == "llm"
+            else available[selected]
+        )
+        if (parent or {}).get("config", {}).get("method") == "chatgpt_zip":
+            engine = "llm"
+        ordered = resolved.sort_values("_business_key")
+        payload = {
+            "mode": selected,
+            "engine": engine,
+            "taxonomy_signature": (parent or {}).get("signature", ""),
+            "keys": ordered["_business_key"].tolist(),
+            "lever": labels(ordered, "Palanca").tolist(),
+            "sublever": labels(ordered, "Subpalanca").tolist(),
+            "channel": labels(ordered, "Canal").tolist(),
+            "provenance": "llm" if engine == "llm" else selected.lower(),
+            "prompt_version": (parent or {}).get("config", {}).get("instructions_version"),
+            "model_version": (parent or {}).get("model_version"),
+            "input_signature": signature(frame, selected, {}),
+        }
+        sig = digest(payload)
+        if self.artifact(sig) is None:
+            payload["signature"] = sig
+            with self.repository._connect() as connection:
+                connection.execute(
+                    "INSERT OR IGNORE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+                    (sig, context_key(context), selected, json.dumps(payload, ensure_ascii=False)),
+                )
+            self._cache[sig] = payload
+        resolved.attrs["classification_signature"] = sig
+        resolved.attrs["classification_engine"] = engine
+        return resolved
 
     def _resolve_available(
         self,
@@ -384,7 +431,8 @@ class TaxonomyService:
                 if self.manual_draft(context, mode)["taxonomy"]
             ],
             "affected_comments": sum(
-                bool(a and b) for a, b in zip(item.get("lever", []), item.get("sublever", []))
+                bool(a and b)
+                for a, b in zip(item.get("lever", []), item.get("sublever", []), strict=False)
             ),
         }
 
@@ -428,7 +476,7 @@ class TaxonomyService:
             mapping.update(
                 {
                     (old, before): (lever, after)
-                    for before, after in zip(previous, cleaned)
+                    for before, after in zip(previous, cleaned, strict=False)
                     if old and before
                 }
             )
@@ -467,7 +515,7 @@ class TaxonomyService:
         )
         assigned = [
             mapping.get(pair, pair)
-            for pair in zip(labels(base, "Palanca"), labels(base, "Subpalanca"))
+            for pair in zip(labels(base, "Palanca"), labels(base, "Subpalanca"), strict=False)
         ]
         assigned = [
             pair if base_mode != "NONE" and pair in pairs else ("", "") for pair in assigned
@@ -503,7 +551,7 @@ class TaxonomyService:
         state.setdefault("artifacts", {})["COMPLETED"] = sig
         with self.repository._connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
                 (sig, context_key(context), "COMPLETED", json.dumps(artifact, ensure_ascii=False)),
             )
             db.execute(
@@ -516,6 +564,9 @@ class TaxonomyService:
 
     def configure(self, context: UploadContext, changes: dict[str, Any]) -> dict[str, Any]:
         state = self.state(context)
+        if changes.get("active") == "DISCOVERED" and state.get("proposed_discovered_taxonomy"):
+            state["discovered_taxonomy"] = state.pop("proposed_discovered_taxonomy")
+            self.save_state(context, state)
         frame, registry = self.source(context), self.registry(context)
         available = self.available(context, frame, registry)
         if "active" in changes:
@@ -711,10 +762,11 @@ class TaxonomyService:
         )
         taxonomies = {}
         for mode in modes:
-            resolved = self._resolve_available(frame, mode, registry, available, state)
+            resolved = self.resolve(context, frame, mode)
             item = dict(available[mode] or {})
             item.update(
                 {
+                    "classification_signature": resolved.attrs["classification_signature"],
                     "keys": frame["_business_key"].tolist(),
                     "lever": labels(resolved, "Palanca").tolist(),
                     "sublever": labels(resolved, "Subpalanca").tolist(),

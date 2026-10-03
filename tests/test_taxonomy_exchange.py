@@ -404,3 +404,18 @@ def test_classifier_still_rejects_unknown_schema_drift(exchange):
     response["results"]["000001"]["classifications"][0]["entity"] = "unexpected"
     with pytest.raises(ValueError, match="formato inválido"):
         handler.import_response(ctx, classifier_zip(response), "classifier")
+
+
+def test_designer_proposal_does_not_replace_active_taxonomy(exchange):
+    handler, context, _, _ = exchange
+    handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
+    before = handler.taxonomy.catalog(context, "DISCOVERED")
+    proposed = {
+        "taxonomy": [*TAXONOMY["taxonomy"], {"lever": "Acceso", "sublevers": ["Autenticación"]}]
+    }
+    result = handler.import_response(context, designer_zip(handler, context, proposed), "designer")
+    assert result["activation_required"]
+    assert handler.taxonomy.catalog(context, "DISCOVERED") == before
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
+    assert handler.taxonomy.catalog(context, "DISCOVERED") != before

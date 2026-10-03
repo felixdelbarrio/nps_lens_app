@@ -165,6 +165,12 @@ export type DashboardPayload = {
 };
 
 export type LinkingDiagnostics = {
+  evaluation_state?: "NOT_EVALUATED" | "EVALUATED_NO_MATCH" | "MATCHED";
+  evaluation_reason?: string;
+  evaluation_message?: string;
+  candidate_count?: number;
+  incidents_with_candidates?: number;
+  incidents_without_candidates?: number;
   nps_total: number;
   nps_focus: number;
   nps_matchable: number;

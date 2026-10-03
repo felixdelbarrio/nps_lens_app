@@ -28,7 +28,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
-from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, link_confidence_label
+from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, engine_quality, link_confidence_label
 from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
@@ -105,24 +105,6 @@ class BusinessPptResult:
     compact_file_name: str
     compact_content: bytes
     saved_path: str = ""
-
-
-@dataclass(frozen=True)
-class ZoomIncident:
-    incident_id: str
-    incident_date: Optional[pd.Timestamp]
-    nps_topic: str
-    incident_summary: str
-    detractor_comment: str
-    similarity: float
-    hot_term: str
-    mention_incidents: int = 0
-    mention_comments: int = 0
-    hotspot_incidents: int = 0
-    hotspot_comments: int = 0
-    hotspot_links: int = 0
-    sample_incidents: str = ""
-    sample_comments: str = ""
 
 
 def _rgb(hex_code: str) -> RGBColor:
@@ -828,7 +810,7 @@ def _build_journey_table(
         "links",
         "comments",
         "nps",
-        "similarity",
+        "text_similarity",
     ]
     if (
         str(touchpoint_source or "").strip() == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS
@@ -837,11 +819,11 @@ def _build_journey_table(
     ):
         source = broken_journeys_df.copy()
         source["links_sort"] = pd.to_numeric(
-            source.get("linked_pairs"),
+            source.get("linked_incidents"),
             errors="coerce",
         ).fillna(0.0)
         source["similarity_sort"] = pd.to_numeric(
-            source.get("semantic_cohesion"),
+            source.get("avg_text_similarity"),
             errors="coerce",
         ).fillna(0.0)
         source["nps_sort"] = pd.to_numeric(
@@ -882,8 +864,8 @@ def _build_journey_table(
                 .fillna(0)
                 .astype(int),
                 "nps": pd.to_numeric(_first_existing_series(out, "avg_nps"), errors="coerce"),
-                "similarity": pd.to_numeric(
-                    _first_existing_series(out, "avg_similarity"),
+                "text_similarity": pd.to_numeric(
+                    _first_existing_series(out, "avg_text_similarity"),
                     errors="coerce",
                 ).fillna(0.0),
             }
@@ -929,8 +911,8 @@ def _build_journey_table(
             .fillna(0)
             .astype(int),
             "nps": pd.to_numeric(_first_existing_series(source, "avg_nps"), errors="coerce"),
-            "similarity": pd.to_numeric(
-                _first_existing_series(source, "avg_similarity"),
+            "text_similarity": pd.to_numeric(
+                _first_existing_series(source, "avg_text_similarity"),
                 errors="coerce",
             ).fillna(0.0),
         }
@@ -1669,7 +1651,7 @@ def _pillow_render_xy(
             )
 
         row_h = max((plot_bottom - plot_top) // max(len(categories), 1), 1)
-        for idx, (category, value) in enumerate(zip(categories, values.tolist())):
+        for idx, (category, value) in enumerate(zip(categories, values.tolist(), strict=False)):
             center_y = plot_top + idx * row_h + row_h // 2
             label = _wrap_label(category, width=18, max_lines=2, joiner="\n")
             tw, th = _pillow_text_size(draw, label, tick_font)
@@ -1737,7 +1719,7 @@ def _pillow_render_xy(
                     and str(getattr(fig.layout, "barmode", "") or "").lower() == "stack"
                 ):
                     x_trace = list(getattr(trace, "x", []))
-                    for x_value, y_value in zip(x_trace, series.tolist()):
+                    for x_value, y_value in zip(x_trace, series.tolist(), strict=False):
                         stacked_primary[x_value] = stacked_primary.get(x_value, 0.0) + float(
                             y_value
                         )
@@ -1815,7 +1797,9 @@ def _pillow_render_xy(
                     str(getattr(fig.layout, "barmode", "") or "").lower() == "stack"
                     and axis_key == "left"
                 )
-                for idx, (x_value, y_value) in enumerate(zip(x_trace, y_trace.tolist())):
+                for idx, (x_value, y_value) in enumerate(
+                    zip(x_trace, y_trace.tolist(), strict=False)
+                ):
                     x = x_positions.get(x_value)
                     if x is None:
                         continue
@@ -1846,7 +1830,7 @@ def _pillow_render_xy(
                     getattr(trace, "marker", None), "color", None
                 )
                 color = _pillow_color(line_color or "#" + BBVA_COLORS["blue"])
-                for x_value, y_value in zip(x_trace, y_trace.tolist()):
+                for x_value, y_value in zip(x_trace, y_trace.tolist(), strict=False):
                     x = x_positions.get(x_value)
                     if x is None or not np.isfinite(float(y_value)):
                         continue
@@ -2151,7 +2135,7 @@ def _build_causal_scenarios(
             ),
             (
                 link_confidence_label(str(row.get("causal_engine", "rules"))),
-                _fmt_pct_or_nd(row.get("avg_similarity", np.nan), decimals=0),
+                _fmt_pct_or_nd(engine_quality(row), decimals=0),
                 BBVA_COLORS["blue"],
             ),
         ]
@@ -2478,7 +2462,7 @@ def _replace_template_table(
     )
     shape._element.getparent().remove(shape._element)
     table = slide.shapes.add_table(len(rows), len(column_widths), left, top, width, height).table
-    for column, width_in in zip(table.columns, column_widths):
+    for column, width_in in zip(table.columns, column_widths, strict=False):
         column.width = Inches(width_in)
     for row_index, row in enumerate(table.rows):
         for cell in row.cells:
@@ -2781,6 +2765,7 @@ def _fill_template_deck(
     context: PresentationContext,
     dimension_mode: str,
     include_causal_section: bool,
+    linking_diagnostics: Optional[dict[str, object]] = None,
 ) -> None:
     if len(prs.slides) != 9:
         raise ValueError("La plantilla ejecutiva BBVA debe contener exactamente 9 diapositivas.")
@@ -2809,7 +2794,7 @@ def _fill_template_deck(
     _set_template_text(
         cover.shapes[1],
         f"{scope} · {context.period_label} · Método de agrupación: "
-        f"{method.label if include_causal_section else 'No aplicado (sin evidencia Helix)'}",
+        f"{method.label if include_causal_section else (linking_diagnostics or {}).get('evaluation_message', 'Vínculos no evaluados')}",
         size=12,
         color="FFFFFF",
     )
@@ -3131,7 +3116,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[6],
-            _fmt_pct_or_nd(row.get("avg_similarity"), decimals=0),
+            _fmt_pct_or_nd(engine_quality(row), decimals=0),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3228,6 +3213,7 @@ def generate_business_review_ppt(
     report_dimension_analysis: str = "palanca",
     period_kpis: Optional[dict[str, object]] = None,
     include_causal_section: bool = True,
+    linking_diagnostics: Optional[dict[str, object]] = None,
     report_context: Optional[dict[str, object]] = None,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
@@ -3269,6 +3255,7 @@ def generate_business_review_ppt(
         context=context,
         dimension_mode=dimension_mode,
         include_causal_section=include_causal_section,
+        linking_diagnostics=linking_diagnostics,
     )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")

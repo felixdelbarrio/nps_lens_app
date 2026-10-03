@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unicodedata
 from enum import Enum
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
-from typing_extensions import Annotated
 
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,

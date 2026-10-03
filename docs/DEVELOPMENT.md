@@ -3,7 +3,7 @@
 ---
 
 ## Estándares
-- Python: **3.9.13**
+- Python: **3.12.14**
 - Formato: `black`
 - Lint: `ruff`
 - Tipado: `mypy` (strict, con exclusiones pragmáticas para UI/Pandas-heavy)

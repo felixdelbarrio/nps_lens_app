@@ -381,7 +381,7 @@ def test_generate_ppt_report_with_valid_nps_and_no_helix_omits_causal_section(
     assert report.content
     assert report.slide_count > 0
     texts = _ppt_texts(report.content)
-    assert not any("Análisis causal no concluyente" in text for text in texts)
+    assert not any("Evidencia Helix ↔ VoC no concluyente" in text for text in texts)
     assert not any("Journeys de detracción" in text for text in texts)
 
 
@@ -428,7 +428,7 @@ def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_bounda
     assert report.content
     assert report.slide_count > 0
     texts = _ppt_texts(report.content)
-    assert not any("Análisis causal no concluyente" in text for text in texts)
+    assert not any("Evidencia Helix ↔ VoC no concluyente" in text for text in texts)
     assert any("Journeys rotos" in text for text in texts)
 
 
@@ -554,7 +554,8 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Incident Summary",
         "Detractor Comment",
         "Tasa Foco",
-        "Similarity",
+        "Similitud textual",
+        "Confianza semántica",
     ]
     identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
     assert [row["label"] for row in identity] == [
@@ -983,3 +984,62 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
         "lidera el deterioro entre los tópicos observados en Web" in text for text in all_texts
     )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
+
+
+def test_views_share_canonical_evidence(tmp_path, monkeypatch):
+    from nps_lens.analytics.incident_attribution import (
+        TOUCHPOINT_SOURCE_DOMAIN,
+        TOUCHPOINT_SOURCE_PALANCA,
+    )
+    from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+    from nps_lens.services.dashboard_service import DashboardService
+
+    settings = _settings(tmp_path)
+    service = DashboardService(SqliteNpsRepository(settings.database_path), settings)
+    context = UploadContext("BBVA México", "Senda")
+    frame = pd.DataFrame(
+        {
+            "_business_key": ["a"],
+            "ID": ["a"],
+            "Fecha": pd.to_datetime(["2026-03-01"]),
+            "NPS": [2],
+            "Comment": ["transferencias rechazadas"],
+            "Canal": ["Web"],
+            "Palanca": ["Pagos"],
+            "Subpalanca": ["Transferencias"],
+        }
+    )
+    frame.attrs["classification_signature"] = "source-artifact"
+    helix = pd.DataFrame(
+        {
+            "Incident Number": ["i"],
+            "Fecha": pd.to_datetime(["2026-03-01"]),
+            "summary": ["transferencias rechazadas"],
+        }
+    )
+    monkeypatch.setattr(service, "_load_nps_df", lambda _: frame)
+    monkeypatch.setattr(service, "_load_helix_df", lambda *a, **kw: helix)
+    monkeypatch.setattr(service, "analysis_engine", lambda *a, **kw: {"engine": "rules"})
+    monkeypatch.setattr(service, "causal_scope", lambda *a, **kw: (frame, helix, helix, "Todos"))
+    calls = []
+    original = service._compute_linking_core
+
+    def counted(**kwargs):
+        calls.append(1)
+        return original(**kwargs)
+
+    monkeypatch.setattr(service, "_compute_linking_core", counted)
+    args = dict(
+        context=context,
+        pop_year="2026",
+        pop_month="03",
+        score_channel="Todos",
+        min_similarity=0.15,
+        max_days_apart=90,
+    )
+    first = service._causal_analysis_bundle(**args, touchpoint_source=TOUCHPOINT_SOURCE_PALANCA)
+    second = service._causal_analysis_bundle(**args, touchpoint_source=TOUCHPOINT_SOURCE_DOMAIN)
+    assert first["ready"] and second["ready"]
+    assert len(calls) == 1
+    assert first["core"] is second["core"]
+    assert set(first["core"]["links_df"]["classification_signature"]) == {"source-artifact"}

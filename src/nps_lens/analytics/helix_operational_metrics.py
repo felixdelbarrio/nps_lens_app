@@ -90,7 +90,7 @@ def build_helix_operational_benchmark(helix_df: pd.DataFrame) -> HelixOperationa
         _split_support_orgs
     )
     mapping: dict[str, tuple[str, ...]] = {}
-    for incident_id, organizations in zip(incident_ids, support_orgs):
+    for incident_id, organizations in zip(incident_ids, support_orgs, strict=False):
         if incident_id:
             mapping[incident_id] = _unique_preserve_order(
                 (*mapping.get(incident_id, ()), *organizations)

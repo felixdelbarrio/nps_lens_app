@@ -116,7 +116,7 @@ def _sample_payload() -> dict:
                 "La app no me deja entrar desde ayer.",
                 "Se bloquea la tarjeta y me quedo sin poder pagar.",
             ],
-            "similarity": [0.92, 0.88, 0.84],
+            "text_similarity": [0.92, 0.88, 0.84],
         }
     )
 
@@ -141,7 +141,7 @@ def _sample_payload() -> dict:
                 "linked_incidents": 5,
                 "linked_comments": 2,
                 "linked_pairs": 5,
-                "avg_similarity": 0.89,
+                "avg_text_similarity": 0.89,
                 "avg_nps": 1.5,
                 "focus_rate_high_incidence": 0.47,
                 "incident_rate_per_100_responses": 8.5,
@@ -247,9 +247,8 @@ def _sample_payload() -> dict:
                 "linked_pairs": 46,
                 "linked_incidents": 26,
                 "linked_comments": 32,
-                "avg_similarity": 0.88,
+                "avg_text_similarity": 0.88,
                 "avg_nps": 4.2,
-                "semantic_cohesion": 0.87,
             },
             {
                 "journey_label": "Uso / Practicidad / Facilidad de uso",
@@ -260,9 +259,8 @@ def _sample_payload() -> dict:
                 "linked_pairs": 5,
                 "linked_incidents": 3,
                 "linked_comments": 4,
-                "avg_similarity": 0.81,
+                "avg_text_similarity": 0.81,
                 "avg_nps": 5.0,
-                "semantic_cohesion": 0.85,
             },
         ]
     )
@@ -314,7 +312,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         entity_summary_df=payload["attribution"],
         entity_summary_kpis=[
             {"label": "Subpalancas activas", "value": "1"},
-            {"label": "Confianza", "value": "82%"},
+            {"label": "Similitud semántica", "value": "82%"},
             {"label": "Vínculos semánticos", "value": "5"},
         ],
     )
@@ -930,7 +928,7 @@ def test_generate_business_review_ppt_handles_selected_period_without_history_or
 
     assert any("acumulado histórico" in t for t in texts)
     assert len(prs.slides) == 6
-    assert not any("Causalidad en tópico NPS ancla" in t for t in texts)
+    assert not any("Evidencia Helix ↔ VoC en tópico NPS ancla" in t for t in texts)
     assert not any("7.1" in t for t in texts)
 
 
@@ -1081,7 +1079,7 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert table.loc[0, "journey"] == "Operativa crítica fallida"
     assert table.loc[0, "palanca"] == "Operativa"
     assert table.loc[0, "anchor_topic"].startswith("Pagos / Transferencias")
-    assert {"touchpoint", "subpalanca", "links", "similarity"}.issubset(table.columns)
+    assert {"touchpoint", "subpalanca", "links", "text_similarity"}.issubset(table.columns)
 
 
 def test_scenario_many_incidents_use_one_bounded_id_bullet():

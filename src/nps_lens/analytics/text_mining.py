@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import pandas as pd
 
@@ -93,26 +92,6 @@ STOPWORDS_ES = {
 }
 
 
-TONE_LEXICON: dict[str, list[str]] = {
-    "frustracion": [
-        "no puedo",
-        "no deja",
-        "error",
-        "falla",
-        "fallo",
-        "bloquea",
-        "se queda",
-        "lento",
-        "intermitente",
-        "timeout",
-    ],
-    "urgencia": ["urge", "urgente", "ya", "hoy", "ahora"],
-    "confusion": ["no entiendo", "como", "donde", "por que", "qué"],
-    "aprecio": ["excelente", "muy bien", "genial", "gracias", "práctica", "facil", "rápida"],
-    "sugerencia": ["podrian", "deberian", "seria bueno", "me gustaria", "falta"],
-}
-
-
 @dataclass(frozen=True)
 class TopicCluster:
     cluster_id: int
@@ -150,16 +129,3 @@ def summarize_taxonomy(frame: pd.DataFrame, limit: int = 10) -> list[TopicCluste
         )
         for i, (label, count) in enumerate(labels[labels.ne("")].value_counts().head(limit).items())
     ]
-
-
-def classify_tone(text: Optional[str]) -> list[str]:
-    if not text:
-        return []
-    t = preprocess_text(text)
-    labels: list[str] = []
-    for label, pats in TONE_LEXICON.items():
-        for p in pats:
-            if p in t:
-                labels.append(label)
-                break
-    return sorted(set(labels))

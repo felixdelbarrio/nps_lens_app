@@ -115,7 +115,7 @@ def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
     }
     artifact["comment_hashes"] = {
         key: digest(str(text))
-        for key, text in zip(frame["_business_key"], frame["Comment"].fillna(""))
+        for key, text in zip(frame["_business_key"], frame["Comment"].fillna(""), strict=False)
     }
     state = tax.state(ctx)
     state["discovered_taxonomy"] = artifact["taxonomy"]
@@ -392,3 +392,69 @@ def test_unsupported_saved_lens_falls_back_and_only_three_modes_are_exposed(serv
         "COMPLETED",
         "DISCOVERED",
     ]
+
+
+def test_active_artifacts_coexist_reuse_and_snapshot(service, monkeypatch):
+    tax, ctx = service
+    from nps_lens.services.taxonomy_exchange import TaxonomyExchange
+
+    source = tax.resolve(ctx)
+    source_sig = source.attrs["classification_signature"]
+    source_artifact = dict(tax.artifact(source_sig))
+
+    def llm_apply(self, context, frame, mode):
+        out = frame.copy()
+        out["Palanca"] = "Semantic"
+        out["Subpalanca"] = "Interpretation"
+        return out
+
+    monkeypatch.setattr(TaxonomyExchange, "apply", llm_apply)
+    state = tax.state(ctx)
+    state["comment_engine"] = "llm"
+    tax.save_state(ctx, state)
+    semantic = tax.resolve(ctx)
+    semantic_sig = semantic.attrs["classification_signature"]
+    assert semantic_sig != source_sig
+    assert set(semantic.Palanca) == {"Semantic"}
+    snapshot = tax.snapshot(ctx)
+    assert snapshot["taxonomies"]["SOURCE"]["lever"] == semantic.Palanca.tolist()
+    state["comment_engine"] = "rules"
+    tax.save_state(ctx, state)
+    assert tax.resolve(ctx).attrs["classification_signature"] == source_sig
+    assert tax.artifact(source_sig) == source_artifact
+    assert tax.artifact(semantic_sig)["lever"] == semantic.Palanca.tolist()
+    tax.restore(ctx, snapshot)
+    assert tax.resolve(ctx).Palanca.tolist() == semantic.Palanca.tolist()
+    assert tax.resolve(ctx).attrs["classification_signature"] == semantic_sig
+
+
+def test_llm_batches_create_immutable_versions(service):
+    from nps_lens.services.taxonomy_exchange import TaxonomyExchange
+
+    tax, ctx = service
+    handler = TaxonomyExchange(tax, Path("."))
+    frame = tax.source(ctx)
+    job = {
+        "mode": "SOURCE",
+        "taxonomy": tax.catalog(ctx, "SOURCE"),
+        "manual_revision": "",
+        "instructions_version": INSTRUCTIONS_VERSION,
+    }
+    key = frame["_business_key"].iloc[0]
+    merged = {
+        key: {
+            "primary_classification": {"lever": "Pagos", "sublever": "Firma"},
+            "secondary_classifications": [],
+        }
+    }
+    with tax.repository._connect() as db:
+        handler._persist_assignments(db, ctx, frame, job, merged)
+    first = tax.classification_artifact(ctx, "SOURCE")
+    before = json.dumps(first, sort_keys=True)
+    key2 = frame["_business_key"].iloc[1]
+    merged[key2] = merged[key]
+    with tax.repository._connect() as db:
+        handler._persist_assignments(db, ctx, frame, job, merged)
+    second = tax.classification_artifact(ctx, "SOURCE")
+    assert first["signature"] != second["signature"]
+    assert json.dumps(tax.artifact(first["signature"]), sort_keys=True) == before

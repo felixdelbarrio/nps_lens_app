@@ -3,7 +3,7 @@
 Design goals:
 - Single source of truth for selector constants (no scattered magic strings).
 - Zero runtime dependency on locale settings.
-- Fast (pure functions, no pandas), Python 3.9 compatible.
+- Fast (pure functions, no pandas), Python 3.12 compatible.
 """
 
 from __future__ import annotations

@@ -140,7 +140,7 @@ def build_helix_incident_url_lookup(
         if actual_column not in helix_df.columns:
             continue
         incident_id = _text_series(helix_df, actual_column)
-        for inc_id, url in zip(incident_id.tolist(), resolved_url.tolist()):
+        for inc_id, url in zip(incident_id.tolist(), resolved_url.tolist(), strict=False):
             key = str(inc_id or "").strip()
             href = str(url or "").strip()
             if not key or not href or key in lookup:

@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, temporal_mask
 from nps_lens.analytics.signal_quality import is_reserve_category
 
 EVIDENCE_COPY = {
@@ -19,16 +20,16 @@ EVIDENCE_COPY = {
         "Indicio semántico",
         "Evidencia semántica compatible; requiere validación operativa.",
     ),
-    "CAUSA_OPERATIVA_PLAUSIBLE": (
-        "Causa operativa plausible",
-        "Causa operativa plausible de detracción: misma tarea y síntoma, dentro de ventana temporal.",
+    "ASOCIACION_OPERATIVA_CONSISTENTE": (
+        "Asociación operativa consistente",
+        "Asociación operativa consistente: misma tarea y síntoma, dentro de ventana temporal.",
     ),
-    "CAUSA_PROBABLE_DE_DETRACCION": (
-        "Causa probable de detracción",
-        "Causa probable de detracción: misma tarea, mismo síntoma y recurrencia.",
+    "EVIDENCIA_OPERATIVA_RECURRENTE": (
+        "Evidencia operativa recurrente",
+        "Evidencia operativa recurrente: misma tarea, mismo síntoma y recurrencia.",
     ),
     "CAUSALIDAD_NO_ACREDITADA": (
-        "Causalidad no acreditada",
+        "Asociación no acreditada",
         "No hay evidencia suficiente para sostener causalidad.",
     ),
 }
@@ -46,6 +47,14 @@ def number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def engine_quality(row: Mapping[str, Any]) -> float:
+    """Select the engine's own score, without treating confidence as cosine similarity."""
+    column = (
+        "avg_semantic_confidence" if row.get("causal_engine") == "llm" else "avg_text_similarity"
+    )
+    return number(row.get(column))
+
+
 def scenario_impact_score(row: Mapping[str, Any]) -> float:
     if any(
         is_reserve_category(row.get(k, "")) for k in ("palanca", "subpalanca", "nps_topic", "title")
@@ -53,7 +62,7 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
         return -1000.0
     comments = max(0, number(row.get("linked_comments")))
     incidents = max(0, number(row.get("linked_incidents")))
-    confidence = min(1, max(0, number(row.get("avg_similarity", row.get("confidence")))))
+    confidence = min(1, max(0, engine_quality(row)))
     score = min(10, max(0, number(row.get("avg_nps", row.get("avg_score")), 10)))
     detractors = min(1, max(0, number(row.get("detractor_rate"))))
     # Bounded contributions keep a large, vague cluster from dominating strong evidence.
@@ -66,7 +75,7 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
         + 10 * min(1, max(0, number(row.get("freshness"))))
     )
     impact -= 15 if comments < 3 else 0
-    impact -= 15 if confidence < 0.6 else 0
+    impact -= 15 if row.get("causal_engine") == "llm" and confidence < 0.6 else 0
     impact -= 15 if score > 6 else 0
     impact -= 15 * (1 - min(1, max(0, number(row.get("quote_coverage")))))
     impact -= 10 * (1 - min(1, max(0, number(row.get("narrative_coverage")))))
@@ -74,12 +83,16 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
 
 
 class CausalEvidenceEvaluator:
-    def __init__(self, max_days_apart: int = 90) -> None:
+    def __init__(self, max_days_apart: int = LINK_MAX_DAYS_APART) -> None:
         self.max_days_apart = max_days_apart
 
     def evaluate(self, link: Mapping[str, Any]) -> dict[str, Any]:
         warnings = []
-        confidence = number(link.get("confidence", link.get("similarity")))
+        confidence = (
+            number(link.get("semantic_confidence"))
+            if link.get("causal_engine") == "llm"
+            else number(link.get("text_similarity"))
+        )
         quotes = all(
             isinstance(link.get(key), str) and bool(link[key].strip())
             for key in ("comment_quote", "incident_quote")
@@ -93,17 +106,13 @@ class CausalEvidenceEvaluator:
             link.get("incident_start_date", link.get("incident_date")), errors="coerce", utc=True
         )
         close = pd.to_datetime(link.get("incident_close_date"), errors="coerce", utc=True)
-        temporal = bool(
-            pd.notna(comment_date)
-            and pd.notna(start)
-            and 0 <= (comment_date - start).total_seconds() / 86400 <= self.max_days_apart
-        )
+        temporal = bool(temporal_mask(comment_date, start, self.max_days_apart))
         if pd.notna(close) and pd.notna(start) and close < start:
             temporal = False
             warnings.append("Fechas de apertura/cierre incompatibles.")
         if not temporal:
             warnings.append(
-                "Temporalidad causal no acreditada: falta fecha, antecede a la incidencia o excede la ventana."
+                "Temporalidad no acreditada: falta fecha o excede la ventana de asociación."
             )
         if not quotes:
             warnings.append("Faltan citas literales en ambas fuentes.")
@@ -115,12 +124,19 @@ class CausalEvidenceEvaluator:
         )
         if not link.get("nps_id") or not link.get("incident_id") or reserve or confidence <= 0:
             level = "SIN_EVIDENCIA"
-        elif confidence < 0.3:
+        elif link.get("causal_engine") == "llm" and confidence < 0.3:
             level = "CAUSALIDAD_NO_ACREDITADA"
-        elif not (quotes and same_task and same_symptom and temporal and confidence >= 0.6):
+        elif not (
+            quotes
+            and same_task
+            and same_symptom
+            and temporal
+            and link.get("causal_engine") == "llm"
+            and confidence >= 0.6
+        ):
             level = "INDICIO_SEMANTICO"
         else:
-            level = "CAUSA_OPERATIVA_PLAUSIBLE"
+            level = "ASOCIACION_OPERATIVA_CONSISTENTE"
             if (
                 number(link.get("linked_comments")) >= 3
                 and number(link.get("linked_incidents")) >= 2
@@ -128,7 +144,7 @@ class CausalEvidenceEvaluator:
                 and number(link.get("detractor_rate")) >= 0.7
                 and confidence >= 0.8
             ):
-                level = "CAUSA_PROBABLE_DE_DETRACCION"
+                level = "EVIDENCIA_OPERATIVA_RECURRENTE"
         label, reason = EVIDENCE_COPY[level]
         return {
             "evidence_level": level,
@@ -139,8 +155,8 @@ class CausalEvidenceEvaluator:
             ),
             "actionability": (
                 "Alta"
-                if level == "CAUSA_PROBABLE_DE_DETRACCION"
-                else "Media" if level == "CAUSA_OPERATIVA_PLAUSIBLE" else "Baja"
+                if level == "EVIDENCIA_OPERATIVA_RECURRENTE"
+                else "Media" if level == "ASOCIACION_OPERATIVA_CONSISTENTE" else "Baja"
             ),
             "warnings": warnings,
             "temporal_relation": "valid" if temporal else "unverified",
@@ -166,8 +182,8 @@ class CausalEvidenceEvaluator:
             "SIN_EVIDENCIA": 0,
             "CAUSALIDAD_NO_ACREDITADA": 1,
             "INDICIO_SEMANTICO": 2,
-            "CAUSA_OPERATIVA_PLAUSIBLE": 3,
-            "CAUSA_PROBABLE_DE_DETRACCION": 4,
+            "ASOCIACION_OPERATIVA_CONSISTENTE": 3,
+            "EVIDENCIA_OPERATIVA_RECURRENTE": 4,
         }
         evidence = (
             min(evaluated, key=lambda r: strength[r["evidence_level"]])

@@ -57,7 +57,7 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
                 "linked_incidents": 1,
                 "linked_comments": 1,
                 "avg_nps": 2,
-                "avg_similarity": 0.7,
+                "avg_text_similarity": 0.7,
                 "support_organizations": "Equipo",
                 "incident_records": [
                     {
@@ -86,6 +86,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
         "Incidencias relacionadas",
         "Comentarios relacionados",
         "Vínculos semánticos",
-        "Similitud textual",
+        "Calidad del vínculo",
         "Nota media (0–10)",
     ]

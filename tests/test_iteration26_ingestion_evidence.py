@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nps_lens.analytics.causal import best_effort_ate_logit
 from nps_lens.analytics.linking_diagnostics import linking_diagnostics
 from nps_lens.analytics.nps_helix_link import (
     build_incident_text,
@@ -19,7 +18,7 @@ from nps_lens.ingest.helix_incidents import read_helix_incidents_excel
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.nps_service import NpsService
-from nps_lens.settings import DEFAULT_UI_TOUCHPOINT_SOURCE, Settings
+from nps_lens.settings import Settings
 
 
 def test_argentina_alias_identity_and_population(tmp_path):
@@ -192,19 +191,6 @@ def test_funnel_accounts_for_each_population():
     )
     assert result["scope_found_n2"] == ["App", "Web"]
     assert result["matchable_coverage_pct"] == 100
-
-
-def test_logit_runs_without_warning_shadowing():
-    rng = np.random.default_rng(42)
-    treatment = rng.integers(0, 2, 1000)
-    outcome = rng.binomial(1, 0.25 + treatment * 0.35)
-    result = best_effort_ate_logit(
-        pd.DataFrame({"treatment": treatment, "is_detractor": outcome}), "treatment", "1"
-    )
-    assert result.method == "logit+marginal_effect"
-    assert result.effect > 0
-    assert result.p_value < 0.01
-    assert DEFAULT_UI_TOUCHPOINT_SOURCE == "broken_journeys"
 
 
 def test_mexico_excel_temporal_extra_fields_persist(tmp_path):

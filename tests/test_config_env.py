@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 from dotenv import dotenv_values
 
-import nps_lens.config as config_module
+import nps_lens.settings as config_module
 import nps_lens.settings as settings_module
-from nps_lens.config import (
+from nps_lens.settings import (
     DEFAULT_UI_HELIX_BASE_URL,
     DEFAULT_UI_REPORT_DIMENSION_ANALYSIS,
     Settings,

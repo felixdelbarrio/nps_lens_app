@@ -24,7 +24,6 @@
 - `make typecheck` — mypy
 - `make test` — pytest + coverage
 - `make ci` — lint backend + frontend + E2E
-- `make platform CONFIG=...` — batch runner
 - `make build` — build PyInstaller (mac/linux)
 
 ---
@@ -52,7 +51,7 @@
 ## 3) Performance
 
 - Vite mantiene feedback rápido en frontend y FastAPI sirve la app empaquetada.
-- DiskCache reduce recomputes pesados.
+- DashboardService reutiliza evidencia base entre vistas mediante firmas de datos y clasificación activa.
 - Pushdown temporal (Año/Mes) reduce RAM/CPU.
 - La UI no recalcula KPIs ni URLs Helix: consume payloads de `DashboardService`.
 - Evita revalidaciones manuales si el estado operativo está `SINCRONIZANDO` o `GENERANDO`.

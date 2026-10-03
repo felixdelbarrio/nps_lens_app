@@ -291,9 +291,9 @@ export function SettingsSheet({
           <section className="settings-group">
             <div className="section-heading">
               <div>
-                <h3>Análisis causal</h3>
+                <h3>Evidencia Helix ↔ VoC</h3>
                 <p className="secondary-copy">
-                  El método causal ya se selecciona en los filtros de Causalidad; aquí se mantienen únicamente los umbrales operativos.
+                  El método causal ya se selecciona en los filtros de Evidencia Helix ↔ VoC; aquí se mantienen únicamente los umbrales operativos.
                 </p>
               </div>
             </div>
@@ -302,7 +302,7 @@ export function SettingsSheet({
                 <div className="settings-subsection-copy">
                   <h4>Parámetros de causalidad</h4>
                   <p className="secondary-copy">
-                    Ajusta el matching causal y la ventana temporal que gobiernan el cruce Helix ↔ VoC.
+                    Ajusta el matching semántico y la ventana temporal que gobiernan el cruce Helix ↔ VoC.
                   </p>
                 </div>
                 <div className="field-grid">

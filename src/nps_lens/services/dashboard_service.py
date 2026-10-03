@@ -15,7 +15,7 @@ from typing import Any, Callable, Optional, Sequence, cast
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, link_confidence_label
+from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, engine_quality, link_confidence_label
 from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
@@ -49,6 +49,8 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SHARED_TERMS,
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
+    evaluation_diagnostic,
+    temporal_scope_mask,
 )
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
@@ -285,6 +287,7 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
             touchpoint.tolist(),
             out.get("linked_incidents", pd.Series([0] * len(out), index=out.index)).tolist(),
             out.get("linked_comments", pd.Series([0] * len(out), index=out.index)).tolist(),
+            strict=False,
         )
     ]
     return out
@@ -459,13 +462,9 @@ class DashboardService:
             self._path_revision(self.repository.db_path),
             self._path_revision(Path(f"{self.repository.db_path}-wal")),
         )
-        knowledge_revision = self._path_revision(
-            self.settings.knowledge_dir / "knowledge_cache.jsonl"
-        )
         return (
             *database_revision,
             helix_revision,
-            knowledge_revision,
             self._path_revision(self.settings.equivalences_path),
             self.taxonomy.lens_override,
         )
@@ -518,6 +517,16 @@ class DashboardService:
                 self._frame_cache.move_to_end(key)
                 return cached
             frame = self.taxonomy.resolve(context)
+            requested = self.taxonomy.lens_override or self.taxonomy.state(context)["active"]
+            frame.attrs["classification_pending"] = frame.attrs.get(
+                "taxonomy_mode"
+            ) != requested or (
+                (requested != "SOURCE" or frame.attrs.get("classification_engine") == "llm")
+                and bool(
+                    frame["Palanca"].fillna("").eq("").all()
+                    or frame["Subpalanca"].fillna("").eq("").all()
+                )
+            )
             frame["match_status"] = nps_matchable_mask(frame).map(
                 {True: "matchable", False: "non_matchable"}
             )
@@ -536,10 +545,6 @@ class DashboardService:
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
         frame = self._load_nps_df(context)
         engine = self.analysis_engine("comments", context, **scope)
-        if engine["engine"] == "llm":
-            frame = TaxonomyExchange(self.taxonomy, Path(".")).apply(
-                context, frame, engine["active"]
-            )
         return frame, engine
 
     def comments_scope(
@@ -567,7 +572,7 @@ class DashboardService:
         pop_year: str = POP_ALL,
         pop_month: str = POP_ALL,
         score_channel: Optional[str] = None,
-        max_days_apart: int = 90,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
         channel = self._resolve_score_channel(frame, score_channel)
         assignments = self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
@@ -603,7 +608,7 @@ class DashboardService:
         pop_month: str = POP_ALL,
         score_channel: Optional[str] = None,
         nps_group: Optional[str] = None,
-        max_days_apart: int = 90,
+        max_days_apart: int = LINK_MAX_DAYS_APART,
     ) -> dict[str, Any]:
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"]
@@ -650,7 +655,11 @@ class DashboardService:
             else:
                 raise ValueError("Motor desconocido.")
             ready = total > 0 and received == total
-            engine = "llm" if ready and state.get(preference) == "llm" else "rules"
+            engine = (
+                "llm"
+                if state.get(preference) == "llm" and (ready or kind == "comments")
+                else "rules"
+            )
         except ValueError as exc:
             reason, ready, engine = str(exc), False, "rules"
         return {
@@ -711,7 +720,9 @@ class DashboardService:
             profile = {
                 "rows": len(frame),
                 "columns": len(frame.columns),
-                "periods": sorted(set(zip(dates.dt.strftime("%Y"), dates.dt.strftime("%m")))),
+                "periods": sorted(
+                    set(zip(dates.dt.strftime("%Y"), dates.dt.strftime("%m"), strict=False))
+                ),
                 "score_channels": self.taxonomy.resolve(context, frame)["Canal"]
                 .drop_duplicates()
                 .tolist(),
@@ -1363,14 +1374,14 @@ class DashboardService:
 
         if helix_df.empty or nps_df.empty or "Fecha" not in nps_df.columns:
             return helix_df.iloc[0:0].copy()
-        nps_dates = pd.to_datetime(nps_df["Fecha"], errors="coerce").dropna().dt.normalize()
-        if nps_dates.empty:
-            return helix_df.iloc[0:0].copy()
-        incident_dates = incident_occurrence_dates(helix_df)[0].dt.normalize()
-        delta = pd.Timedelta(days=max(0, int(max_days_apart)))
-        return helix_df.loc[
-            incident_dates.between(nps_dates.min() - delta, nps_dates.max() + delta)
-        ].copy()
+        return cast(
+            pd.DataFrame,
+            helix_df.loc[
+                temporal_scope_mask(
+                    nps_df["Fecha"], incident_occurrence_dates(helix_df)[0], max_days_apart
+                )
+            ].copy(),
+        )
 
     def _causal_analysis_bundle(
         self,
@@ -1385,15 +1396,66 @@ class DashboardService:
     ) -> dict[str, object]:
         """Build the canonical causal dataset consumed by both UI and PowerPoint."""
 
+        active_frame = self._load_nps_df(context)
         active_source = str(
             touchpoint_source
             or self.settings.ui_defaults()["touchpoint_source"]
             or TOUCHPOINT_SOURCE_DOMAIN
         ).strip()
+        llm_status = self.analysis_engine(
+            "helix",
+            context,
+            pop_year=pop_year,
+            pop_month=pop_month,
+            score_channel=score_channel,
+            max_days_apart=max_days_apart,
+        )
+        llm_pending = (
+            self.settings.auth_mode == "local"
+            and self.taxonomy.state(context).get("causal_engine") == "llm"
+            and not llm_status.get("ready", False)
+        )
+        handler = HelixExchange(self.taxonomy, Path(".")) if llm_status["engine"] == "llm" else None
+        inputs = (
+            handler.inputs(context, self._load_helix_df(context), llm_status["active"])
+            if handler
+            else None
+        )
+        frame_signature = hashlib.sha256(
+            pd.util.hash_pandas_object(
+                active_frame.reindex(
+                    columns=[
+                        "_business_key",
+                        "Fecha",
+                        "NPS",
+                        "Comment",
+                        "Canal",
+                        "Palanca",
+                        "Subpalanca",
+                    ]
+                ),
+                index=False,
+            )
+            .to_numpy()
+            .tobytes()
+        ).hexdigest()
+        evidence_signature = (
+            frame_signature,
+            self.taxonomy.lens_override or self.taxonomy.state(context)["active"],
+            active_frame.attrs.get("classification_pending", False),
+            active_frame.attrs["classification_signature"],
+            self._data_revision(context)[2],
+            json.dumps(self.settings.service_origin_n2_map, sort_keys=True),
+            (
+                json.dumps(handler.current(context, inputs), sort_keys=True)
+                if handler and inputs
+                else "llm_pending" if llm_pending else "rules"
+            ),
+        )
         key = (
             "causal-analysis",
             *self._context_key(context),
-            self._data_revision(context),
+            evidence_signature,
             pop_year,
             pop_month,
             score_channel,
@@ -1403,22 +1465,9 @@ class DashboardService:
             self._helix_base_url(),
         )
 
-        def _build() -> dict[str, object]:
-            llm_status = self.analysis_engine(
-                "helix",
-                context,
-                pop_year=pop_year,
-                pop_month=pop_month,
-                score_channel=score_channel,
-                max_days_apart=max_days_apart,
-            )
-            use_llm = llm_status["engine"] == "llm"
-            nps_frame = self._load_nps_df(context)
-            inputs = None
-            handler = HelixExchange(self.taxonomy, Path(".")) if use_llm else None
-            if handler:
-                inputs = handler.inputs(context, self._load_helix_df(context), llm_status["active"])
-                nps_frame = inputs["frame"]
+        def _build_base() -> dict[str, object]:
+            use_llm = handler is not None
+            nps_frame = active_frame
             nps_slice, helix_history, helix_window, resolved_channel = self.causal_scope(
                 context,
                 nps_frame,
@@ -1435,13 +1484,9 @@ class DashboardService:
             focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
             helix_total = self._load_helix_df(context)
             helix_annotated = annotate_incident_link_quality(helix_window)
-            helix_slice = (
-                helix_window.copy()
-                if use_llm
-                else helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
-            )
+            helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
             imported_links = None
-            if handler and inputs:
+            if handler and inputs and not active_frame.attrs.get("classification_pending"):
                 imported_links = handler.links(
                     context, inputs, focus_df, helix_slice, max_days_apart=max_days_apart
                 )
@@ -1455,7 +1500,6 @@ class DashboardService:
                 "helix_slice": helix_slice,
                 "helix_window_rows": int(len(helix_window)),
                 "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
-                "touchpoint_source": active_source,
                 "causal_engine": "llm" if use_llm else "rules",
                 "signal_quality": signal_quality(nps_slice),
             }
@@ -1469,6 +1513,27 @@ class DashboardService:
                 requested_scope=list(assignments),
             )
             base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
+            if active_frame.attrs.get("classification_pending") or (
+                (
+                    active_frame.attrs.get("taxonomy_mode", "SOURCE") != "SOURCE"
+                    or active_frame.attrs.get("classification_engine") == "llm"
+                )
+                and bool(
+                    focus_df["Palanca"].fillna("").eq("").any()
+                    | focus_df["Subpalanca"].fillna("").eq("").any()
+                )
+            ):
+                cast(dict[str, object], base["diagnostics"]).update(
+                    evaluation_diagnostic(
+                        eligible=len(helix_slice), reason="classification_pending"
+                    )
+                )
+                return base
+            if llm_pending:
+                cast(dict[str, object], base["diagnostics"]).update(
+                    evaluation_diagnostic(eligible=len(helix_slice), reason="evaluation_pending")
+                )
+                return base
             if nps_slice.empty or focus_df.empty or helix_slice.empty:
                 return base
 
@@ -1487,7 +1552,31 @@ class DashboardService:
             )
             links_df = cast(pd.DataFrame, core["links_df"])
             base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=links_df)
+            base.update(ready=True, core=core, operational_benchmark=operational_benchmark)
+            return base
+
+        def _build() -> dict[str, object]:
+            evidence_key = (
+                "link-evidence",
+                *self._context_key(context),
+                evidence_signature,
+                pop_year,
+                pop_month,
+                score_channel,
+                min_similarity,
+                max_days_apart,
+            )
+            base = dict(self._cached_result(evidence_key, _build_base))
+            base["touchpoint_source"] = active_source
+            if not base["ready"]:
+                return base
+            core = cast(dict[str, object], base["core"])
+            links_df = cast(pd.DataFrame, core["links_df"])
             by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
+            focus_df = cast(pd.DataFrame, base["focus_df"])
+            helix_slice = cast(pd.DataFrame, base["helix_slice"])
+            focus_group = str(base["focus_group"])
+            operational_benchmark = cast(HelixOperationalBenchmark, base["operational_benchmark"])
             executive_journey_catalog = load_executive_journey_catalog(
                 self.settings.knowledge_dir,
                 service_origin=context.service_origin,
@@ -1626,9 +1715,8 @@ class DashboardService:
                 score_channel=resolved_channel,
                 focus_group=focus_group,
                 focus_label=focus_label,
-                empty_state=(
-                    "No hay suficiente base cruzada para analizar incidencias frente a NPS en el "
-                    "contexto actual. Carga Helix y revisa el periodo activo."
+                empty_state=str(
+                    cast(dict[str, object], analysis["diagnostics"])["evaluation_message"]
                 ),
             )
             payload["diagnostics"] = analysis["diagnostics"]
@@ -1725,12 +1813,12 @@ class DashboardService:
                 "nps_topic",
                 pd.Series([""] * len(evidence_sorted_df), index=evidence_sorted_df.index),
             ).map(lambda topic: topic_rank.get(str(topic).strip(), len(topic_rank)))
-            evidence_sorted_df["similarity"] = pd.to_numeric(
-                _series_or_default(evidence_sorted_df, "similarity", default=0.0),
+            evidence_sorted_df["text_similarity"] = pd.to_numeric(
+                _series_or_default(evidence_sorted_df, "text_similarity", default=0.0),
                 errors="coerce",
             ).fillna(0.0)
             evidence_sorted_df = evidence_sorted_df.sort_values(
-                ["__topic_order", "similarity"],
+                ["__topic_order", "text_similarity"],
                 ascending=[True, False],
             ).drop(columns="__topic_order")
 
@@ -1762,7 +1850,8 @@ class DashboardService:
                 "incident_summary",
                 "detractor_comment",
                 "Tasa foco",
-                "similarity",
+                "text_similarity",
+                "semantic_confidence",
             ]
         )
         evidence_visible_df["Tasa foco"] = evidence_visible_df["Tasa foco"].map(format_percentage)
@@ -1774,7 +1863,8 @@ class DashboardService:
                 "incident_summary": "Incident Summary",
                 "detractor_comment": "Detractor Comment",
                 "Tasa foco": "Tasa Foco",
-                "similarity": "Similarity",
+                "text_similarity": "Similitud textual",
+                "semantic_confidence": "Confianza semántica",
             }
         )
         evidence_rows = self._serialize_rows(evidence_visible_df)
@@ -1834,7 +1924,9 @@ class DashboardService:
                     "title": (
                         f"{len(scenario_cards)} {method_spec.entity_plural.lower()} con vínculos para {focus_name}"
                         if scenario_cards
-                        else "Sin vínculos semánticos en esta ventana"
+                        else str(
+                            cast(dict[str, object], analysis["diagnostics"])["evaluation_message"]
+                        )
                     ),
                     "summary": (
                         (
@@ -1870,7 +1962,9 @@ class DashboardService:
                     "title": "Evidencias",
                     "subtitle": "Comentarios e incidencias vinculados para los 10 tópicos afectados con mayor evidencia.",
                     "rows": evidence_rows,
-                    "empty_state": "No hay vínculos semánticos para los tópicos afectados.",
+                    "empty_state": str(
+                        cast(dict[str, object], analysis["diagnostics"])["evaluation_message"]
+                    ),
                 },
             },
             "entity_summary": {
@@ -1896,7 +1990,7 @@ class DashboardService:
                 "table_title": method_spec.table_title,
                 "table": self._serialize_rows(entity_summary_df),
                 "column_labels": {
-                    "Similitud textual": link_confidence_label(
+                    "Calidad del vínculo": link_confidence_label(
                         str(analysis.get("causal_engine", "rules"))
                     )
                 },
@@ -2122,6 +2216,7 @@ class DashboardService:
             report_dimension_analysis=resolved_report_dimension_analysis,
             period_kpis=period_kpis,
             include_causal_section=include_causal_section,
+            linking_diagnostics=cast(dict[str, object], causal["diagnostics"]),
             report_context=report_context,
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
@@ -2542,7 +2637,7 @@ class DashboardService:
             summary[column] = _numeric_series(summary, column, default=0).astype(int)
         for column in (
             "avg_nps",
-            "avg_similarity",
+            "avg_text_similarity",
         ):
             summary[column] = _numeric_series(summary, column, default=np.nan).round(3)
         summary = select_causal_scenarios(summary, max_rows=len(summary))
@@ -2553,12 +2648,14 @@ class DashboardService:
             "linked_incidents",
             "linked_comments",
             "linked_pairs",
-            "avg_similarity",
+            "Calidad del vínculo",
             "avg_nps",
         ]
         if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
-        summary["avg_similarity"] = summary["avg_similarity"].map(format_percentage)
+        summary["Calidad del vínculo"] = summary.apply(engine_quality, axis=1).map(
+            format_percentage
+        )
         return summary[columns].rename(
             columns={
                 "nps_topic": entity_name,
@@ -2567,7 +2664,6 @@ class DashboardService:
                 "linked_incidents": "Incidencias relacionadas",
                 "linked_comments": "Comentarios relacionados",
                 "linked_pairs": "Vínculos semánticos",
-                "avg_similarity": "Similitud textual",
                 "avg_nps": "Nota media (0–10)",
             }
         )
@@ -2635,7 +2731,7 @@ class DashboardService:
                         },
                         {
                             "label": link_confidence_label(str(row.get("causal_engine", "rules"))),
-                            "value": format_percentage(row.get("avg_similarity")),
+                            "value": format_percentage(engine_quality(row.to_dict())),
                         },
                     ],
                     "flow_steps": [
@@ -2976,7 +3072,9 @@ class DashboardService:
             helix_copy.set_index("incident_id")["incident_summary"].astype(str).fillna("")
         )
 
-        evidence = links_df.copy().sort_values("similarity", ascending=False).head(int(max_rows))
+        evidence = (
+            links_df.copy().sort_values("text_similarity", ascending=False).head(int(max_rows))
+        )
         evidence["detractor_comment"] = (
             evidence["nps_id"]
             .astype(str)
@@ -2993,16 +3091,17 @@ class DashboardService:
             .map(redact_operational_snippet)
             .str.slice(0, 220)
         )
-        return evidence[
-            [
+        return evidence.reindex(
+            columns=[
                 "nps_topic",
-                "similarity",
+                "text_similarity",
+                "semantic_confidence",
                 "incident_id",
                 "incident_summary",
                 "nps_id",
                 "detractor_comment",
             ]
-        ].copy()
+        ).copy()
 
     def _compute_linking_core(
         self,
@@ -3024,9 +3123,34 @@ class DashboardService:
             )
         else:
             links_df = imported_links
-            assignments_df = links_df.sort_values("similarity", ascending=False).drop_duplicates(
-                "incident_id"
-            )[["incident_id", "nps_topic", "similarity", "incident_topic"]]
+            assignments_df = links_df.sort_values(
+                "text_similarity", ascending=False
+            ).drop_duplicates(["incident_id", "nps_topic"])[
+                ["incident_id", "nps_topic", "text_similarity", "incident_topic"]
+            ]
+        links_df = links_df.copy()
+        links_df["classification_signature"] = nps_df.attrs.get("classification_signature", "")
+        links_df["nps_date"] = links_df["nps_id"].map(
+            dict(zip(analytical_response_ids(nps_df), nps_df["Fecha"], strict=False))
+        )
+        links_df["incident_date"] = links_df["incident_id"].map(
+            dict(
+                zip(
+                    helix_df["Incident Number"].astype(str),
+                    incident_occurrence_dates(helix_df)[0],
+                    strict=False,
+                )
+            )
+        )
+        links_df["evidence_id"] = [
+            hashlib.sha256(f"{sig}|{inc}|{nps}".encode()).hexdigest()
+            for sig, inc, nps in zip(
+                links_df["classification_signature"],
+                links_df["incident_id"],
+                links_df["nps_id"],
+                strict=False,
+            )
+        ]
         overall_weekly, by_topic_weekly = weekly_aggregates(
             nps_df,
             helix_df,
