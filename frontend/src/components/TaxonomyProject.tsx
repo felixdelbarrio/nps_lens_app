@@ -8,7 +8,7 @@ import { ProjectUrlField } from "./ProjectUrlField";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
 import { ADDITIONAL_TOPICS, ExchangeProgress, type ExchangeCounts } from "./ExchangeProgress";
 
-type Progress = ExchangeCounts & { multiple:number; designer:ExchangeCounts & {levers:number;sublevers:number} };
+type Progress = ExchangeCounts & { mode:string; taxonomy_fingerprint:string; multiple:number; designer:ExchangeCounts & {levers:number;sublevers:number} };
 type Role = "designer" | "classifier" | "normalizer";
 const FIELDS = {designer:"designer_url",classifier:"classifier_url",normalizer:"normalizer_url"} as const;
 const IMPORT_LABELS = {designer:"Importar ZIP de taxonomía",classifier:"Importar ZIP de comentarios clasificados",normalizer:"Importar ZIP de conceptos"};
@@ -38,7 +38,7 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     const body = new FormData();
     body.append("file", file);
     const result = await taxonomyRequest<{progress?: ExchangeCounts}>(`/discovery/${role}/import`, context, {method:"POST", body});
-    const success = role === "designer" ? "Taxonomía importada. Ya puedes utilizarla para clasificar comentarios e incidencias." : role === "normalizer" ? "Conceptos actualizados para esta compañía." : "Importación validada. Progreso acumulado actualizado.";
+    const success = role === "designer" ? "Propuesta de taxonomía importada. Actívala explícitamente para clasificar comentarios e incidencias." : role === "normalizer" ? "Conceptos actualizados para esta compañía." : "Importación validada. Progreso acumulado actualizado.";
     setMessage(success + (role === "classifier" && result.progress ? ` ${classificationImportMessage(result.progress.pending)}` : ""));
     await mutate();
     await onChange();
@@ -51,6 +51,7 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
     {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : "Clasificación completa. Activa Usar clasificación LLM en los filtros de Comentarios."}</p> : null}
+    {role === "classifier" && progress ? <p>Modo activo: {progress.mode} · fingerprint <code>{progress.taxonomy_fingerprint?.slice(0, 8)}</code></p> : null}
     <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(exportZips)}>{EXPORT_LABELS[role]}</button>
     <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(() => importZip(file)); }} /></label></div>
     <ExchangeFiles result={exported} />

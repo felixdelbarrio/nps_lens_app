@@ -184,7 +184,7 @@ def test_short_comments_are_reviewed_without_keyword_reclassification():
     assert "No funciona bien la página" in PROJECT_INSTRUCTIONS["classifier"]
 
 
-def test_suspicious_import_is_atomic_and_does_not_leave_operational_comment_in_reserve(exchange):
+def test_suspicious_import_reports_without_heuristic_quality_gate(exchange):
     handler, ctx, frame, _ = exchange
     frame.loc[:, "Comment"] = "No funciona bien la página"
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
@@ -199,10 +199,9 @@ def test_suspicious_import_is_atomic_and_does_not_leave_operational_comment_in_r
     for batch in response["results"].values():
         for row in batch["classifications"]:
             row["primary"] = reserve
-    with pytest.raises(ValueError, match="Clasificación sospechosa"):
-        handler.import_response(ctx, classifier_zip(response), "classifier")
-    assert handler.progress(ctx)["received"] == 0
-    assert not handler.taxonomy.classification_artifact(ctx, "DISCOVERED")
+    result = handler.import_response(ctx, classifier_zip(response), "classifier")
+    assert result["classification_audit"]["suspicious_rate"] == 1
+    assert handler.progress(ctx)["received"] == len(frame)
 
 
 def test_incident_semantic_contract_prioritizes_cheque_description_over_administrative_token():
@@ -219,7 +218,7 @@ def test_incident_semantic_contract_prioritizes_cheque_description_over_administ
     assert narrative in build_incident_text(frame).iloc[0]
     instructions = PROJECT_INSTRUCTIONS["helix"]
     assert "routing y campos de plantilla no son evidencia" in instructions
-    assert "clasifica Cheques / Depósito de cheque físico no disponible" in instructions
+    assert "clasifica por cheques" in instructions
     # Semantic decisions are supplied externally; no production keyword classifier.
     validated = EvidenceLink(
         nps_id="N1",

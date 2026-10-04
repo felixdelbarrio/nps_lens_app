@@ -50,7 +50,9 @@ def restart(handler, frame, monkeypatch):
     return type(handler)(service, handler.downloads)
 
 
-def test_exact_text_fanout_local_empty_restart_and_individual_fingerprints(exchange, monkeypatch):
+def test_canonical_text_fanout_local_empty_restart_and_individual_fingerprints(
+    exchange, monkeypatch
+):
     handler, ctx, frame = set_comments(
         exchange, monkeypatch, [None, "", "NO", "NO", "no", "texto", "texto ", " "]
     )
@@ -58,8 +60,8 @@ def test_exact_text_fanout_local_empty_restart_and_individual_fingerprints(excha
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     sent = request["comments/000001.json"]["comments"]
-    assert [row["Comment"] for row in sent] == ["NO", "no", "texto", "texto ", " "]
-    assert handler.progress(ctx)["received"] == 2
+    assert [row["Comment"] for row in sent] == ["NO", "texto"]
+    assert handler.progress(ctx)["received"] == 3
     assert "private-" not in str(request)
     local = handler.assignments(ctx, frame, "DISCOVERED")
     assert local[frame.iloc[0]._business_key] == {

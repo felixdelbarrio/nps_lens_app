@@ -1,3 +1,4 @@
+import { HelixClassifier } from "./HelixClassifier";
 import { useState } from "react";
 import useSWR from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyMode } from "../api";
@@ -18,6 +19,7 @@ export function ClassificationEngineControl({kind, context, disabled, onChange}:
   }
   return <div className="classification-engine"><label className="switch-field"><input type="checkbox" role="switch" checked={Boolean(data?.selected_engine === "llm")} disabled={disabled || busy || !data || (data.selected_engine === "rules" && !data.ready)} onChange={e=>void change(e.target.checked ? "llm" : "rules")} />{kind === "helix" ? "Usar vinculación semántica LLM" : "Usar clasificación LLM"}</label>
     {data ? <p className="field-hint">Lente: {TAXONOMY_NAMES[data.active]}. {formatVolume(data.received)} de {formatVolume(data.total)} {kind === "helix" ? "incidencias" : "comentarios"} del ámbito visible procesados. {data.selected_engine === "llm" && !data.ready ? data.reason : ""}</p> : null}
+    {kind === "helix" && data ? <HelixClassifier context={context} mode={data.active} url="" disabled={disabled || busy} onlyLinking onChange={async () => { await mutate(); await onChange(); }} /> : null}
     {message || error ? <p role="status">{message || error.message}</p> : null}
   </div>;
 }

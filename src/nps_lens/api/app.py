@@ -899,7 +899,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             with dashboard_layer._analytics_lock:
                 handler, context, inputs = helix_exchange(request, dashboard_layer)
-                return handler.export(context, inputs)
+                return handler.export(
+                    context, inputs, only_linking=request.query_params.get("only_linking") == "true"
+                )
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
 

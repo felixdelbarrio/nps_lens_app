@@ -61,6 +61,49 @@ def _upload_nps_march(client: TestClient) -> dict[str, object]:
     return payload
 
 
+_LINK_NARRATIVES = (
+    "La pantalla de acceso queda en blanco al validar credenciales",
+    "La autenticación rechaza la clave con error de validación",
+)
+
+
+def _upload_nps_link_evidence(client: TestClient) -> None:
+    """Known narrative pairs for linking tests, independent of the real Excel corpus."""
+    data = pd.DataFrame(
+        {
+            "Fecha": ["2026-03-01", "2026-03-03", "2026-03-04"],
+            "ID": ["link-access", "link-auth", "unrelated"],
+            "NPS": [2, 3, 1],
+            "Comment": [
+                *_LINK_NARRATIVES,
+                "El depósito de cheques está bloqueado",
+            ],
+            "Canal": ["Web"] * 3,
+            "Palanca": ["Acceso", "Acceso", "Cheques"],
+            "Subpalanca": ["Portal", "Autenticación", "Depósito"],
+        }
+    )
+    content = BytesIO()
+    data.to_excel(content, index=False)
+    response = client.post(
+        "/api/uploads/nps",
+        data={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "service_origin_n2": "",
+        },
+        files={
+            "file": (
+                "link-evidence.xlsx",
+                content.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+
 def _upload_nps_jan_feb(client: TestClient) -> dict[str, object]:
     jan_feb = fixture_excel("NPS Térmico Senda - 01Enero-02Febrero.xlsx")
     with jan_feb.open("rb") as handle:
@@ -86,7 +129,13 @@ def _upload_nps_jan_feb(client: TestClient) -> dict[str, object]:
     return payload
 
 
-def _build_helix_fixture(path: Path) -> Path:
+def _build_helix_fixture(
+    path: Path,
+    narratives: tuple[str, str] = (
+        "Cliente no puede acceder al portal",
+        "Fallo en autenticacion web",
+    ),
+) -> Path:
     pd.DataFrame(
         {
             "Owner Support Company": ["BBVA México", "BBVA México", "BBVA España"],
@@ -97,8 +146,7 @@ def _build_helix_fixture(path: Path) -> Path:
             "Incident Number": ["INC-1", "INC-2", "INC-3"],
             "Record ID": ["RID-1", "RID-2", "RID-3"],
             "Detailed Description": [
-                "Cliente no puede acceder al portal",
-                "Fallo en autenticacion web",
+                *narratives,
                 "Contexto ajeno",
             ],
             "Short Description": ["Acceso", "Autenticacion", "Otro"],
@@ -117,10 +165,7 @@ def _build_helix_out_of_period_fixture(path: Path) -> Path:
             "CreatedDate": ["2026-02-01", "2026-02-03"],
             "Incident Number": ["INC-FEB-1", "INC-FEB-2"],
             "Record ID": ["RID-FEB-1", "RID-FEB-2"],
-            "Detailed Description": [
-                "Cliente no puede acceder al portal en febrero",
-                "Fallo en autenticacion web en febrero",
-            ],
+            "Detailed Description": list(_LINK_NARRATIVES),
             "Short Description": ["Acceso febrero", "Autenticacion febrero"],
         }
     ).to_excel(path, index=False)
@@ -391,7 +436,7 @@ def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_bounda
 ) -> None:
     app = create_app(_settings(tmp_path))
     client = TestClient(app)
-    _upload_nps_march(client)
+    _upload_nps_link_evidence(client)
     helix_fixture = _build_helix_out_of_period_fixture(tmp_path / "helix-february.xlsx")
     with helix_fixture.open("rb") as handle:
         upload_response = client.post(
@@ -426,7 +471,18 @@ def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_bounda
     )
 
     assert report.content
-    assert report.slide_count > 0
+    assert report.slide_count > 6
+    params = {
+        "service_origin": "BBVA México",
+        "service_origin_n1": "Senda",
+        "pop_year": "2026",
+        "pop_month": "03",
+        "score_channel": "Web",
+    }
+    linked = client.get("/api/dashboard/linking", params=params).json()
+    assert linked["diagnostics"]["evidence_pairs"] == 2
+    outside = client.get("/api/dashboard/linking", params={**params, "max_days_apart": "10"}).json()
+    assert outside["diagnostics"]["evidence_pairs"] == 0
     texts = _ppt_texts(report.content)
     assert not any("Evidencia Helix ↔ VoC no concluyente" in text for text in texts)
     assert any("Journeys rotos" in text for text in texts)
@@ -434,8 +490,8 @@ def test_generate_ppt_report_uses_helix_inside_causal_window_across_month_bounda
 
 def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) -> None:
     client = TestClient(create_app(_settings(tmp_path)))
-    _upload_nps_march(client)
-    helix_fixture = _build_helix_fixture(tmp_path / "helix.xlsx")
+    _upload_nps_link_evidence(client)
+    helix_fixture = _build_helix_fixture(tmp_path / "helix.xlsx", _LINK_NARRATIVES)
 
     with helix_fixture.open("rb") as handle:
         upload_response = client.post(
@@ -537,7 +593,7 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert linking_payload["causal_method"]["value"] == "broken_journeys"
     assert linking_payload["navigation"][1]["label"] == "Journeys rotos"
     assert linking_payload["diagnostics"]["helix_quality_eligible"] == 2
-    assert linking_payload["diagnostics"]["evidence_pairs"] > 0
+    assert linking_payload["diagnostics"]["evidence_pairs"] == 2
     assert "situation" in linking_payload
     assert "narrative" in linking_payload["situation"]
     assert "entity_summary" in linking_payload
@@ -546,7 +602,10 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
     assert len(linking_payload["navigation"]) == 3
     assert "associations" not in linking_payload["situation"]
     evidence_rows = linking_payload["situation"]["evidence"]["rows"]
-    assert evidence_rows
+    assert {(row["Incident ID"], row["Detractor Comment"]) for row in evidence_rows} == {
+        ("INC-1", _LINK_NARRATIVES[0]),
+        ("INC-2", _LINK_NARRATIVES[1]),
+    }
     assert list(evidence_rows[0]) == [
         "NPS Topic",
         "Incident ID",
@@ -795,8 +854,9 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
     assert Path(report_response.headers["x-nps-lens-saved-path"]).exists()
 
     presentation = Presentation(BytesIO(report_response.content))
-    # A valid report retains its seven core slides even without enough causal evidence.
-    assert len(presentation.slides) >= 7
+    # Six base slides; scenario slides require accepted narrative evidence.
+    assert len(presentation.slides) == 6
+    assert not any("Journeys rotos" in text for text in _ppt_texts(report_response.content))
 
 
 def test_publication_embeds_the_executive_report_with_causal_slides(
