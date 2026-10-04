@@ -563,8 +563,24 @@ class TaxonomyService:
         self._state_cache.clear()
         return taxonomy
 
+    def guard_export(self, context: UploadContext, mode: str) -> None:
+        state = self.state(context)
+        proposal = state.get("proposed_discovered_taxonomy")
+        if (
+            mode == "DISCOVERED"
+            and proposal
+            and taxonomy_fingerprint(proposal) != taxonomy_fingerprint(self.catalog(context, mode))
+        ):
+            raise ValueError(
+                "Activa o descarta explícitamente la propuesta DISCOVERED antes de exportar."
+            )
+
     def configure(self, context: UploadContext, changes: dict[str, Any]) -> dict[str, Any]:
         state = self.state(context)
+        if changes.get("discard_proposal"):
+            state.pop("proposed_discovered_taxonomy", None)
+            state.pop("proposed_discovered_fingerprint", None)
+            self.save_state(context, state)
         if changes.get("active") == "DISCOVERED" and state.get("proposed_discovered_taxonomy"):
             state["discovered_taxonomy"] = state.pop("proposed_discovered_taxonomy")
             state["taxonomy_fingerprint"] = state.pop(

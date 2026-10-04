@@ -131,7 +131,7 @@ _DETAIL_LABEL = re.compile(
 )
 _ADMIN_LABEL = re.compile(
     r"^(?:nombre|apellido|tel[eé]fono|email|e-mail|correo|dni|cuit|legajo|"
-    r"contacto|adjuntos|canal|producto|categor[ií]a|categorization|asignado a|assigned group|"
+    r"contacto|adjuntos|canal|producto|categor[ií]a(?: de producto)?|routing|categorization|asignado a|assigned group|"
     r"owner support company|servicio origen|source service|prioridad|priority)$",
     re.IGNORECASE,
 )
@@ -196,6 +196,8 @@ def build_incident_text(df: pd.DataFrame) -> pd.Series:
                 .str.replace(r"\s+", " ", regex=True)
                 .str.strip()
             )
+            if name in {"Description", "Short Description", "summary"}:
+                part = part.mask(compact.str.strip().ne(""), "")
             key = part.str.casefold()
             duplicate = pd.Series(False, index=df.index)
             for previous in seen:
@@ -225,8 +227,8 @@ def _incident_link_quality_columns(df: pd.DataFrame) -> tuple[pd.Series, pd.Seri
     empty = semantic_text.eq("") | informative.eq(0)
     synthetic = placeholder & informative.le(4)
     reasons = pd.Series("", index=df.index, dtype="string")
-    reasons.loc[synthetic] = "Registro de ejemplo o placeholder"
     reasons.loc[empty] = "Texto operativo vacío o no interpretable"
+    reasons.loc[synthetic] = "Registro de ejemplo o placeholder"
     return ~(empty | synthetic), reasons
 
 

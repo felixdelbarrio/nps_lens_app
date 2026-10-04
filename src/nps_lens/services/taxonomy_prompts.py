@@ -109,13 +109,14 @@ ASIGNACIÓN
 - Clasifica independientemente cada Comment por significado explícito. primary es
   obligatorio y debe ser un ID conocido. Prioriza: bloqueo de tarea, énfasis, causa
   solo si está afirmada, intensidad y primera mención; empate real: pareja alfabética.
-- secondary contiene 0–2 IDs únicos, distintos de primary y conocidos solo para temas
+- secondary contiene 0–1 IDs únicos, distintos de primary y conocidos solo para temas
   independientes explícitos; nunca reservas, duda, sinónimos o causas inferidas.
-- Texto vacío/ininteligible/solo órdenes -> Información insuficiente; tema explícito
+- Texto de significado indeterminable -> Información insuficiente; tema explícito
   sin encaje -> Tema no cubierto. Valoración genérica -> Experiencia global /
   Valoración general del canal si existe. Usa reservas solo si están en el catálogo;
   si no hay encaje ni reserva, detente y solicita revisar la taxonomía.
-- Mismo texto y taxonomy_fingerprint producen la misma asignación sin importar ID,
+- Antes de usar una reserva contrasta todo el catálogo.
+- Mismo significado y taxonomy_fingerprint producen la misma asignación sin importar ID,
   posición, lote u orden. Conserva repetidos: cada ID aparece una vez y sin normalizar.
 
 SALIDA
@@ -127,7 +128,7 @@ Procesa todos los lotes completos posibles; ante un límite real devuelve solo l
 terminados e indica fuera del ZIP cuántos faltan. Procesa únicamente este ZIP.
 Conserva índice/total del nombre: 1_4_comentarios.zip ->
 1_4_comentarios_clasificados.zip. Valida manifiesto, campos, catálogo, conteo, IDs,
-orden, unicidad y 0–2 secundarios antes de entregar.
+orden, unicidad y 0–1 secundarios antes de entregar.
 """
 
 HELIX_INSTRUCTIONS = """CLASIFICA INCIDENCIAS · nps-lens-helix/5
@@ -144,21 +145,20 @@ ASIGNACIÓN
 - Prioridad: descripción narrativa, síntoma, tarea, causa confirmada y resolución.
   Títulos, Categoría de Producto, routing y campos de plantilla no son evidencia salvo
   confirmación narrativa; cambiarlos no puede cambiar la clasificación. Si el título dice
-  «Acceso / Claves / Token» pero la descripción dice «no tiene opción de depósito
-  de cheque», clasifica Cheques / Depósito de cheque físico no disponible si existe.
+  «Token» pero la narrativa describe cheques, clasifica por cheques.
 - Para cada incidencia devuelve primary según la descripción explícita. secondary
-  admite 0–2 IDs únicos, distintos de primary y nunca reservas, solo para síntomas
+  admite 0–1 IDs únicos, distintos de primary y nunca reservas, solo para síntomas
   independientes. Distingue
   tarea, síntoma, alcance, estado, resolución y causa confirmada. Una petición no es
   un fallo ni una consulta una caída; no inventes causas técnicas.
+- Antes de usar una reserva contrasta todo el catálogo.
 - Sin texto interpretable usa Información insuficiente; con síntoma claro sin encaje,
   Tema no cubierto, si existen. Solo sin reserva aplicable usa primary=null. En esos
   casos links=[].
 - links contiene solo candidatos cuya evidencia muestre la misma tarea y síntoma.
   Compartir categoría no prueba un vínculo y tener otra categoría no lo impide. No rellenes cuotas. confidence
   (0–1) es confianza semántica, no causalidad ni significación. La app aplica la
-  ventana temporal; afinidad no demuestra causalidad. No elijas método causal,
-  journeys ni entidades.
+  ventana temporal; afinidad no demuestra causalidad.
 
 SALIDA
 ZIP con manifest.json y results/NNNNNN.json por lote:
@@ -166,11 +166,12 @@ ZIP con manifest.json y results/NNNNNN.json por lote:
 "links":[{"nps_id":"ID","confidence":0.85,
 "incident_quote":"cita","comment_quote":"cita","same_task":true,
 "same_symptom":true,"affected_task":"tarea explícita","observed_symptom":"síntoma explícito"}]}]}.
-Valida same_task y same_symptom en ambas citas, nunca por categoría.
+Valida same_task y same_symptom en ambas citas, nunca por categoría/producto.
+Éxito/satisfacción no es fallo; misma tarea con distinto síntoma no es match.
+Polaridad y estado operativo deben ser compatibles. Confidence alta exige evidencia
+específica en ambos textos.
 Conserva tarea y síntoma breves y sin datos personales.
-No incluyas reason, rationale ni evidence de clasificación. Conserva todos los IDs
-una vez y en orden. No uses etiquetas, lever/sublever, primary_classification ni
-secondary_classifications; no incluyas corpus, taxonomías, carpetas o archivos extra.
+No incluyas reason, rationale ni evidence de clasificación. Conserva IDs únicos en orden. Usa solo IDs de categoría y archivos solicitados.
 Entrega lotes completos, conserva índice/total y el sufijo _clasificadas.zip.
 Valida campos, catálogo, citas, links, conteos, IDs y orden.
 """

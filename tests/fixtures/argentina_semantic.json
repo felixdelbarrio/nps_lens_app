@@ -1,0 +1,228 @@
+{
+  "provenance": "Argentina v3, intercambios locales del 2026-10-04. Extractos sin identificadores personales; IDs reasignados. Etiquetas esperadas revisadas frente al catálogo original. Los títulos/routing y variantes de formato son perturbaciones de prueba. Links etiquetados para calibración; no son resultados de una nueva ejecución LLM.",
+  "catalog": {
+    "c001": {
+      "lever": "Acceso y continuidad",
+      "sublever": "Acceso no disponible",
+      "criterion": "Usar cuando no se puede entrar o iniciar la operativa. Excluye lentitud con acceso posible, cierres de sesión ya dentro y bloqueos de una tarea concreta."
+    },
+    "c002": {
+      "lever": "Acceso y continuidad",
+      "sublever": "Cierre de sesión inesperado",
+      "criterion": "Usar cuando la sesión expulsa, vuelve a la parte pública o se cierra mientras se trabaja. Excluye cierres voluntarios para recuperar un cuelgue y problemas de acceso inicial."
+    },
+    "c003": {
+      "lever": "Acceso y continuidad",
+      "sublever": "Errores y bloqueos durante la operativa",
+      "criterion": "Usar cuando la página o app se cuelga, queda en blanco, arroja error o deja de responder durante el uso sin un síntoma más específico. Excluye lentitud pura, acceso inicial y fallos de tareas con categoría propia."
+    },
+    "c004": {
+      "lever": "Acceso y continuidad",
+      "sublever": "Lentitud y tiempos de respuesta",
+      "criterion": "Usar cuando cargar, navegar o ejecutar tarda demasiado pero la tarea sigue siendo posible. Excluye demoras de acreditación, emisión de resúmenes y otros tiempos ligados a un resultado específico."
+    },
+    "c005": {
+      "lever": "Atención y resolución",
+      "sublever": "Asesoramiento y trato",
+      "criterion": "Usar para valoraciones explícitas sobre claridad, cordialidad o calidad del asesoramiento de una persona o canal de atención. Excluye tiempos de respuesta y ausencia de solución."
+    },
+    "c006": {
+      "lever": "Atención y resolución",
+      "sublever": "Respuesta y resolución de incidencias",
+      "criterion": "Usar cuando el problema es no obtener respuesta, ser derivado sin solución o demorar en resolver una incidencia. Excluye la calidad de trato cuando sí se describe asesoramiento efectivo."
+    },
+    "c007": {
+      "lever": "Autorización y credenciales",
+      "sublever": "Claves y acceso seguro",
+      "criterion": "Usar para alta, cambio, recepción o bloqueo de claves y credenciales de ingreso. Excluye token para autorizar operaciones, firma de operaciones y permisos funcionales."
+    },
+    "c008": {
+      "lever": "Autorización y credenciales",
+      "sublever": "Firma y autorización de operaciones",
+      "criterion": "Usar cuando firmar, aprobar o autorizar una operación falla o resulta impracticable, salvo que el síntoma explícito sea el token. Excluye el mero cambio entre dispositivos como fricción de flujo."
+    },
+    "c009": {
+      "lever": "Autorización y credenciales",
+      "sublever": "Permisos de operación",
+      "criterion": "Usar cuando el sistema informa falta, pérdida o configuración incorrecta de permisos para una acción. Excluye credenciales de ingreso y fallos genéricos sin mención de permisos."
+    },
+    "c010": {
+      "lever": "Autorización y credenciales",
+      "sublever": "Token no disponible",
+      "criterion": "Usar cuando el token no aparece, no se genera, se desactiva o no funciona para autorizar. Excluye problemas generales de firma si el token no es el síntoma explícito."
+    },
+    "c011": {
+      "lever": "Disponibilidad de tareas",
+      "sublever": "Carga documental fallida",
+      "criterion": "Usar cuando no se pueden subir, enviar o verificar documentos o balances cargados. Excluye descargar resúmenes/comprobantes y dificultad para encontrar el menú de envío."
+    },
+    "c012": {
+      "lever": "Disponibilidad de tareas",
+      "sublever": "Depósito de cheques no disponible",
+      "criterion": "Usar cuando depositar cheques físicos o electrónicos no está disponible o fue retirado. Excluye emisión, endoso, consulta o firma de cheques."
+    },
+    "c013": {
+      "lever": "Disponibilidad de tareas",
+      "sublever": "Pago de sueldos bloqueado",
+      "criterion": "Usar cuando cargar, acceder, firmar o ejecutar específicamente sueldos/haberes está bloqueado o no disponible. Excluye lentitud general y pagos de otros conceptos."
+    },
+    "c014": {
+      "lever": "Disponibilidad de tareas",
+      "sublever": "Transferencia inmediata no efectiva",
+      "criterion": "Usar cuando una transferencia declarada inmediata no se puede cursar como tal, se difiere o tarda en acreditarse. Excluye lentitud de la interfaz y transferencias sin referencia a inmediatez/acreditación."
+    },
+    "c015": {
+      "lever": "Experiencia global",
+      "sublever": "Valoración general del canal",
+      "criterion": "Usar para opiniones globales inteligibles, positivas o negativas, sin tarea ni síntoma concreto que permita una categoría temática más específica. No convertir la valoración en facilidad, rapidez o fallo inferido."
+    },
+    "c016": {
+      "lever": "Información operativa",
+      "sublever": "Comprobantes no disponibles o incompletos",
+      "criterion": "Usar cuando no se puede obtener, descargar, encontrar tras la operación o utilizar un comprobante por falta de datos. Excluye resúmenes de cuenta y mera navegación general."
+    },
+    "c017": {
+      "lever": "Información operativa",
+      "sublever": "Detalle de movimientos insuficiente",
+      "criterion": "Usar cuando movimientos o transferencias muestran datos insuficientes, poco identificables, desordenados o difíciles de conciliar. Excluye saldo desactualizado y ausencia de comprobantes."
+    },
+    "c018": {
+      "lever": "Información operativa",
+      "sublever": "Resúmenes no disponibles o demorados",
+      "criterion": "Usar cuando el resumen/extracto no se puede descargar, aparece tarde o se anuncia como disponible sin estarlo. Excluye comprobantes de operaciones y carga documental."
+    },
+    "c019": {
+      "lever": "Información operativa",
+      "sublever": "Saldo no actualizado o inconsistente",
+      "criterion": "Usar cuando el saldo mostrado está atrasado, no refleja movimientos o difiere entre vistas. Excluye falta de detalle de movimientos y lentitud de actualización sin inconsistencia de saldo explícita."
+    },
+    "c020": {
+      "lever": "Navegación y eficiencia",
+      "sublever": "Búsqueda y localización difíciles",
+      "criterion": "Usar cuando cuesta encontrar una función, dato u operación por menús, rutas o buscador. Excluye funciones ausentes y comprobantes que no existen o no se generan."
+    },
+    "c021": {
+      "lever": "Navegación y eficiencia",
+      "sublever": "Flujo con pasos innecesarios",
+      "criterion": "Usar cuando una tarea exige demasiados pasos, repeticiones o recorridos evitables. Excluye cambio obligatorio entre web y móvil, que tiene categoría propia."
+    },
+    "c022": {
+      "lever": "Navegación y eficiencia",
+      "sublever": "Interrupción por encuesta",
+      "criterion": "Usar cuando la encuesta aparece como molestia o interrumpe el flujo. Excluye críticas al contenido o confidencialidad de la encuesta sin interferencia operativa."
+    },
+    "c023": {
+      "lever": "Navegación y eficiencia",
+      "sublever": "Salto obligatorio entre dispositivos",
+      "criterion": "Usar cuando completar una misma tarea obliga a alternar entre web/PC y app/móvil y eso se describe como fricción. Excluye fallos de token o firma aunque ocurran en uno de esos dispositivos."
+    },
+    "c024": {
+      "lever": "Propuesta de valor",
+      "sublever": "Beneficios y condiciones comerciales",
+      "criterion": "Usar cuando se valora la disponibilidad, pérdida o desigualdad de beneficios y condiciones ofrecidas al cliente. Excluye precios/comisiones explícitos y condiciones operativas de una tarea."
+    },
+    "c025": {
+      "lever": "Propuesta de valor",
+      "sublever": "Comisiones y mantenimiento",
+      "criterion": "Usar cuando el foco es el importe, aumento, bonificación o competitividad de comisiones y mantenimiento. Excluye beneficios promocionales salvo que el reclamo principal sea el cobro."
+    },
+    "c026": {
+      "lever": "Propuesta de valor",
+      "sublever": "Horario operativo limitado",
+      "criterion": "Usar cuando una tarea no puede hacerse fuera de una franja horaria o se pide ampliar el horario. Excluye transferencias inmediatas demoradas si el problema principal es la acreditación."
+    },
+    "c027": {
+      "lever": "Propuesta de valor",
+      "sublever": "Operativa masiva ausente o limitada",
+      "criterion": "Usar cuando se reclama ejecutar transferencias, pagos u otras operaciones en lote/masivamente de forma más directa. Excluye lentitud o exceso de pasos en operaciones individuales."
+    },
+    "c028": {
+      "lever": "Sin clasificación temática",
+      "sublever": "Información insuficiente",
+      "criterion": "Usar solo cuando el texto no permite determinar un significado temático, por ejemplo vacío, signo, número aislado o respuesta como «NO» sin referente. Una valoración global inteligible no pertenece aquí."
+    },
+    "c029": {
+      "lever": "Sin clasificación temática",
+      "sublever": "Tema no cubierto",
+      "criterion": "Usar cuando el significado es claro y temático pero ninguna categoría de esta taxonomía representa su tarea o síntoma. No usar para evitar una categoría aplicable ni para opiniones globales."
+    }
+  },
+  "comments": [
+    {
+      "id": "g0",
+      "text": "NO PUEDO REALIZAR MIS PAGOS PORQUE NO FUNCIONA EL TOKEN DIGITAL",
+      "observed_primary": "c028",
+      "expected_primary": "c010"
+    },
+    {
+      "id": "g1",
+      "text": "LAS FUNCIONES SON DIFICILES DE ENCONTRAR- ",
+      "observed_primary": "c028",
+      "expected_primary": "c020"
+    },
+    {
+      "id": "g2",
+      "text": "muy lenta la pag",
+      "observed_primary": "c029",
+      "expected_primary": "c004"
+    },
+    {
+      "id": "g3",
+      "text": "SE TILDA ALGUNAS VECES",
+      "observed_primary": "c029",
+      "expected_primary": "c003"
+    },
+    {
+      "id": "g4",
+      "text": "DSFSDFSDAFSD",
+      "observed_primary": "c028",
+      "expected_primary": "c028"
+    },
+    {
+      "id": "g5",
+      "text": "Excelente servicio",
+      "observed_primary": "c015",
+      "expected_primary": "c015"
+    },
+    {
+      "id": "g6",
+      "text": "hace 15 días que no puedo usar el token",
+      "observed_primary": "c010",
+      "expected_primary": "c010"
+    },
+    {
+      "id": "g7",
+      "text": "muy lenta la app para token",
+      "observed_primary": "c004",
+      "expected_primary": "c004"
+    }
+  ],
+  "incident": {
+    "description": "token grisado .",
+    "provenance": "Extracto narrativo anonimizado de incidencia Argentina v3; eliminados contrato, usuario y routing GE-INC-SIDEBAR-TOKEN.",
+    "primary": "c010"
+  },
+  "links": [
+    {
+      "comment_id": "g6",
+      "same_task": true,
+      "same_symptom": true,
+      "expected": true,
+      "case": "cliente frente a síntoma técnico"
+    },
+    {
+      "comment_id": "g7",
+      "same_task": true,
+      "same_symptom": false,
+      "expected": false,
+      "case": "misma tarea; lentitud frente a indisponibilidad"
+    },
+    {
+      "comment_id": "g5",
+      "same_task": false,
+      "same_symptom": false,
+      "expected": false,
+      "case": "satisfacción frente a fallo"
+    }
+  ]
+}

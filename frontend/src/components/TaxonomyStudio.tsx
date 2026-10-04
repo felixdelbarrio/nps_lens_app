@@ -55,7 +55,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       <article className="settings-subsection">
         <h3>Lente activa</h3>
         <p>{NAMES[activeMode]} · fingerprint <code>{data.active_fingerprint.slice(0, 8)}</code></p>
-        {data.activation_required ? <><p>Hay una propuesta DISCOVERED pendiente de activación{data.proposed_discovered_fingerprint ? <> · fingerprint <code>{data.proposed_discovered_fingerprint.slice(0, 8)}</code></> : null}.</p><button className="secondary-button" disabled={locked} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: "DISCOVERED" })))}>Activar propuesta DISCOVERED</button></> : null}
+        {data.activation_required ? <><p>Hay una propuesta DISCOVERED pendiente de activación{data.proposed_discovered_fingerprint ? <> · fingerprint <code>{data.proposed_discovered_fingerprint.slice(0, 8)}</code></> : null}.</p><button className="secondary-button" disabled={locked} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: "DISCOVERED" })))}>Activar propuesta DISCOVERED</button><button className="secondary-button" disabled={locked} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { discard_proposal: true })))}>Descartar propuesta DISCOVERED</button></> : null}
       </article>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />

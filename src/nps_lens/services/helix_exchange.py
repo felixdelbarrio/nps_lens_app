@@ -400,17 +400,15 @@ class HelixExchange:
         classified = sum(
             count for (lever, _), count in categories.items() if lever != FALLBACK_LEVER
         )
-        usage = Counter(link["nps_id"] for row in current[mode].values() for link in row["links"])
         return {
+            "mode": mode,
+            "taxonomy_fingerprint": taxonomy_fingerprint(inputs["taxonomies"][mode]),
             "total": total,
             "received": len(rows),
             "classified": classified,
             "multiple": sum(bool(row.get("secondary_classifications")) for row in rows.values()),
             "unassigned": len(rows) - classified,
             "coverage": classified / total if total else 0,
-            "links": sum(usage.values()),
-            "linked_comments": len(usage),
-            "max_comment_reuse": max(usage.values(), default=0),
             "categories": [
                 {"lever": lever, "sublever": sub, "count": count}
                 for (lever, sub), count in categories.most_common()
@@ -421,12 +419,21 @@ class HelixExchange:
             "ready": bool(total and all(len(current[mode]) == total for mode in inputs["modes"])),
         }
 
-    def export(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, Any]:
+    def export(
+        self, context: UploadContext, inputs: dict[str, Any], *, only_linking: bool = False
+    ) -> dict[str, Any]:
+        for mode in inputs["modes"]:
+            self.taxonomy.guard_export(context, mode)
         known = self.current(context, inputs)
         categories = self.classifications(context, inputs)
         pending = []
         for row in inputs["incidents"]:
-            modes = [mode for mode in inputs["modes"] if row["id"] not in known[mode]]
+            modes = [
+                mode
+                for mode in inputs["modes"]
+                if row["id"] not in known[mode]
+                and (not only_linking or row["id"] in categories[mode])
+            ]
             if modes:
                 pending.append({**row, "pending_taxonomies": modes})
         if not pending:
@@ -572,6 +579,7 @@ class HelixExchange:
         comments = job["comments"]
         catalogs = {mode: category_catalog(frozen_taxonomy)}
         frozen_inputs = {
+            "taxonomies": job["taxonomies"],
             "incidents": list(source.values()),
             "modes": [mode],
             "classification_scopes": manifest["classification_scopes"],
@@ -608,6 +616,8 @@ class HelixExchange:
                 if len({link.nps_id for link in row.links}) != len(row.links):
                     raise ValueError("Vínculos NPS duplicados.")
                 for link in row.links:
+                    if link.same_task is not True or link.same_symptom is not True:
+                        raise ValueError("Un vínculo requiere same_task=true y same_symptom=true.")
                     comment = comments.get(link.nps_id)
                     if not comment or link.nps_id not in supplied:
                         raise ValueError(

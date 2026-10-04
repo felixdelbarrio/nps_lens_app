@@ -180,6 +180,7 @@ class LinkingResponse(BaseModel):
 class TaxonomySettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     active: Optional[str] = None
+    discard_proposal: bool = False
     policy: Optional[str] = None
 
 
