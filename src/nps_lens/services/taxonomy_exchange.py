@@ -37,9 +37,10 @@ from nps_lens.services.taxonomy_discovery import (
     TaxonomyValidator,
 )
 from nps_lens.services.taxonomy_prompts import (
+    COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
+    DESIGNER_INSTRUCTIONS_VERSION,
     FALLBACK_LEVER,
     FALLBACK_SUBLEVERS,
-    INSTRUCTIONS_VERSION,
     PROJECT_INSTRUCTIONS,
 )
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
@@ -232,7 +233,8 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != schema
         or manifest.get("stage") != stage
-        or manifest.get("instructions_version") != INSTRUCTIONS_VERSION
+        or not isinstance(manifest.get("instructions_version"), str)
+        or not manifest["instructions_version"]
         or not isinstance(manifest.get("job_id"), str)
         or not manifest["job_id"]
     ):
@@ -423,18 +425,33 @@ class TaxonomyExchange:
             ],
         }
 
-    def assignments(self, context: UploadContext, frame: Any, mode: str) -> dict[str, Any]:
-        artifact = self.taxonomy.classification_artifact(context, mode)
-        catalog = self.taxonomy.catalog(context, mode)
+    def assignments(
+        self,
+        context: UploadContext,
+        frame: Any,
+        mode: str,
+        artifact: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        explicit_artifact = artifact is not None
+        artifact = artifact or self.taxonomy.classification_artifact(context, mode)
+        catalog = (
+            artifact.get("taxonomy") if explicit_artifact else self.taxonomy.catalog(context, mode)
+        )
+        if not catalog:
+            return {}
         revision = (
             self.taxonomy.state(context).get("artifacts", {}).get("COMPLETED", "")
             if mode == "COMPLETED"
             else ""
         )
         if (
-            artifact.get("config", {}).get("instructions_version") != INSTRUCTIONS_VERSION
+            artifact.get("config", {}).get("instructions_version")
+            != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
             or artifact.get("taxonomy_fingerprint") != taxonomy_fingerprint(catalog)
-            or artifact.get("config", {}).get("manual_revision", "") != revision
+            or (
+                not explicit_artifact
+                and artifact.get("config", {}).get("manual_revision", "") != revision
+            )
         ):
             return {}
         hashes = artifact.get("comment_hashes", {})
@@ -559,7 +576,7 @@ class TaxonomyExchange:
                                 "mode": mode,
                                 "taxonomy": taxonomy,
                                 "manual_revision": revision,
-                                "instructions_version": INSTRUCTIONS_VERSION,
+                                "instructions_version": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
                             },
                             retained,
                         )
@@ -614,7 +631,11 @@ class TaxonomyExchange:
             "batches": batches,
             "taxonomy": taxonomy,
             "stage": "classifier" if pending else "designer",
-            "instructions_version": INSTRUCTIONS_VERSION,
+            "instructions_version": (
+                COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
+                if pending
+                else DESIGNER_INSTRUCTIONS_VERSION
+            ),
         }
         if not pending:
             self._save(context, job)
@@ -675,23 +696,15 @@ class TaxonomyExchange:
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
             proposed = taxonomy.model_dump(exclude={"review"})
-            if state["active"] == "DISCOVERED" and state.get("discovered_taxonomy") != proposed:
-                state["proposed_discovered_taxonomy"] = proposed
-                self.taxonomy.save_state(context, state)
-                return {"stage": "designer", "imported": True, "activation_required": True}
-            state["discovered_taxonomy"] = taxonomy.model_dump(exclude={"review"})
-            state["taxonomy_fingerprint"] = taxonomy_fingerprint(state["discovered_taxonomy"])
+            state["proposed_discovered_taxonomy"] = proposed
+            state["proposed_discovered_fingerprint"] = taxonomy_fingerprint(proposed)
             state["designer_review"] = taxonomy.review.model_dump()
             state["designer_progress"] = {
                 "received": len(frame),
                 "corpus": self._corpus(context, frame),
             }
-            # A new catalog must not expose assignments from a different catalog.
-            previous = self.taxonomy.artifact(state.get("artifacts", {}).get("DISCOVERED", ""))
-            if previous and previous.get("taxonomy") != state["discovered_taxonomy"]:
-                state["artifacts"].pop("DISCOVERED", None)
             self.taxonomy.save_state(context, state)
-            return {"stage": "designer", "imported": True}
+            return {"stage": "designer", "imported": True, "activation_required": True}
         files = {
             name.removeprefix("results/").removesuffix(".json"): value
             for name, value in files.items()
@@ -700,12 +713,6 @@ class TaxonomyExchange:
         mode = job.get("mode")
         if mode not in ("SOURCE", "COMPLETED", "DISCOVERED"):
             raise ValueError("Exporta un nuevo intercambio con la lente LLM seleccionada.")
-        if job["taxonomy"] != self.taxonomy.catalog(context, mode) or (
-            mode == "COMPLETED"
-            and job["manual_revision"]
-            != self.taxonomy.state(context).get("artifacts", {}).get(mode, "")
-        ):
-            raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")
         allowed_batches = validate_manifest(manifest, self._manifest(job, "classifier"))
         if self._corpus(context, frame) != job["corpus"]:
             raise ValueError("El corpus ha cambiado. Exporta un nuevo ZIP; no se importó nada.")
@@ -740,7 +747,14 @@ class TaxonomyExchange:
                     ]
                 }
             ).decode()
-        retained = self.assignments(context, frame, mode)
+        prior_artifact = self.taxonomy.artifact(
+            job.get("artifact_signature", "")
+        ) or self.taxonomy.classification_artifact(context, mode)
+        retained = (
+            self.assignments(context, frame, mode, prior_artifact)
+            if prior_artifact.get("taxonomy_fingerprint") == taxonomy_fingerprint(job["taxonomy"])
+            else {}
+        )
         with self.repository._connect() as db:
             existing = dict(
                 db.execute(
@@ -770,7 +784,7 @@ class TaxonomyExchange:
                     "Revisa y regenera la clasificación; no se importó ningún cambio. "
                     f"IDs para auditoría: {', '.join(audit['suspicious_ids'][:20])}"
                 )
-            self._persist_assignments(db, context, frame, job, merged)
+            job["artifact_signature"] = self._persist_assignments(db, context, frame, job, merged)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
                 "UPDATE taxonomy_exchange SET payload=? WHERE id=?",
@@ -802,7 +816,7 @@ class TaxonomyExchange:
         frame: Any,
         job: dict[str, Any],
         merged: dict[str, Any],
-    ) -> None:
+    ) -> str:
         mode = job["mode"]
         assignments = [
             merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
@@ -845,7 +859,13 @@ class TaxonomyExchange:
             "equivalences": {},
         }
         state = self.taxonomy.state(context)
-        state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[mode] = sig
+        active_matches = state.get("active") == mode and taxonomy_fingerprint(
+            self.taxonomy.catalog(context, mode)
+        ) == taxonomy_fingerprint(job["taxonomy"])
+        if active_matches:
+            state.setdefault("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})[
+                mode
+            ] = sig
         db.execute(
             "INSERT OR IGNORE INTO taxonomy_artifacts VALUES (?, ?, ?, ?)",
             (sig, context_key(context), mode, encode(artifact).decode()),
@@ -854,6 +874,7 @@ class TaxonomyExchange:
             "INSERT OR REPLACE INTO taxonomy_state VALUES (?, ?)",
             (context_key(context), encode(state).decode()),
         )
+        return sig
 
     def _clear_caches(self) -> None:
         self.taxonomy._state_cache.clear()

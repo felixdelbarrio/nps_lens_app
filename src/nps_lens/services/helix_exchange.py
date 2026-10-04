@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -47,10 +48,11 @@ from nps_lens.services.taxonomy_exchange import (
 )
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,
-    HELIX_CLASSIFICATION_VERSION,
-    INSTRUCTIONS_VERSION,
+    HELIX_INSTRUCTIONS_VERSION,
 )
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
+
+logger = logging.getLogger(__name__)
 
 
 class EvidenceLink(BaseModel):
@@ -155,9 +157,17 @@ class HelixExchange:
             ).fetchone():
                 # One transactional migration. Recover the original narrative from
                 # retained requests; never guess a semantic identity from a quote.
+                legacy = db.execute(
+                    "SELECT context, scope, incident, fingerprint, payload "
+                    "FROM helix_classifications ORDER BY rowid"
+                ).fetchall()
+                legacy_scopes = {(row[0], row[1]) for row in legacy}
                 narratives = {}
                 modes = {}
-                for ctx, payload in db.execute("SELECT context, payload FROM helix_exchange"):
+                migrated_exchange_ids: set[str] = set()
+                for exchange_id, ctx, payload in db.execute(
+                    "SELECT id, context, payload FROM helix_exchange"
+                ):
                     try:
                         job = strict_json(payload.encode())
                         taxonomy_scopes = job["manifest"]["taxonomy_scopes"]
@@ -169,6 +179,8 @@ class HelixExchange:
                     for mode, scope in taxonomy_scopes.items():
                         if isinstance(mode, str) and isinstance(scope, str):
                             modes[(ctx, scope)] = mode
+                            if (ctx, scope) in legacy_scopes:
+                                migrated_exchange_ids.add(exchange_id)
                     for batch in batches.values():
                         if not isinstance(batch, list):
                             continue
@@ -186,9 +198,8 @@ class HelixExchange:
                                     digest([row.get("description", ""), row.get("date", "")]),
                                 )
                             ] = row
-                for ctx, scope, key, fingerprint, payload in db.execute(
-                    "SELECT * FROM helix_classifications ORDER BY rowid"
-                ):
+                migrated = 0
+                for ctx, scope, key, fingerprint, payload in legacy:
                     try:
                         item = strict_json(payload.encode())
                     except (AttributeError, TypeError, ValueError):
@@ -210,7 +221,7 @@ class HelixExchange:
                         for k, v in item.items()
                         if k not in {"links", "candidates", "evidence_hashes", "linking_version"}
                     }
-                    category["instructions_version"] = HELIX_CLASSIFICATION_VERSION
+                    category["instructions_version"] = HELIX_INSTRUCTIONS_VERSION
                     category_scope = self.category_scope(mode, item["taxonomy_fingerprint"])
                     db.execute(
                         "INSERT OR REPLACE INTO helix_incident_categories VALUES (?, ?, ?, ?, ?)",
@@ -222,13 +233,23 @@ class HelixExchange:
                             encode(category).decode(),
                         ),
                     )
+                    migrated += 1
                 # Old links used ID-based candidate padding and must be reevaluated.
                 db.execute("DROP TABLE helix_classifications")
-                db.execute("DELETE FROM helix_exchange")
+                if migrated_exchange_ids:
+                    db.executemany(
+                        "DELETE FROM helix_exchange WHERE id=?",
+                        [(exchange_id,) for exchange_id in migrated_exchange_ids],
+                    )
+                logger.info(
+                    "Migración Helix completada: migrated=%d discarded=%d",
+                    migrated,
+                    len(legacy) - migrated,
+                )
 
     @staticmethod
     def category_scope(mode: str, fingerprint: str) -> str:
-        return digest([mode, fingerprint, HELIX_CLASSIFICATION_VERSION])
+        return digest([mode, fingerprint, HELIX_INSTRUCTIONS_VERSION])
 
     def inputs(self, context: UploadContext, incidents: pd.DataFrame, mode: str) -> dict[str, Any]:
         if self.taxonomy.state(context).get("restored"):
@@ -307,7 +328,7 @@ class HelixExchange:
                     LINK_MAX_DAYS_APART,
                     LINK_TOP_K_PER_INCIDENT,
                     HELIX_SCHEMA,
-                    INSTRUCTIONS_VERSION,
+                    HELIX_INSTRUCTIONS_VERSION,
                     comments,
                 ]
             )
@@ -332,14 +353,16 @@ class HelixExchange:
         result: dict[str, dict[str, Any]] = {}
         with self.repository._connect() as db:
             for mode, scope in inputs["classification_scopes"].items():
-                result[mode] = {
-                    key: strict_json(payload.encode())
-                    for key, fingerprint, payload in db.execute(
-                        "SELECT incident, fingerprint, payload FROM helix_incident_categories WHERE context=? AND scope=?",
-                        (context_key(context), scope),
-                    )
-                    if fingerprints.get(key) == fingerprint
-                }
+                result[mode] = {}
+                for key, fingerprint, payload in db.execute(
+                    "SELECT incident, fingerprint, payload FROM helix_incident_categories WHERE context=? AND scope=?",
+                    (context_key(context), scope),
+                ):
+                    if fingerprints.get(key) != fingerprint:
+                        continue
+                    item = strict_json(payload.encode())
+                    if item.get("instructions_version") == HELIX_INSTRUCTIONS_VERSION:
+                        result[mode][key] = item
         return result
 
     def current(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -354,7 +377,7 @@ class HelixExchange:
                     (context_key(context), scope),
                 ):
                     linking = strict_json(payload.encode())
-                    if linking.get("linking_version") != INSTRUCTIONS_VERSION:
+                    if linking.get("linking_version") != HELIX_INSTRUCTIONS_VERSION:
                         continue
                     category = categories[mode].get(key)
                     if category is not None and fingerprint == digest([category, incidents[key]]):
@@ -362,20 +385,22 @@ class HelixExchange:
         return current
 
     def status(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, Any]:
+        classifications = self.classifications(context, inputs)
         current = self.current(context, inputs)
         total = len(inputs["incidents"])
         counts = {
             mode: {"received": len(rows), "pending": total - len(rows)}
-            for mode, rows in current.items()
+            for mode, rows in classifications.items()
         }
-        rows = current[inputs["modes"][0]]
+        mode = inputs["modes"][0]
+        rows = classifications[mode]
         categories = Counter(
             (row["lever"], row["sublever"]) for row in rows.values() if row["lever"]
         )
         classified = sum(
             count for (lever, _), count in categories.items() if lever != FALLBACK_LEVER
         )
-        usage = Counter(link["nps_id"] for row in rows.values() for link in row["links"])
+        usage = Counter(link["nps_id"] for row in current[mode].values() for link in row["links"])
         return {
             "total": total,
             "received": len(rows),
@@ -392,7 +417,8 @@ class HelixExchange:
             ],
             "taxonomies": counts,
             "pending": sum(item["pending"] for item in counts.values()),
-            "ready": bool(total and all(item["pending"] == 0 for item in counts.values())),
+            "link_pending": sum(total - len(current[mode]) for mode in inputs["modes"]),
+            "ready": bool(total and all(len(current[mode]) == total for mode in inputs["modes"])),
         }
 
     def export(self, context: UploadContext, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -476,12 +502,14 @@ class HelixExchange:
         batches = bounded_batches(pending, "incidents")
         manifest = {
             "schema_version": HELIX_SCHEMA,
-            "instructions_version": INSTRUCTIONS_VERSION,
+            "instructions_version": HELIX_INSTRUCTIONS_VERSION,
             "taxonomies_sha256": digest(catalogs),
             "taxonomy_fingerprint": taxonomy_fingerprint(inputs["taxonomies"][mode]),
+            "taxonomy_mode": mode,
             "job_id": job_id,
             "stage": "helix",
             "taxonomy_scopes": inputs["scopes"],
+            "classification_scopes": inputs["classification_scopes"],
             "linking_diagnostics": diagnostic,
             "batches": [
                 {"id": key, "count": len(rows), "sha256": digest({"incidents": rows})}
@@ -496,7 +524,8 @@ class HelixExchange:
         job = {
             "manifest": manifest,
             "batches": batches,
-            "comment_hashes": {key: digest(comments[key]) for key in candidate_ids},
+            "taxonomies": inputs["taxonomies"],
+            "comments": {key: comments[key] for key in candidate_ids},
         }
         with self.repository._connect() as db:
             db.execute(
@@ -522,17 +551,31 @@ class HelixExchange:
             raise ValueError("El intercambio no pertenece a este dataset.")
         job = strict_json(found[0].encode())
         allowed_batches = validate_manifest(manifest, job["manifest"])
-        if manifest["taxonomy_scopes"] != inputs["scopes"]:
-            raise ValueError(
-                "La selección, las taxonomías o el corpus han cambiado; exporta de nuevo."
-            )
-        mode = inputs["modes"][0]
-        if manifest["taxonomy_fingerprint"] != taxonomy_fingerprint(inputs["taxonomies"][mode]):
-            raise ValueError("taxonomy_fingerprint incompatible; exporta de nuevo.")
-        source = {row["id"]: row for row in inputs["incidents"]}
-        comments = {row["id"]: row for row in inputs["comments"]}
-        catalogs = {
-            mode: category_catalog(catalog) for mode, catalog in inputs["taxonomies"].items()
+        mode = manifest["taxonomy_mode"]
+        if mode not in MODES or mode not in job["taxonomies"]:
+            raise ValueError("El job Helix no conserva una lente válida.")
+        frozen_taxonomy = job["taxonomies"][mode]
+        if manifest["taxonomy_fingerprint"] != taxonomy_fingerprint(frozen_taxonomy):
+            raise ValueError("taxonomy_fingerprint incompatible con el job exportado.")
+        expected_rows = [row for batch in job["batches"].values() for row in batch]
+        source = {
+            row["id"]: {
+                key: value
+                for key, value in row.items()
+                if key not in {"pending_taxonomies", "candidates", "classification"}
+            }
+            for row in expected_rows
+        }
+        current_source = {row["id"]: row for row in inputs["incidents"] if row["id"] in source}
+        if current_source != source:
+            raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
+        comments = job["comments"]
+        catalogs = {mode: category_catalog(frozen_taxonomy)}
+        frozen_inputs = {
+            "incidents": list(source.values()),
+            "modes": [mode],
+            "classification_scopes": manifest["classification_scopes"],
+            "scopes": manifest["taxonomy_scopes"],
         }
         validated: dict[tuple[str, str], dict[str, Any]] = {}
         if not files:
@@ -552,7 +595,6 @@ class HelixExchange:
                     if k not in {"pending_taxonomies", "candidates", "classification"}
                 }:
                     raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
-                mode = inputs["modes"][0]
                 if "classification" in original and original["classification"] != {
                     "primary": row.primary,
                     "secondary": row.secondary,
@@ -571,8 +613,6 @@ class HelixExchange:
                         raise ValueError(
                             "Vínculo a comentario desconocido o no candidato de esta incidencia."
                         )
-                    if job["comment_hashes"].get(link.nps_id) != digest(comment):
-                        raise ValueError("La evidencia NPS ha cambiado; exporta de nuevo.")
                     if row.primary is None:
                         raise ValueError("Una incidencia sin clasificación no admite vínculos.")
                     validate_quote(link.incident_quote, original["description"])
@@ -581,7 +621,7 @@ class HelixExchange:
                         raise ValueError("Las categorías de reserva no justifican vínculos NPS.")
                 validated[(mode, row.id)] = {
                     "classified_at": datetime.now(timezone.utc).isoformat(),
-                    "instructions_version": HELIX_CLASSIFICATION_VERSION,
+                    "instructions_version": HELIX_INSTRUCTIONS_VERSION,
                     "taxonomy_fingerprint": manifest["taxonomy_fingerprint"],
                     **primary,
                     "secondary_classifications": expanded["secondary_classifications"],
@@ -591,10 +631,10 @@ class HelixExchange:
                     },
                     "links": [link.model_dump() for link in row.links],
                 }
-        existing = self.current(context, inputs)
-        categories = self.classifications(context, inputs)
+        existing = self.current(context, frozen_inputs)
+        categories = self.classifications(context, frozen_inputs)
         decisions: dict[tuple[str, str], tuple[Any, ...]] = {}
-        for mode in inputs["modes"]:
+        for mode in frozen_inputs["modes"]:
             candidates = {
                 **categories[mode],
                 **{key: value for (lens, key), value in validated.items() if lens == mode},
@@ -628,7 +668,7 @@ class HelixExchange:
                             "Una incidencia ya tiene una respuesta diferente para esa taxonomía."
                         )
                 links = {k: value[k] for k in ("links", "candidates")}
-                links["linking_version"] = INSTRUCTIONS_VERSION
+                links["linking_version"] = HELIX_INSTRUCTIONS_VERSION
                 combined = {**category, **links}
                 if key in existing[mode] and combined != existing[mode][key]:
                     raise ValueError(
@@ -638,7 +678,7 @@ class HelixExchange:
                     "INSERT OR REPLACE INTO helix_incident_categories VALUES (?, ?, ?, ?, ?)",
                     (
                         context_key(context),
-                        inputs["classification_scopes"][mode],
+                        manifest["classification_scopes"][mode],
                         key,
                         incident_classification_fingerprint(source[key]),
                         encode(category).decode(),
@@ -648,13 +688,13 @@ class HelixExchange:
                     "INSERT OR REPLACE INTO helix_incident_links VALUES (?, ?, ?, ?, ?)",
                     (
                         context_key(context),
-                        inputs["scopes"][mode],
+                        manifest["taxonomy_scopes"][mode],
                         key,
                         digest([category, source[key]]),
                         encode(links).decode(),
                     ),
                 )
-        return self.status(context, inputs)
+        return self.status(context, frozen_inputs)
 
     def links(
         self,

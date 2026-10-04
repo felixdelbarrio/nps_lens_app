@@ -105,4 +105,6 @@ def test_helix_new_comments_invalidate_prior_absence_of_links(helix, monkeypatch
     handler = HelixExchange(restarted, handler.downloads)
     updated = handler.inputs(ctx, incidents, "SOURCE")
     assert updated["scopes"] != inputs["scopes"]
-    assert handler.status(ctx, updated)["pending"] == len(incidents)
+    status = handler.status(ctx, updated)
+    assert status["pending"] == 0
+    assert status["link_pending"] == len(incidents)

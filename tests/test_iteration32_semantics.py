@@ -196,7 +196,9 @@ def test_helix_accepts_cross_category_link_but_rejects_changed_dates(helix):
         handler.import_response(ctx, handler.inputs(ctx, changed, "SOURCE"), zipped(response))
     assert handler.status(ctx, inputs)["received"] == 0
     assert handler.import_response(ctx, inputs, zipped(response))["links"] == len(incidents)
-    assert handler.status(ctx, handler.inputs(ctx, changed, "SOURCE"))["received"] == 0
+    changed_status = handler.status(ctx, handler.inputs(ctx, changed, "SOURCE"))
+    assert changed_status["received"] == len(incidents)
+    assert changed_status["link_pending"] == len(incidents)
 
 
 def test_complete_semantic_identity_designer_comments_helix_application(helix):

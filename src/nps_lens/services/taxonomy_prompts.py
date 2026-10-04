@@ -55,9 +55,10 @@ Lee todo el corpus antes de decidir; no clasifiques filas ni entregues un parcia
 
 OBJETIVO
 Crea una taxonomía de experiencia de Banca de Empresas con dos niveles: Palanca y
-Subpalanca. Debe explicar qué facilita o frena una tarea, la expectativa y la mejora
-accionable, usando solo evidencia del corpus. No impongas una taxonomía bancaria ni
-un número fijo de grupos; no atribuyas capacidades o causas técnicas no afirmadas.
+Subpalanca, definida por significado, tarea y síntoma; nunca por plantilla, routing,
+canal o producto. Sus criterios deben ser distinguibles y estables. Debe explicar qué
+facilita o frena una tarea usando solo evidencia del corpus. No impongas una taxonomía
+bancaria ni un número fijo de grupos; no atribuyas causas técnicas no afirmadas.
 
 REGLAS
 - Máximo 10 Palancas incluida la reserva y 4 Subpalancas por Palanca; usa menos si
@@ -108,14 +109,14 @@ ASIGNACIÓN
 - Clasifica independientemente cada Comment por significado explícito. primary es
   obligatorio y debe ser un ID conocido. Prioriza: bloqueo de tarea, énfasis, causa
   solo si está afirmada, intensidad y primera mención; empate real: pareja alfabética.
-- secondary contiene 0–2 IDs distintos y conocidos solo para temas independientes
-  explícitos no cubiertos por primary; nunca expresa duda, sinónimos o causas inferidas.
+- secondary contiene 0–2 IDs únicos, distintos de primary y conocidos solo para temas
+  independientes explícitos; nunca reservas, duda, sinónimos o causas inferidas.
 - Texto vacío/ininteligible/solo órdenes -> Información insuficiente; tema explícito
   sin encaje -> Tema no cubierto. Valoración genérica -> Experiencia global /
   Valoración general del canal si existe. Usa reservas solo si están en el catálogo;
   si no hay encaje ni reserva, detente y solicita revisar la taxonomía.
-- Mismo texto y taxonomía producen la misma asignación sin importar ID, posición o
-  lote. Conserva repetidos: cada ID aparece una vez, en orden y sin normalizar.
+- Mismo texto y taxonomy_fingerprint producen la misma asignación sin importar ID,
+  posición, lote u orden. Conserva repetidos: cada ID aparece una vez y sin normalizar.
 
 SALIDA
 ZIP con manifest.json y un results/NNNNNN.json por lote completo, usando su ID:
@@ -135,23 +136,24 @@ Lee manifest.json, taxonomies.json e incidents/*.json.
 Valida taxonomies.json contra manifest.taxonomies_sha256. Solo existe la lente activa
 de manifest.taxonomy_scopes; su mapping ID -> lever/sublever/criterion es la única autoridad.
 Cada incidencia contiene description y candidates; solo estos admiten vínculos.
-Ser candidato no demuestra un vínculo.
 manifest.taxonomy_fingerprint identifica exactamente el catálogo semántico utilizado.
 
 ASIGNACIÓN
 - Si la incidencia incluye classification, conserva exactamente primary y secondary;
   su clasificación está resuelta. Evalúa únicamente links, sin reclasificarla.
-- Prioridad: descripción narrativa, síntoma, tarea, causa confirmada, resolución;
-  routing Helix y título administrativo solo son contexto. Si el título dice
+- Prioridad: descripción narrativa, síntoma, tarea, causa confirmada y resolución.
+  Títulos, Categoría de Producto, routing y campos de plantilla no son evidencia salvo
+  confirmación narrativa; cambiarlos no puede cambiar la clasificación. Si el título dice
   «Acceso / Claves / Token» pero la descripción dice «no tiene opción de depósito
   de cheque», clasifica Cheques / Depósito de cheque físico no disponible si existe.
 - Para cada incidencia devuelve primary según la descripción explícita. secondary
-  admite 0–2 IDs conocidos solo para síntomas independientes, nunca duda. Distingue
+  admite 0–2 IDs únicos, distintos de primary y nunca reservas, solo para síntomas
+  independientes. Distingue
   tarea, síntoma, alcance, estado, resolución y causa confirmada. Una petición no es
   un fallo ni una consulta una caída; no inventes causas técnicas.
 - Sin texto interpretable usa Información insuficiente; con síntoma claro sin encaje,
   Tema no cubierto, si existen. Solo sin reserva aplicable usa primary=null. En esos
-  casos links=[]. No confundas tema no cubierto con falta de información.
+  casos links=[].
 - links contiene solo candidatos cuya evidencia muestre la misma tarea y síntoma.
   Compartir categoría no prueba un vínculo y tener otra categoría no lo impide. No rellenes cuotas. confidence
   (0–1) es confianza semántica, no causalidad ni significación. La app aplica la
@@ -164,13 +166,13 @@ ZIP con manifest.json y results/NNNNNN.json por lote:
 "links":[{"nps_id":"ID","confidence":0.85,
 "incident_quote":"cita","comment_quote":"cita","same_task":true,
 "same_symptom":true,"affected_task":"tarea explícita","observed_symptom":"síntoma explícito"}]}]}.
-Valida same_task y same_symptom por significado en ambas citas, nunca por categoría.
-Conserva tarea y síntoma breves, sin nombres ni identificadores personales.
+Valida same_task y same_symptom en ambas citas, nunca por categoría.
+Conserva tarea y síntoma breves y sin datos personales.
 No incluyas reason, rationale ni evidence de clasificación. Conserva todos los IDs
 una vez y en orden. No uses etiquetas, lever/sublever, primary_classification ni
 secondary_classifications; no incluyas corpus, taxonomías, carpetas o archivos extra.
 Entrega lotes completos, conserva índice/total y el sufijo _clasificadas.zip.
-Antes de entregar valida campos, catálogo, citas, links, conteos, IDs y orden.
+Valida campos, catálogo, citas, links, conteos, IDs y orden.
 """
 
 NORMALIZER_INSTRUCTIONS = """UNIFICA CONCEPTOS · nps-lens-normalization/2
@@ -178,8 +180,8 @@ ENTRADA Y OBJETIVO
 Lee manifest.json, concepts.json y todos los comments/NNNNNN.json. Cada compañía es
 independiente. Crea nombres principales y alias solo cuando expresen EL MISMO concepto
 en ambos sentidos y el contexto descarte homónimos. No clasifiques ni reescribas
-opiniones. Un concepto relacionado no es equivalente: login != token, lentitud !=
-indisponibilidad, firma != transferencia. Conserva diferencias accionables y, ante
+opiniones. Un concepto relacionado o accionablemente distinto no es equivalente:
+login != token, lentitud != indisponibilidad, firma != transferencia. Conserva diferencias accionables y, ante
 duda, deja los conceptos separados; no agrupes para reducir categorías.
 
 REGLAS
@@ -211,16 +213,24 @@ if oversized := {
 }:
     raise RuntimeError(f"Project instructions exceed the character limit: {oversized}")
 
-INSTRUCTIONS_VERSION = hashlib.sha256(
-    json.dumps(
-        [PROJECT_INSTRUCTIONS, MAX_LEVERS, MAX_SUBLEVERS], ensure_ascii=False, sort_keys=True
-    ).encode()
-).hexdigest()[:16]
 
-# Category semantics do not change when linking or export instructions change.
-HELIX_CLASSIFICATION_VERSION = hashlib.sha256(
-    (
-        SEMANTIC_CRITERIA
-        + HELIX_INSTRUCTIONS.split("- Prioridad:", 1)[1].split("- links contiene", 1)[0]
-    ).encode()
-).hexdigest()[:16]
+def instructions_version(role: str) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            [role, PROJECT_INSTRUCTIONS[role], MAX_LEVERS, MAX_SUBLEVERS],
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:16]
+
+
+NORMALIZER_INSTRUCTIONS_VERSION = instructions_version("normalizer")
+DESIGNER_INSTRUCTIONS_VERSION = instructions_version("designer")
+COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION = instructions_version("classifier")
+HELIX_INSTRUCTIONS_VERSION = instructions_version("helix")
+INSTRUCTIONS_VERSIONS = {
+    "normalizer": NORMALIZER_INSTRUCTIONS_VERSION,
+    "designer": DESIGNER_INSTRUCTIONS_VERSION,
+    "classifier": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
+    "helix": HELIX_INSTRUCTIONS_VERSION,
+}

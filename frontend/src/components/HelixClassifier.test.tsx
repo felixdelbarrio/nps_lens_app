@@ -7,7 +7,7 @@ import { ClassificationEngineControl } from "./ClassificationEngineControl";
 afterEach(() => vi.unstubAllGlobals());
 it("imports independent taxonomy assignments without method selectors and autosaves URL", async () => {
   const fetcher = vi.fn(async (url: string) => {
-    if (url.includes("/instructions")) return new Response(JSON.stringify({version:"2",helix:"Reglas Helix"}));
+    if (url.includes("/instructions")) return new Response(JSON.stringify({versions:{designer:"1",classifier:"1",helix:"2",normalizer:"1"},helix:"Reglas Helix"}));
     return new Response(JSON.stringify({pending:2,taxonomies:{SOURCE:{received:0,pending:1},COMPLETED:{received:0,pending:1}}}));
   });
   vi.stubGlobal("fetch", fetcher);
