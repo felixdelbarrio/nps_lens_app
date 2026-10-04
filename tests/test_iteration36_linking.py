@@ -336,14 +336,29 @@ def test_comment_assignment_signature_invalidates_only_linking(helix, monkeypatc
     assert not handler.current(ctx, updated)["SOURCE"]
 
 
-def test_missing_migration_narrative_rolls_back_without_data_loss(helix):
-    handler, _, _, _, _ = helix
+@pytest.mark.parametrize("mode", ["SOURCE", "DISCOVERED"])
+def test_unrecoverable_legacy_classification_is_discarded_and_can_be_reexported(helix, mode):
+    handler, ctx, _, incidents, _ = helix
+    if mode == "DISCOVERED":
+        discover(TaxonomyExchange(handler.taxonomy, handler.downloads), ctx)
+    handler.taxonomy.configure(ctx, {"active": mode})
     with handler.repository._connect() as db:
         db.execute(
             "CREATE TABLE helix_classifications (context TEXT, scope TEXT, incident TEXT, fingerprint TEXT, payload TEXT)"
         )
         db.execute("INSERT INTO helix_classifications VALUES ('Bank','missing','I','missing','{}')")
-    with pytest.raises(ValueError, match="solicitud original"):
-        HelixExchange(handler.taxonomy, handler.downloads)
+
+    handler = HelixExchange(handler.taxonomy, handler.downloads)
+    inputs = handler.inputs(ctx, incidents, mode)
+    status = handler.status(ctx, inputs)
+    exported_result = handler.export(ctx, inputs)
+
+    assert status["received"] == 0
+    assert status["pending"] == status["total"] == len(incidents)
+    assert exported_result["pending"] == len(incidents)
+    assert exported_result["saved_paths"]
     with handler.repository._connect() as db:
-        assert db.execute("SELECT incident FROM helix_classifications").fetchone()[0] == "I"
+        assert (
+            db.execute("SELECT 1 FROM sqlite_master WHERE name='helix_classifications'").fetchone()
+            is None
+        )
