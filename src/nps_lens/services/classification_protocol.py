@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,6 +23,11 @@ def encode(value: Any) -> bytes:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(encode(value)).hexdigest()
+
+
+def canonical_comment_key(comment: str) -> str:
+    """Minimal equivalence key; raw text and persisted fingerprints remain untouched."""
+    return " ".join(unicodedata.normalize("NFC", comment).split()).casefold()
 
 
 def comment_classification_fingerprint(comment: str) -> str:
@@ -82,7 +88,7 @@ class CompactClassification(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1)
     primary: Optional[str]
-    secondary: list[str] = Field(default_factory=list, max_length=2)
+    secondary: list[str] = Field(default_factory=list, max_length=1)
 
     def expand(self, catalog: dict[str, dict[str, str]]) -> dict[str, Any]:
         ids = ([self.primary] if self.primary is not None else []) + self.secondary

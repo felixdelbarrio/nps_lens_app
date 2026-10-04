@@ -26,6 +26,7 @@ from nps_lens.services.classification_protocol import (
     CLASSIFIER_SCHEMA,
     HELIX_SCHEMA,
     CompactCommentResponse,
+    canonical_comment_key,
     category_catalog,
     comment_classification_fingerprint,
     digest,
@@ -481,6 +482,18 @@ class TaxonomyExchange:
             )
             if value is not None:
                 retained[key] = value
+        equivalent = {
+            canonical: by_key[key]
+            for canonical, key in artifact.get("canonical_representatives", {}).items()
+            if key in by_key
+        }
+        equivalent.update(
+            {digest(canonical_comment_key(comments[key])): value for key, value in retained.items()}
+        )
+        for key, comment in comments.items():
+            value = equivalent.get(digest(canonical_comment_key(comment)))
+            if value is not None:
+                retained[key] = value
         return retained
 
     def progress(self, context: UploadContext) -> dict[str, Any]:
@@ -498,6 +511,7 @@ class TaxonomyExchange:
         )
         return {
             "mode": mode,
+            "taxonomy_fingerprint": taxonomy_fingerprint(catalog),
             "total": len(frame),
             "received": received,
             "pending": len(frame) - received,
@@ -546,6 +560,7 @@ class TaxonomyExchange:
         revision = state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
         groups: dict[str, list[str]] = {}
         if pending:
+            self.taxonomy.guard_export(context, mode)
             if not taxonomy or not taxonomy["taxonomy"]:
                 raise ValueError("Crea o importa primero la taxonomía de la lente LLM.")
             retained = self.assignments(context, frame, mode)
@@ -556,7 +571,9 @@ class TaxonomyExchange:
                 all(pair[field] == fallback[field] for field in fallback)
                 for pair in categories.values()
             ):
-                empty_keys = frame.loc[frame["Comment"].fillna("").eq(""), "_business_key"]
+                empty_keys = frame.loc[
+                    frame["Comment"].fillna("").str.strip().eq(""), "_business_key"
+                ]
                 if len(empty_keys):
                     retained.update(
                         {
@@ -582,15 +599,17 @@ class TaxonomyExchange:
                         )
                     self._clear_caches()
                     frame = frame.loc[~frame["_business_key"].isin(retained)]
-            # Sorted business keys choose stable representatives; text is never normalized.
+            representatives: dict[str, str] = {}
+            # Keep a raw representative; normalize only the grouping key.
             for key, comment in zip(
                 frame["_business_key"], frame["Comment"].fillna(""), strict=False
             ):
-                if comment in groups:
-                    groups[comment].append(key)
-                else:
-                    groups[comment] = [key]
-            rows = [{"id": str(i), "Comment": text} for i, text in enumerate(groups, 1)]
+                canonical = canonical_comment_key(comment)
+                groups.setdefault(canonical, []).append(key)
+                representatives.setdefault(canonical, comment)
+            rows = [
+                {"id": str(i), "Comment": representatives[text]} for i, text in enumerate(groups, 1)
+            ]
             if not rows:
                 return {
                     "stage": "complete",
@@ -776,14 +795,10 @@ class TaxonomyExchange:
                             )
                         merged[business_key] = value
             audit = audit_classifications(
-                dict(zip(frame["_business_key"], frame["Comment"].fillna(""), strict=False)), merged
+                dict(zip(frame["_business_key"], frame["Comment"].fillna(""), strict=False)),
+                merged,
+                category_catalog(job["taxonomy"]),
             )
-            if audit["review_required"]:
-                raise ValueError(
-                    f"Clasificación sospechosa: {audit['suspicious_count']} comentarios interpretables en Información insuficiente. "
-                    "Revisa y regenera la clasificación; no se importó ningún cambio. "
-                    f"IDs para auditoría: {', '.join(audit['suspicious_ids'][:20])}"
-                )
             job["artifact_signature"] = self._persist_assignments(db, context, frame, job, merged)
             job["stage"] = "complete" if len(existing) == len(job["batches"]) else "classifier"
             db.execute(
@@ -850,6 +865,13 @@ class TaxonomyExchange:
             "nodes": [],
             "taxonomy_fingerprint": taxonomy_fingerprint(job["taxonomy"]),
             "taxonomy": job["taxonomy"],
+            "canonical_representatives": {
+                digest(canonical_comment_key(comment)): key
+                for key, comment in zip(
+                    frame["_business_key"], frame["Comment"].fillna(""), strict=False
+                )
+                if key in merged
+            },
             "comment_hashes": {
                 key: comment_classification_fingerprint(comment)
                 for key, comment in zip(

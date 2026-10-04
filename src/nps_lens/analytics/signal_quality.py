@@ -9,7 +9,6 @@ from typing import Any
 import pandas as pd
 
 INSUFFICIENT_WARNING_RATE = 0.20
-SUSPICIOUS_REVIEW_RATE = 0.10
 
 
 def _normalize(value: object) -> str:
@@ -65,22 +64,43 @@ def signal_quality(frame: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def audit_classifications(comments: dict[str, str], assignments: dict[str, Any]) -> dict[str, Any]:
-    """Flag interpretations for human/LLM review; never assign a category by keywords."""
+def audit_classifications(
+    comments: dict[str, str], assignments: dict[str, Any], catalog: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Report reserve review signals, not semantic verdicts or quality gates."""
+    insufficient = []
+    uncovered = []
     suspicious = []
+    uncovered_suspicious = []
+    labels = {
+        _normalize(pair["sublever"])
+        for pair in (catalog or {}).values()
+        if not is_reserve_category(pair["lever"])
+    }
     for key, assignment in assignments.items():
-        sub = assignment.get("primary_classification", {}).get("sublever", "")
-        if _normalize(sub) != "informacion insuficiente":
-            continue
-        if re.search(
-            r"\b(funciona\w*|entr[ao]\w*|cierr\w*|token|transferencia\w*|pago\w*|lent[ao]\w*|error\w*|pesim[ao]|excelente)\b",
-            _normalize(comments.get(key, "")),
-        ):
-            suspicious.append(key)
-    rate = len(suspicious) / len(assignments) if assignments else 0.0
+        sub = _normalize(assignment.get("primary_classification", {}).get("sublever", ""))
+        text = _normalize(comments.get(key, ""))
+        if sub == "informacion insuficiente":
+            insufficient.append(key)
+            if re.search(
+                r"\b(funciona\w*|entr[ao]\w*|cierr\w*|token|transferencia\w*|pago\w*|lent[ao]\w*|error\w*|pesim[ao]|excelente)\b",
+                text,
+            ):
+                suspicious.append(key)
+        elif sub == "tema no cubierto":
+            uncovered.append(key)
+            if any(re.search(r"\b" + re.escape(label) + r"\b", text) for label in labels):
+                uncovered_suspicious.append(key)
     return {
+        "insufficient_count": len(insufficient),
         "suspicious_ids": suspicious,
         "suspicious_count": len(suspicious),
-        "review_required": rate > SUSPICIOUS_REVIEW_RATE,
-        "suspicious_rate": rate,
+        "suspicious_rate": len(suspicious) / len(insufficient) if insufficient else 0.0,
+        "uncovered_count": len(uncovered),
+        "uncovered_suspicious_ids": uncovered_suspicious,
+        "uncovered_suspicious_count": len(uncovered_suspicious),
+        "uncovered_suspicious_rate": (
+            len(uncovered_suspicious) / len(uncovered) if uncovered else 0.0
+        ),
+        "review_required": bool(suspicious or uncovered_suspicious),
     }

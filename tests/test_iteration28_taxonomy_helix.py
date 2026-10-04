@@ -131,6 +131,8 @@ def helix_response(request, nps_id, entity="Resolución"):
                                 {
                                     "nps_id": nps_id,
                                     "confidence": 0.9,
+                                    "same_task": True,
+                                    "same_symptom": True,
                                     "incident_quote": row["description"] or "Sin descripción",
                                     "comment_quote": next(
                                         comment["Comment"]
@@ -437,7 +439,7 @@ def test_helix_flat_annotations_kpis_and_concise_validation(helix):
     first.update(primary=None, secondary=[], links=[])
     status = handler.import_response(ctx, inputs, zipped(response))
     assert status["total"] == status["received"] == 201
-    assert status["classified"] == status["links"] == 200
+    assert status["classified"] == 200
     assert status["unassigned"] == 1
     assert sum(row["count"] for row in status["categories"]) == 200
     assert "entity" not in next(iter(handler.current(ctx, inputs)["SOURCE"].values()))

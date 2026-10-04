@@ -24,7 +24,8 @@ it("imports independent taxonomy assignments without method selectors and autosa
 });
 it.each([false,true])("allows activation only when ready=%s", async ready => {
   let engine = "rules";
-  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
     if (init?.method === "PUT") engine = "llm";
     return new Response(JSON.stringify({selected_engine:engine,ready,active:"SOURCE"}));
   }));
@@ -36,7 +37,7 @@ it.each([false,true])("allows activation only when ready=%s", async ready => {
   else expect(toggle).toBeDisabled();
 });
 it("blocks unavailable LLM activation without showing a pending rules analysis", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/instructions") ? Response.json({versions:{helix:"2"},helix:"Reglas Helix"}) : new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
   await screen.findByText(/Lente: Taxonomía Original/);
   expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
@@ -46,6 +47,7 @@ it("blocks unavailable LLM activation without showing a pending rules analysis",
 it("keeps unavailable LLM checked and permits switching back to rules", async () => {
   let selected_engine = "llm";
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
     if (init?.method === "PUT") selected_engine = new URL(url, "http://localhost").searchParams.get("engine")!;
     return new Response(JSON.stringify({selected_engine,ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}));
   });
@@ -61,4 +63,20 @@ it("keeps unavailable LLM checked and permits switching back to rules", async ()
   expect(selected_engine).toBe("rules");
   expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
   expect(onChange).toHaveBeenCalledOnce();
+});
+
+it("exports only linking when categories are complete and displays their fingerprint", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
+    if (url.includes("/export")) return Response.json({saved_paths:[],saved_directory:null,batches:0});
+    return Response.json({mode:"DISCOVERED",taxonomy_fingerprint:"abcdef123456",pending:0,link_pending:2,total:2,received:2});
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="DISCOVERED" url="" disabled={false} onlyLinking onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText("abcdef12");
+  const button = screen.getByRole("button",{name:"Exportar solo linking reutilizando categorías"});
+  expect(button).toBeEnabled();
+  expect(screen.queryByText("Vínculos NPS")).not.toBeInTheDocument();
+  await userEvent.click(button);
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*only_linking=true/), expect.objectContaining({method:"POST"})));
 });
