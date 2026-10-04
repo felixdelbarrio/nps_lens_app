@@ -181,8 +181,8 @@ def test_helix_partial_pending_atomic_and_stale(helix):
         handler.import_response(UploadContext("Foreign", "", ""), inputs, zipped(response))
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
     altered = handler.inputs(ctx, incidents, "COMPLETED")
-    with pytest.raises(ValueError, match="cambiado"):
-        handler.import_response(ctx, altered, zipped(response))
+    assert handler.import_response(ctx, altered, zipped(response))["ready"]
+    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
     incidents.loc[0, "Detailed Description"] = "Otro síntoma"
     updated = handler.inputs(ctx, incidents, "SOURCE")
     assert handler.status(ctx, updated)["pending"] == 1
@@ -348,7 +348,9 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
     )
     for mode in ["SOURCE", "DISCOVERED"]:
         assert handler.status(ctx, handler.inputs(ctx, incidents, mode))["pending"] == 0
-    assert handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))["pending"] == 201
+    latest_status = handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))
+    assert latest_status["pending"] == 0
+    assert latest_status["link_pending"] == 201
 
 
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
@@ -394,7 +396,9 @@ def test_manual_replacement_requires_review_and_unique_revision(helix):
     assert client.put("/api/taxonomy/manual", params=params, json=replacement).status_code == 200
     latest = client.get("/api/taxonomy/manual", params=params).json()
     assert latest["revision"] != current["revision"]
-    assert handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))["pending"] == 201
+    latest_status = handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))
+    assert latest_status["pending"] == 0
+    assert latest_status["link_pending"] == 201
     assert client.put("/api/taxonomy/manual", params=params, json=replacement).status_code == 409
     assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
 

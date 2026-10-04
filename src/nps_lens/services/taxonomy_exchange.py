@@ -747,8 +747,14 @@ class TaxonomyExchange:
                     ]
                 }
             ).decode()
-        prior_artifact = self.taxonomy.artifact(job.get("artifact_signature", ""))
-        retained = self.assignments(context, frame, mode, prior_artifact) if prior_artifact else {}
+        prior_artifact = self.taxonomy.artifact(
+            job.get("artifact_signature", "")
+        ) or self.taxonomy.classification_artifact(context, mode)
+        retained = (
+            self.assignments(context, frame, mode, prior_artifact)
+            if prior_artifact.get("taxonomy_fingerprint") == taxonomy_fingerprint(job["taxonomy"])
+            else {}
+        )
         with self.repository._connect() as db:
             existing = dict(
                 db.execute(
