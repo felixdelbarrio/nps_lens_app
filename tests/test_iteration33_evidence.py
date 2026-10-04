@@ -218,7 +218,7 @@ def test_incident_semantic_contract_prioritizes_cheque_description_over_administ
     )
     assert narrative in build_incident_text(frame).iloc[0]
     instructions = PROJECT_INSTRUCTIONS["helix"]
-    assert "routing Helix y título administrativo solo son contexto" in instructions
+    assert "routing y campos de plantilla no son evidencia" in instructions
     assert "clasifica Cheques / Depósito de cheque físico no disponible" in instructions
     # Semantic decisions are supplied externally; no production keyword classifier.
     validated = EvidenceLink(

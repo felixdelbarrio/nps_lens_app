@@ -20,9 +20,12 @@ from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 from nps_lens.services.equivalence_exchange import EquivalenceExchange
 from nps_lens.services.semantic_validation import validate_quote
 from nps_lens.services.taxonomy_prompts import (
+    COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
+    HELIX_INSTRUCTIONS_VERSION,
     MAX_PROJECT_INSTRUCTION_CHARS,
     PROJECT_INSTRUCTIONS,
     SEMANTIC_CRITERIA,
+    instructions_version,
 )
 
 
@@ -102,7 +105,7 @@ def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exc
         "designer",
     )
 
-    assert result == {"stage": "designer", "imported": True}
+    assert result == {"stage": "designer", "imported": True, "activation_required": True}
     assert handler.taxonomy.state(context)["designer_review"]["quotes"] == quotes
 
 
@@ -177,6 +180,12 @@ def test_project_instructions_fit_chatgpt_without_losing_shared_safeguards():
     assert all(SEMANTIC_CRITERIA in instructions for instructions in PROJECT_INSTRUCTIONS.values())
 
 
+def test_prompt_versions_are_isolated_by_role(monkeypatch):
+    monkeypatch.setitem(PROJECT_INSTRUCTIONS, "helix", PROJECT_INSTRUCTIONS["helix"] + "\nCambio")
+    assert instructions_version("classifier") == COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
+    assert instructions_version("helix") != HELIX_INSTRUCTIONS_VERSION
+
+
 def test_stale_helix_results_remain_selected_and_cannot_drive_llm(helix, monkeypatch):
     handler, context, _, incidents, client = helix
     inputs = handler.inputs(context, incidents, "SOURCE")
@@ -184,7 +193,9 @@ def test_stale_helix_results_remain_selected_and_cannot_drive_llm(helix, monkeyp
     handler.import_response(
         context, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))
     )
-    monkeypatch.setattr("nps_lens.services.helix_exchange.INSTRUCTIONS_VERSION", "next-policy")
+    monkeypatch.setattr(
+        "nps_lens.services.helix_exchange.HELIX_INSTRUCTIONS_VERSION", "next-policy"
+    )
     assert handler.status(context, inputs)["pending"] == len(incidents)
     dashboard = client.app.state.dashboard_service
     monkeypatch.setattr(dashboard, "_load_helix_df", lambda *args, **kwargs: incidents)
@@ -210,4 +221,7 @@ def test_new_comment_invalidates_previous_absence_of_links(helix):
     frame.loc[1, "Comment"] = "Nueva evidencia relevante que antes no existía"
     updated = handler.inputs(context, incidents, "SOURCE")
     assert updated["scopes"] != inputs["scopes"]
-    assert handler.status(context, updated)["pending"] == len(incidents)
+    status = handler.status(context, updated)
+    assert status["pending"] == 0
+    assert status["link_pending"] == len(incidents)
+    assert not status["ready"]

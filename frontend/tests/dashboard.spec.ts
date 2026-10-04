@@ -110,7 +110,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Taxonomía importada/)).toBeVisible();
-  await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
+  await page.getByRole("button", { name: "Activar propuesta DISCOVERED" }).click();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
   let exportCount = 0;
   page.on("request", request => {

@@ -25,7 +25,10 @@ from nps_lens.services.taxonomy_exchange import (
     read_response,
     validate_payload,
 )
-from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
+from nps_lens.services.taxonomy_prompts import (
+    NORMALIZER_INSTRUCTIONS_VERSION,
+    PROJECT_INSTRUCTIONS,
+)
 
 
 class ConceptGroup(BaseModel):
@@ -86,7 +89,7 @@ class EquivalenceExchange(TaxonomyExchange):
             raise ValueError("No hay comentarios que exportar para esta compañía.")
         manifest = {
             "schema_version": "nps-lens-normalization/2",
-            "instructions_version": INSTRUCTIONS_VERSION,
+            "instructions_version": NORMALIZER_INSTRUCTIONS_VERSION,
             "stage": "normalizer",
             "job_id": uuid.uuid4().hex,
             "owner": context.service_origin,
@@ -147,7 +150,7 @@ class EquivalenceExchange(TaxonomyExchange):
         self.taxonomy.save_equivalences(context, registry)
         state = self.taxonomy.state(context)
         state["normalizer_review"] = {
-            "instructions_version": INSTRUCTIONS_VERSION,
+            "instructions_version": NORMALIZER_INSTRUCTIONS_VERSION,
             "dimensions": response.model_dump()["dimensions"],
         }
         self.taxonomy.save_state(context, state)

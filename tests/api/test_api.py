@@ -30,13 +30,13 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_project_instructions_are_local_read_only(tmp_path):
-    from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
+    from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSIONS, PROJECT_INSTRUCTIONS
 
     with TestClient(create_app(_settings(tmp_path))) as client:
         response = client.get("/api/taxonomy/discovery/instructions")
         assert client.post("/api/taxonomy/discovery/connect").status_code == 404
     assert response.status_code == 200
-    assert response.json() == {"version": INSTRUCTIONS_VERSION, **PROJECT_INSTRUCTIONS}
+    assert response.json() == {"versions": INSTRUCTIONS_VERSIONS, **PROJECT_INSTRUCTIONS}
     assert "manifest.json" in response.json()["designer"]
 
 

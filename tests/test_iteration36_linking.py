@@ -15,6 +15,7 @@ from nps_lens.services.classification_protocol import (
     digest,
     encode,
     incident_classification_fingerprint,
+    taxonomy_fingerprint,
 )
 from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange
@@ -238,7 +239,13 @@ def test_one_time_migration_preserves_categories_and_drops_combined_table(helix)
 def test_narrative_fingerprint_excludes_linking_date():
     incident = {"description": "Transferencia retenida", "date": "2026-09-01"}
     assert incident_classification_fingerprint(incident) == incident_classification_fingerprint(
-        {**incident, "date": "2026-10-01"}
+        {
+            **incident,
+            "date": "2026-10-01",
+            "title": "Acceso / Claves / Token",
+            "routing": "Mesa administrativa",
+            "Product Categorization Tier 1": "Canal",
+        }
     )
 
 
@@ -336,14 +343,60 @@ def test_comment_assignment_signature_invalidates_only_linking(helix, monkeypatc
     assert not handler.current(ctx, updated)["SOURCE"]
 
 
-def test_missing_migration_narrative_rolls_back_without_data_loss(helix):
-    handler, _, _, _, _ = helix
+@pytest.mark.parametrize("mode", ["SOURCE", "DISCOVERED"])
+def test_unrecoverable_legacy_classification_is_discarded_and_can_be_reexported(helix, mode):
+    handler, ctx, _, incidents, _ = helix
+    if mode == "DISCOVERED":
+        discover(TaxonomyExchange(handler.taxonomy, handler.downloads), ctx)
+    handler.taxonomy.configure(ctx, {"active": mode})
     with handler.repository._connect() as db:
         db.execute(
             "CREATE TABLE helix_classifications (context TEXT, scope TEXT, incident TEXT, fingerprint TEXT, payload TEXT)"
         )
         db.execute("INSERT INTO helix_classifications VALUES ('Bank','missing','I','missing','{}')")
-    with pytest.raises(ValueError, match="solicitud original"):
-        HelixExchange(handler.taxonomy, handler.downloads)
+        db.execute(
+            "INSERT INTO helix_exchange VALUES ('unrelated', 'Other', ?)",
+            (encode({"current": True}).decode(),),
+        )
+
+    handler = HelixExchange(handler.taxonomy, handler.downloads)
+    inputs = handler.inputs(ctx, incidents, mode)
+    status = handler.status(ctx, inputs)
+    exported_result = handler.export(ctx, inputs)
+
+    assert status["received"] == 0
+    assert status["pending"] == status["total"] == len(incidents)
+    assert exported_result["pending"] == len(incidents)
+    assert exported_result["saved_paths"]
     with handler.repository._connect() as db:
-        assert db.execute("SELECT incident FROM helix_classifications").fetchone()[0] == "I"
+        assert (
+            db.execute("SELECT 1 FROM sqlite_master WHERE name='helix_classifications'").fetchone()
+            is None
+        )
+        assert (
+            db.execute("SELECT COUNT(*) FROM helix_exchange WHERE id='unrelated'").fetchone()[0]
+            == 1
+        )
+
+
+def test_late_source_helix_job_imports_without_contaminating_active_discovered(helix):
+    handler, ctx, _, incidents, _ = helix
+    source_inputs = handler.inputs(ctx, incidents, "SOURCE")
+    source_request = exported(handler.export(ctx, source_inputs)["saved_paths"])
+    assert source_request["manifest.json"]["taxonomy_mode"] == "SOURCE"
+
+    comments = TaxonomyExchange(handler.taxonomy, handler.downloads)
+    discover(comments, ctx)
+    discovered_inputs = handler.inputs(ctx, incidents, "DISCOVERED")
+    discovered_fingerprint = taxonomy_fingerprint(discovered_inputs["taxonomies"]["DISCOVERED"])
+    discovered_request = exported(handler.export(ctx, discovered_inputs)["saved_paths"])
+    assert discovered_request["manifest.json"]["taxonomy_mode"] == "DISCOVERED"
+    assert discovered_request["manifest.json"]["taxonomy_fingerprint"] == discovered_fingerprint
+
+    handler.import_response(
+        ctx,
+        discovered_inputs,
+        zipped(helix_response(source_request, source_inputs["comments"][0]["id"])),
+    )
+    assert handler.taxonomy.state(ctx)["active"] == "DISCOVERED"
+    assert handler.classifications(ctx, discovered_inputs)["DISCOVERED"] == {}
