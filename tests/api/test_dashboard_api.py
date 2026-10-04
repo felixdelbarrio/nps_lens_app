@@ -1019,7 +1019,7 @@ def test_views_share_canonical_evidence(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(service, "_load_nps_df", lambda _: frame)
     monkeypatch.setattr(service, "_load_helix_df", lambda *a, **kw: helix)
-    monkeypatch.setattr(service, "analysis_engine", lambda *a, **kw: {"engine": "rules"})
+    monkeypatch.setattr(service, "analysis_engine", lambda *a, **kw: {"selected_engine": "rules"})
     monkeypatch.setattr(service, "causal_scope", lambda *a, **kw: (frame, helix, helix, "Todos"))
     calls = []
     original = service._compute_linking_core

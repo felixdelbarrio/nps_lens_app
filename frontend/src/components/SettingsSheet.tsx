@@ -127,7 +127,7 @@ export function SettingsSheet({
             <p className="eyebrow">Configuración global</p>
             <h2 id="settings-sheet-title">Preferencias del producto</h2>
             <p className="secondary-copy">
-              Ajusta ambientación, descargas, causalidad y mantenimiento del catálogo de servicio.
+              Ajusta ambientación, descargas, vinculación y mantenimiento del catálogo de servicio.
             </p>
           </div>
           <button aria-label="Cerrar configuración" className="icon-button" onClick={onClose} type="button">
@@ -223,7 +223,7 @@ export function SettingsSheet({
                 <div className="settings-subsection-copy">
                   <h4>Ruta base de Helix</h4>
                   <p className="secondary-copy">
-                    Se usa para abrir incidencias desde tablas, escenarios causales y evidencia enlazada.
+                    Se usa para abrir incidencias desde tablas, escenarios de vinculación y evidencia enlazada.
                   </p>
                 </div>
                 <div className="field-grid">
@@ -293,24 +293,24 @@ export function SettingsSheet({
               <div>
                 <h3>Evidencia Helix ↔ VoC</h3>
                 <p className="secondary-copy">
-                  El método causal ya se selecciona en los filtros de Evidencia Helix ↔ VoC; aquí se mantienen únicamente los umbrales operativos.
+                  El método de vinculación ya se selecciona en los filtros de Evidencia Helix ↔ VoC; aquí se mantienen únicamente los umbrales operativos.
                 </p>
               </div>
             </div>
             <div className="settings-section-stack">
               <article className="settings-subsection">
                 <div className="settings-subsection-copy">
-                  <h4>Parámetros de causalidad</h4>
+                  <h4>Parámetros de vinculación</h4>
                   <p className="secondary-copy">
                     Ajusta el matching semántico y la ventana temporal que gobiernan el cruce Helix ↔ VoC.
                   </p>
                 </div>
                 <div className="field-grid">
                   <label>
-                    <span>Similitud en la causalidad</span>
-                    {causalEngine?.engine === "llm" ? <span className="field-hint">El LLM determina la afinidad contextual; solo se aplica la ventana temporal.</span> : null}
+                    <span>Similitud textual</span>
+                    {causalEngine?.selected_engine === "llm" ? <span className="field-hint">El LLM determina la afinidad contextual; solo se aplica la ventana temporal.</span> : null}
                     <input
-                      disabled={causalEngine?.engine === "llm"}
+                      disabled={causalEngine?.selected_engine === "llm"}
                       max={1}
                       min={0.05}
                       onChange={(event) => setMinSimilarity(Number(event.target.value))}

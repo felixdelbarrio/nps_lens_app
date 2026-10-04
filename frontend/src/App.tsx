@@ -67,7 +67,7 @@ const MAIN_AREAS = [
   {
     id: "insights",
     label: "Insights",
-    description: "Seguimiento analítico y causal",
+    description: "Seguimiento analítico y vinculación",
     icon: "home" as const
   },
   {
@@ -1376,7 +1376,7 @@ export function App() {
           <article className="note-card">
             <p className="secondary-copy">
               {linking?.empty_state ||
-                "El dataset Helix aún no está cargado para este contexto. La vista causal se activará cuando exista base cruzada suficiente."}
+                "El dataset Helix aún no está cargado para este contexto. La vista de vinculación se activará cuando exista base cruzada suficiente."}
             </p>
           </article>
         </section>
@@ -1468,7 +1468,7 @@ export function App() {
             <DatasetUploadCard
               ctaLabel="Importar / actualizar Helix"
               datasetStatus={helixDatasetStatus}
-              description="Importa el extracto Helix y deja el dataset persistido por contexto para explotación causal posterior."
+              description="Importa el extracto Helix y deja el dataset persistido por contexto para vinculación posterior."
               disabled={actionsDisabled && !isMutating}
               eyebrow="Carga Helix"
               feedback={latestHelixUpload}

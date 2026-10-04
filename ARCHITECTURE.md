@@ -35,7 +35,9 @@ de la taxonomía activa; no entrena un segundo TF-IDF. El ranking prioriza incid
 
 `TaxonomyExchange` y `HelixExchange` exportan/importan archivos con contratos estrictos,
 hashes, versiones de instrucciones y evidencia validada. Helix recibe candidatos
-reducidos por retrieval. No hay cliente API automático: el modelo externo no se puede
+reducidos por TF-IDF y expansión contextual por taxonomía y proximidad temporal;
+el ID solo desempata. El presupuesto top-N combina evidencia léxica y contextual
+y diversifica verbatims repetidos. No hay cliente API automático: el modelo externo no se puede
 verificar desde la aplicación. Python calcula volúmenes, NPS, ventanas y rankings.
 El LLM aporta decisiones semánticas materializadas; no una segunda verdad cuantitativa.
 
@@ -44,3 +46,15 @@ El LLM aporta decisiones semánticas materializadas; no una segunda verdad cuant
 Dashboard, PPT y newsletter consumen los servicios y selectores compartidos.
 La WebApp publica resultados ya calculados. Los enlaces a tickets se construyen con
 `base_url + Record ID`. Las salidas describen asociación observada, no causalidad probada.
+
+La selección persistida `selected_engine` es independiente de `ready`: rules ejecuta
+sin artefactos LLM y un LLM seleccionado no disponible conserva su selección con
+`NOT_EVALUATED`. El interruptor permite volver a rules en ese estado.
+
+`helix_incident_categories` identifica categorías por contexto, modo/fingerprint de
+taxonomía, versión de clasificación e ID/narrativa. `helix_incident_links` vincula
+esas categorías con firma de comentarios, política/retrieval, evidencia y versión
+LLM. Fechas y cambios de comentarios invalidan enlaces, no categorías. La migración
+transaccional elimina la tabla combinada, conserva categorías desde las solicitudes
+originales y exige reevaluar enlaces con el retrieval nuevo. Si faltan esas solicitudes,
+revierte íntegramente para no inventar fingerprints ni perder clasificaciones.

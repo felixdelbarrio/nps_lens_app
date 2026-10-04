@@ -969,7 +969,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             dashboard_layer.taxonomy.save_state(context, state)
             dashboard_layer._frame_cache.clear()
             dashboard_layer.taxonomy.clear_source_cache()
-            return {**status, "engine": engine}
+            return {**status, "selected_engine": engine}
 
     @app.put("/api/taxonomy/settings")
     def taxonomy_settings(

@@ -30,7 +30,7 @@ EVIDENCE_COPY = {
     ),
     "CAUSALIDAD_NO_ACREDITADA": (
         "Asociación no acreditada",
-        "No hay evidencia suficiente para sostener causalidad.",
+        "No hay evidencia suficiente para sostener una vinculación.",
     ),
 }
 

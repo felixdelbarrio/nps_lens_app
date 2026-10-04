@@ -177,7 +177,7 @@ def test_project_instructions_fit_chatgpt_without_losing_shared_safeguards():
     assert all(SEMANTIC_CRITERIA in instructions for instructions in PROJECT_INSTRUCTIONS.values())
 
 
-def test_old_helix_results_fall_back_to_rules_and_cannot_drive_llm(helix, monkeypatch):
+def test_stale_helix_results_remain_selected_and_cannot_drive_llm(helix, monkeypatch):
     handler, context, _, incidents, client = helix
     inputs = handler.inputs(context, incidents, "SOURCE")
     request = exported(handler.export(context, inputs)["saved_paths"])
@@ -192,7 +192,7 @@ def test_old_helix_results_fall_back_to_rules_and_cannot_drive_llm(helix, monkey
     state["causal_engine"] = "llm"
     handler.taxonomy.save_state(context, state)
     engine = dashboard.analysis_engine("helix", context)
-    assert engine["engine"] == "rules"
+    assert engine["selected_engine"] == "llm"
     assert not engine["ready"]
     assert engine["pending"] == len(incidents)
 
