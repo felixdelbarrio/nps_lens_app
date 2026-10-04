@@ -31,9 +31,9 @@ def comment_classification_fingerprint(comment: str) -> str:
 
 
 def incident_classification_fingerprint(incident: dict[str, Any]) -> str:
-    """Hash narrative and link date; operational routing fields remain mutable."""
+    """Hash only narrative; dates invalidate linking, not incident categories."""
 
-    return digest([str(incident.get("description", "")), incident.get("date", "")])
+    return digest(str(incident.get("description", "")))
 
 
 def category_catalog(taxonomy: dict[str, Any]) -> dict[str, dict[str, str]]:

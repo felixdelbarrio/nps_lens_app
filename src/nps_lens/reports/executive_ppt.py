@@ -3270,7 +3270,7 @@ def generate_business_review_ppt(
     report_note = (
         f"Taxonomía activa: {metadata.get('taxonomy_mode', 'No disponible')}\n"
         f"Fingerprint: {metadata.get('taxonomy_fingerprint', 'No disponible')}\n"
-        f"Motor causal: {metadata.get('causal_engine', 'rules')}\n"
+        f"Motor de vinculación: {metadata.get('causal_engine', 'rules')}\n"
         f"Fecha de clasificación comentarios: {metadata.get('comment_classified_at', 'No disponible')}\n"
         f"Fecha de clasificación incidencias: {metadata.get('incident_classified_at', 'No disponible')}\n"
         f"Ámbito: {metadata.get('scope', {})}\n{quality['message']}\n"

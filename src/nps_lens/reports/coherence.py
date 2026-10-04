@@ -28,7 +28,7 @@ def validate_classification_context(
             )
         if artifact.get("causal_engine") != causal_engine:
             raise ReportCoherenceError(
-                f"Motor causal incompatible en {name}; regenera el análisis."
+                f"Motor de vinculación incompatible en {name}; regenera el análisis."
             )
 
 

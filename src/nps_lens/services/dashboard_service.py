@@ -596,7 +596,7 @@ class DashboardService:
             self.settings.auth_mode != "local"
             or self.taxonomy.state(context).get(preference) != "llm"
         ):
-            return {"engine": "rules"}
+            return {"selected_engine": "rules"}
         return self.classification_status(kind, context, **scope)
 
     def classification_status(
@@ -611,7 +611,9 @@ class DashboardService:
         max_days_apart: int = LINK_MAX_DAYS_APART,
     ) -> dict[str, Any]:
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.state(context)["active"]
+        mode = state["active"]
+        preference = "comment_engine" if kind == "comments" else "causal_engine"
+        selected_engine = state.get(preference, "rules")
         total = received = 0
         reason = ""
         try:
@@ -630,7 +632,6 @@ class DashboardService:
                 received = len(
                     TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
                 )
-                preference = "comment_engine"
             elif kind == "helix":
                 _, _, visible, _ = self.causal_scope(
                     context,
@@ -651,20 +652,14 @@ class DashboardService:
                     if total
                     else 0
                 )
-                preference = "causal_engine"
             else:
                 raise ValueError("Motor desconocido.")
             ready = total > 0 and received == total
-            engine = (
-                "llm"
-                if state.get(preference) == "llm" and (ready or kind == "comments")
-                else "rules"
-            )
         except ValueError as exc:
-            reason, ready, engine = str(exc), False, "rules"
+            reason, ready = str(exc), False
         return {
             "active": mode,
-            "engine": engine,
+            "selected_engine": selected_engine,
             "ready": ready,
             "total": total,
             "received": received,
@@ -1410,12 +1405,12 @@ class DashboardService:
             score_channel=score_channel,
             max_days_apart=max_days_apart,
         )
-        llm_pending = (
-            self.settings.auth_mode == "local"
-            and self.taxonomy.state(context).get("causal_engine") == "llm"
-            and not llm_status.get("ready", False)
+        llm_pending = llm_status["selected_engine"] == "llm" and not llm_status.get("ready", False)
+        handler = (
+            HelixExchange(self.taxonomy, Path("."))
+            if llm_status["selected_engine"] == "llm" and not llm_pending
+            else None
         )
-        handler = HelixExchange(self.taxonomy, Path(".")) if llm_status["engine"] == "llm" else None
         inputs = (
             handler.inputs(context, self._load_helix_df(context), llm_status["active"])
             if handler
@@ -1466,7 +1461,6 @@ class DashboardService:
         )
 
         def _build_base() -> dict[str, object]:
-            use_llm = handler is not None
             nps_frame = active_frame
             nps_slice, helix_history, helix_window, resolved_channel = self.causal_scope(
                 context,
@@ -1500,7 +1494,7 @@ class DashboardService:
                 "helix_slice": helix_slice,
                 "helix_window_rows": int(len(helix_window)),
                 "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
-                "causal_engine": "llm" if use_llm else "rules",
+                "causal_engine": llm_status["selected_engine"],
                 "signal_quality": signal_quality(nps_slice),
             }
             diagnostic_inputs: dict[str, Any] = dict(
@@ -2062,7 +2056,7 @@ class DashboardService:
                 score_channel=score_channel,
                 max_days_apart=max_days_apart,
             )
-            if not status.get("ready") or status.get("engine") != "llm":
+            if not status.get("ready") or status.get("selected_engine") != "llm":
                 raise ReportCoherenceError(
                     f"Regenera la clasificación de {label} para la taxonomía y ámbito activos. {status.get('reason', '')}"
                 )

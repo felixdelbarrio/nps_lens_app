@@ -318,7 +318,7 @@ export function ServiceOriginMaintenance({
               <h3>Canal</h3>
               <p className="secondary-copy">
                 {selectedOrigin
-                  ? `Canales con atribución causal opcional para ${selectedOrigin}.`
+                  ? `Canales con vinculación opcional para ${selectedOrigin}.`
                   : "Selecciona una compañía para editar sus canales."}
               </p>
             </div>
@@ -364,7 +364,7 @@ export function ServiceOriginMaintenance({
             <h3>N1 y N2 de Helix asignados al canal</h3>
             <p className="secondary-copy">
               {selectedOrigin && selectedN1
-                ? `Asigna valores exactos de N1 o N2 a ${selectedOrigin} · ${selectedN1}. Si no añades ninguno, la causalidad aplicará a todos los comentarios y canales.`
+                ? `Asigna valores exactos de N1 o N2 a ${selectedOrigin} · ${selectedN1}. Si no añades ninguno, la vinculación aplicará a todos los comentarios y canales.`
                 : "Selecciona compañía y canal para configurar la atribución opcional."}
             </p>
           </div>

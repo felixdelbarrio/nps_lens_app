@@ -410,7 +410,7 @@ def test_reporting_rejects_selected_llm_engine_instead_of_silent_rules_fallback(
         "classification_status",
         lambda *a, **kw: {
             "ready": False,
-            "engine": "rules",
+            "selected_engine": "llm",
             "reason": "Fingerprint desactualizado.",
         },
     )

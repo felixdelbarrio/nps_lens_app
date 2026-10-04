@@ -407,9 +407,27 @@ def retrieve_incident_candidates(
     incident_topics = helix["incident_topic"].to_numpy()
     incident_dates = helix["incident_date"].to_numpy(dtype="datetime64[ns]")
     # Evidence links: incident -> top detractor comments with sparse/chunked text_similarity.
-    nps_ids = nps["nps_id"].to_numpy()
+    nps_ids = nps["nps_id"].to_numpy(dtype=str)
     nps_topics = nps["nps_topic"].to_numpy()
     nps_dates = nps["nps_date"].to_numpy(dtype="datetime64[ns]")
+
+    if acceptance is None:
+        # Context expansion shares the narrative vectorisation above. Taxonomy groups and
+        # a date index are built once; each incident only visits its temporal window.
+        topic_groups: dict[str, int] = {topic: i for i, topic in enumerate(sorted(set(nps_topics)))}
+        topic_codes = np.array([topic_groups[topic] for topic in nps_topics])
+        topic_terms = [set(preprocess_text(topic).split()) for topic in topic_groups]
+        incident_context = (
+            (
+                build_nps_topic(helix).replace("", pd.NA).fillna(helix["incident_topic"])
+                if {"Palanca", "Subpalanca"}.issubset(helix.columns)
+                else helix["incident_topic"]
+            )
+            .map(preprocess_text)
+            .tolist()
+        )
+        date_order = np.argsort(nps_dates)
+        sorted_dates = nps_dates[date_order]
 
     word_features = word_vec.get_feature_names_out()
     if acceptance is not None:
@@ -445,19 +463,69 @@ def retrieve_incident_candidates(
             row = sim_block.getrow(bi)
             candidate_idx = row.indices
             candidate_vals = row.data
-            # LLM top-N includes zero-overlap candidates; never allocate the full pair matrix.
             if acceptance is None:
-                eligible_idx = (
-                    np.flatnonzero(temporal_mask(nps_dates, inc_date, max_days))
-                    if max_days is not None
-                    else np.arange(len(nps))
+                if max_days is None:
+                    eligible_idx = date_order
+                elif np.isnat(inc_date):
+                    eligible_idx = np.array([], dtype=int)
+                else:
+                    delta = np.timedelta64(max_days, "D")
+                    lo = np.searchsorted(sorted_dates, inc_date - delta, side="left")
+                    hi = np.searchsorted(sorted_dates, inc_date + delta, side="right")
+                    eligible_idx = date_order[lo:hi]
+                # Category compatibility is context, never an acceptance gate. For
+                # unclassified incidents use explicit taxonomy terms in their narrative.
+                context_terms = set(incident_context[inc_row].split()) | set(
+                    helix_text.iloc[inc_row].split()
                 )
-                missing = eligible_idx[~np.isin(eligible_idx, candidate_idx)]
-                missing = missing[np.argsort(nps_ids[missing].astype(str))][:per_incident_k]
-                candidate_idx = np.concatenate((candidate_idx, missing))
-                candidate_vals = np.concatenate(
-                    (candidate_vals, np.zeros(len(missing), dtype=np.float32))
+                compatibility = np.array([len(terms & context_terms) for terms in topic_terms])
+                distances = (
+                    np.abs(nps_dates[eligible_idx] - inc_date)
+                    .astype("timedelta64[D]")
+                    .astype(float)
                 )
+                distances = np.nan_to_num(distances, nan=np.inf)
+                contextual_order = np.lexsort(
+                    (
+                        nps_ids[eligible_idx],
+                        distances,
+                        -compatibility[topic_codes[eligible_idx]],
+                    )
+                )
+                contextual = eligible_idx[contextual_order]
+                # Reserve half the budget for contextual recall; lexical retrieval
+                # cannot crowd out a compatible zero-overlap comment.
+                lexical_valid = np.isin(candidate_idx, eligible_idx)
+                lexical_idx, lexical_vals = (
+                    candidate_idx[lexical_valid],
+                    candidate_vals[lexical_valid],
+                )
+                lexical_order = np.lexsort((nps_ids[lexical_idx], -lexical_vals))
+                chosen: list[int] = []
+                chosen_set: set[int] = set()
+                seen_text: set[str] = set()
+                # Repeated verbatims cannot consume the entire semantic budget.
+                for pool, limit in (
+                    (lexical_idx[lexical_order], per_incident_k // 2),
+                    (contextual, per_incident_k),
+                ):
+                    for candidate in pool:
+                        if len(chosen) >= limit:
+                            break
+                        text = corpus[int(candidate)]
+                        if candidate not in chosen_set and text not in seen_text:
+                            chosen.append(int(candidate))
+                            chosen_set.add(int(candidate))
+                            seen_text.add(text)
+                for candidate in contextual:
+                    if len(chosen) >= per_incident_k:
+                        break
+                    if candidate not in chosen_set:
+                        chosen.append(int(candidate))
+                        chosen_set.add(int(candidate))
+                scores = dict(zip(candidate_idx, candidate_vals, strict=False))
+                candidate_idx = np.asarray(chosen, dtype=int)
+                candidate_vals = np.array([scores.get(i, 0.0) for i in chosen], dtype=np.float32)
             if max_days is not None:
                 valid = temporal_mask(nps_dates[candidate_idx], inc_date, max_days)
                 candidate_idx, candidate_vals = candidate_idx[valid], candidate_vals[valid]
@@ -467,7 +535,7 @@ def retrieve_incident_candidates(
                 len(candidate_idx) if acceptance else min(per_incident_k, len(candidate_idx))
             )
             with_candidates += 1
-            order = np.lexsort((nps_ids[candidate_idx].astype(str), -candidate_vals))
+            order = np.lexsort((nps_ids[candidate_idx], -candidate_vals))
             idx, vals = candidate_idx[order], candidate_vals[order]
             if acceptance is not None:
                 keep = acceptance(
