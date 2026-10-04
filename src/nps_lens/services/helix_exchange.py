@@ -158,24 +158,53 @@ class HelixExchange:
                 narratives = {}
                 modes = {}
                 for ctx, payload in db.execute("SELECT context, payload FROM helix_exchange"):
-                    job = strict_json(payload.encode())
-                    for mode, scope in job["manifest"]["taxonomy_scopes"].items():
-                        modes[(ctx, scope)] = mode
-                    for batch in job["batches"].values():
+                    try:
+                        job = strict_json(payload.encode())
+                        taxonomy_scopes = job["manifest"]["taxonomy_scopes"]
+                        batches = job["batches"]
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        continue
+                    if not isinstance(taxonomy_scopes, dict) or not isinstance(batches, dict):
+                        continue
+                    for mode, scope in taxonomy_scopes.items():
+                        if isinstance(mode, str) and isinstance(scope, str):
+                            modes[(ctx, scope)] = mode
+                    for batch in batches.values():
+                        if not isinstance(batch, list):
+                            continue
                         for row in batch:
+                            if (
+                                not isinstance(row, dict)
+                                or not isinstance(row.get("id"), str)
+                                or not isinstance(row.get("description"), str)
+                            ):
+                                continue
                             narratives[
-                                (ctx, row["id"], digest([row["description"], row.get("date", "")]))
+                                (
+                                    ctx,
+                                    row["id"],
+                                    digest([row.get("description", ""), row.get("date", "")]),
+                                )
                             ] = row
                 for ctx, scope, key, fingerprint, payload in db.execute(
-                    "SELECT * FROM helix_classifications ORDER BY json_extract(payload, '$.classified_at'), scope"
+                    "SELECT * FROM helix_classifications ORDER BY rowid"
                 ):
-                    item = strict_json(payload.encode())
+                    try:
+                        item = strict_json(payload.encode())
+                    except (AttributeError, TypeError, ValueError):
+                        continue
                     original = narratives.get((ctx, key, fingerprint))
                     mode = modes.get((ctx, scope))
-                    if original is None or mode is None:
-                        raise ValueError(
-                            "No se puede migrar la clasificación Helix sin su solicitud original; restaura los intercambios antes de continuar."
-                        )
+                    if (
+                        original is None
+                        or mode is None
+                        or not isinstance(item, dict)
+                        or not isinstance(item.get("taxonomy_fingerprint"), str)
+                        or not isinstance(item.get("lever"), str)
+                        or not isinstance(item.get("sublever"), str)
+                        or not isinstance(item.get("secondary_classifications"), list)
+                    ):
+                        continue
                     category = {
                         k: v
                         for k, v in item.items()
