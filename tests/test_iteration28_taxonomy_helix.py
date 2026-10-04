@@ -348,9 +348,7 @@ def test_three_taxonomies_are_independent_and_selection_reuses_assignments(helix
     )
     for mode in ["SOURCE", "DISCOVERED"]:
         assert handler.status(ctx, handler.inputs(ctx, incidents, mode))["pending"] == 0
-    latest_status = handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))
-    assert latest_status["pending"] == 0
-    assert latest_status["link_pending"] == 201
+    assert handler.status(ctx, handler.inputs(ctx, incidents, "COMPLETED"))["pending"] == 201
 
 
 def test_partial_classifier_export_omits_already_imported_comments(exchange):
