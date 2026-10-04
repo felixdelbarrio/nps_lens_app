@@ -11,13 +11,13 @@ from fastapi.testclient import TestClient
 
 from nps_lens.api.app import create_app
 from nps_lens.domain.models import UploadContext
-from nps_lens.services.classification_protocol import label_criterion
+from nps_lens.services.classification_protocol import label_criterion, taxonomy_fingerprint
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange, encode, read_zip
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,
     FALLBACK_SUBLEVERS,
-    INSTRUCTIONS_VERSION,
+    INSTRUCTIONS_VERSIONS,
 )
 from nps_lens.settings import Settings
 
@@ -329,7 +329,7 @@ def test_all_projects_share_strict_zip_validation(stage):
             "designer": "nps-lens-taxonomy/4",
         }[stage],
         "stage": stage,
-        "instructions_version": INSTRUCTIONS_VERSION,
+        "instructions_version": INSTRUCTIONS_VERSIONS[stage],
         "job_id": "test",
     }
     member = "taxonomy.json" if stage == "designer" else "results/000001.json"
@@ -419,3 +419,44 @@ def test_designer_proposal_does_not_replace_active_taxonomy(exchange):
     assert handler.taxonomy.catalog(context, "DISCOVERED") == before
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     assert handler.taxonomy.catalog(context, "DISCOVERED") != before
+
+
+def test_proposal_requires_activation_and_late_classifier_keeps_new_active_version(exchange):
+    handler, context, frame, _ = exchange
+    frame["Palanca"] = "Atención"
+    frame["Subpalanca"] = "Resolución"
+    handler.import_response(context, designer_zip(handler, context), "designer")
+
+    source_request = exported(handler.export(context, "classifier")["saved_paths"])
+    assert source_request["manifest.json"]["taxonomy_mode"] == "SOURCE"
+    assert source_request["manifest.json"]["taxonomy_fingerprint"] == taxonomy_fingerprint(
+        handler.taxonomy.catalog(context, "SOURCE")
+    )
+
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
+    old_request = exported(handler.export(context, "classifier")["saved_paths"])
+    old_fingerprint = old_request["manifest.json"]["taxonomy_fingerprint"]
+    assert old_request["manifest.json"]["taxonomy_mode"] == "DISCOVERED"
+
+    replacement = {
+        "taxonomy": [
+            *TAXONOMY["taxonomy"],
+            {"lever": "Acceso", "sublevers": ["Autenticación"]},
+        ]
+    }
+    handler.import_response(context, designer_zip(handler, context, replacement), "designer")
+    assert taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED")) == old_fingerprint
+    handler.taxonomy.configure(context, {"active": "DISCOVERED"})
+    new_fingerprint = taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED"))
+    assert new_fingerprint != old_fingerprint
+
+    result = handler.import_response(
+        context,
+        classifier_zip(classifier_files(old_request["manifest.json"], old_request)),
+        "classifier",
+    )
+    assert result["stage"] == "complete"
+    state = handler.taxonomy.state(context)
+    assert state["active"] == "DISCOVERED"
+    assert "DISCOVERED" not in state.get("artifacts", {})
+    assert taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED")) == new_fingerprint

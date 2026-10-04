@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
 
 const context = { service_origin: "Bank", service_origin_n1: "Web" };
-const instructions = { version: "v-test", designer: "CREA · JSON exacto\nreglas", classifier: "CLASIFICA · todos los IDs\nreglas" };
+const instructions = { versions: { designer: "v-designer", classifier: "v-classifier", helix: "v-helix", normalizer: "v-normalizer" }, designer: "CREA · JSON exacto\nreglas", classifier: "CLASIFICA · todos los IDs\nreglas" };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function setup() {

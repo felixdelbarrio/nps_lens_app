@@ -42,7 +42,7 @@ from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.nps_service import NpsService
 from nps_lens.services.taxonomy_discovery import TaxonomyDiscoveryError
 from nps_lens.services.taxonomy_exchange import MAX_ZIP_BYTES, TaxonomyExchange
-from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION, PROJECT_INSTRUCTIONS
+from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSIONS, PROJECT_INSTRUCTIONS
 from nps_lens.settings import (
     Settings,
     load_runtime_dotenv,
@@ -720,7 +720,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def taxonomy_project_instructions(request: Request) -> dict[str, Any]:
         require_admin(request)
         require_local_taxonomy(request)
-        return {"version": INSTRUCTIONS_VERSION, **PROJECT_INSTRUCTIONS}
+        return {"versions": INSTRUCTIONS_VERSIONS, **PROJECT_INSTRUCTIONS}
 
     @app.get("/api/taxonomy/discovery")
     def taxonomy_discovery_settings(

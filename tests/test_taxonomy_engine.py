@@ -21,7 +21,7 @@ from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.classification_protocol import digest
 from nps_lens.services.nps_service import NpsService
-from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION
+from nps_lens.services.taxonomy_prompts import COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
 from nps_lens.settings import Settings
 
@@ -88,7 +88,7 @@ def seed_discovered(tax: TaxonomyService, ctx: UploadContext) -> None:
     config = {
         "method": "chatgpt_zip",
         "taxonomy_sha256": "test",
-        "instructions_version": INSTRUCTIONS_VERSION,
+        "instructions_version": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
     }
     sig = signature(frame, "DISCOVERED", config, "")
     artifact = {
@@ -438,7 +438,7 @@ def test_llm_batches_create_immutable_versions(service):
         "mode": "SOURCE",
         "taxonomy": tax.catalog(ctx, "SOURCE"),
         "manual_revision": "",
-        "instructions_version": INSTRUCTIONS_VERSION,
+        "instructions_version": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
     }
     key = frame["_business_key"].iloc[0]
     merged = {

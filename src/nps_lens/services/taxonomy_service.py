@@ -26,9 +26,9 @@ from nps_lens.analytics.taxonomy import (
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
-from nps_lens.services.classification_protocol import digest
+from nps_lens.services.classification_protocol import digest, taxonomy_fingerprint
 from nps_lens.services.taxonomy_discovery import TaxonomyResponse
-from nps_lens.services.taxonomy_prompts import INSTRUCTIONS_VERSION
+from nps_lens.services.taxonomy_prompts import COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
 from nps_lens.settings import persist_ui_prefs
 
 POLICIES = ("ACTIVE_ONLY", "SOURCE_AND_ACTIVE", "ALL_AVAILABLE")
@@ -227,7 +227,8 @@ class TaxonomyService:
                 config = item.get("config", {})
                 if (
                     config.get("method") == "chatgpt_zip"
-                    and config.get("instructions_version") != INSTRUCTIONS_VERSION
+                    and config.get("instructions_version")
+                    != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
                 ):
                     continue
                 if mode == "DISCOVERED" and item.get("taxonomy") != state.get(
@@ -566,6 +567,11 @@ class TaxonomyService:
         state = self.state(context)
         if changes.get("active") == "DISCOVERED" and state.get("proposed_discovered_taxonomy"):
             state["discovered_taxonomy"] = state.pop("proposed_discovered_taxonomy")
+            state["taxonomy_fingerprint"] = state.pop(
+                "proposed_discovered_fingerprint",
+                taxonomy_fingerprint(state["discovered_taxonomy"]),
+            )
+            state.setdefault("artifacts", {}).pop("DISCOVERED", None)
             self.save_state(context, state)
         frame, registry = self.source(context), self.registry(context)
         available = self.available(context, frame, registry)
@@ -635,6 +641,7 @@ class TaxonomyService:
                 }
             )
         selected = state["active"] if state["active"] in available else "SOURCE"
+        active_fingerprint = taxonomy_fingerprint(self.catalog(context, selected))
         return {
             "detection": {
                 **detect_taxonomy(frame),
@@ -648,6 +655,9 @@ class TaxonomyService:
             "policy": state["policy"],
             "restored": bool(state.get("restored")),
             "discovered_catalog_available": bool(state.get("discovered_taxonomy")),
+            "active_fingerprint": active_fingerprint,
+            "proposed_discovered_fingerprint": state.get("proposed_discovered_fingerprint"),
+            "activation_required": bool(state.get("proposed_discovered_taxonomy")),
         }
 
     def explore(

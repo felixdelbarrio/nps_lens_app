@@ -15,7 +15,7 @@ it.each([
   let imported = false;
   const calls: string[] = [];
   const fetcher = vi.fn(async (url: string) => {
-    if (url.includes("/instructions")) return Response.json({ version: "3", [role]: "Reglas" });
+    if (url.includes("/instructions")) return Response.json({ versions: {designer:"3",classifier:"3",helix:"3",normalizer:"3"}, [role]: "Reglas" });
     const counts = () => ({ total: 2, received: imported ? 2 - pending : 0, pending: imported ? pending : 2 });
     if (url.includes("/import")) {
       imported = true; calls.push("import");
@@ -51,7 +51,7 @@ it.each([
 it("refreshes locally resolved empty comments without showing a nonexistent ZIP", async () => {
   let exported = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.includes("/instructions")) return Response.json({ version: "3", classifier: "Reglas" });
+    if (url.includes("/instructions")) return Response.json({ versions: {designer:"3",classifier:"3",helix:"3",normalizer:"3"}, classifier: "Reglas" });
     if (url.includes("/export")) { exported = true; return Response.json({ saved_paths: [], saved_directory: null, stage: "complete", batches: 0 }); }
     return Response.json({ total: 2, received: exported ? 2 : 0, pending: exported ? 0 : 2, multiple: 0 });
   }));

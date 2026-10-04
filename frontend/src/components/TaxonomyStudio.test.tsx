@@ -6,7 +6,7 @@ import { TaxonomyStudio, SnapshotSettings } from "./TaxonomyStudio";
 
 const context = { service_origin: "Bank", service_origin_n1: "Web" };
 function status() {
-  return { active: "SOURCE", requested_active: "SOURCE", policy: "ACTIVE_ONLY", restored: false, discovered_catalog_available: false, discovery_local_available: true, detection: { state: "PARTIAL", rows: 96, missing: 16, usable_comments: 96 }, taxonomies: [
+  return { active: "SOURCE", requested_active: "SOURCE", active_fingerprint: "source-fingerprint", policy: "ACTIVE_ONLY", restored: false, discovered_catalog_available: false, discovery_local_available: true, detection: { state: "PARTIAL", rows: 96, missing: 16, usable_comments: 96 }, taxonomies: [
     { mode: "SOURCE", available: true, levers: 2, sublevers: 4, coverage: 0.83 },
     { mode: "COMPLETED", available: false }, { mode: "DISCOVERED", available: false }
   ] };
@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllGlobals());
 it("edits completed taxonomy, imports discovery, explores and selects", async () => {
   const state = status();
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("/discovery/instructions")) return new Response(JSON.stringify({ version: "test", designer: "Designer instructions", classifier: "Classifier instructions" }));
+    if (url.includes("/discovery/instructions")) return new Response(JSON.stringify({ versions: {designer: "test", classifier: "test", helix: "test", normalizer: "test"}, designer: "Designer instructions", classifier: "Classifier instructions" }));
     if (url.includes("/discovery/designer/export")) return new Response(JSON.stringify({stage: "designer", saved_path: "/Downloads/designer.zip"}));
     if (url.includes("/discovery/classifier/import")) { state.discovered_catalog_available = true; Object.assign(state.taxonomies[2], {available:true,coverage:1,levers:2,sublevers:4}); return new Response(JSON.stringify({stage:"complete",progress:{total:96,received:96,pending:0}})); }
     if (url.includes("/discovery/progress")) return new Response(JSON.stringify({total:96,received:0,pending:96,multiple:0,designer:{total:96,received:0,pending:96,levers:0,sublevers:0}}));
@@ -63,7 +63,7 @@ it("places the global framework before both tabs and disables classification wit
   const state = status();
   Object.assign(state.taxonomies[0], { selectable: false });
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.includes("/instructions")) return Response.json({ version: "test", designer: "Reglas", classifier: "Reglas", helix: "Reglas" });
+    if (url.includes("/instructions")) return Response.json({ versions: {designer: "test", classifier: "test", helix: "test", normalizer: "test"}, designer: "Reglas", classifier: "Reglas", helix: "Reglas" });
     if (url.includes("/progress")) return Response.json({ total: 96, received: 0, pending: 96, multiple: 0, designer: {total: 96, received: 0, pending: 96} });
     if (url.includes("/discovery")) return Response.json({ designer_url: "", classifier_url: "", helix_classifier_url: "" });
     if (url.includes("/helix")) return Response.json({total: 1, received: 0, pending: 1});
@@ -80,4 +80,24 @@ it("places the global framework before both tabs and disables classification wit
   expect(screen.getByRole("button", { name: "Descargar todos los ZIP de incidencias pendientes" })).toBeDisabled();
   expect(screen.getByLabelText("Importar ZIP de incidencias clasificadas")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" })).toBeEnabled();
+});
+
+it("shows the active fingerprint and explicitly activates a discovered proposal", async () => {
+  const state = { ...status(), activation_required: true, proposed_discovered_fingerprint: "discovered-abcdef" };
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/instructions")) return Response.json({ versions: { designer: "1", classifier: "1", helix: "1", normalizer: "1" }, designer: "Reglas", classifier: "Reglas", helix: "Reglas" });
+    if (url.includes("/settings") && init?.method === "PUT") {
+      state.active = "DISCOVERED";
+      state.activation_required = false;
+      return Response.json({});
+    }
+    if (url.includes("/discovery")) return Response.json({ designer_url: "", classifier_url: "", helix_classifier_url: "" });
+    return Response.json(state);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<SWRConfig value={{ provider: () => new Map() }}><TaxonomyStudio context={context} onChange={async () => {}} /></SWRConfig>);
+  await userEvent.setup().click(await screen.findByRole("tab", { name: "Análisis con LLM" }));
+  expect(await screen.findByText("source-f")).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "Activar propuesta DISCOVERED" }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/settings?"), expect.objectContaining({ method: "PUT" })));
 });

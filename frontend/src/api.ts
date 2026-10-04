@@ -731,10 +731,13 @@ export type TaxonomyStatus = {
   restored: boolean;
   discovery_local_available?: boolean;
   discovered_catalog_available: boolean;
+  active_fingerprint: string;
+  proposed_discovered_fingerprint?: string;
+  activation_required?: boolean;
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
-  version: string;
+  versions: Record<"normalizer" | "designer" | "classifier" | "helix", string>;
   normalizer: string;
   designer: string;
   classifier: string;
