@@ -67,7 +67,7 @@ const MAIN_AREAS = [
   {
     id: "insights",
     label: "Insights",
-    description: "Seguimiento analítico y causal",
+    description: "Seguimiento analítico y vinculación",
     icon: "home" as const
   },
   {
@@ -88,7 +88,7 @@ const MAIN_AREAS = [
 const INSIGHT_TABS = [
   { id: "summary", label: "Evolución NPS" },
   { id: "nps-analysis", label: "Comentarios" },
-  { id: "linking", label: "Causalidad" }
+  { id: "linking", label: "Evidencia Helix ↔ VoC" }
 ];
 
 const INGEST_TABS = [
@@ -962,7 +962,7 @@ export function App() {
             <p className="eyebrow">Filters</p>
             <h2>FILTROS</h2>
             <p className="secondary-copy">
-              Sincronizados para Comentarios, Causalidad y reportes ejecutivos
+              Sincronizados para Comentarios, Evidencia Helix ↔ VoC y reportes ejecutivos
             </p>
           </div>
         </div>
@@ -1351,7 +1351,7 @@ export function App() {
         <section className="surface-card stack-panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Causalidad</p>
+              <p className="eyebrow">Evidencia Helix ↔ VoC</p>
               <h2>Base cruzada y readiness operativo</h2>
             </div>
           </div>
@@ -1376,7 +1376,7 @@ export function App() {
           <article className="note-card">
             <p className="secondary-copy">
               {linking?.empty_state ||
-                "El dataset Helix aún no está cargado para este contexto. La vista causal se activará cuando exista base cruzada suficiente."}
+                "El dataset Helix aún no está cargado para este contexto. La vista de vinculación se activará cuando exista base cruzada suficiente."}
             </p>
           </article>
         </section>
@@ -1468,7 +1468,7 @@ export function App() {
             <DatasetUploadCard
               ctaLabel="Importar / actualizar Helix"
               datasetStatus={helixDatasetStatus}
-              description="Importa el extracto Helix y deja el dataset persistido por contexto para explotación causal posterior."
+              description="Importa el extracto Helix y deja el dataset persistido por contexto para vinculación posterior."
               disabled={actionsDisabled && !isMutating}
               eyebrow="Carga Helix"
               feedback={latestHelixUpload}

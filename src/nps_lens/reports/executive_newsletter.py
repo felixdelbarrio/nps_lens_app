@@ -94,7 +94,11 @@ def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
     cards = [card for card in _list(scenario_block.get("cards")) if isinstance(card, dict)]
     selected = sorted(
         (card for card in cards if scenario_impact_score(card) > -1000),
-        key=scenario_impact_score,
+        key=lambda card: (
+            _number(card.get("linked_incidents")) or 0,
+            _number(card.get("linked_comments")) or 0,
+            scenario_impact_score(card),
+        ),
         reverse=True,
     )[:4]
     connections: list[dict[str, object]] = []
@@ -202,7 +206,11 @@ def build_executive_newsletter(
             + (
                 str(connections[0]["evidence_reason"])
                 if connections
-                else "No hay evidencia suficiente para sostener causalidad."
+                else str(
+                    _dict(linking.get("diagnostics")).get(
+                        "evaluation_message", "Vínculos no evaluados"
+                    )
+                )
             )
         ),
         "signal_quality": signal_quality(current_df),

@@ -8,7 +8,7 @@ VENV_BIN = $(VENV)/Scripts
 BIN_EXT := .exe
 PLAYWRIGHT := $(FRONTEND_DIR)/node_modules/.bin/playwright.cmd
 else
-PYTHON ?= python3.9
+PYTHON ?= python3.12
 VENV_BIN = $(VENV)/bin
 BIN_EXT :=
 PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright

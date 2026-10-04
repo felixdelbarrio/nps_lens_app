@@ -14,6 +14,7 @@ from nps_lens.analytics.linking_policy import (
     HOTSPOT_MIN_TERM_OCCURRENCES,
     LINK_MAX_DAYS_APART,
     LINK_MIN_SIMILARITY,
+    temporal_mask,
 )
 from nps_lens.analytics.nps_helix_link import build_incident_display_text, build_nps_topic
 from nps_lens.domain.record_identity import analytical_response_ids
@@ -25,7 +26,7 @@ HOTSPOT_EVIDENCE_COLUMNS = [
     "nps_topic",
     "incident_summary",
     "detractor_comment",
-    "similarity",
+    "text_similarity",
     "hot_term",
     "hot_rank",
     "mention_incidents",
@@ -289,22 +290,22 @@ def _strict_term_links(
     d = links_enriched.copy()
     inc_match = d["incident_summary_norm"].str.contains(term_pattern, regex=True, na=False)
     com_match = d["detractor_comment_norm"].str.contains(term_pattern, regex=True, na=False)
-    sim_ok = pd.to_numeric(d.get("similarity"), errors="coerce").fillna(0.0) >= float(
+    sim_ok = pd.to_numeric(d.get("text_similarity"), errors="coerce").fillna(0.0) >= float(
         min_similarity
     )
-    keep = inc_match & com_match & sim_ok
+    llm = d.get("causal_engine", pd.Series("rules", index=d.index)).eq("llm")
+    keep = inc_match & com_match & (llm | sim_ok)
 
     if max_days_apart is not None:
         inc_date = pd.to_datetime(d.get("incident_date"), errors="coerce")
         nps_date = pd.to_datetime(d.get("nps_date"), errors="coerce")
-        delta_days = (inc_date - nps_date).abs().dt.days
-        keep = keep & delta_days.notna() & (delta_days <= int(max_days_apart))
+        keep = keep & temporal_mask(nps_date, inc_date, max_days_apart)
 
     out = d[keep].copy()
     if out.empty:
         return out
     out = out.drop_duplicates(["incident_id", "nps_id"])
-    out = out.sort_values(["similarity"], ascending=False)
+    out = out.sort_values(["text_similarity"], ascending=False)
     return out
 
 
@@ -490,7 +491,7 @@ def select_best_business_axis_for_hotspots(
                 label_rows.append((str(lab), nlab, toks))
 
         matched_idx: set[int] = set()
-        for idx, (txt_norm, tok_set) in enumerate(zip(helix_norm, helix_tokens)):
+        for idx, (txt_norm, tok_set) in enumerate(zip(helix_norm, helix_tokens, strict=False)):
             best_label = ""
             best_score = 0.0
             for lab, nlab, ltoks in label_rows:
@@ -572,7 +573,7 @@ def align_hotspot_evidence_to_axis(
     term_rank = {term: idx for idx, term in enumerate(selected_terms, start=1)}
     out = d[d["hot_term"].astype(str).isin(set(selected_terms))].copy()
     out["hot_rank"] = out["hot_term"].map(term_rank).astype(int)
-    out = out.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(
+    out = out.sort_values(["hot_rank", "text_similarity"], ascending=[True, False]).reset_index(
         drop=True
     )
     cols = [c for c in HOTSPOT_EVIDENCE_COLUMNS if c in out.columns]
@@ -600,7 +601,9 @@ def build_hotspot_evidence(
     links["incident_id"] = links.get("incident_id", "").astype(str).str.strip()
     links["nps_id"] = links.get("nps_id", "").astype(str).str.strip()
     links["nps_topic"] = links.get("nps_topic", "").astype(str)
-    links["similarity"] = pd.to_numeric(links.get("similarity", 0.0), errors="coerce").fillna(0.0)
+    links["text_similarity"] = pd.to_numeric(
+        links.get("text_similarity", 0.0), errors="coerce"
+    ).fillna(0.0)
 
     nps_ref = _prepare_nps_ref(nps_focus_df)
     if links.empty or nps_ref.empty:
@@ -635,9 +638,22 @@ def build_hotspot_evidence(
     )
 
     out = (
-        links[["incident_id", "nps_id", "nps_topic", "similarity"]].copy()
+        links[
+            [
+                column
+                for column in (
+                    "incident_id",
+                    "nps_id",
+                    "nps_topic",
+                    "text_similarity",
+                    "semantic_confidence",
+                    "causal_engine",
+                )
+                if column in links
+            ]
+        ].copy()
         if not links.empty
-        else pd.DataFrame(columns=["incident_id", "nps_id", "nps_topic", "similarity"])
+        else pd.DataFrame(columns=["incident_id", "nps_id", "nps_topic", "text_similarity"])
     )
     out["incident_summary"] = out["incident_id"].map(summary_map).fillna("")
     out["incident_summary_norm"] = out["incident_summary"].map(_norm_txt)
@@ -656,9 +672,9 @@ def build_hotspot_evidence(
         else pd.Series(dtype=str)
     )
     incident_sim_map = (
-        out.groupby("incident_id", as_index=False)["similarity"]
+        out.groupby("incident_id", as_index=False)["text_similarity"]
         .max()
-        .set_index("incident_id")["similarity"]
+        .set_index("incident_id")["text_similarity"]
         if not out.empty
         else pd.Series(dtype=float)
     )
@@ -757,7 +773,7 @@ def build_hotspot_evidence(
             if not chosen.empty:
                 row0 = chosen.iloc[0]
                 topic_val = str(row0.get("nps_topic", "") or topic_val)
-                sim_val = float(row0.get("similarity", sim_val) or sim_val)
+                sim_val = float(row0.get("text_similarity", sim_val) or sim_val)
                 summary_val = str(row0.get("incident_summary", "") or summary_val)
                 date_val = row0.get("incident_date", date_val)
 
@@ -776,7 +792,7 @@ def build_hotspot_evidence(
                     "nps_topic": topic_val,
                     "incident_summary": summary_val,
                     "detractor_comment": detr_comment,
-                    "similarity": sim_val,
+                    "text_similarity": sim_val,
                     "hot_term": str(term),
                     "hot_rank": int(rank_idx),
                     "mention_incidents": int(mention_incidents),
@@ -807,7 +823,7 @@ def build_hotspot_evidence(
     res["hotspot_links"] = (
         pd.to_numeric(res.get("hotspot_links"), errors="coerce").fillna(0).astype(int)
     )
-    res = res.sort_values(["hot_rank", "similarity"], ascending=[True, False]).reset_index(
+    res = res.sort_values(["hot_rank", "text_similarity"], ascending=[True, False]).reset_index(
         drop=True
     )
     return res[cols].copy()
@@ -850,7 +866,9 @@ def build_hotspot_timeline(
     links["incident_id"] = links.get("incident_id", "").astype(str).str.strip()
     links["nps_id"] = links.get("nps_id", "").astype(str).str.strip()
     links["nps_topic"] = links.get("nps_topic", "").astype(str)
-    links["similarity"] = pd.to_numeric(links.get("similarity", 0.0), errors="coerce").fillna(0.0)
+    links["text_similarity"] = pd.to_numeric(
+        links.get("text_similarity", 0.0), errors="coerce"
+    ).fillna(0.0)
 
     nps_daily = pd.DataFrame(
         columns=[
@@ -1238,13 +1256,15 @@ def build_hotspot_daily_breakdown(
         e["incident_id"] = e.get("incident_id", "").astype(str).str.strip()
         e["hot_rank"] = pd.to_numeric(e.get("hot_rank"), errors="coerce")
         e["hot_term"] = e.get("hot_term", "").astype(str).str.strip()
-        e["similarity"] = pd.to_numeric(e.get("similarity", 0.0), errors="coerce").fillna(0.0)
+        e["text_similarity"] = pd.to_numeric(e.get("text_similarity", 0.0), errors="coerce").fillna(
+            0.0
+        )
         e = e.dropna(subset=["hot_rank"]).copy()
         e = e[e["hot_rank"].between(1, int(max_hotspots), inclusive="both")]
         e = e[e["incident_id"] != ""]
 
         if not e.empty:
-            term_rank = e.sort_values(["hot_rank", "similarity"], ascending=[True, False])[
+            term_rank = e.sort_values(["hot_rank", "text_similarity"], ascending=[True, False])[
                 ["hot_rank", "hot_term"]
             ].drop_duplicates(["hot_rank"])
             for _, r in term_rank.iterrows():
@@ -1253,7 +1273,7 @@ def build_hotspot_daily_breakdown(
                     term_by_rank[rk] = str(r["hot_term"]).strip()
 
             rank_map = (
-                e.sort_values(["hot_rank", "similarity"], ascending=[True, False])
+                e.sort_values(["hot_rank", "text_similarity"], ascending=[True, False])
                 .drop_duplicates(["incident_id"])[["incident_id", "hot_rank", "hot_term"]]
                 .copy()
             )

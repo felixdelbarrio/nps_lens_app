@@ -87,8 +87,12 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("button", { name: /Insights/i }).click();
   await page.getByRole("button", { name: /Abrir configuración global/i }).click();
   await page.getByRole("tab", { name: "Ajustes avanzados" }).click();
-  await page.getByTestId("reprocess-button").click();
-  await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados");
+  const [reprocessed] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/api/reprocess") && response.request().method() === "POST"),
+    page.getByTestId("reprocess-button").click(),
+  ]);
+  expect(reprocessed.ok()).toBeTruthy();
+  await expect(page.getByTestId("reprocess-button")).toHaveText("Reprocesar agregados", {timeout: 15000});
   await page.getByRole("button", { name: /Cerrar configuración/i }).click();
 
   await page.getByRole("button", { name: /Datos/i }).click();
@@ -150,8 +154,21 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("tab", { name: "Comentarios", exact: true }).click();
   const llmSwitch = page.getByRole("switch", {name:"Usar clasificación LLM"});
   await expect(llmSwitch).toBeEnabled();
-  await llmSwitch.click();
+  const [enabled] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/comments/engine") && response.request().method() === "PUT"),
+    llmSwitch.click(),
+  ]);
+  expect(enabled.ok()).toBeTruthy();
+  expect((await enabled.json()).selected_engine).toBe("llm");
   await expect(llmSwitch).toBeChecked({ timeout: 15000 });
+  await expect(llmSwitch).toBeEnabled({ timeout: 15000 });
+  const [disabled] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/comments/engine") && response.request().method() === "PUT"),
+    llmSwitch.click(),
+  ]);
+  expect(disabled.ok()).toBeTruthy();
+  expect((await disabled.json()).selected_engine).toBe("rules");
+  await expect(llmSwitch).not.toBeChecked({ timeout: 15000 });
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();

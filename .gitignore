@@ -113,3 +113,6 @@ frontend/test-results/
 frontend/*.tsbuildinfo
 .playwright-browsers/
 tmp-ppt-test/
+
+# Python 3.12 verification environment
+.venv312/

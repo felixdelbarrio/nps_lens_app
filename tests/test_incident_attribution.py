@@ -29,7 +29,7 @@ def test_build_incident_attribution_chains_keeps_only_presentable_linked_topics(
         {
             "nps_id": ["n1", "n1b", "n1c", "n2", "n2b", "n_bad"],
             "incident_id": ["INC00001", "INC00003", "INC00025", "INC00040", "INC00041", "INC00099"],
-            "similarity": [0.88, 0.86, 0.84, 0.81, 0.79, 0.91],
+            "text_similarity": [0.88, 0.86, 0.84, 0.81, 0.79, 0.91],
             "nps_topic": [
                 "Acceso > Login",
                 "Acceso > Login",
@@ -180,7 +180,7 @@ def test_build_incident_attribution_chains_can_use_bbva_source_service_n2_as_tou
         {
             "nps_id": ["n1"],
             "incident_id": ["INC00001"],
-            "similarity": [0.88],
+            "text_similarity": [0.88],
             "nps_topic": ["Operativa > Creditos"],
         }
     )
@@ -223,7 +223,7 @@ def test_build_incident_attribution_chains_can_aggregate_to_executive_journeys()
         {
             "nps_id": ["n1", "n2"],
             "incident_id": ["INC00001", "INC00002"],
-            "similarity": [0.91, 0.83],
+            "text_similarity": [0.91, 0.83],
             "nps_topic": ["Acceso > Login", "Operativa > Pagos"],
         }
     )
@@ -415,7 +415,7 @@ def test_build_incident_attribution_chains_can_use_persisted_executive_catalog()
         {
             "nps_id": ["n1"],
             "incident_id": ["INC00001"],
-            "similarity": [0.91],
+            "text_similarity": [0.91],
             "nps_topic": ["Operativa > Firma"],
         }
     )
@@ -471,7 +471,7 @@ def test_build_incident_attribution_chains_can_return_all_examples_when_limit_is
         {
             "nps_id": ["n1", "n2", "n3"],
             "incident_id": ["INC00001", "INC00002", "INC00003"],
-            "similarity": [0.91, 0.84, 0.82],
+            "text_similarity": [0.91, 0.84, 0.82],
             "nps_topic": ["Acceso > Login", "Acceso > Login", "Acceso > Login"],
         }
     )
@@ -541,7 +541,7 @@ def test_build_incident_attribution_chains_filters_compound_generic_topics() -> 
         {
             "nps_id": ["n1"],
             "incident_id": ["INC00001"],
-            "similarity": [0.88],
+            "text_similarity": [0.88],
             "nps_topic": ["Sin Comentarios > Sin Comentarios"],
         }
     )
@@ -581,7 +581,7 @@ def test_broken_journey_catalog_groups_related_links_without_manual_table() -> N
         {
             "nps_id": ["n1", "n2", "n3", "n4"],
             "incident_id": ["INC00001", "INC00002", "INC00003", "INC00004"],
-            "similarity": [0.92, 0.90, 0.89, 0.87],
+            "text_similarity": [0.92, 0.90, 0.89, 0.87],
             "nps_topic": [
                 "Acceso > Login",
                 "Acceso > Login",
@@ -649,7 +649,7 @@ def test_broken_journey_remap_reuses_detected_clusters_in_timeseries_and_chains(
         {
             "nps_id": ["n1", "n2", "n3", "n4"],
             "incident_id": ["INC00001", "INC00002", "INC00003", "INC00004"],
-            "similarity": [0.92, 0.90, 0.89, 0.87],
+            "text_similarity": [0.92, 0.90, 0.89, 0.87],
             "nps_topic": [
                 "Acceso > Login",
                 "Acceso > Login",

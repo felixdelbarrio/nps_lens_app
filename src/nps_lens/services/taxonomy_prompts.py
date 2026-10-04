@@ -134,12 +134,13 @@ ENTRADA
 Lee manifest.json, taxonomies.json e incidents/*.json.
 Valida taxonomies.json contra manifest.taxonomies_sha256. Solo existe la lente activa
 de manifest.taxonomy_scopes; su mapping ID -> lever/sublever/criterion es la única autoridad.
-Cada incidencia contiene description y candidates: solo esos comentarios pueden
-recibir vínculos. Cada candidato lleva id, Comment, primary y secondary. El retrieval
-local limita candidatos y temporalidad; ser candidato no demuestra un vínculo.
+Cada incidencia contiene description y candidates; solo estos admiten vínculos.
+Ser candidato no demuestra un vínculo.
 manifest.taxonomy_fingerprint identifica exactamente el catálogo semántico utilizado.
 
 ASIGNACIÓN
+- Si la incidencia incluye classification, conserva exactamente primary y secondary;
+  su clasificación está resuelta. Evalúa únicamente links, sin reclasificarla.
 - Prioridad: descripción narrativa, síntoma, tarea, causa confirmada, resolución;
   routing Helix y título administrativo solo son contexto. Si el título dice
   «Acceso / Claves / Token» pero la descripción dice «no tiene opción de depósito
@@ -168,8 +169,7 @@ Conserva tarea y síntoma breves, sin nombres ni identificadores personales.
 No incluyas reason, rationale ni evidence de clasificación. Conserva todos los IDs
 una vez y en orden. No uses etiquetas, lever/sublever, primary_classification ni
 secondary_classifications; no incluyas corpus, taxonomías, carpetas o archivos extra.
-Ante un límite entrega lotes completos e indica los pendientes. Conserva índice/total:
-1_3_incidencias_helix.zip -> 1_3_incidencias_helix_clasificadas.zip.
+Entrega lotes completos, conserva índice/total y el sufijo _clasificadas.zip.
 Antes de entregar valida campos, catálogo, citas, links, conteos, IDs y orden.
 """
 
@@ -214,5 +214,13 @@ if oversized := {
 INSTRUCTIONS_VERSION = hashlib.sha256(
     json.dumps(
         [PROJECT_INSTRUCTIONS, MAX_LEVERS, MAX_SUBLEVERS], ensure_ascii=False, sort_keys=True
+    ).encode()
+).hexdigest()[:16]
+
+# Category semantics do not change when linking or export instructions change.
+HELIX_CLASSIFICATION_VERSION = hashlib.sha256(
+    (
+        SEMANTIC_CRITERIA
+        + HELIX_INSTRUCTIONS.split("- Prioridad:", 1)[1].split("- links contiene", 1)[0]
     ).encode()
 ).hexdigest()[:16]

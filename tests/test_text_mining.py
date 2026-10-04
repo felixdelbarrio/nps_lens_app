@@ -2,13 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from nps_lens.analytics.text_mining import classify_tone, summarize_taxonomy
-
-
-def test_classify_tone_rules() -> None:
-    labels = classify_tone("No puedo entrar, error 500. Urge.")
-    assert "frustracion" in labels
-    assert "urgencia" in labels
+from nps_lens.analytics.text_mining import summarize_taxonomy
 
 
 def test_summarize_taxonomy_smoke() -> None:

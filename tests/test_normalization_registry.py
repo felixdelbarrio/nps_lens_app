@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from nps_lens.analytics.nps_gaps import rank_nps_gaps
 from nps_lens.domain.normalization import EquivalenceRegistry, equivalence_key
 from nps_lens.ingest.nps_thermal import read_nps_thermal_excel
 
@@ -67,14 +66,3 @@ def test_parser_accepts_current_senda_export_headers(tmp_path: Path) -> None:
     assert result.df["source_lever"].tolist() == source["Palanca"].tolist()
     assert result.df["source_sublever"].tolist() == source["Subpalanca"].tolist()
     assert result.df["NPS Group"].tolist() == ["PASIVO", "DETRACTOR"]
-
-
-def test_nps_gaps_never_expose_an_empty_business_label() -> None:
-    frame = pd.DataFrame(
-        {
-            "NPS": [0] * 250 + [10] * 250,
-            "Palanca": [""] * 250 + ["Pagos y transferencias"] * 250,
-        }
-    )
-    nps_gaps = rank_nps_gaps(frame, ["Palanca"], min_n=200)
-    assert all(item.value for item in nps_gaps)

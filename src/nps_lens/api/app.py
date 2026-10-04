@@ -921,7 +921,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def engine_scope(request: Request) -> dict[str, Any]:
         params = request.query_params
         try:
-            days = int(params.get("max_days_apart", "90"))
+            days = int(params.get("max_days_apart", str(LINK_MAX_DAYS_APART)))
         except ValueError as exc:
             raise HTTPException(400, "Ventana temporal inválida.") from exc
         if not 0 <= days <= 365:
@@ -967,8 +967,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             state = dashboard_layer.taxonomy.state(context)
             state["comment_engine" if kind == "comments" else "causal_engine"] = engine
             dashboard_layer.taxonomy.save_state(context, state)
-            dashboard_layer.clear_caches()
-            return {**status, "engine": engine}
+            dashboard_layer._frame_cache.clear()
+            dashboard_layer.taxonomy.clear_source_cache()
+            return {**status, "selected_engine": engine}
 
     @app.put("/api/taxonomy/settings")
     def taxonomy_settings(

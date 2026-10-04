@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+from typing import Annotated
 
 from pydantic import StringConstraints
-from typing_extensions import Annotated
 
 Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=12, max_length=2000)]
 

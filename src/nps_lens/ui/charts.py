@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.causal_evidence import link_confidence_label
+from nps_lens.analytics.causal_evidence import engine_quality, link_confidence_label
 from nps_lens.core.nps_math import daily_metrics as shared_daily_metrics
 from nps_lens.design.tokens import (
     DesignTokens,
@@ -877,11 +877,8 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
     tmp = journey_df.copy()
     tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
     tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
-    tmp["semantic_cohesion"] = pd.to_numeric(tmp.get("semantic_cohesion"), errors="coerce").fillna(
-        0.0
-    )
     tmp = tmp.sort_values(
-        ["linked_pairs", "semantic_cohesion", "avg_nps"],
+        ["linked_incidents", "linked_comments", "avg_nps"],
         ascending=[False, False, True],
     ).head(int(top_k))
     if tmp.empty:
@@ -905,7 +902,6 @@ def chart_broken_journeys_bar(journey_df: pd.DataFrame, theme: Theme, top_k: int
             "palanca": True,
             "subpalanca": True,
             "journey_keywords": True,
-            "semantic_cohesion": ":.2f",
             "avg_nps": ":.2f",
         },
     )
@@ -951,7 +947,9 @@ def chart_causal_entity_bar(
         if column not in tmp.columns:
             tmp[column] = ""
     tmp["linked_pairs"] = pd.to_numeric(tmp.get("linked_pairs"), errors="coerce").fillna(0.0)
-    tmp["avg_similarity"] = pd.to_numeric(tmp.get("avg_similarity"), errors="coerce").fillna(0.0)
+    tmp["avg_text_similarity"] = pd.to_numeric(
+        tmp.get("avg_text_similarity"), errors="coerce"
+    ).fillna(0.0)
     tmp["avg_nps"] = pd.to_numeric(tmp.get("avg_nps"), errors="coerce")
     tmp = select_causal_scenarios(tmp, max_rows=int(top_k))
     if tmp.empty:
@@ -962,7 +960,7 @@ def chart_causal_entity_bar(
 
     plot_df = tmp.iloc[::-1].copy()
     plot_df["entity_label"] = plot_df["entity_label"].astype(str)
-    plot_df["confidence_pct"] = plot_df["avg_similarity"] * 100.0
+    plot_df["confidence_pct"] = plot_df.apply(engine_quality, axis=1) * 100.0
     fig = px.bar(
         plot_df,
         x="linked_pairs",
@@ -1162,7 +1160,7 @@ def chart_nps_timeseries_with_changepoints(
             return warn_c
         return neutral
 
-    for p, lvl in zip(points, levels):
+    for p, lvl in zip(points, levels, strict=False):
         fig.add_vline(
             x=p,
             line_width=2,

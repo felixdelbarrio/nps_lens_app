@@ -40,7 +40,7 @@ def frames():
         {
             "incident_id": ["i1", "i2", "i3"],
             "nps_id": ["n1", "n1", "n2"],
-            "similarity": [0.9, 0.8, 0.7],
+            "text_similarity": [0.9, 0.8, 0.7],
             "nps_topic": ["Operativa > Transferencias"] * 3,
         }
     )
@@ -120,7 +120,7 @@ def test_entity_vote_is_not_fragmented_by_secondary_metadata():
             "entity_id": ["A", "A", "B"],
             "entity_label": ["A", "A", "B"],
             "helix_source_service_n2": ["Firma", "SPEI", "Login"],
-            "similarity": [0.8, 0.9, 0.99],
+            "text_similarity": [0.8, 0.9, 0.99],
         }
     )
     mapping = _select_topic_entities(
