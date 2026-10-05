@@ -36,15 +36,15 @@ it.each([false,true])("allows activation only when ready=%s", async ready => {
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   if (ready) {
     expect(selector).toBeEnabled();
-    await user.selectOptions(selector, ((selector as HTMLSelectElement).value === "llm" ? "rules" : "llm"));
+    await user.selectOptions(selector, "llm");
     await waitFor(()=>expect(selector).toHaveValue("llm"));
     expect(screen.getByLabelText("Importar ZIP de vínculos evaluados")).toBeInTheDocument();
-    await user.selectOptions(selector, ((selector as HTMLSelectElement).value === "llm" ? "rules" : "llm"));
+    await user.selectOptions(selector, "rules");
     await waitFor(()=>expect(selector).toHaveValue("rules"));
     expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   } else expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
 });
-it("blocks unavailable LLM activation without showing a pending rules analysis", async () => {
+it("blocks unavailable LLM activation and explains pending classifications", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/instructions") ? Response.json({versions:{helix:"2"},helix:"Reglas Helix"}) : new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
   await screen.findByText(/Marco: Taxonomía Original/);
@@ -52,7 +52,7 @@ it("blocks unavailable LLM activation without showing a pending rules analysis",
   expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
   expect(screen.getByLabelText("Método de vinculación")).toHaveValue("rules");
 });
-it("keeps unavailable LLM checked and permits switching back to rules", async () => {
+it("keeps unavailable LLM selected and permits switching back to rules", async () => {
   let selected_engine = "llm";
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});

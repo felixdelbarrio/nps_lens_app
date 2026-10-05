@@ -212,6 +212,12 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
     assert "saved_path" not in result.json()
     assert (
         client.put(
+            "/api/taxonomy/settings", params=params, json={"accept_proposal": True}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.put(
             "/api/taxonomy/settings", params=params, json={"active": "DISCOVERED"}
         ).status_code
         == 200
