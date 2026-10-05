@@ -618,12 +618,16 @@ class DashboardService:
             "llm" if kind == "comments" and mode == "DISCOVERED" else state.get(preference, "rules")
         )
         total = received = 0
+        base_available = kind == "helix"
         reason = ""
         try:
             if self.settings.auth_mode != "local" or state.get("restored"):
                 raise ValueError("Los motores LLM solo se activan en el dataset local.")
             frame = self._load_nps_df(context)
             if kind == "comments":
+                base_available = mode != "DISCOVERED" and bool(
+                    self.taxonomy.catalog(context, mode)["taxonomy"]
+                )
                 visible = self.comments_scope(
                     frame,
                     pop_year=pop_year,
@@ -671,8 +675,7 @@ class DashboardService:
         return {
             "active": mode,
             "selected_engine": selected_engine,
-            "base_available": kind == "helix"
-            or (mode != "DISCOVERED" and bool(self.taxonomy.catalog(context, mode)["taxonomy"])),
+            "base_available": base_available,
             "ready": ready,
             "total": total,
             "received": received,
