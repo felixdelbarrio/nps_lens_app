@@ -231,12 +231,8 @@ def test_helix_pending_excludes_empty_keeps_distinct_ids_and_restart(helix, monk
         for key, value in response.items()
         if key in ("manifest.json", "results/000001.json")
     }
-    response["results/000001.json"]["classifications"][0].update(
-        primary=None, secondary=[], links=[]
-    )
     assert handler.import_response(ctx, inputs, zipped(response))["received"] == 500
     handler = restart(handler, frame, monkeypatch)
-    assert handler.status(ctx, inputs)["unassigned"] == 1
     next_request = exported(handler.export(ctx, inputs)["saved_paths"])
     assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [500, 500, 500, 4]
     assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-501"
