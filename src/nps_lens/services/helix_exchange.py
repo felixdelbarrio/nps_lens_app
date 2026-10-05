@@ -553,6 +553,7 @@ class HelixExchange:
         )
         candidate_ids = {candidate["id"] for row in pending for candidate in row["candidates"]}
         job = {
+            "stage": "helix",
             "manifest": manifest,
             "batches": batches,
             "taxonomies": inputs["taxonomies"],
@@ -562,6 +563,12 @@ class HelixExchange:
             db.execute(
                 "INSERT INTO helix_exchange VALUES (?, ?, ?)",
                 (job_id, context_key(context), encode(job).decode()),
+            )
+            db.execute(
+                "DELETE FROM helix_exchange WHERE context=? AND json_extract(payload, '$.stage')='complete' "
+                "AND id NOT IN (SELECT id FROM helix_exchange WHERE context=? "
+                "AND json_extract(payload, '$.stage')='complete' ORDER BY rowid DESC LIMIT 3)",
+                (context_key(context), context_key(context)),
             )
         return {**result, "pending": len(pending), "diagnostics": diagnostic}
 
@@ -747,6 +754,14 @@ class HelixExchange:
                         digest([category, source[key]]),
                         encode(links).decode(),
                     ),
+                )
+            if set(source).issubset(
+                set(existing[mode]) | {key for lens, key in validated if lens == mode}
+            ):
+                job["stage"] = "complete"
+                db.execute(
+                    "UPDATE helix_exchange SET payload=? WHERE id=?",
+                    (encode(job).decode(), manifest["job_id"]),
                 )
         return self.status(context, frozen_inputs)
 

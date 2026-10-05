@@ -446,15 +446,14 @@ class TaxonomyExchange:
         )
         if not catalog:
             return {}
+        fingerprint = taxonomy_fingerprint(catalog)
         artifact = artifact or self.taxonomy.classification_artifact(
-            context, mode, fingerprint=taxonomy_fingerprint(catalog)
+            context, mode, fingerprint=fingerprint
         )
-        if artifact.get("config", {}).get(
-            "instructions_version"
-        ) != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION or artifact.get(
-            "taxonomy_fingerprint"
-        ) != taxonomy_fingerprint(
-            catalog
+        if (
+            artifact.get("config", {}).get("instructions_version")
+            != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
+            or artifact.get("taxonomy_fingerprint") != fingerprint
         ):
             return {}
         hashes = artifact.get("comment_hashes", {})
