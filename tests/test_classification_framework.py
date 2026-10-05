@@ -111,9 +111,8 @@ def test_helix_new_comments_invalidate_prior_absence_of_links(helix, monkeypatch
 
 
 def test_accept_proposal_preserves_source_and_explores_only_real_assignments(exchange):
-    from test_taxonomy_exchange import classifier_files, classifier_zip, designer_zip
-
     import pandas as pd
+    from test_taxonomy_exchange import classifier_files, classifier_zip, designer_zip
 
     handler, ctx, frame, client = exchange
     frame["Palanca"], frame["Subpalanca"] = "Original", "Categoría"
