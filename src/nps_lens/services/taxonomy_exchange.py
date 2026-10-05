@@ -20,6 +20,7 @@ from nps_lens.analytics.signal_quality import audit_classifications
 from nps_lens.analytics.taxonomy import signature
 from nps_lens.domain.models import UploadContext
 from nps_lens.platform.downloads import persist_download
+from nps_lens.services.analysis_horizon import analysis_horizon
 from nps_lens.services.classification_protocol import (
     CLASSIFICATION_BATCH_BYTES,
     CLASSIFICATION_BATCH_ROWS,
@@ -377,7 +378,7 @@ class TaxonomyExchange:
             stale = [
                 row[0]
                 for row in db.execute(
-                    "SELECT id FROM taxonomy_exchange WHERE context=? "
+                    "SELECT id FROM taxonomy_exchange WHERE context=? AND json_extract(payload, '$.stage') != 'classifier' "
                     "ORDER BY rowid DESC LIMIT -1 OFFSET ?",
                     (context_key(context), MAX_RETAINED_JOBS),
                 ).fetchall()
@@ -405,6 +406,11 @@ class TaxonomyExchange:
 
     def _manifest(self, job: dict[str, Any], stage: str) -> dict[str, Any]:
         return {
+            **(
+                {"scope": job["scope"], "analysis_horizon": job["analysis_horizon"]}
+                if stage == "classifier"
+                else {}
+            ),
             "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-taxonomy/4",
             "job_id": job["id"],
             "instructions_version": job["instructions_version"],
@@ -434,9 +440,11 @@ class TaxonomyExchange:
         artifact: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         explicit_artifact = artifact is not None
-        artifact = artifact or self.taxonomy.classification_artifact(context, mode)
         catalog = (
             artifact.get("taxonomy") if explicit_artifact else self.taxonomy.catalog(context, mode)
+        )
+        artifact = artifact or self.taxonomy.classification_artifact(
+            context, mode, fingerprint=taxonomy_fingerprint(catalog)
         )
         if not catalog:
             return {}
@@ -496,8 +504,14 @@ class TaxonomyExchange:
                 retained[key] = value
         return retained
 
-    def progress(self, context: UploadContext) -> dict[str, Any]:
-        frame = self._frame(context)
+    def progress(self, context: UploadContext, **scope: Any) -> dict[str, Any]:
+        full_frame = self._frame(context)
+        horizon = analysis_horizon(full_frame, **scope)
+        frame = (
+            full_frame.loc[horizon.mask(full_frame["Fecha"])]
+            if scope and "Fecha" in full_frame
+            else full_frame
+        )
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"]
         catalog = self.taxonomy.catalog(context, mode)
@@ -506,10 +520,11 @@ class TaxonomyExchange:
         designer = state.get("designer_progress", {})
         designed = (
             designer.get("received", 0)
-            if designer.get("corpus") == self._corpus(context, frame)
+            if designer.get("corpus") == self._corpus(context, full_frame)
             else 0
         )
         return {
+            "analysis_horizon": horizon.payload(),
             "mode": mode,
             "taxonomy_fingerprint": taxonomy_fingerprint(catalog),
             "total": len(frame),
@@ -517,9 +532,9 @@ class TaxonomyExchange:
             "pending": len(frame) - received,
             "multiple": sum(bool(row["secondary_classifications"]) for row in assignments.values()),
             "designer": {
-                "total": len(frame),
+                "total": len(full_frame),
                 "received": designed,
-                "pending": len(frame) - designed,
+                "pending": len(full_frame) - designed,
                 "levers": len(state.get("discovered_taxonomy", {}).get("taxonomy", [])),
                 "sublevers": sum(
                     len(branch["sublevers"])
@@ -548,12 +563,15 @@ class TaxonomyExchange:
         out.attrs["taxonomy_mode"] = mode
         return out
 
-    def export(self, context: UploadContext, stage: str) -> dict[str, Any]:
+    def export(self, context: UploadContext, stage: str, **scope: Any) -> dict[str, Any]:
         if stage not in ("designer", "classifier"):
             raise ValueError("Proyecto desconocido.")
         pending = stage == "classifier"
         frame = self._frame(context)
         full_frame = frame
+        horizon = analysis_horizon(full_frame, **scope)
+        if pending and scope and "Fecha" in frame:
+            frame = frame.loc[horizon.mask(frame["Fecha"])]
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
         taxonomy = self.taxonomy.catalog(context, mode) if pending else None
@@ -643,6 +661,8 @@ class TaxonomyExchange:
             )
         job = {
             "id": uuid.uuid4().hex,
+            "scope": scope if pending else {},
+            "analysis_horizon": horizon.payload() if pending else None,
             "corpus": self._corpus(context, full_frame),
             "groups": {str(i): keys for i, keys in enumerate(groups.values(), 1)},
             "mode": mode,
@@ -766,9 +786,9 @@ class TaxonomyExchange:
                     ]
                 }
             ).decode()
-        prior_artifact = self.taxonomy.artifact(
-            job.get("artifact_signature", "")
-        ) or self.taxonomy.classification_artifact(context, mode)
+        prior_artifact = self.taxonomy.classification_artifact(
+            context, mode, fingerprint=taxonomy_fingerprint(job["taxonomy"])
+        )
         retained = (
             self.assignments(context, frame, mode, prior_artifact)
             if prior_artifact.get("taxonomy_fingerprint") == taxonomy_fingerprint(job["taxonomy"])
@@ -833,6 +853,17 @@ class TaxonomyExchange:
         merged: dict[str, Any],
     ) -> str:
         mode = job["mode"]
+        # Merge against the latest accumulation, including concurrent/late jobs.
+        prior = self.taxonomy.classification_artifact(
+            context, mode, fingerprint=taxonomy_fingerprint(job["taxonomy"])
+        )
+        retained = self.assignments(context, frame, mode, prior) if prior else {}
+        for key, value in merged.items():
+            if key in retained and retained[key] != value:
+                raise ValueError(
+                    "Un comentario ya tiene una respuesta diferente para esa taxonomía."
+                )
+        merged = {**retained, **merged}
         assignments = [
             merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
             for key in frame["_business_key"]

@@ -170,9 +170,25 @@ class TaxonomyService:
         self._state_cache.clear()
         self._cache.clear()
 
-    def classification_artifact(self, context: UploadContext, mode: str) -> dict[str, Any]:
+    def classification_artifact(
+        self, context: UploadContext, mode: str, *, fingerprint: str | None = None
+    ) -> dict[str, Any]:
         state = self.state(context)
         signatures = state.get("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})
+        if fingerprint is not None:
+            with self.repository._connect() as db:
+                row = db.execute(
+                    "SELECT signature FROM taxonomy_artifacts WHERE context=? AND mode=? "
+                    "AND json_extract(payload, '$.taxonomy_fingerprint')=? "
+                    "AND json_extract(payload, '$.config.instructions_version')=? ORDER BY rowid DESC LIMIT 1",
+                    (
+                        context_key(context),
+                        mode,
+                        fingerprint,
+                        COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
+                    ),
+                ).fetchone()
+            return (self.artifact(row[0]) or {}) if row else {}
         return self.artifact(signatures.get(mode, "")) or {}
 
     def clear_source_cache(self) -> None:

@@ -24,11 +24,16 @@ def numbered(request, exchange, monkeypatch):
             "Palanca": "Atención",
             "Subpalanca": "Resolución",
             "Canal": "Web",
+            "Fecha": pd.Timestamp("2026-09-01"),
         }
     )
     monkeypatch.setattr(handler.taxonomy, "source", lambda context: frame.copy())
     incidents = pd.DataFrame(
-        {"Incident Number": [f"INC-{i}" for i in range(9)], "Detailed Description": "Mismo texto"}
+        {
+            "Incident Number": [f"INC-{i}" for i in range(9)],
+            "Detailed Description": "Mismo texto",
+            "Submit Date": pd.Timestamp("2026-09-01"),
+        }
     )
     kind = request.param
     if kind == "helix":

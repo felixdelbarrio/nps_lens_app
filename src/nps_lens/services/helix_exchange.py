@@ -27,6 +27,7 @@ from nps_lens.analytics.taxonomy import MODES
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
+from nps_lens.services.analysis_horizon import analysis_horizon
 from nps_lens.services.classification_protocol import (
     HELIX_SCHEMA,
     CompactClassification,
@@ -251,12 +252,19 @@ class HelixExchange:
     def category_scope(mode: str, fingerprint: str) -> str:
         return digest([mode, fingerprint, HELIX_INSTRUCTIONS_VERSION])
 
-    def inputs(self, context: UploadContext, incidents: pd.DataFrame, mode: str) -> dict[str, Any]:
+    def inputs(
+        self, context: UploadContext, incidents: pd.DataFrame, mode: str, **scope: Any
+    ) -> dict[str, Any]:
         if self.taxonomy.state(context).get("restored"):
             raise ValueError("Vuelve al dataset local para usar el intercambio Helix.")
         if mode not in MODES:
             raise ValueError("Selecciona una lente disponible.")
         source = self.taxonomy.source(context).sort_values("_business_key")
+        horizon = analysis_horizon(source, **scope)
+        if "Fecha" in source:
+            source = source.loc[horizon.mask(source["Fecha"])]
+        all_incidents = incidents
+        incidents = incidents.loc[horizon.mask(incident_occurrence_dates(incidents)[0], helix=True)]
         available = self.taxonomy.available(context, source, self.taxonomy.registry(context))
         frame = (
             self.taxonomy.resolve(context, source, mode)
@@ -325,7 +333,7 @@ class HelixExchange:
                     frame.attrs["classification_signature"],
                     "llm",
                     "contextual-retrieval/1",
-                    LINK_MAX_DAYS_APART,
+                    horizon.max_days_apart,
                     LINK_TOP_K_PER_INCIDENT,
                     HELIX_SCHEMA,
                     HELIX_INSTRUCTIONS_VERSION,
@@ -335,6 +343,9 @@ class HelixExchange:
         }
         return {
             "frame": frame,
+            "all_incident_frame": all_incidents,
+            "scope": scope,
+            "analysis_horizon": horizon.payload(),
             "incident_frame": incidents,
             "modes": list(resolved),
             "taxonomies": catalogs,
@@ -401,6 +412,7 @@ class HelixExchange:
             count for (lever, _), count in categories.items() if lever != FALLBACK_LEVER
         )
         return {
+            "analysis_horizon": inputs["analysis_horizon"],
             "mode": mode,
             "taxonomy_fingerprint": taxonomy_fingerprint(inputs["taxonomies"][mode]),
             "total": total,
@@ -434,7 +446,11 @@ class HelixExchange:
                 mode
                 for mode in inputs["modes"]
                 if row["id"] not in known[mode]
-                and (not only_linking or row["id"] in categories[mode])
+                and (
+                    row["id"] in categories[mode]
+                    if only_linking
+                    else row["id"] not in categories[mode]
+                )
             ]
             if modes:
                 pending.append({**row, "pending_taxonomies": modes})
@@ -464,7 +480,11 @@ class HelixExchange:
                     lambda key: categories[mode].get(str(key), {}).get("sublever", "")
                 ),
             )
-        retrieved = retrieve_incident_candidates(inputs["frame"], pending_frame)
+        retrieved = retrieve_incident_candidates(
+            inputs["frame"],
+            pending_frame,
+            max_days_apart=inputs["analysis_horizon"]["max_days_apart"],
+        )
         for link in retrieved.itertuples(index=False):
             row = comments[link.nps_id]
             primary = category_ids[mode].get(
@@ -510,6 +530,8 @@ class HelixExchange:
         }
         batches = bounded_batches(pending, "incidents")
         manifest = {
+            "scope": inputs["scope"],
+            "analysis_horizon": inputs["analysis_horizon"],
             "schema_version": HELIX_SCHEMA,
             "instructions_version": HELIX_INSTRUCTIONS_VERSION,
             "taxonomies_sha256": digest(catalogs),
@@ -541,10 +563,6 @@ class HelixExchange:
                 "INSERT INTO helix_exchange VALUES (?, ?, ?)",
                 (job_id, context_key(context), encode(job).decode()),
             )
-            db.execute(
-                "DELETE FROM helix_exchange WHERE context=? AND id NOT IN (SELECT id FROM helix_exchange WHERE context=? ORDER BY rowid DESC LIMIT 3)",
-                (context_key(context), context_key(context)),
-            )
         return {**result, "pending": len(pending), "diagnostics": diagnostic}
 
     def import_response(
@@ -575,13 +593,31 @@ class HelixExchange:
             }
             for row in expected_rows
         }
-        current_source = {row["id"]: row for row in inputs["incidents"] if row["id"] in source}
+        # Validate original IDs even when the user has since changed the horizon.
+        original_frame = inputs["all_incident_frame"]
+        original_frame = original_frame.loc[
+            original_frame["Incident Number"].astype(str).isin(source)
+        ]
+        current_source = {
+            str(key): {
+                "id": str(key),
+                "description": text,
+                "date": stamp.isoformat() if pd.notna(stamp) else "",
+            }
+            for key, text, stamp in zip(
+                original_frame["Incident Number"],
+                build_incident_text(original_frame),
+                incident_occurrence_dates(original_frame)[0],
+                strict=False,
+            )
+        }
         if current_source != source:
             raise ValueError("Las incidencias han cambiado; exporta de nuevo.")
         comments = job["comments"]
         catalogs = {mode: category_catalog(frozen_taxonomy)}
         frozen_inputs = {
             "taxonomies": job["taxonomies"],
+            "analysis_horizon": manifest["analysis_horizon"],
             "incidents": list(source.values()),
             "modes": [mode],
             "classification_scopes": manifest["classification_scopes"],
@@ -627,6 +663,12 @@ class HelixExchange:
                         )
                     if row.primary is None:
                         raise ValueError("Una incidencia sin clasificación no admite vínculos.")
+                    if not temporal_mask(
+                        comment["date"],
+                        original["date"],
+                        manifest["analysis_horizon"]["max_days_apart"],
+                    ):
+                        raise ValueError("Vínculo fuera de la ventana temporal por pareja.")
                     validate_quote(link.incident_quote, original["description"])
                     validate_quote(link.comment_quote, comment["Comment"])
                     if primary["lever"] == "Sin clasificación temática":
