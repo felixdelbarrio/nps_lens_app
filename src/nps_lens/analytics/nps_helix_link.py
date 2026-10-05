@@ -472,9 +472,12 @@ def retrieve_incident_candidates(
                     eligible_idx = np.array([], dtype=int)
                 else:
                     delta = np.timedelta64(max_days, "D")
-                    lo = np.searchsorted(sorted_dates, inc_date - delta, side="left")
+                    lo = np.searchsorted(sorted_dates, inc_date, side="left")
                     hi = np.searchsorted(sorted_dates, inc_date + delta, side="right")
                     eligible_idx = date_order[lo:hi]
+                    eligible_idx = eligible_idx[
+                        temporal_mask(nps_dates[eligible_idx], inc_date, max_days)
+                    ]
                 # Category compatibility is context, never an acceptance gate. For
                 # unclassified incidents use explicit taxonomy terms in their narrative.
                 context_terms = set(incident_context[inc_row].split()) | set(

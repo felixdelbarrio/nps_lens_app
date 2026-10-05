@@ -415,7 +415,9 @@ class HelixExchange:
             ],
             "taxonomies": counts,
             "pending": sum(item["pending"] for item in counts.values()),
-            "link_pending": sum(total - len(current[mode]) for mode in inputs["modes"]),
+            "link_pending": sum(
+                len(set(classifications[mode]) - set(current[mode])) for mode in inputs["modes"]
+            ),
             "ready": bool(total and all(len(current[mode]) == total for mode in inputs["modes"])),
         }
 

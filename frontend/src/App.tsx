@@ -999,7 +999,7 @@ export function App() {
               </select>
             </label>
           ) : null}
-          {config?.access?.local && (showCausalMethodFilter || showScoreGroup) ? <ClassificationEngineControl kind={showCausalMethodFilter ? "helix" : "comments"} context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
+          {config?.access?.local && showScoreGroup ? <ClassificationEngineControl kind="comments" context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método de agrupación</span>

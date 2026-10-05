@@ -5,6 +5,7 @@ import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscov
 import { TAXONOMY_NAMES as NAMES } from "../utils/taxonomy";
 import { ManualTaxonomyEditor } from "./ManualTaxonomyEditor";
 import { NavigationTabs } from "./NavigationTabs";
+import { ClassificationEngineControl } from "./ClassificationEngineControl";
 import { HelixClassifier } from "./HelixClassifier";
 import { TaxonomyProject } from "./TaxonomyProject";
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -24,7 +25,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     await mutate();
     await revalidate(key => {
       const url = Array.isArray(key) ? key[0] : key;
-      return typeof url === "string" && /^\/api\/taxonomy\/(manual|helix|discovery\/progress|explore|compare)(\?|$)/.test(url);
+      return typeof url === "string" && /^\/api\/taxonomy\/(manual|helix(?:\/engine)?|discovery\/progress|explore|compare)(\?|$)/.test(url);
     });
     await onChange();
   }
@@ -60,7 +61,9 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
         <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={context} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
+        <p className="eyebrow">1. Clasificar incidencias</p>
         <HelixClassifier key={`helix:${exchangeKey}`} context={context} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
+        <article className="settings-subsection"><p className="eyebrow">2. Vincular</p><h3>Vinculación Helix ↔ VoC</h3><ClassificationEngineControl key={`linking:${exchangeKey}`} kind="helix" context={context} disabled={locked || !hasFramework} onChange={refresh} /></article>
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}
