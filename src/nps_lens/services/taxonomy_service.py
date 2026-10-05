@@ -24,7 +24,7 @@ from nps_lens.analytics.taxonomy import (
     signature,
 )
 from nps_lens.domain.models import UploadContext
-from nps_lens.domain.normalization import EquivalenceRegistry
+from nps_lens.domain.normalization import EquivalenceRegistry, semantic_series
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.classification_protocol import digest, taxonomy_fingerprint
 from nps_lens.services.taxonomy_discovery import TaxonomyResponse
@@ -793,22 +793,24 @@ class TaxonomyService:
     ) -> dict[str, Any]:
         source = self.source(context)
         a, b = self.resolve(context, source, left), self.resolve(context, source, right)
-        pairs = pd.DataFrame(
-            {
-                "from_lever": labels(a, "Palanca"),
-                "from_sublever": labels(a, "Subpalanca"),
-                "to_lever": labels(b, "Palanca"),
-                "to_sublever": labels(b, "Subpalanca"),
-            }
+        classified = []
+        for frame in (a, b):
+            categories = frame[["_business_key", "Palanca", "Subpalanca"]].set_index(
+                "_business_key"
+            )
+            valid = categories.apply(semantic_series).ne("").all(axis=1)
+            classified.append(categories.loc[valid])
+        pairs = (
+            classified[0]
+            .rename(columns={"Palanca": "from_lever", "Subpalanca": "from_sublever"})
+            .join(
+                classified[1].rename(columns={"Palanca": "to_lever", "Subpalanca": "to_sublever"}),
+                how="inner",
+            )
         )
         counts = cast(
-            pd.DataFrame,
-            (
-                pairs.assign(volume=1)
-                .groupby(list(pairs.columns), dropna=False, observed=True, as_index=False)["volume"]
-                .sum()
-            ),
-        )
+            "pd.Series[int]", pairs.groupby(list(pairs.columns), observed=True).size()
+        ).reset_index(name="volume")
         counts["share"] = counts.volume / counts.groupby(
             ["from_lever", "from_sublever"]
         ).volume.transform("sum")
@@ -816,8 +818,16 @@ class TaxonomyService:
             "left": left,
             "right": right,
             "rows": counts.iloc[offset : offset + min(limit, 100)].to_dict("records"),
-            "total": len(counts),
-            "note": "Distribución de las mismas respuestas entre lentes; una dispersión puede sugerir mezcla temática.",
+            "total": len(source),
+            "left_classified": len(classified[0]),
+            "right_classified": len(classified[1]),
+            "comparable": len(pairs),
+            "groups": len(counts),
+            "note": (
+                "Distribución de las mismas respuestas entre lentes; una dispersión puede sugerir mezcla temática."
+                if len(pairs)
+                else "No hay respuestas comparables. Clasifica primero los comentarios con ambas taxonomías."
+            ),
         }
 
     def snapshot(

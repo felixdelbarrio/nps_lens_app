@@ -8,9 +8,10 @@ import { NavigationTabs } from "./NavigationTabs";
 import { ClassificationEngineControl } from "./ClassificationEngineControl";
 import { HelixClassifier } from "./HelixClassifier";
 import { TaxonomyProject } from "./TaxonomyProject";
+import { TaxonomyDownload } from "./TaxonomyDownload";
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 type Props = { classificationContext?: TaxonomyContext; context: TaxonomyContext; onChange: () => Promise<void>; disabled?: boolean };
-type Exploration = { rows: Array<Record<string, string | number | string[]>>; total: number; audit?: { multi_parent_sublevers: string[]; generic_labels: string[]; note: string }; note?: string };
+type Exploration = { rows: Array<Record<string, string | number | string[]>>; total: number; comparable?: number; groups?: number; audit?: { multi_parent_sublevers: string[]; generic_labels: string[]; note: string }; note?: string };
 
 export function TaxonomyStudio({ context, classificationContext = context, onChange, disabled = false }: Props) {
   const { data, error, mutate } = useSWR(taxonomyUrl("", context), () => taxonomyRequest<TaxonomyStatus>("", context));
@@ -81,16 +82,20 @@ function TaxonomyExplorer({ context, mode, left, right }: { context: TaxonomyCon
   const path = compare ? "/compare" : "/explore";
   const params = { ...context, ...(mode ? { mode } : { left: left!, right: right! }), offset: String(offset) };
   const { data: exploration, error, isLoading } = useSWR(open ? taxonomyUrl(path, params) : null, () => taxonomyRequest<Exploration>(path, params));
-  return <details onToggle={event => setOpen(event.currentTarget.open)}><summary>{mode ? `Explorar ${NAMES[mode]}` : "Ver comparación"}</summary>
+  return <div>
+    <details className="taxonomy-details" onToggle={event => setOpen(event.currentTarget.open)}><summary>{mode ? `Explorar ${NAMES[mode]}` : "Ver comparación"}</summary>
     {isLoading ? <p role="status">Cargando…</p> : null}
     {error ? <p role="alert">{error.message}</p> : null}
     {exploration ? <div className="taxonomy-exploration">
       <p>{exploration.note || exploration.audit?.note}</p>
+      {compare ? <p>Comparables {exploration.comparable}/{exploration.total}</p> : null}
       {exploration.audit ? <p>Subpalancas bajo varias Palancas: {exploration.audit.multi_parent_sublevers.join(", ") || "ninguna"}. Categorías genéricas: {exploration.audit.generic_labels.join(", ") || "ninguna"}.</p> : null}
       {exploration.rows.length ? <><div className="table-scroll"><table><thead><tr>{(compare ? ["Origen", "Destino", "Volumen", "Share"] : ["Palanca", "Subpalanca", "Volumen", "Share", "NPS", "Promotores / Neutros / Detractores", "Ejemplos"]).map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{exploration.rows.map((row, i) => <tr key={i}>{compare ? <><td>{row.from_lever} &gt; {row.from_sublever}</td><td>{row.to_lever} &gt; {row.to_sublever}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td></> : <><td>{row.Palanca}</td><td>{row.Subpalanca}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td><td>{formatMetric(row.nps)}</td><td>{row.promoters} / {row.neutrals} / {row.detractors}</td><td>{Array.isArray(row.examples) ? row.examples.map((text, index) => <p key={index}>{text}</p>) : null}</td></>}</tr>)}</tbody></table></div>
-      <div className="inline-actions"><button disabled={isLoading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Anterior</button><span>{offset + 1}–{offset + exploration.rows.length} de {exploration.total}</span><button disabled={isLoading || offset + 100 >= exploration.total} onClick={() => setOffset(offset + 100)}>Siguiente</button></div></> : null}
+      <div className="inline-actions"><button disabled={isLoading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Anterior</button><span>{offset + 1}–{offset + exploration.rows.length} de {compare ? exploration.groups : exploration.total}</span><button disabled={isLoading || offset + 100 >= (compare ? exploration.groups! : exploration.total)} onClick={() => setOffset(offset + 100)}>Siguiente</button></div></> : null}
     </div> : null}
-  </details>;
+  </details>
+    {mode ? <div className="inline-actions"><TaxonomyDownload context={context} mode={mode} /></div> : null}
+  </div>;
 }
 
 export function TaxonomyIngestNotice({ context, revision, onOpen }: { context: TaxonomyContext; revision: string; onOpen: () => void }) {

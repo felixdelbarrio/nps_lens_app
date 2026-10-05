@@ -212,7 +212,7 @@ def test_catalog_ids_deterministic_and_obsolete_assignments_require_reprocessing
     assert handler.progress(ctx)["received"] == 0
 
 
-def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatch):
+def test_helix_pending_excludes_empty_keeps_distinct_ids_and_restart(helix, monkeypatch):
     handler, ctx, frame, original, _ = helix
     frame.drop(frame.index[1:], inplace=True)
     incidents = pd.concat([original.iloc[:1]] * 2_005, ignore_index=True)
@@ -221,8 +221,8 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     assert request["manifest.json"]["schema_version"] == "nps-lens-helix/5"
-    assert [b["count"] for b in request["manifest.json"]["batches"]] == [500, 500, 500, 500, 5]
-    assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-0"
+    assert [b["count"] for b in request["manifest.json"]["batches"]] == [500, 500, 500, 500, 4]
+    assert request["incidents/000001.json"]["incidents"][0]["id"] == "INC-1"
     assert handler.status(ctx, inputs)["received"] == 0
     assert not any(name.startswith("comments/") for name in request)
     response = helix_response(request, inputs["comments"][0]["id"])
@@ -231,19 +231,15 @@ def test_helix_all_pending_no_dedup_or_local_empty_and_restart(helix, monkeypatc
         for key, value in response.items()
         if key in ("manifest.json", "results/000001.json")
     }
-    response["results/000001.json"]["classifications"][0].update(
-        primary=None, secondary=[], links=[]
-    )
     assert handler.import_response(ctx, inputs, zipped(response))["received"] == 500
     handler = restart(handler, frame, monkeypatch)
-    assert handler.status(ctx, inputs)["unassigned"] == 1
     next_request = exported(handler.export(ctx, inputs)["saved_paths"])
-    assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [500, 500, 500, 5]
-    assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-500"
+    assert [b["count"] for b in next_request["manifest.json"]["batches"]] == [500, 500, 500, 4]
+    assert next_request["incidents/000001.json"]["incidents"][0]["id"] == "INC-501"
     response = helix_response(next_request, inputs["comments"][0]["id"])
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
     assert handler.import_response(ctx, inputs, zipped(response))["ready"]
-    persisted = handler.current(ctx, inputs)["SOURCE"]["INC-500"]
+    persisted = handler.current(ctx, inputs)["SOURCE"]["INC-501"]
     assert persisted["lever"] == "Atención" and persisted["links"][0]["confidence"] == 0.9
     assert "rationale" not in persisted
 
@@ -321,7 +317,10 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
         exchange, monkeypatch, ["漢" * 60_000 + str(i) for i in range(2)]
     )
     incidents = pd.DataFrame(
-        {"Incident Number": ["I1", "I2"], "Detailed Description": ["漢" * 60_000] * 2}
+        {
+            "Incident Number": ["I1", "I2"],
+            "Detailed Description": ["transferencia retenida " + "漢" * 60_000] * 2,
+        }
     )
     frame["Fecha"] = pd.Timestamp("2026-09-01")
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
@@ -342,7 +341,7 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
     assert len(batches) == 2
     assert all(len(encode(batch)) <= 300_000 for batch in batches)
     if stage == "helix":
-        incidents.loc[0, "Detailed Description"] = "漢" * 100_001
+        incidents.loc[0, "Detailed Description"] = "transferencia retenida " + "漢" * 100_001
     else:
         frame.loc[0, "Comment"] = "漢" * 100_001
     with pytest.raises(ValueError, match="no se truncará"):

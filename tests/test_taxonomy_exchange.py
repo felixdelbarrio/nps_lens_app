@@ -8,6 +8,7 @@ from dataclasses import replace
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from nps_lens.api.app import create_app
 from nps_lens.domain.models import UploadContext
@@ -100,6 +101,63 @@ def exchange_fixture(tmp_path, monkeypatch):
         frame,
         TestClient(app),
     )
+
+
+def test_taxonomy_excel_downloads_proposal_and_saved_catalog(exchange, monkeypatch):
+    handler, context, _, client = exchange
+    catalog = {
+        "taxonomy": [
+            {
+                "lever": "Atención",
+                "sublevers": [
+                    {"name": "=Resolución", "criterion": "=Texto literal con á漢字"},
+                    {"name": "Espera", "criterion": "Respuesta tardía"},
+                ],
+            }
+        ]
+    }
+    state = handler.taxonomy.state(context)
+    state["proposed_discovered_taxonomy"] = catalog
+    handler.taxonomy.save_state(context, state)
+    params = {"service_origin": "Bank", "service_origin_n1": "Web", "mode": "DISCOVERED"}
+    monkeypatch.setattr(handler.taxonomy, "catalog", lambda ctx, mode: TAXONOMY)
+    response = client.get("/api/taxonomy/export", params={**params, "proposal": "true"})
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].endswith('taxonomia-discovered-propuesta.xlsx"')
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    sheet = load_workbook(io.BytesIO(response.content)).active
+    assert list(sheet.values) == [
+        ("Palanca", "Subpalanca", "Criterio de clasificación"),
+        ("Atención", "=Resolución", "=Texto literal con á漢字"),
+        ("Atención", "Espera", "Respuesta tardía"),
+    ]
+    assert sheet["B2"].data_type == sheet["C2"].data_type == "s"
+    assert sheet.freeze_panes == "A2"
+    assert sheet.auto_filter.ref == "A1:C3"
+    saved = client.get("/api/taxonomy/export", params=params)
+    assert saved.status_code == 200
+    saved_sheet = load_workbook(io.BytesIO(saved.content)).active
+    assert saved_sheet.max_row == 1 + sum(len(b["sublevers"]) for b in TAXONOMY["taxonomy"])
+    assert saved_sheet["C2"].value == label_criterion(
+        saved_sheet["A2"].value, saved_sheet["B2"].value
+    )
+    assert saved.headers["content-disposition"].endswith('taxonomia-discovered.xlsx"')
+
+
+def test_taxonomy_excel_rejects_missing_and_invalid_catalogs(exchange):
+    _, _, _, client = exchange
+    params = {"service_origin": "Bank", "service_origin_n1": "Web"}
+    for selection in [
+        {"mode": "DISCOVERED", "proposal": "true"},
+        {"mode": "SOURCE", "proposal": "true"},
+        {"mode": "SOURCE"},
+        {"mode": "UNKNOWN"},
+    ]:
+        response = client.get("/api/taxonomy/export", params={**params, **selection})
+        assert response.status_code == 409
+        assert "content-disposition" not in response.headers
 
 
 def classifier_files(manifest, inputs):

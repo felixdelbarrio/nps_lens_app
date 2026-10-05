@@ -158,7 +158,7 @@ def test_funnel_accounts_for_each_population():
         focus=nps.iloc[:3],
         helix=helix,
         scoped=helix.iloc[:4],
-        period=helix.iloc[:3],
+        period_total=3,
         eligible=helix.iloc[:2],
         links=links,
         requested_scope=["Senda"],

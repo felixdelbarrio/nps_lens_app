@@ -39,7 +39,7 @@ def test_horizon_uses_exact_existing_comparison_and_no_comment_padding():
     horizon = analysis_horizon(frame, **SEPTEMBER)
     assert horizon.comment_start == baseline.start == date(2026, 6, 12)
     assert horizon.comment_end == current.end == date(2026, 9, 20)
-    assert horizon.helix_start == date(2026, 3, 14)
+    assert horizon.helix_start == date(2026, 6, 3)
     assert horizon.payload()["helix_end"] == "2026-09-20"
     assert horizon.mask(frame.Fecha).tolist() == [True, True, True, False]
     assert analysis_horizon(frame, pop_year="Todos", pop_month="Todos").comment_end == date(
@@ -127,7 +127,7 @@ def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix, m
     assert imported.json()["analysis_horizon"] == inputs["analysis_horizon"]
     assert handler.status(ctx, inputs)["pending"] == 0
     assert handler.export(ctx, inputs)["saved_paths"] == []
-    assert handler.status(ctx, changed)["received"] == 2
+    assert handler.status(ctx, changed)["received"] == 1
     assert handler.status(ctx, changed)["pending"] == 2
     with handler.repository._connect() as db:
         assert {
@@ -201,3 +201,164 @@ def test_late_jobs_keep_separate_taxonomy_fingerprints(exchange):
     handler.taxonomy.save_state(ctx, state)
     assert handler.progress(ctx, **SEPTEMBER)["pending"] == 0
     assert handler.progress(ctx, **OCTOBER)["pending"] == 1
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_compare_requires_classified_intersection(exchange, partial, monkeypatch):
+    handler, ctx, frame, _ = exchange
+    small_comments(frame)
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    if partial:
+        monkeypatch.setattr("nps_lens.services.taxonomy_exchange.CLASSIFICATION_BATCH_ROWS", 1)
+        request = exported(handler.export(ctx, "classifier")["saved_paths"])
+        response = classifier_files(request["manifest.json"], request)
+        response["results"] = dict(list(response["results"].items())[:2])
+        response["manifest"]["batches"] = [
+            batch for batch in response["manifest"]["batches"] if batch["id"] in response["results"]
+        ]
+        handler.import_response(ctx, classifier_zip(response), "classifier")
+        # The other lens is also partial, including a semantic placeholder.
+        frame.loc[0, "Subpalanca"] = "Sin clasificar"
+        frame.loc[3, "Palanca"] = ""
+    result = handler.taxonomy.compare(ctx, "SOURCE", "DISCOVERED")
+    assert result["total"] == 4
+    assert result["comparable"] == int(partial)
+    assert result["left_classified"] == (2 if partial else 4)
+    assert result["right_classified"] == (2 if partial else 0)
+    if partial:
+        assert sum(row["volume"] for row in result["rows"]) == 1
+        assert result["rows"][0]["share"] == 1
+        assert all(
+            value not in ("", "Sin clasificar") for row in result["rows"] for value in row.values()
+        )
+    else:
+        assert result["rows"] == []
+        assert (
+            result["note"]
+            == "No hay respuestas comparables. Clasifica primero los comentarios con ambas taxonomías."
+        )
+
+
+def test_comment_readiness_progress_export_require_baseline(exchange, monkeypatch):
+    handler, ctx, frame, client = exchange
+    small_comments(frame)
+    handler.taxonomy.configure(ctx, {"comment_engine": "llm"})
+    monkeypatch.setattr("nps_lens.services.taxonomy_exchange.CLASSIFICATION_BATCH_ROWS", 1)
+    request = exported(handler.export(ctx, "classifier", **SEPTEMBER)["saved_paths"])
+    response = classifier_files(request["manifest.json"], request)
+    response["results"] = {
+        name: batch
+        for name, batch in response["results"].items()
+        if request[f"comments/{name}.json"]["comments"][0]["Comment"] == frame.Comment.iloc[2]
+    }
+    response["manifest"]["batches"] = [
+        batch for batch in response["manifest"]["batches"] if batch["id"] in response["results"]
+    ]
+    handler.import_response(ctx, classifier_zip(response), "classifier")
+    dashboard = client.app.state.dashboard_service
+    scope = {**SEPTEMBER, "score_channel": "Web", "nps_group": "Detractores"}
+    status = dashboard.classification_status("comments", ctx, **scope)
+    progress = handler.progress(ctx, **scope)
+    assert (
+        {key: status[key] for key in ("total", "received", "pending")}
+        == {key: progress[key] for key in ("total", "received", "pending")}
+        == {"total": 3, "received": 1, "pending": 2}
+    )
+    assert status["ready"] is False
+    pending = exported(handler.export(ctx, "classifier", **scope)["saved_paths"])
+    sent = [
+        row["Comment"]
+        for name, batch in pending.items()
+        if name.startswith("comments/")
+        for row in batch["comments"]
+    ]
+    assert sent == frame.Comment.iloc[:2].tolist()
+    import_comments(handler, ctx, pending)
+    assert dashboard.classification_status("comments", ctx, **scope)["ready"] is True
+    assert handler.export(ctx, "classifier", **scope)["stage"] == "complete"
+
+
+def test_august_helix_window_does_not_inherit_baseline():
+    frame = pd.DataFrame(
+        {"Fecha": pd.to_datetime(["2020-01-01", "2026-08-10", "2026-08-31", "2026-09-10"])}
+    )
+    scope = dict(pop_year="2026", pop_month="08", max_days_apart=90)
+    horizon = analysis_horizon(frame, **scope)
+    assert horizon.comment_start == date(2020, 1, 1)
+    assert horizon.link_comment_start == date(2026, 8, 1)
+    assert horizon.helix_start == date(2026, 5, 3)
+    assert horizon.link_comment_end == date(2026, 8, 31)
+    assert analysis_horizon(frame.iloc[1:], **scope).helix_start == horizon.helix_start
+    incidents = pd.Series(pd.to_datetime(["2026-05-02", "2026-05-03", "2026-08-31", "2026-09-01"]))
+    assert horizon.mask(incidents, helix=True).tolist() == [False, True, True, False]
+
+
+def test_temporal_pair_policy_remains_stricter_than_prefilter():
+    from nps_lens.analytics.linking_policy import temporal_mask
+
+    assert temporal_mask(
+        "2026-08-01", pd.Series(["2026-08-02", "2026-05-02", "2026-05-03", "2026-08-01"]), 90
+    ).tolist() == [False, False, True, True]
+
+
+def test_helix_classification_and_linking_share_ids_and_retain_categories(helix, monkeypatch):
+    handler, ctx, frame, incidents, client = helix
+    frame.drop(frame.index[2:], inplace=True)
+    frame["Fecha"] = pd.to_datetime(["2026-08-01", "2026-08-31"])
+    frame["Canal"] = ["Web", "App"]
+    incidents = incidents.iloc[:6].copy()
+    incidents["Submit Date"] = pd.to_datetime(
+        ["2026-05-03", "2026-08-10", "2026-08-10", "2026-08-10", "2026-05-02", "2026-09-01"]
+    )
+    incidents["BBVA_SourceServiceN2"] = ["Web", "App", "Other", "Web", "Web", "Web"]
+    incidents.loc[3, "Detailed Description"] = ""
+    dashboard = client.app.state.dashboard_service
+    dashboard.settings.service_origin_n2_map[ctx.service_origin] = {"Web": ["Web"], "App": ["App"]}
+    monkeypatch.setattr(dashboard, "_load_helix_df", lambda context: incidents)
+    scope = dict(pop_year="2026", pop_month="08", max_days_apart=90, score_channel="Web")
+    inputs = handler.inputs(ctx, incidents, "SOURCE", channel_assignments=["Web"], **scope)
+    ids = {row["id"] for row in inputs["incidents"]}
+    assert ids == {"INC-0"}
+    _, _, linking, _ = dashboard.causal_scope(ctx, dashboard._load_nps_df(ctx), **scope)
+    assert set(linking["Incident Number"]) == ids
+    diagnostic = dashboard.linking_dashboard(context=ctx, **scope)["diagnostics"]
+    assert diagnostic["helix_after_period"] == 2
+    assert diagnostic["helix_quality_eligible"] == 1
+    assert diagnostic["exclusions"]["helix_quality"] == 1
+    params = {"service_origin": "Bank", "service_origin_n1": "Web", **scope}
+    assert (
+        client.get("/api/taxonomy/helix", params=params).json()["total"]
+        == dashboard.classification_status("helix", ctx, **scope)["total"]
+        == 1
+    )
+    request = exported(handler.export(ctx, inputs)["saved_paths"])
+    sent = {
+        row["id"]
+        for name, batch in request.items()
+        if name.startswith("incidents/")
+        for row in batch["incidents"]
+    }
+    assert sent == ids
+    handler.import_response(ctx, inputs, zipped(helix_response(request, "no-link")))
+    app_scope = {**scope, "score_channel": "App"}
+    changed = handler.inputs(ctx, incidents, "SOURCE", channel_assignments=["App"], **app_scope)
+    assert {row["id"] for row in changed["incidents"]} == {"INC-1"}
+    assert inputs["scopes"] != changed["scopes"]
+    assert inputs["classification_scopes"] == changed["classification_scopes"]
+    app_request = exported(handler.export(ctx, changed)["saved_paths"])
+    handler.import_response(ctx, changed, zipped(helix_response(app_request, "no-link")))
+    assert handler.status(ctx, inputs)["received"] == handler.status(ctx, changed)["received"] == 1
+    assert handler.export(ctx, inputs)["saved_paths"] == []
+    assert (
+        client.get("/api/taxonomy/helix", params={**params, "score_channel": "App"}).json()[
+            "received"
+        ]
+        == 1
+    )
+    with handler.repository._connect() as db:
+        assert {row[0] for row in db.execute("SELECT incident FROM helix_incident_categories")} == {
+            "INC-0",
+            "INC-1",
+        }
