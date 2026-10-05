@@ -24,7 +24,7 @@ export function ClassificationEngineControl({kind, context, disabled, onChange}:
     </select></label>
     {llmRequired ? <p className="field-hint">Clasificación LLM requerida para DISCOVERED.</p> : null}
     {kind === "helix" ? <p className="field-hint">TF-IDF = similitud textual + reglas. LLM = validación semántica de candidatos.</p> : null}
-    {data ? <p className="field-hint">Marco: {TAXONOMY_NAMES[data.active]}. {formatVolume(data.received)} de {formatVolume(data.total)} {kind === "helix" ? "incidencias" : "comentarios"} del ámbito visible procesados. {!data.ready ? data.reason : ""}</p> : null}
+    {data ? <p className="field-hint">Marco: {TAXONOMY_NAMES[data.active]}. {formatVolume(data.received)} de {formatVolume(data.total)} {kind === "helix" ? "incidencias elegibles" : "comentarios del horizonte analítico"} procesados. {!data.ready ? data.reason : ""}</p> : null}
     {kind === "helix" && data?.ready && data.selected_engine === "llm" ? <HelixClassifier context={context} mode={data.active} url="" disabled={disabled || busy} onlyLinking onChange={async () => { await mutate(); await onChange(); }} /> : null}
     {message || error ? <p role="status">{message || error.message}</p> : null}
   </div>;

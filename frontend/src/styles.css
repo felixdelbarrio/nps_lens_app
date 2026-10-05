@@ -753,7 +753,8 @@ ul {
   margin-top: 0.6rem;
   min-width: 0;
 }
-.taxonomy-project-instructions summary { cursor: pointer; }
+.taxonomy-details > summary { cursor: pointer; }
+.taxonomy-detail-content { display: grid; gap: 1rem; margin-top: 1rem; }
 .taxonomy-project-instructions textarea { width: 100%; resize: vertical; }
 
 .field-grid.single-column {

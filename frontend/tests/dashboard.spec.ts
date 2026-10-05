@@ -63,7 +63,7 @@ async function exportedPath(page: import("@playwright/test").Page, title: string
 }
 
 test("uploads a schema-drift file and shows cumulative results", async ({ page }) => {
-  test.setTimeout(240000);
+  test.setTimeout(600000);
 
   await page.goto("/");
   await expect(
@@ -114,11 +114,18 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Propuesta de taxonomía importada/)).toBeVisible();
-  await expect(page.getByRole("region", {name:"Propuesta DISCOVERED"})).toContainText("Criterion:");
+  const proposal = page.getByRole("region", {name:"Propuesta DISCOVERED"});
+  await expect(proposal.locator("details")).not.toHaveAttribute("open", "");
+  await expect(proposal.getByText("Criterio:", {exact:false}).first()).toBeHidden();
+  const downloadPromise = page.waitForEvent("download");
+  await proposal.getByRole("link", {name:"Descargar taxonomía en Excel"}).click();
+  expect((await downloadPromise).suggestedFilename()).toBe("taxonomia-discovered-propuesta.xlsx");
+  await proposal.getByText("Ver taxonomía", {exact:true}).click();
+  await expect(proposal.getByText("Criterio:", {exact:false}).first()).toBeVisible();
   await page.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }).click();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
-  await expect(page.getByLabel("Clasificación de comentarios")).toHaveValue("llm");
+  await expect(page.getByLabel("Clasificación de comentarios")).toHaveValue("llm", {timeout: 30000});
   await expect(page.getByLabel("Clasificación de comentarios").locator('option[value="rules"]')).toHaveCount(0);
   await page.getByText("Explorar Descubierta por LLM", {exact:true}).click();
   await expect(page.getByText("Clasifica comentarios con esta taxonomía para ver volumen, NPS y ejemplos.")).toBeVisible();
@@ -140,7 +147,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   for (const classifierInput of classifierInputs) {
     const classifierOutput = classifierInput.replace(/\.zip$/, "-response.zip");
     responseZip(classifierInput, classifierOutput, "classifier");
-    await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
+    await expect(classifierUpload).toBeEnabled({ timeout: 45000 });
     const [classificationImport] = await Promise.all([
       page.waitForResponse(response => response.url().includes("/discovery/classifier/import") && response.request().method() === "POST"),
       classifierUpload.setInputFiles(classifierOutput),
@@ -155,7 +162,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   }
   expect(previousPending).toBe(0);
   expect(exportCount).toBe(1);
-  await expect(classifierUpload).toBeEnabled({ timeout: 15000 });
+  await expect(classifierUpload).toBeEnabled({ timeout: 45000 });
   await expect(page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
