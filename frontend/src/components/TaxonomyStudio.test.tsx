@@ -107,3 +107,24 @@ it("shows the active fingerprint and explicitly activates a discovered proposal"
   await userEvent.setup().click(screen.getByRole("button", { name: "Activar propuesta DISCOVERED" }));
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/settings?"), expect.objectContaining({ method: "PUT" })));
 });
+
+it("passes the changing analysis scope to classification while keeping designer on the dataset", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({ versions: {designer:"test",classifier:"test",helix:"test",normalizer:"test"}, designer:"Reglas",classifier:"Reglas",helix:"Reglas" });
+    if (url.includes("/progress")) return Response.json({ total:3,received:1,pending:2,multiple:0,analysis_horizon:{comment_start:"2026-06-12",comment_end:"2026-09-20",helix_start:"2026-03-14",max_days_apart:90},designer:{total:4,received:0,pending:4,levers:0,sublevers:0} });
+    if (url.includes("/discovery")) return Response.json({designer_url:"",classifier_url:"",helix_classifier_url:""});
+    if (url.includes("/helix/engine")) return Response.json({selected_engine:"rules",ready:false,active:"SOURCE",total:2,received:0});
+    if (url.includes("/helix")) return Response.json({total:2,received:0,pending:2,classified:0,unassigned:0,coverage:0,multiple:0,categories:[],taxonomies:{SOURCE:{received:0,pending:2}}});
+    return Response.json(status());
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  const scope = {...context,pop_year:"2026",pop_month:"09",score_channel:"Web",nps_group:"Detractores",max_days_apart:"90"};
+  const {rerender} = render(<SWRConfig value={{provider:()=>new Map()}}><TaxonomyStudio context={context} classificationContext={scope} onChange={async()=>{}} /></SWRConfig>);
+  await user.click(await screen.findByRole("tab",{name:"Análisis con LLM"}));
+  expect(await screen.findByText(/Ámbito analítico: 2026-06-12/)).toHaveTextContent("Helix desde 2026-03-14 por ventana de 90 días");
+  await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "09")).toBe(true));
+  expect(fetcher.mock.calls.some(([url])=>url.includes("/discovery/progress?") && !new URL(url,"http://localhost").searchParams.has("pop_month"))).toBe(true);
+  rerender(<SWRConfig><TaxonomyStudio context={context} classificationContext={{...scope,pop_month:"10"}} onChange={async()=>{}} /></SWRConfig>);
+  await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "10")).toBe(true));
+});

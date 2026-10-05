@@ -1801,7 +1801,7 @@ export function App() {
           ) : null}
 
           {mainArea === "insights" ? renderInsightsArea() : null}
-          {mainArea === "taxonomy" ? <TaxonomyStudio key={JSON.stringify(taxonomyContext)} context={taxonomyContext} onChange={refreshTaxonomy} disabled={actionsDisabled} /> : null}
+          {mainArea === "taxonomy" ? <TaxonomyStudio key={JSON.stringify(taxonomyContext)} context={taxonomyContext} classificationContext={classificationContext} onChange={refreshTaxonomy} disabled={actionsDisabled} /> : null}
           {mainArea === "ingest" ? <TaxonomyIngestNotice context={taxonomyContext} revision={latestNpsUpload?.upload_id || ""} onOpen={() => setMainArea("taxonomy")} /> : null}
           {mainArea === "ingest" ? renderIngestArea() : null}
           {mainArea === "data" ? renderDataArea() : null}

@@ -643,7 +643,15 @@ class DashboardService:
                 )
                 total = len(visible)
                 handler = HelixExchange(self.taxonomy, Path("."))
-                inputs = handler.inputs(context, self._load_helix_df(context), mode)
+                inputs = handler.inputs(
+                    context,
+                    self._load_helix_df(context),
+                    mode,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    score_channel=score_channel,
+                    max_days_apart=max_days_apart,
+                )
                 received = (
                     len(
                         set(visible["Incident Number"].astype(str))
@@ -1420,7 +1428,15 @@ class DashboardService:
             else None
         )
         inputs = (
-            handler.inputs(context, self._load_helix_df(context), llm_status["active"])
+            handler.inputs(
+                context,
+                self._load_helix_df(context),
+                llm_status["active"],
+                pop_year=pop_year,
+                pop_month=pop_month,
+                score_channel=score_channel,
+                max_days_apart=max_days_apart,
+            )
             if handler
             else None
         )
@@ -2089,7 +2105,15 @@ class DashboardService:
                 comment_date = artifact.get("created_at", "Fecha no disponible")
             else:
                 handler = HelixExchange(self.taxonomy, Path("."))
-                inputs = handler.inputs(context, self._load_helix_df(context), mode)
+                inputs = handler.inputs(
+                    context,
+                    self._load_helix_df(context),
+                    mode,
+                    pop_year=pop_year,
+                    pop_month=pop_month,
+                    score_channel=score_channel,
+                    max_days_apart=max_days_apart,
+                )
                 current = handler.current(context, inputs)[mode]
                 fingerprints = {row.get("taxonomy_fingerprint") for row in current.values()}
                 artifact_fingerprint = next(iter(fingerprints)) if len(fingerprints) == 1 else None

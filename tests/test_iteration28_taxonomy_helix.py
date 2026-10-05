@@ -288,7 +288,7 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     frame["Fecha"] = pd.Timestamp("2026-09-01")
     frame["NPS"] = 2
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
-    inputs = handler.inputs(ctx, incidents, "SOURCE")
+    inputs = handler.inputs(ctx, incidents, "SOURCE", max_days_apart=30)
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     handler.import_response(
         ctx, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))

@@ -68,6 +68,7 @@ src/nps_lens/reports/presentation_context.py
 src/nps_lens/repositories/__init__.py
 src/nps_lens/repositories/sqlite_repository.py
 src/nps_lens/services/__init__.py
+src/nps_lens/services/analysis_horizon.py
 src/nps_lens/services/classification_protocol.py
 src/nps_lens/services/dashboard_service.py
 src/nps_lens/services/equivalence_exchange.py
@@ -123,6 +124,8 @@ tests/test_iteration32_semantics.py
 tests/test_iteration33_evidence.py
 tests/test_iteration35_linking.py
 tests/test_iteration36_linking.py
+tests/test_iteration39_workflow.py
+tests/test_iteration40_horizon.py
 tests/test_linking_precision.py
 tests/test_local_processes.py
 tests/test_normalization_registry.py

@@ -265,18 +265,22 @@ def test_changed_corpus_and_foreign_job_rejected(exchange):
         handler.import_response(context, classifier_zip(response), "classifier")
 
 
-def test_exchange_history_is_bounded(exchange):
+def test_exchange_retains_inflight_jobs(exchange):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     jobs = [handler.export(context, "classifier") for _ in range(4)]
     with handler.repository._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM taxonomy_exchange").fetchone()[0] == 3
-    oldest = exported(jobs[0]["saved_paths"])
-    with pytest.raises(ValueError, match="intercambio"):
-        handler.import_response(
-            context, classifier_zip(classifier_files(oldest["manifest.json"], oldest)), "classifier"
+        assert (
+            db.execute(
+                "SELECT COUNT(*) FROM taxonomy_exchange WHERE json_extract(payload, '$.stage') = 'classifier'"
+            ).fetchone()[0]
+            == 4
         )
+    oldest = exported(jobs[0]["saved_paths"])
+    handler.import_response(
+        context, classifier_zip(classifier_files(oldest["manifest.json"], oldest)), "classifier"
+    )
 
 
 @pytest.mark.parametrize(

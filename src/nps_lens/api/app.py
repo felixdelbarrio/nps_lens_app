@@ -787,7 +787,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         context, dashboard_layer._load_helix_df(context)
                     )
                 try:
-                    return handler.export(context, stage)
+                    return handler.export(context, stage, **engine_scope(request))
                 finally:
                     if stage == "classifier":
                         dashboard_layer.clear_caches()
@@ -823,7 +823,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         request: Request, dashboard_layer: DashboardService = Depends(get_dashboard_service)
     ) -> dict[str, Any]:
         try:
-            return exchange(request, dashboard_layer).progress(taxonomy_context(request))
+            return exchange(request, dashboard_layer).progress(
+                taxonomy_context(request), **engine_scope(request)
+            )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -880,7 +882,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         context = taxonomy_context(request)
         mode = dashboard_layer.taxonomy.state(context)["active"]
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
-        return helix, context, helix.inputs(context, dashboard_layer._load_helix_df(context), mode)
+        return (
+            helix,
+            context,
+            helix.inputs(
+                context, dashboard_layer._load_helix_df(context), mode, **engine_scope(request)
+            ),
+        )
 
     @app.get("/api/taxonomy/helix")
     def helix_exchange_status(
@@ -913,7 +921,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                handler, context, inputs = helix_exchange(request, dashboard_layer)
+                exchange_handler = exchange(request, dashboard_layer)
+                context = taxonomy_context(request)
+                handler = HelixExchange(dashboard_layer.taxonomy, exchange_handler.downloads)
+                inputs = {"all_incident_frame": dashboard_layer._load_helix_df(context)}
                 result = handler.import_response(context, inputs, file.file.read(MAX_ZIP_BYTES + 1))
                 dashboard_layer.clear_caches()
                 return result
