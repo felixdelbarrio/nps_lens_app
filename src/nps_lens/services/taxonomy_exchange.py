@@ -439,28 +439,22 @@ class TaxonomyExchange:
         mode: str,
         artifact: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        explicit_artifact = artifact is not None
         catalog = (
-            artifact.get("taxonomy") if explicit_artifact else self.taxonomy.catalog(context, mode)
-        )
-        artifact = artifact or self.taxonomy.classification_artifact(
-            context, mode, fingerprint=taxonomy_fingerprint(catalog)
+            artifact.get("taxonomy")
+            if artifact is not None
+            else self.taxonomy.catalog(context, mode)
         )
         if not catalog:
             return {}
-        revision = (
-            self.taxonomy.state(context).get("artifacts", {}).get("COMPLETED", "")
-            if mode == "COMPLETED"
-            else ""
+        artifact = artifact or self.taxonomy.classification_artifact(
+            context, mode, fingerprint=taxonomy_fingerprint(catalog)
         )
-        if (
-            artifact.get("config", {}).get("instructions_version")
-            != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
-            or artifact.get("taxonomy_fingerprint") != taxonomy_fingerprint(catalog)
-            or (
-                not explicit_artifact
-                and artifact.get("config", {}).get("manual_revision", "") != revision
-            )
+        if artifact.get("config", {}).get(
+            "instructions_version"
+        ) != COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION or artifact.get(
+            "taxonomy_fingerprint"
+        ) != taxonomy_fingerprint(
+            catalog
         ):
             return {}
         hashes = artifact.get("comment_hashes", {})
@@ -572,6 +566,7 @@ class TaxonomyExchange:
         horizon = analysis_horizon(full_frame, **scope)
         if pending and scope and "Fecha" in frame:
             frame = frame.loc[horizon.mask(frame["Fecha"])]
+        horizon_keys = frame["_business_key"].tolist() if pending else []
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
         taxonomy = self.taxonomy.catalog(context, mode) if pending else None
@@ -581,7 +576,7 @@ class TaxonomyExchange:
             self.taxonomy.guard_export(context, mode)
             if not taxonomy or not taxonomy["taxonomy"]:
                 raise ValueError("Crea o importa primero la taxonomía de la lente LLM.")
-            retained = self.assignments(context, frame, mode)
+            retained = self.assignments(context, full_frame, mode)
             frame = frame.loc[~frame["_business_key"].isin(retained)]
             fallback = {"lever": FALLBACK_LEVER, "sublever": FALLBACK_SUBLEVERS[0]}
             categories = category_catalog(taxonomy)
@@ -662,6 +657,7 @@ class TaxonomyExchange:
         job = {
             "id": uuid.uuid4().hex,
             "scope": scope if pending else {},
+            "horizon_keys": horizon_keys,
             "analysis_horizon": horizon.payload() if pending else None,
             "corpus": self._corpus(context, full_frame),
             "groups": {str(i): keys for i, keys in enumerate(groups.values(), 1)},
@@ -838,9 +834,9 @@ class TaxonomyExchange:
             "batches": len(job["batches"]),
             "pending": [key for key in job["batches"] if key not in existing],
             "progress": {
-                "total": len(frame),
-                "received": len(merged),
-                "pending": len(frame) - len(merged),
+                "total": len(job["horizon_keys"]),
+                "received": sum(key in merged for key in job["horizon_keys"]),
+                "pending": sum(key not in merged for key in job["horizon_keys"]),
             },
         }
 
@@ -853,17 +849,6 @@ class TaxonomyExchange:
         merged: dict[str, Any],
     ) -> str:
         mode = job["mode"]
-        # Merge against the latest accumulation, including concurrent/late jobs.
-        prior = self.taxonomy.classification_artifact(
-            context, mode, fingerprint=taxonomy_fingerprint(job["taxonomy"])
-        )
-        retained = self.assignments(context, frame, mode, prior) if prior else {}
-        for key, value in merged.items():
-            if key in retained and retained[key] != value:
-                raise ValueError(
-                    "Un comentario ya tiene una respuesta diferente para esa taxonomía."
-                )
-        merged = {**retained, **merged}
         assignments = [
             merged.get(key, {}).get("primary_classification", {"lever": "", "sublever": ""})
             for key in frame["_business_key"]

@@ -175,7 +175,14 @@ class TaxonomyService:
     ) -> dict[str, Any]:
         state = self.state(context)
         signatures = state.get("artifacts" if mode == "DISCOVERED" else "llm_artifacts", {})
+        current = self.artifact(signatures.get(mode, "")) or {}
         if fingerprint is not None:
+            if (
+                current.get("taxonomy_fingerprint") == fingerprint
+                and current.get("config", {}).get("instructions_version")
+                == COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
+            ):
+                return current
             with self.repository._connect() as db:
                 row = db.execute(
                     "SELECT signature FROM taxonomy_artifacts WHERE context=? AND mode=? "
@@ -189,7 +196,7 @@ class TaxonomyService:
                     ),
                 ).fetchone()
             return (self.artifact(row[0]) or {}) if row else {}
-        return self.artifact(signatures.get(mode, "")) or {}
+        return current
 
     def clear_source_cache(self) -> None:
         with self._source_lock:

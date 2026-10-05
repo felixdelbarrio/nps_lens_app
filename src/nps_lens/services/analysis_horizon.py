@@ -65,7 +65,7 @@ def analysis_horizon(frame: pd.DataFrame, **scope: Any) -> AnalysisHorizon:
             selected.between(date.fromisoformat(start), date.fromisoformat(end))
         ]
     if month_filter:
-        selected = selected.loc[selected.map(lambda value: value.month == int(month_filter))]
+        selected = selected.loc[pd.to_datetime(selected).dt.month.eq(int(month_filter))]
     return AnalysisHorizon(
         min(
             current.start,
