@@ -121,6 +121,30 @@ def test_accept_proposal_preserves_source_and_explores_only_real_assignments(exc
     tax = handler.taxonomy
     dashboard = client.app.state.dashboard_service
     params = {"service_origin": "Bank"}
+    source_request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    response = {"manifest.json": source_request["manifest.json"]}
+    response.update(
+        {
+            name.replace("comments/", "results/"): {
+                "classifications": [
+                    {"id": row["id"], "primary": "c001", "secondary": []}
+                    for row in batch["comments"]
+                ]
+            }
+            for name, batch in source_request.items()
+            if name.startswith("comments/")
+        }
+    )
+    handler.import_response(ctx, zipped(response), "classifier")
+    source_signature = tax.state(ctx)["llm_artifacts"]["SOURCE"]
+    for engine in ("llm", "rules"):
+        assert (
+            client.put(
+                "/api/taxonomy/comments/engine", params={**params, "engine": engine}
+            ).status_code
+            == 200
+        )
+        assert tax.state(ctx)["active"] == "SOURCE"
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
     proposal = tax.state(ctx)["proposed_discovered_taxonomy"]
     fingerprint = tax.state(ctx)["proposed_discovered_fingerprint"]
@@ -136,6 +160,7 @@ def test_accept_proposal_preserves_source_and_explores_only_real_assignments(exc
     assert accepted.status_code == 200
     assert accepted.json()["active"] == "SOURCE"
     state = tax.state(ctx)
+    assert state["llm_artifacts"]["SOURCE"] == source_signature
     assert state["discovered_taxonomy"] == proposal
     assert state["taxonomy_fingerprint"] == fingerprint
     assert "proposed_discovered_taxonomy" not in state
