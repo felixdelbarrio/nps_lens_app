@@ -1519,7 +1519,7 @@ class DashboardService:
                 focus=focus_df,
                 helix=helix_total,
                 scoped=helix_history,
-                period=helix_window,
+                period_total=helix_window.attrs["window_total"],
                 eligible=helix_slice,
                 requested_scope=list(assignments),
             )

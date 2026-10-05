@@ -323,6 +323,10 @@ def test_helix_classification_and_linking_share_ids_and_retain_categories(helix,
     assert ids == {"INC-0"}
     _, _, linking, _ = dashboard.causal_scope(ctx, dashboard._load_nps_df(ctx), **scope)
     assert set(linking["Incident Number"]) == ids
+    diagnostic = dashboard.linking_dashboard(context=ctx, **scope)["diagnostics"]
+    assert diagnostic["helix_after_period"] == 2
+    assert diagnostic["helix_quality_eligible"] == 1
+    assert diagnostic["exclusions"]["helix_quality"] == 1
     params = {"service_origin": "Bank", "service_origin_n1": "Web", **scope}
     assert (
         client.get("/api/taxonomy/helix", params=params).json()["total"]

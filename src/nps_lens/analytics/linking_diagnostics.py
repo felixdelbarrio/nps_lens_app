@@ -16,7 +16,7 @@ def linking_diagnostics(
     focus: pd.DataFrame,
     helix: pd.DataFrame,
     scoped: pd.DataFrame,
-    period: pd.DataFrame,
+    period_total: int,
     eligible: pd.DataFrame,
     links: pd.DataFrame,
     requested_scope: list[str],
@@ -32,8 +32,8 @@ def linking_diagnostics(
         "nps_outside_focus": len(nps) - len(focus),
         "non_matchable": len(focus) - matchable,
         "helix_outside_scope": len(helix) - len(scoped),
-        "helix_outside_period_or_missing_date": len(scoped) - len(period),
-        "helix_quality": len(period) - len(eligible),
+        "helix_outside_period_or_missing_date": len(scoped) - period_total,
+        "helix_quality": period_total - len(eligible),
         "helix_without_evidence": len(eligible) - linked_incidents,
     }
     evaluation = evaluation_diagnostic(
@@ -70,7 +70,7 @@ def linking_diagnostics(
         "nps_non_matchable": len(focus) - matchable,
         "helix_total": len(helix),
         "helix_after_scope": len(scoped),
-        "helix_after_period": len(period),
+        "helix_after_period": period_total,
         "helix_quality_eligible": len(eligible),
         "linked_incidents": linked_incidents,
         "linked_nps_comments": linked_comments,

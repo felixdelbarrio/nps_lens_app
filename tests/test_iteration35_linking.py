@@ -95,7 +95,7 @@ def test_mexico_rules_and_evaluation_states():
         focus=nps,
         helix=helix,
         scoped=helix,
-        period=helix,
+        period_total=len(helix),
         eligible=helix,
         links=links,
         requested_scope=[],
