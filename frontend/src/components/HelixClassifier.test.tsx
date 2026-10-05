@@ -31,28 +31,28 @@ it.each([false,true])("allows activation only when ready=%s", async ready => {
   }));
   const user = userEvent.setup();
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Lente: Taxonomía Original/);
-  const toggle = screen.getByRole("switch");
+  await screen.findByText(/Marco: Taxonomía Original/);
+  const selector = screen.getByLabelText("Método de vinculación");
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   if (ready) {
-    expect(toggle).toBeEnabled();
-    await user.click(toggle);
-    await waitFor(()=>expect(toggle).toBeChecked());
+    expect(selector).toBeEnabled();
+    await user.selectOptions(selector, "llm");
+    await waitFor(()=>expect(selector).toHaveValue("llm"));
     expect(screen.getByLabelText("Importar ZIP de vínculos evaluados")).toBeInTheDocument();
-    await user.click(toggle);
-    await waitFor(()=>expect(toggle).not.toBeChecked());
+    await user.selectOptions(selector, "rules");
+    await waitFor(()=>expect(selector).toHaveValue("rules"));
     expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  } else expect(toggle).toBeDisabled();
+  } else expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
 });
-it("blocks unavailable LLM activation without showing a pending rules analysis", async () => {
+it("blocks unavailable LLM activation and explains pending classifications", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/instructions") ? Response.json({versions:{helix:"2"},helix:"Reglas Helix"}) : new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Lente: Taxonomía Original/);
-  expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
-  expect(screen.getByRole("switch")).toBeDisabled();
-  expect(screen.getByRole("switch")).not.toBeChecked();
+  await screen.findByText(/Marco: Taxonomía Original/);
+  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
+  expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
+  expect(screen.getByLabelText("Método de vinculación")).toHaveValue("rules");
 });
-it("keeps unavailable LLM checked and permits switching back to rules", async () => {
+it("keeps unavailable LLM selected and permits switching back to rules", async () => {
   let selected_engine = "llm";
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
@@ -63,14 +63,14 @@ it("keeps unavailable LLM checked and permits switching back to rules", async ()
   const onChange = vi.fn(async () => {});
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={onChange} /></SWRConfig>);
   await screen.findByText(/Ámbito pendiente/);
-  const toggle = screen.getByRole("switch", {name:"Usar vinculación semántica LLM"});
-  expect(toggle).toBeChecked();
-  expect(toggle).toBeEnabled();
+  const selector = screen.getByLabelText("Método de vinculación");
+  expect(selector).toHaveValue("llm");
+  expect(selector).toBeEnabled();
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  await userEvent.click(toggle);
-  await waitFor(() => expect(toggle).not.toBeChecked());
+  await userEvent.selectOptions(selector, "rules");
+  await waitFor(() => expect(selector).toHaveValue("rules"));
   expect(selected_engine).toBe("rules");
-  expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
   expect(onChange).toHaveBeenCalledOnce();
 });
 
@@ -88,4 +88,29 @@ it("exports only linking when categories are complete and displays their fingerp
   expect(screen.queryByText("Vínculos NPS")).not.toBeInTheDocument();
   await userEvent.click(button);
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*only_linking=true/), expect.objectContaining({method:"POST"})));
+});
+
+it("requires LLM for discovered comments and never offers rules", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({active:"DISCOVERED",selected_engine:"llm",base_available:false,ready:false,total:3,received:0,reason:"Clasificación pendiente"})));
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="comments" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText("Clasificación LLM requerida para DISCOVERED.");
+  expect(screen.getByLabelText("Clasificación de comentarios")).toHaveValue("llm");
+  expect(screen.queryByRole("option", {name:"Clasificación base"})).not.toBeInTheDocument();
+});
+
+it("selects available base and LLM comment classifications using the existing endpoint", async () => {
+  let selected_engine = "rules";
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") selected_engine = new URL(url,"http://localhost").searchParams.get("engine")!;
+    return Response.json({active:"COMPLETED",selected_engine,base_available:true,ready:true,total:3,received:3});
+  });
+  vi.stubGlobal("fetch",fetcher);
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="comments" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText(/Marco: Taxonomía Manual/);
+  const selector = screen.getByLabelText("Clasificación de comentarios");
+  await userEvent.selectOptions(selector,"llm");
+  await waitFor(() => expect(selector).toHaveValue("llm"));
+  await userEvent.selectOptions(selector,"rules");
+  await waitFor(() => expect(selector).toHaveValue("rules"));
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/comments/engine?"), expect.objectContaining({method:"PUT"}));
 });

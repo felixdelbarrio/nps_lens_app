@@ -57,6 +57,7 @@ def test_canonical_text_fanout_local_empty_restart_and_individual_fingerprints(
         exchange, monkeypatch, [None, "", "NO", "NO", "no", "texto", "texto ", " "]
     )
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     sent = request["comments/000001.json"]["comments"]
@@ -96,6 +97,7 @@ def test_all_empty_resolves_only_when_exact_fallback_exists(exchange, monkeypatc
     handler, ctx, frame = set_comments(exchange, monkeypatch, [None, "", ""])
     if fallback:
         handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+        handler.taxonomy.configure(ctx, {"accept_proposal": True})
         handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     result = handler.export(ctx, "classifier")
     if fallback:
@@ -158,6 +160,7 @@ def test_classifier_all_pending_batches_fanout_and_restart(exchange, monkeypatch
 def test_classifier_rejects_compact_category_errors_atomically(exchange, changes):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
@@ -178,6 +181,7 @@ def test_catalog_ids_deterministic_and_obsolete_assignments_require_reprocessing
     )
     handler, ctx, frame, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     # An obsolete semantic contract must not be accepted as current.
     with handler.repository._connect() as db:
@@ -348,6 +352,7 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
 def test_classifier_conflicting_jobs_do_not_overwrite_fanout(exchange, monkeypatch):
     handler, ctx, frame = set_comments(exchange, monkeypatch, ["igual", "igual"])
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     first = exported(handler.export(ctx, "classifier")["saved_paths"])
     second = exported(handler.export(ctx, "classifier")["saved_paths"])
@@ -372,6 +377,7 @@ def test_empty_assignments_keep_lens_and_catalog_invalidation(exchange, monkeypa
         handler.taxonomy.save_manual(ctx, TAXONOMY["taxonomy"], template="NONE")
     else:
         handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+        handler.taxonomy.configure(ctx, {"accept_proposal": True})
         handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     handler.taxonomy.configure(ctx, {"active": mode})
     assert handler.export(ctx, "classifier")["saved_paths"] == []
@@ -388,5 +394,6 @@ def test_empty_assignments_keep_lens_and_catalog_invalidation(exchange, monkeypa
         changed = copy.deepcopy(TAXONOMY)
         changed["taxonomy"][0]["lever"] = "Otra"
         handler.import_response(ctx, designer_zip(handler, ctx, changed), "designer")
+        handler.taxonomy.configure(ctx, {"accept_proposal": True})
         handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     assert handler.progress(ctx)["received"] == 0

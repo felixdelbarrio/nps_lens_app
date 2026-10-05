@@ -156,6 +156,7 @@ def test_source_does_not_satisfy_pending_discovered_and_export_is_diagnosed(heli
         "classification_signature"
     ]
     exchange.import_response(ctx, designer_zip(exchange, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     service = client.app.state.dashboard_service
     active = service._load_nps_df(ctx)

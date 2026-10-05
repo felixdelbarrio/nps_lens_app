@@ -33,7 +33,6 @@ import type {
   UploadSelectionPayload,
   UploadResult
 } from "./api";
-import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { TaxonomyIngestNotice, TaxonomyStudio } from "./components/TaxonomyStudio";
 import { DatasetUploadCard } from "./components/DatasetUploadCard";
 import { IssueList } from "./components/IssueList";
@@ -999,7 +998,6 @@ export function App() {
               </select>
             </label>
           ) : null}
-          {config?.access?.local && showScoreGroup ? <ClassificationEngineControl kind="comments" context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método de agrupación</span>

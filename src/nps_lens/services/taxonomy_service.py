@@ -280,8 +280,12 @@ class TaxonomyService:
         state = self.state(context)
         resolved = self._resolve_available(frame, mode, registry, available, state)
         selected = resolved.attrs["taxonomy_mode"]
-        engine = "rules"
-        if not state.get("restored") and state.get("comment_engine") == "llm":
+        engine = "llm" if selected == "DISCOVERED" else "rules"
+        if (
+            not state.get("restored")
+            and selected != "DISCOVERED"
+            and state.get("comment_engine") == "llm"
+        ):
             from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 
             resolved = TaxonomyExchange(self, Path(".")).apply(context, resolved, selected)
@@ -595,26 +599,31 @@ class TaxonomyService:
             and taxonomy_fingerprint(proposal) != taxonomy_fingerprint(self.catalog(context, mode))
         ):
             raise ValueError(
-                "Activa o descarta explícitamente la propuesta DISCOVERED antes de exportar."
+                "Acepta o descarta explícitamente la propuesta DISCOVERED antes de exportar."
             )
 
     def configure(self, context: UploadContext, changes: dict[str, Any]) -> dict[str, Any]:
         state = self.state(context)
+        if (
+            changes.get("accept_proposal") or changes.get("discard_proposal")
+        ) and "active" in changes:
+            raise ValueError("Revisa la propuesta y cambia el Marco en acciones separadas.")
+        if changes.get("accept_proposal") and changes.get("discard_proposal"):
+            raise ValueError("Elige aceptar o descartar la propuesta.")
         if changes.get("discard_proposal"):
             state.pop("proposed_discovered_taxonomy", None)
             state.pop("proposed_discovered_fingerprint", None)
-            self.save_state(context, state)
-        if changes.get("active") == "DISCOVERED" and state.get("proposed_discovered_taxonomy"):
+        if changes.get("accept_proposal") and state.get("proposed_discovered_taxonomy"):
             state["discovered_taxonomy"] = state.pop("proposed_discovered_taxonomy")
-            state["taxonomy_fingerprint"] = state.pop(
-                "proposed_discovered_fingerprint",
-                taxonomy_fingerprint(state["discovered_taxonomy"]),
-            )
-            state.setdefault("artifacts", {}).pop("DISCOVERED", None)
-            self.save_state(context, state)
-        frame, registry = self.source(context), self.registry(context)
-        available = self.available(context, frame, registry)
+            state["taxonomy_fingerprint"] = state.pop("proposed_discovered_fingerprint")
+            for field in ("artifacts", "llm_artifacts"):
+                artifacts = state.get(field, {})
+                item = self.artifact(artifacts.get("DISCOVERED", ""))
+                if item and item.get("taxonomy_fingerprint") != state["taxonomy_fingerprint"]:
+                    artifacts.pop("DISCOVERED", None)
         if "active" in changes:
+            frame, registry = self.source(context), self.registry(context)
+            available = self.available(context, frame, registry)
             mode = changes["active"]
             if mode not in available or not self.catalog(context, mode)["taxonomy"]:
                 raise ValueError(
@@ -696,13 +705,37 @@ class TaxonomyService:
             "discovered_catalog_available": bool(state.get("discovered_taxonomy")),
             "active_fingerprint": active_fingerprint,
             "proposed_discovered_fingerprint": state.get("proposed_discovered_fingerprint"),
-            "activation_required": bool(state.get("proposed_discovered_taxonomy")),
+            "proposed_discovered_taxonomy": state.get("proposed_discovered_taxonomy"),
+            "designer_review": state.get("designer_review"),
         }
 
     def explore(
         self, context: UploadContext, mode: str, offset: int = 0, limit: int = 100
     ) -> dict[str, Any]:
+        state = self.state(context)
+        if (
+            mode == "DISCOVERED"
+            and state.get("proposed_discovered_taxonomy")
+            and not state.get("discovered_taxonomy")
+            and not state.get("restored")
+        ):
+            return {
+                "mode": mode,
+                "rows": [],
+                "total": 0,
+                "note": "Revisa la propuesta pendiente en Crear Taxonomía.",
+            }
         frame = self.resolve(context, mode=mode)
+        if (
+            mode == "DISCOVERED"
+            and not (labels(frame, "Palanca").ne("") & labels(frame, "Subpalanca").ne("")).any()
+        ):
+            return {
+                "mode": mode,
+                "rows": [],
+                "total": 0,
+                "note": "Clasifica comentarios con esta taxonomía para ver volumen, NPS y ejemplos.",
+            }
         work = pd.DataFrame(
             {
                 "Palanca": labels(frame, "Palanca").replace("", "Sin clasificar"),

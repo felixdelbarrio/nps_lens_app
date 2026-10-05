@@ -738,7 +738,11 @@ class TaxonomyExchange:
                 "corpus": self._corpus(context, frame),
             }
             self.taxonomy.save_state(context, state)
-            return {"stage": "designer", "imported": True, "activation_required": True}
+            return {
+                "stage": "designer",
+                "imported": True,
+                "proposed_discovered_fingerprint": state["proposed_discovered_fingerprint"],
+            }
         files = {
             name.removeprefix("results/").removesuffix(".json"): value
             for name, value in files.items()

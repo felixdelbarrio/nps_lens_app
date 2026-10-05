@@ -108,3 +108,109 @@ def test_helix_new_comments_invalidate_prior_absence_of_links(helix, monkeypatch
     status = handler.status(ctx, updated)
     assert status["pending"] == 0
     assert status["link_pending"] == len(incidents)
+
+
+def test_accept_proposal_preserves_source_and_explores_only_real_assignments(exchange):
+    import pandas as pd
+    from test_taxonomy_exchange import classifier_files, classifier_zip, designer_zip
+
+    handler, ctx, frame, client = exchange
+    frame["Palanca"], frame["Subpalanca"] = "Original", "Categoría"
+    frame["NPS"], frame["Fecha"] = 10, pd.Timestamp("2026-09-01")
+    tax = handler.taxonomy
+    dashboard = client.app.state.dashboard_service
+    params = {"service_origin": "Bank"}
+    source_request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    response = {"manifest.json": source_request["manifest.json"]}
+    response.update(
+        {
+            name.replace("comments/", "results/"): {
+                "classifications": [
+                    {"id": row["id"], "primary": "c001", "secondary": []}
+                    for row in batch["comments"]
+                ]
+            }
+            for name, batch in source_request.items()
+            if name.startswith("comments/")
+        }
+    )
+    handler.import_response(ctx, zipped(response), "classifier")
+    source_signature = tax.state(ctx)["llm_artifacts"]["SOURCE"]
+    for engine in ("llm", "rules"):
+        assert (
+            client.put(
+                "/api/taxonomy/comments/engine", params={**params, "engine": engine}
+            ).status_code
+            == 200
+        )
+        assert tax.state(ctx)["active"] == "SOURCE"
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    proposal = tax.state(ctx)["proposed_discovered_taxonomy"]
+    fingerprint = tax.state(ctx)["proposed_discovered_fingerprint"]
+    assert tax.explore(ctx, "DISCOVERED")["rows"] == []
+    # Selecting a pending proposal never accepts it implicitly.
+    assert (
+        client.put(
+            "/api/taxonomy/settings", params=params, json={"active": "DISCOVERED"}
+        ).status_code
+        == 409
+    )
+    accepted = client.put("/api/taxonomy/settings", params=params, json={"accept_proposal": True})
+    assert accepted.status_code == 200
+    assert accepted.json()["active"] == "SOURCE"
+    state = tax.state(ctx)
+    assert state["llm_artifacts"]["SOURCE"] == source_signature
+    assert state["discovered_taxonomy"] == proposal
+    assert state["taxonomy_fingerprint"] == fingerprint
+    assert "proposed_discovered_taxonomy" not in state
+    assert "proposed_discovered_fingerprint" not in state
+    assert next(card for card in tax.studio(ctx)["taxonomies"] if card["mode"] == "DISCOVERED")[
+        "available"
+    ]
+    assert dashboard._load_nps_df(ctx).Palanca.eq("Original").all()
+    empty = tax.explore(ctx, "DISCOVERED")
+    assert empty["rows"] == [] and empty["total"] == 0
+    assert (
+        empty["note"]
+        == "Clasifica comentarios con esta taxonomía para ver volumen, NPS y ejemplos."
+    )
+    assert (
+        client.put(
+            "/api/taxonomy/settings", params=params, json={"active": "DISCOVERED"}
+        ).status_code
+        == 200
+    )
+    assert dashboard._load_nps_df(ctx).Palanca.eq("").all()
+    assert (
+        client.get("/api/taxonomy/comments/engine", params=params).json()["selected_engine"]
+        == "llm"
+    )
+    assert (
+        client.put(
+            "/api/taxonomy/comments/engine", params={**params, "engine": "rules"}
+        ).status_code
+        == 409
+    )
+    request = exported(handler.export(ctx, "classifier")["saved_paths"])
+    handler.import_response(
+        ctx, classifier_zip(classifier_files(request["manifest.json"], request)), "classifier"
+    )
+    explored = tax.explore(ctx, "DISCOVERED")
+    assert explored["total"] == 1
+    row = explored["rows"][0]
+    assert (row["Palanca"], row["Subpalanca"], row["volume"], row["share"], row["nps"]) == (
+        "Atención",
+        "Resolución",
+        len(frame),
+        1,
+        100,
+    )
+    assert row["promoters"] == len(frame) and row["detractors"] == 0
+    dashboard.clear_caches()
+    assert dashboard._load_nps_df(ctx).Palanca.eq("Atención").all()
+    # Reaccepting an identical semantic catalog preserves assignments and in-flight jobs.
+    signature = tax.state(ctx)["artifacts"]["DISCOVERED"]
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    tax.configure(ctx, {"accept_proposal": True})
+    assert tax.state(ctx)["artifacts"]["DISCOVERED"] == signature
+    assert handler.progress(ctx)["pending"] == 0
