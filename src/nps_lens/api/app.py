@@ -921,7 +921,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             with dashboard_layer._analytics_lock:
-                handler, context, inputs = helix_exchange(request, dashboard_layer)
+                exchange_handler = exchange(request, dashboard_layer)
+                context = taxonomy_context(request)
+                handler = HelixExchange(dashboard_layer.taxonomy, exchange_handler.downloads)
+                inputs = {"all_incident_frame": dashboard_layer._load_helix_df(context)}
                 result = handler.import_response(context, inputs, file.file.read(MAX_ZIP_BYTES + 1))
                 dashboard_layer.clear_caches()
                 return result

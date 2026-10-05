@@ -1,5 +1,6 @@
 """Analytical horizon, cumulative assignments and frozen jobs across months."""
 
+import copy
 from datetime import date
 
 import pandas as pd
@@ -136,3 +137,53 @@ def test_restarted_comment_accumulation_retains_completed_period(exchange):
     restarted = TaxonomyExchange(handler.taxonomy, handler.downloads)
     assert restarted.progress(ctx, **SEPTEMBER)["pending"] == 0
     assert len(restarted.assignments(ctx, frame, "SOURCE")) == 4
+
+
+def test_month_change_exports_only_new_comments_and_preserves_future_assignments(exchange):
+    handler, ctx, frame, _ = exchange
+    small_comments(frame)
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    september = exported(handler.export(ctx, "classifier", **SEPTEMBER)["saved_paths"])
+    import_comments(handler, ctx, september)
+    assert handler.progress(ctx, **SEPTEMBER)["pending"] == 0
+    october = exported(handler.export(ctx, "classifier", **OCTOBER)["saved_paths"])
+    sent = [
+        row["Comment"]
+        for name, batch in october.items()
+        if name.startswith("comments/")
+        for row in batch["comments"]
+    ]
+    assert sent == [frame.Comment.iloc[3]]
+    import_comments(handler, ctx, october)
+    assert handler.progress(ctx, **SEPTEMBER)["pending"] == 0
+    assert len(handler.assignments(ctx, frame, "DISCOVERED")) == 4
+    # Empty comments are assigned locally without replacing October's accumulated assignment.
+    frame.loc[frame.index[0], "Comment"] = ""
+    handler.export(ctx, "classifier", **SEPTEMBER)
+    assert len(handler.assignments(ctx, frame, "DISCOVERED")) == 4
+
+
+def test_late_jobs_keep_separate_taxonomy_fingerprints(exchange):
+    handler, ctx, frame, _ = exchange
+    small_comments(frame)
+    handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
+    old_catalog = handler.taxonomy.state(ctx)["discovered_taxonomy"]
+    old_job = exported(handler.export(ctx, "classifier", **SEPTEMBER)["saved_paths"])
+    new_catalog = copy.deepcopy(old_catalog)
+    new_catalog["taxonomy"][0]["sublevers"][0]["criterion"] += " Criterio revisado."
+    state = handler.taxonomy.state(ctx)
+    state["discovered_taxonomy"] = new_catalog
+    handler.taxonomy.save_state(ctx, state)
+    new_job = exported(handler.export(ctx, "classifier", **OCTOBER)["saved_paths"])
+    import_comments(handler, ctx, new_job)
+    current_signature = handler.taxonomy.state(ctx)["artifacts"]["DISCOVERED"]
+    import_comments(handler, ctx, old_job)
+    assert handler.taxonomy.state(ctx)["artifacts"]["DISCOVERED"] == current_signature
+    assert handler.progress(ctx, **OCTOBER)["pending"] == 0
+    state = handler.taxonomy.state(ctx)
+    state["discovered_taxonomy"] = old_catalog
+    handler.taxonomy.save_state(ctx, state)
+    assert handler.progress(ctx, **SEPTEMBER)["pending"] == 0
+    assert handler.progress(ctx, **OCTOBER)["pending"] == 1
