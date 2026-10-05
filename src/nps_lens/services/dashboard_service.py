@@ -1442,6 +1442,7 @@ class DashboardService:
             .to_numpy()
             .tobytes()
         ).hexdigest()
+        current_links = handler.current(context, inputs) if handler and inputs else None
         evidence_signature = (
             frame_signature,
             self.taxonomy.lens_override or self.taxonomy.state(context)["active"],
@@ -1450,8 +1451,8 @@ class DashboardService:
             self._data_revision(context)[2],
             json.dumps(self.settings.service_origin_n2_map, sort_keys=True),
             (
-                json.dumps(handler.current(context, inputs), sort_keys=True)
-                if handler and inputs
+                json.dumps(current_links, sort_keys=True)
+                if current_links is not None
                 else "llm_pending" if llm_pending else "rules"
             ),
         )
@@ -1489,8 +1490,14 @@ class DashboardService:
             helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
             imported_links = None
             llm_links_pending = False
-            if handler and inputs and not active_frame.attrs.get("classification_pending"):
-                current = handler.current(context, inputs)[inputs["modes"][0]]
+            if (
+                handler
+                and inputs
+                and current_links is not None
+                and not active_frame.attrs.get("classification_pending")
+                and not helix_slice.empty
+            ):
+                current = current_links[inputs["modes"][0]]
                 llm_links_pending = not set(helix_slice["Incident Number"].astype(str)).issubset(
                     current
                 )
