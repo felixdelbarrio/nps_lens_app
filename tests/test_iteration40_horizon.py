@@ -306,7 +306,7 @@ def test_temporal_pair_policy_remains_stricter_than_prefilter():
 def test_helix_classification_and_linking_share_ids_and_retain_categories(helix, monkeypatch):
     handler, ctx, frame, incidents, client = helix
     frame.drop(frame.index[2:], inplace=True)
-    frame["Fecha"] = pd.to_datetime(["2026-08-31", "2026-08-31"])
+    frame["Fecha"] = pd.to_datetime(["2026-08-01", "2026-08-31"])
     frame["Canal"] = ["Web", "App"]
     incidents = incidents.iloc[:6].copy()
     incidents["Submit Date"] = pd.to_datetime(
