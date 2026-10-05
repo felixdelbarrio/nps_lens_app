@@ -110,7 +110,7 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
 
 def test_helix_toggle_uses_visible_window_and_llm_links_obey_dates(helix, monkeypatch):
     handler, ctx, frame, incidents, client = helix
-    incidents.loc[200, "Submit Date"] = pd.Timestamp("2026-10-01")
+    incidents.loc[200, "Submit Date"] = pd.Timestamp("2026-08-01")
     dashboard = client.app.state.dashboard_service
     monkeypatch.setattr(dashboard, "_load_helix_df", lambda *args, **kwargs: incidents)
     inputs = handler.inputs(ctx, incidents, "SOURCE")

@@ -21,6 +21,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
     if (url.includes("/discovery/progress")) return new Response(JSON.stringify({total:96,received:0,pending:96,multiple:0,designer:{total:96,received:0,pending:96,levers:0,sublevers:0}}));
     if (url.includes("/discovery")) return new Response(JSON.stringify({ helix_classifier_url:"https://chatgpt.com/g/helix", designer_url: "https://chatgpt.com/g/designer", classifier_url: "https://chatgpt.com/g/classifier", session: "connected" }));
     if (url.includes("/manual")) { if (init?.method === "PUT") Object.assign(state.taxonomies[1], { available: true, coverage: 1, levers: 1, sublevers: 1 }); return new Response(JSON.stringify({revision:"",exists:false,templates:["NONE","SOURCE"],affected_comments:0, taxonomy: [{ lever: "Atención", sublevers: ["Resolución"] }] })); }
+    if (url.includes("/helix/engine")) return Response.json({selected_engine:"rules",ready:false,active:"SOURCE",received:0,total:1});
     if (url.includes("/helix")) return new Response(JSON.stringify({ready:false,taxonomies:{SOURCE:{received:0,pending:1}},pending:1}));
     if (url.includes("/settings/equivalences")) return new Response(JSON.stringify({dimensions:{"nps.Palanca":[]},available_dimensions:["nps.Palanca"]}));
     if (url.includes("/settings")) { Object.assign(state,JSON.parse(String(init?.body))); state.requested_active = state.active; return new Response("{}"); }
@@ -35,6 +36,11 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   expect(await screen.findByText("Explorar Taxonomía Manual")).toBeInTheDocument();
   expect(screen.queryByText("Normalización · tabla de equivalencias")).not.toBeInTheDocument();
   await user.click(screen.getByRole("tab", {name:"Análisis con LLM"}));
+  const classification = screen.getByRole("heading", { name: "Clasifica incidencias" });
+  const linking = screen.getByRole("heading", { name: "Vinculación Helix ↔ VoC" });
+  expect(classification.compareDocumentPosition(linking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole("switch", {name:"Usar vinculación semántica LLM"})).toBeDisabled();
+  expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();
   await user.upload(screen.getByLabelText("Importar ZIP de comentarios clasificados"), new File(["{}"], "result.zip", { type: "application/zip" }));
@@ -100,4 +106,25 @@ it("shows the active fingerprint and explicitly activates a discovered proposal"
   expect(await screen.findByText("source-f")).toBeInTheDocument();
   await userEvent.setup().click(screen.getByRole("button", { name: "Activar propuesta DISCOVERED" }));
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/settings?"), expect.objectContaining({ method: "PUT" })));
+});
+
+it("passes the changing analysis scope to classification while keeping designer on the dataset", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({ versions: {designer:"test",classifier:"test",helix:"test",normalizer:"test"}, designer:"Reglas",classifier:"Reglas",helix:"Reglas" });
+    if (url.includes("/progress")) return Response.json({ total:3,received:1,pending:2,multiple:0,analysis_horizon:{comment_start:"2026-06-12",comment_end:"2026-09-20",helix_start:"2026-03-14",max_days_apart:90},designer:{total:4,received:0,pending:4,levers:0,sublevers:0} });
+    if (url.includes("/discovery")) return Response.json({designer_url:"",classifier_url:"",helix_classifier_url:""});
+    if (url.includes("/helix/engine")) return Response.json({selected_engine:"rules",ready:false,active:"SOURCE",total:2,received:0});
+    if (url.includes("/helix")) return Response.json({total:2,received:0,pending:2,classified:0,unassigned:0,coverage:0,multiple:0,categories:[],taxonomies:{SOURCE:{received:0,pending:2}}});
+    return Response.json(status());
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  const scope = {...context,pop_year:"2026",pop_month:"09",score_channel:"Web",nps_group:"Detractores",max_days_apart:"90"};
+  const {rerender} = render(<SWRConfig value={{provider:()=>new Map()}}><TaxonomyStudio context={context} classificationContext={scope} onChange={async()=>{}} /></SWRConfig>);
+  await user.click(await screen.findByRole("tab",{name:"Análisis con LLM"}));
+  expect(await screen.findByText(/Ámbito analítico: 2026-06-12/)).toHaveTextContent("Helix desde 2026-03-14 por ventana de 90 días");
+  await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "09")).toBe(true));
+  expect(fetcher.mock.calls.some(([url])=>url.includes("/discovery/progress?") && !new URL(url,"http://localhost").searchParams.has("pop_month"))).toBe(true);
+  rerender(<SWRConfig><TaxonomyStudio context={context} classificationContext={{...scope,pop_month:"10"}} onChange={async()=>{}} /></SWRConfig>);
+  await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "10")).toBe(true));
 });

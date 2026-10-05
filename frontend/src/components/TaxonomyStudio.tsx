@@ -5,13 +5,14 @@ import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyDiscov
 import { TAXONOMY_NAMES as NAMES } from "../utils/taxonomy";
 import { ManualTaxonomyEditor } from "./ManualTaxonomyEditor";
 import { NavigationTabs } from "./NavigationTabs";
+import { ClassificationEngineControl } from "./ClassificationEngineControl";
 import { HelixClassifier } from "./HelixClassifier";
 import { TaxonomyProject } from "./TaxonomyProject";
 const jsonRequest = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-type Props = { context: TaxonomyContext; onChange: () => Promise<void>; disabled?: boolean };
+type Props = { classificationContext?: TaxonomyContext; context: TaxonomyContext; onChange: () => Promise<void>; disabled?: boolean };
 type Exploration = { rows: Array<Record<string, string | number | string[]>>; total: number; audit?: { multi_parent_sublevers: string[]; generic_labels: string[]; note: string }; note?: string };
 
-export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
+export function TaxonomyStudio({ context, classificationContext = context, onChange, disabled = false }: Props) {
   const { data, error, mutate } = useSWR(taxonomyUrl("", context), () => taxonomyRequest<TaxonomyStatus>("", context));
   const { data: discovery } = useSWR(data?.discovery_local_available ? taxonomyUrl("/discovery", context) : null, () => taxonomyRequest<TaxonomyDiscoverySettings>("/discovery", context));
   const [tab, setTab] = useState("static");
@@ -24,7 +25,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
     await mutate();
     await revalidate(key => {
       const url = Array.isArray(key) ? key[0] : key;
-      return typeof url === "string" && /^\/api\/taxonomy\/(manual|helix|discovery\/progress|explore|compare)(\?|$)/.test(url);
+      return typeof url === "string" && /^\/api\/taxonomy\/(manual|helix(?:\/engine)?|discovery\/progress|explore|compare)(\?|$)/.test(url);
     });
     await onChange();
   }
@@ -40,7 +41,7 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
   const available = data.taxonomies.filter(item => item.available && item.selectable !== false);
   const activeMode = data.active;
   const hasFramework = available.some(item => item.mode === activeMode);
-  const exchangeKey = `${taxonomyUrl("", context)}:${activeMode}`;
+  const exchangeKey = `${taxonomyUrl("", classificationContext)}:${activeMode}`;
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
       <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><p>Se aplica a Insights, comentarios, incidencias y presentaciones. La selección se guarda por compañía; cada taxonomía conserva sus resultados LLM.</p><label>Marco de clasificación<select value={hasFramework ? activeMode : ""} disabled={locked || !available.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{active:e.target.value})))}><option value="" disabled>No hay una taxonomía seleccionada</option>{available.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
@@ -59,8 +60,10 @@ export function TaxonomyStudio({ context, onChange, disabled = false }: Props) {
       </article>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={context} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
-        <HelixClassifier key={`helix:${exchangeKey}`} context={context} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
+        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
+        <p className="eyebrow">1. Clasificar incidencias</p>
+        <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
+        <article className="settings-subsection"><p className="eyebrow">2. Vincular</p><h3>Vinculación Helix ↔ VoC</h3><ClassificationEngineControl key={`linking:${exchangeKey}`} kind="helix" context={classificationContext} disabled={locked || !hasFramework} onChange={refresh} /></article>
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}

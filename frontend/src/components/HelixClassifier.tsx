@@ -32,15 +32,15 @@ export function HelixClassifier({ context, mode, url, disabled, onChange, onlyLi
     await onChange();
   }
   const locked = disabled || busy;
-  return <article className="settings-subsection"><h3>{onlyLinking ? "Recalcular vínculos Helix ↔ VoC" : PROJECT_NAMES.helix}</h3>
+  return <article className="settings-subsection"><h3>{onlyLinking ? "Vinculación Helix ↔ VoC" : PROJECT_NAMES.helix}</h3>
     {!onlyLinking ? <ProjectUrlField context={context} field="helix_classifier_url" label={`URL · ${PROJECT_NAMES.helix}`} url={url} disabled={locked} /> : null}
-    <TaxonomyProjectInstructions role="helix" context={context} />
-    <p>Lente activa: {TAXONOMY_NAMES[mode]} ({data?.mode || mode}) · fingerprint <code>{data?.taxonomy_fingerprint?.slice(0, 8)}</code>. El método de vinculación se elige en Evidencia Helix ↔ VoC. Cada lente conserva sus propias clasificaciones.</p>
+    <TaxonomyProjectInstructions role="helix" context={context} onlyLinking={onlyLinking} />
+    <p>Lente activa: {TAXONOMY_NAMES[mode]} ({data?.mode || mode}) · fingerprint <code>{data?.taxonomy_fingerprint?.slice(0, 8)}</code>. La vinculación se configura en el paso 2 de Taxonomy Studio. Cada lente conserva sus propias clasificaciones.</p>
     {data && !onlyLinking ? <><ExchangeProgress counts={data} unit="incidencias" metrics={[{label:"Con categoría",value:data.classified},{label:"Sin encaje",value:data.unassigned},{...ADDITIONAL_TOPICS,value:data.multiple}]} /><p>Cobertura temática: {formatPercentage(data.coverage)}. Sin encaje incluye categorías de reserva y resultados sin categoría. Las citas comprueban procedencia; la afinidad semántica requiere revisión.</p>
     {data.categories?.length ? <details><summary>Distribución de incidencias</summary><div className="table-scroll"><table><thead><tr><th>Palanca</th><th>Subpalanca</th><th>Incidencias</th></tr></thead><tbody>{data.categories.map(row => <tr key={`${row.lever}/${row.sublever}`}><td>{row.lever}</td><td>{row.sublever}</td><td>{formatVolume(row.count)}</td></tr>)}</tbody></table></div></details> : null}</> : null}
     {onlyLinking && data ? <p>{data.link_pending} incidencias con linking pendiente. Se exportan solo las que ya tienen categorías, conservándolas exactamente.</p> : null}
     {error ? <p role="status">{error.message}</p> : null}
-    <div className="inline-actions"><button className="primary-button" disabled={locked || !(onlyLinking ? data?.link_pending : data?.pending)} onClick={() => void run(async () => { setExported(null); setExported(await exportClassification(onlyLinking ? {...context, only_linking: "true"} : context, "/helix/export")); })}>{onlyLinking ? "Exportar solo linking reutilizando categorías" : "Descargar todos los ZIP de incidencias pendientes"}</button>
+    <div className="inline-actions"><button className="primary-button" disabled={locked || !(onlyLinking ? data?.link_pending : data?.pending)} onClick={() => void run(async () => { setExported(null); setExported(await exportClassification(onlyLinking ? {...context, only_linking: "true"} : context, "/helix/export")); })}>{onlyLinking ? "Exportar linking reutilizando categorías" : "Descargar todos los ZIP de incidencias pendientes"}</button>
     <label>{onlyLinking ? "Importar ZIP de vínculos evaluados" : "Importar ZIP de incidencias clasificadas"}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void run(() => importZip(file)); }} /></label></div>
     <ExchangeFiles result={exported} />
     {message ? <p role="status">{message}</p> : null}

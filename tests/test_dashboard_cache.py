@@ -86,7 +86,7 @@ def test_causal_window_uses_nps_dates_and_handles_missing_dates() -> None:
 
     selected = DashboardService._causal_helix_window(helix, nps, max_days_apart=45)
 
-    assert selected["Incident Number"].tolist() == ["before", "after"]
+    assert selected["Incident Number"].tolist() == ["before"]
     assert DashboardService._causal_helix_window(
         helix.drop(columns="Fecha"), nps, max_days_apart=45
     ).empty

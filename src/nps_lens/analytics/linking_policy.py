@@ -49,7 +49,7 @@ LINK_EVIDENCE_CHUNK_SIZE = 128
 def temporal_mask(
     comment_dates: Any, incident_dates: Any, max_days_apart: int = LINK_MAX_DAYS_APART
 ) -> Any:
-    """Business association window: inclusive calendar days, in either direction."""
+    """Business association window: inclusive calendar days before the comment."""
     import numpy as np
     import pandas as pd
 
@@ -62,7 +62,7 @@ def temporal_mask(
         return pd.DatetimeIndex([dates]).normalize()[0]
 
     delta = (days(comment_dates) - days(incident_dates)) / pd.Timedelta(days=1)
-    return np.isfinite(delta) & (abs(delta) <= max(0, int(max_days_apart)))
+    return np.isfinite(delta) & (delta >= 0) & (delta <= max(0, int(max_days_apart)))
 
 
 def temporal_scope_mask(

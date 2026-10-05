@@ -584,6 +584,8 @@ describe("App", () => {
     await user.click(screen.getByRole("tab", { name: "Evidencia Helix ↔ VoC" }));
     expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("App");
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", {name:"Usar vinculación semántica LLM"})).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Ingesta/i }));
     expect(screen.queryByRole("heading", { name: "FILTROS" })).not.toBeInTheDocument();

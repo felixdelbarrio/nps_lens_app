@@ -999,7 +999,7 @@ export function App() {
               </select>
             </label>
           ) : null}
-          {config?.access?.local && (showCausalMethodFilter || showScoreGroup) ? <ClassificationEngineControl kind={showCausalMethodFilter ? "helix" : "comments"} context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
+          {config?.access?.local && showScoreGroup ? <ClassificationEngineControl kind="comments" context={classificationContext} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
           {showCausalMethodFilter ? (
             <label>
               <span>Método de agrupación</span>
@@ -1801,7 +1801,7 @@ export function App() {
           ) : null}
 
           {mainArea === "insights" ? renderInsightsArea() : null}
-          {mainArea === "taxonomy" ? <TaxonomyStudio key={JSON.stringify(taxonomyContext)} context={taxonomyContext} onChange={refreshTaxonomy} disabled={actionsDisabled} /> : null}
+          {mainArea === "taxonomy" ? <TaxonomyStudio key={JSON.stringify(taxonomyContext)} context={taxonomyContext} classificationContext={classificationContext} onChange={refreshTaxonomy} disabled={actionsDisabled} /> : null}
           {mainArea === "ingest" ? <TaxonomyIngestNotice context={taxonomyContext} revision={latestNpsUpload?.upload_id || ""} onOpen={() => setMainArea("taxonomy")} /> : null}
           {mainArea === "ingest" ? renderIngestArea() : null}
           {mainArea === "data" ? renderDataArea() : null}

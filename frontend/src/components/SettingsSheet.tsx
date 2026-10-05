@@ -320,7 +320,7 @@ export function SettingsSheet({
                     />
                   </label>
                   <label>
-                    <span>Ventana de días</span>
+                    <span>Ventana de días</span><span className="field-hint">Incidencias hasta {maxDaysApart} días antes del comentario</span>
                     <input
                       max={365}
                       min={1}

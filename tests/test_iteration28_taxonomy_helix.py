@@ -244,8 +244,13 @@ def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monk
     )
     assert not payload["links_mode_df"].empty
     frame.loc[0, "Comment"] = "Changed comment"
-    blocked = client.put("/api/taxonomy/helix/engine", params=params)
-    assert blocked.status_code == 409
+    enabled = client.put("/api/taxonomy/helix/engine", params=params)
+    assert enabled.status_code == 200
+    assert enabled.json()["ready"]
+    assert (
+        dashboard.linking_dashboard(context=ctx)["diagnostics"]["evaluation_reason"]
+        == "evaluation_pending"
+    )
     assert (
         client.put("/api/taxonomy/helix/engine", params={**params, "engine": "rules"}).status_code
         == 200
@@ -283,7 +288,7 @@ def test_llm_causal_pipeline_does_not_call_business_classifier(helix, monkeypatc
     frame["Fecha"] = pd.Timestamp("2026-09-01")
     frame["NPS"] = 2
     incidents["Submit Date"] = pd.Timestamp("2026-09-01")
-    inputs = handler.inputs(ctx, incidents, "SOURCE")
+    inputs = handler.inputs(ctx, incidents, "SOURCE", max_days_apart=30)
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     handler.import_response(
         ctx, inputs, zipped(helix_response(request, inputs["comments"][0]["id"]))

@@ -8,7 +8,7 @@ import { ProjectUrlField } from "./ProjectUrlField";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
 import { ADDITIONAL_TOPICS, ExchangeProgress, type ExchangeCounts } from "./ExchangeProgress";
 
-type Progress = ExchangeCounts & { mode:string; taxonomy_fingerprint:string; multiple:number; designer:ExchangeCounts & {levers:number;sublevers:number} };
+type Progress = ExchangeCounts & { analysis_horizon?: {comment_start:string|null;comment_end:string|null;helix_start:string|null;max_days_apart:number}; mode:string; taxonomy_fingerprint:string; multiple:number; designer:ExchangeCounts & {levers:number;sublevers:number} };
 type Role = "designer" | "classifier" | "normalizer";
 const FIELDS = {designer:"designer_url",classifier:"classifier_url",normalizer:"normalizer_url"} as const;
 const IMPORT_LABELS = {designer:"Importar ZIP de taxonomía",classifier:"Importar ZIP de comentarios clasificados",normalizer:"Importar ZIP de conceptos"};
@@ -51,6 +51,7 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
     {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : "Clasificación completa. Activa Usar clasificación LLM en los filtros de Comentarios."}</p> : null}
+    {role === "classifier" && progress?.analysis_horizon?.comment_start ? <p>Ámbito analítico: {progress.analysis_horizon.comment_start} – {progress.analysis_horizon.comment_end}; Helix desde {progress.analysis_horizon.helix_start} por ventana de {progress.analysis_horizon.max_days_apart} días.</p> : null}
     {role === "classifier" && progress ? <p>Modo activo: {progress.mode} · fingerprint <code>{progress.taxonomy_fingerprint?.slice(0, 8)}</code></p> : null}
     <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(exportZips)}>{EXPORT_LABELS[role]}</button>
     <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(() => importZip(file)); }} /></label></div>

@@ -319,6 +319,8 @@ def test_utf8_byte_bounds_and_oversized_item_is_not_truncated(exchange, monkeypa
     incidents = pd.DataFrame(
         {"Incident Number": ["I1", "I2"], "Detailed Description": ["漢" * 60_000] * 2}
     )
+    frame["Fecha"] = pd.Timestamp("2026-09-01")
+    incidents["Submit Date"] = pd.Timestamp("2026-09-01")
     helix = HelixExchange(handler.taxonomy, handler.downloads)
     if stage == "helix":
         frame["Comment"] = ["one", "two"]
@@ -378,6 +380,10 @@ def test_empty_assignments_keep_lens_and_catalog_invalidation(exchange, monkeypa
         frame["Palanca"], frame["Subpalanca"] = "Otra", "Categoría"
     elif mode == "COMPLETED":
         handler.taxonomy.save_manual(ctx, TAXONOMY["taxonomy"], template="NONE")
+        assert handler.progress(ctx)["received"] == 2
+        changed = copy.deepcopy(TAXONOMY)
+        changed["taxonomy"][0]["lever"] = "Otra"
+        handler.taxonomy.save_manual(ctx, changed["taxonomy"], template="NONE")
     else:
         changed = copy.deepcopy(TAXONOMY)
         changed["taxonomy"][0]["lever"] = "Otra"
