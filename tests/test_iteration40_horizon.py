@@ -154,6 +154,7 @@ def test_month_change_exports_only_new_comments_and_preserves_future_assignments
     handler, ctx, frame, _ = exchange
     small_comments(frame)
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     september = exported(handler.export(ctx, "classifier", **SEPTEMBER)["saved_paths"])
     import_comments(handler, ctx, september)
@@ -179,6 +180,7 @@ def test_late_jobs_keep_separate_taxonomy_fingerprints(exchange):
     handler, ctx, frame, _ = exchange
     small_comments(frame)
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     old_catalog = handler.taxonomy.state(ctx)["discovered_taxonomy"]
     old_job = exported(handler.export(ctx, "classifier", **SEPTEMBER)["saved_paths"])

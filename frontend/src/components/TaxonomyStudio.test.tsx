@@ -39,7 +39,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   const classification = screen.getByRole("heading", { name: "Clasifica incidencias" });
   const linking = screen.getByRole("heading", { name: "Vinculación Helix ↔ VoC" });
   expect(classification.compareDocumentPosition(linking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole("switch", {name:"Usar vinculación semántica LLM"})).toBeDisabled();
+  expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();
@@ -88,13 +88,13 @@ it("places the global framework before both tabs and disables classification wit
   expect(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" })).toBeEnabled();
 });
 
-it("shows the active fingerprint and explicitly activates a discovered proposal", async () => {
-  const state = { ...status(), activation_required: true, proposed_discovered_fingerprint: "discovered-abcdef" };
+it("previews and accepts a discovered proposal without changing the framework", async () => {
+  const state = { ...status(), proposed_discovered_fingerprint: "discovered-abcdef", proposed_discovered_taxonomy: {taxonomy:[{lever:"Atención",sublevers:[{name:"Resolución",criterion:"Problema resuelto"}]}]}, designer_review:{reason:"La evidencia respalda las categorías",quotes:["Resolvieron mi problema"]} };
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/instructions")) return Response.json({ versions: { designer: "1", classifier: "1", helix: "1", normalizer: "1" }, designer: "Reglas", classifier: "Reglas", helix: "Reglas" });
     if (url.includes("/settings") && init?.method === "PUT") {
-      state.active = "DISCOVERED";
-      state.activation_required = false;
+      expect(JSON.parse(String(init.body))).toEqual({accept_proposal:true});
+      Object.assign(state.taxonomies[2], {available:true});
       return Response.json({});
     }
     if (url.includes("/discovery")) return Response.json({ designer_url: "", classifier_url: "", helix_classifier_url: "" });
@@ -104,8 +104,15 @@ it("shows the active fingerprint and explicitly activates a discovered proposal"
   render(<SWRConfig value={{ provider: () => new Map() }}><TaxonomyStudio context={context} onChange={async () => {}} /></SWRConfig>);
   await userEvent.setup().click(await screen.findByRole("tab", { name: "Análisis con LLM" }));
   expect(await screen.findByText("source-f")).toBeInTheDocument();
-  await userEvent.setup().click(screen.getByRole("button", { name: "Activar propuesta DISCOVERED" }));
+  const proposal = screen.getByRole("region", {name:"Propuesta DISCOVERED"});
+  expect(proposal).toHaveTextContent("Atención");
+  expect(proposal).toHaveTextContent("Resolución");
+  expect(proposal).toHaveTextContent("Problema resuelto");
+  expect(proposal).toHaveTextContent("Resolvieron mi problema");
+  expect(proposal.closest("article")).toHaveTextContent("Crear Taxonomía");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }));
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/settings?"), expect.objectContaining({ method: "PUT" })));
+  expect(screen.getByLabelText("Marco de clasificación")).toHaveValue("SOURCE");
 });
 
 it("passes the changing analysis scope to classification while keeping designer on the dataset", async () => {

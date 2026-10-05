@@ -592,9 +592,10 @@ class DashboardService:
 
     def analysis_engine(self, kind: str, context: UploadContext, **scope: Any) -> dict[str, Any]:
         preference = "comment_engine" if kind == "comments" else "causal_engine"
-        if (
-            self.settings.auth_mode != "local"
-            or self.taxonomy.state(context).get(preference) != "llm"
+        state = self.taxonomy.state(context)
+        if self.settings.auth_mode != "local" or (
+            not (kind == "comments" and state["active"] == "DISCOVERED")
+            and state.get(preference) != "llm"
         ):
             return {"selected_engine": "rules"}
         return self.classification_status(kind, context, **scope)
@@ -613,7 +614,9 @@ class DashboardService:
         state = self.taxonomy.state(context)
         mode = state["active"]
         preference = "comment_engine" if kind == "comments" else "causal_engine"
-        selected_engine = state.get(preference, "rules")
+        selected_engine = (
+            "llm" if kind == "comments" and mode == "DISCOVERED" else state.get(preference, "rules")
+        )
         total = received = 0
         reason = ""
         try:
@@ -668,6 +671,8 @@ class DashboardService:
         return {
             "active": mode,
             "selected_engine": selected_engine,
+            "base_available": kind == "helix"
+            or (mode != "DISCOVERED" and bool(self.taxonomy.catalog(context, mode)["taxonomy"])),
             "ready": ready,
             "total": total,
             "received": received,

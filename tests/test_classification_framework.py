@@ -33,6 +33,7 @@ def test_framework_persists_per_owner_and_drives_analysis_and_snapshot(exchange,
     assert restarted.state(other)["active"] == "COMPLETED"
     assert restarted.resolve(ctx).attrs["taxonomy_mode"] == "SOURCE"
     assert restarted.snapshot(ctx)["active"] == "SOURCE"
+    tax.configure(ctx, {"accept_proposal": True})
     tax.configure(ctx, {"active": "DISCOVERED"})
     assert tax.resolve(ctx).attrs["taxonomy_mode"] == "DISCOVERED"
     assert tax.snapshot(ctx)["active"] == "DISCOVERED"

@@ -33,6 +33,7 @@ from nps_lens.services.taxonomy_prompts import (
 def test_comments_reject_obsolete_response_atomically(exchange, change):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     request = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)

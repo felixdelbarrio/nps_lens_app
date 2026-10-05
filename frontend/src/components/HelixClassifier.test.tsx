@@ -31,26 +31,26 @@ it.each([false,true])("allows activation only when ready=%s", async ready => {
   }));
   const user = userEvent.setup();
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Lente: Taxonomía Original/);
-  const toggle = screen.getByRole("switch");
+  await screen.findByText(/Marco: Taxonomía Original/);
+  const selector = screen.getByLabelText("Método de vinculación");
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   if (ready) {
-    expect(toggle).toBeEnabled();
-    await user.click(toggle);
-    await waitFor(()=>expect(toggle).toBeChecked());
+    expect(selector).toBeEnabled();
+    await user.selectOptions(selector, ((selector as HTMLSelectElement).value === "llm" ? "rules" : "llm"));
+    await waitFor(()=>expect(selector).toHaveValue("llm"));
     expect(screen.getByLabelText("Importar ZIP de vínculos evaluados")).toBeInTheDocument();
-    await user.click(toggle);
-    await waitFor(()=>expect(toggle).not.toBeChecked());
+    await user.selectOptions(selector, ((selector as HTMLSelectElement).value === "llm" ? "rules" : "llm"));
+    await waitFor(()=>expect(selector).toHaveValue("rules"));
     expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  } else expect(toggle).toBeDisabled();
+  } else expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
 });
 it("blocks unavailable LLM activation without showing a pending rules analysis", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/instructions") ? Response.json({versions:{helix:"2"},helix:"Reglas Helix"}) : new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Lente: Taxonomía Original/);
-  expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
-  expect(screen.getByRole("switch")).toBeDisabled();
-  expect(screen.getByRole("switch")).not.toBeChecked();
+  await screen.findByText(/Marco: Taxonomía Original/);
+  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
+  expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
+  expect(screen.getByLabelText("Método de vinculación")).toHaveValue("rules");
 });
 it("keeps unavailable LLM checked and permits switching back to rules", async () => {
   let selected_engine = "llm";
@@ -63,14 +63,14 @@ it("keeps unavailable LLM checked and permits switching back to rules", async ()
   const onChange = vi.fn(async () => {});
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={onChange} /></SWRConfig>);
   await screen.findByText(/Ámbito pendiente/);
-  const toggle = screen.getByRole("switch", {name:"Usar vinculación semántica LLM"});
-  expect(toggle).toBeChecked();
-  expect(toggle).toBeEnabled();
+  const selector = screen.getByLabelText("Método de vinculación");
+  expect(selector).toHaveValue("llm");
+  expect(selector).toBeEnabled();
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  await userEvent.click(toggle);
-  await waitFor(() => expect(toggle).not.toBeChecked());
+  await userEvent.selectOptions(selector, "rules");
+  await waitFor(() => expect(selector).toHaveValue("rules"));
   expect(selected_engine).toBe("rules");
-  expect(screen.queryByText(/Ámbito pendiente/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
   expect(onChange).toHaveBeenCalledOnce();
 });
 

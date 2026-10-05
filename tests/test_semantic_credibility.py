@@ -33,6 +33,7 @@ def test_pending_proposal_guards_both_exports_and_late_results(helix):
     handler, ctx, _, incidents, _ = helix
     comments = TaxonomyExchange(handler.taxonomy, handler.downloads)
     comments.import_response(ctx, designer_zip(comments, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     old_comments = exported(comments.export(ctx, "classifier")["saved_paths"])
     old_inputs = handler.inputs(ctx, incidents, "DISCOVERED")
@@ -54,6 +55,7 @@ def test_pending_proposal_guards_both_exports_and_late_results(helix):
     handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     assert comments.export(ctx, "classifier")["saved_paths"]
     assert handler.export(ctx, handler.inputs(ctx, incidents, "SOURCE"))["saved_paths"]
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     fingerprint = taxonomy_fingerprint(proposal)
     new_comments = exported(comments.export(ctx, "classifier")["saved_paths"])
@@ -90,6 +92,7 @@ def test_canonical_raw_representative_and_reuse_after_format_changes(exchange):
     raw = "  NO PUEDO REALIZAR MIS PAGOS PORQUE NO FUNCIONA EL TOKEN DIGITAL  "
     frame["Comment"] = [raw if i % 2 else raw.lower().replace(" ", "\t") for i in range(len(frame))]
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     assert request["comments/000001.json"]["comments"] == [

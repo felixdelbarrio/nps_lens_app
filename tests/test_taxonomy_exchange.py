@@ -253,6 +253,7 @@ def test_zip_api_roundtrip_restart_partial_atomic_and_idempotent(exchange):
 def test_changed_corpus_and_foreign_job_rejected(exchange):
     handler, context, frame, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     original = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(original["manifest.json"], original)
@@ -268,6 +269,7 @@ def test_changed_corpus_and_foreign_job_rejected(exchange):
 def test_exchange_retains_inflight_jobs(exchange):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     jobs = [handler.export(context, "classifier") for _ in range(4)]
     with handler.repository._connect() as db:
@@ -311,8 +313,10 @@ def test_invalid_taxonomy_and_unknown_category_leave_state_unchanged(exchange):
         )
     with pytest.raises(ValueError):
         handler.import_response(context, zipped({"taxonomy.json": TAXONOMY}), "designer")
+        handler.taxonomy.configure(context, {"accept_proposal": True})
         handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     inputs = exported(handler.export(context, "classifier")["saved_paths"])
     files = classifier_files(inputs["manifest.json"], inputs)
@@ -359,6 +363,7 @@ def test_designer_zip_rejects_changed_dataset_without_mutation(exchange):
     frame.loc[0, "Comment"] = "Changed"
     with pytest.raises(ValueError, match="corpus"):
         handler.import_response(context, response, "designer")
+        handler.taxonomy.configure(context, {"accept_proposal": True})
         handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     assert "discovered_taxonomy" not in handler.taxonomy.state(context)
 
@@ -366,6 +371,7 @@ def test_designer_zip_rejects_changed_dataset_without_mutation(exchange):
 def test_classifier_tolerates_known_nonsemantic_llm_annotations(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
@@ -378,6 +384,7 @@ def test_classifier_tolerates_known_nonsemantic_llm_annotations(exchange):
 def test_classifier_drops_fallback_categories_from_secondary_topics(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
@@ -397,6 +404,7 @@ def test_classifier_drops_fallback_categories_from_secondary_topics(exchange):
 def test_classifier_still_rejects_unknown_schema_drift(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
@@ -408,14 +416,16 @@ def test_classifier_still_rejects_unknown_schema_drift(exchange):
 def test_designer_proposal_does_not_replace_active_taxonomy(exchange):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     before = handler.taxonomy.catalog(context, "DISCOVERED")
     proposed = {
         "taxonomy": [*TAXONOMY["taxonomy"], {"lever": "Acceso", "sublevers": ["Autenticación"]}]
     }
     result = handler.import_response(context, designer_zip(handler, context, proposed), "designer")
-    assert result["activation_required"]
+    assert result["proposed_discovered_fingerprint"]
     assert handler.taxonomy.catalog(context, "DISCOVERED") == before
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     assert handler.taxonomy.catalog(context, "DISCOVERED") != before
 
@@ -432,6 +442,8 @@ def test_proposal_requires_activation_and_late_classifier_keeps_new_active_versi
         handler.taxonomy.catalog(context, "SOURCE")
     )
 
+    handler.taxonomy.configure(context, {"accept_proposal": True})
+
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     old_request = exported(handler.export(context, "classifier")["saved_paths"])
     old_fingerprint = old_request["manifest.json"]["taxonomy_fingerprint"]
@@ -445,6 +457,7 @@ def test_proposal_requires_activation_and_late_classifier_keeps_new_active_versi
     }
     handler.import_response(context, designer_zip(handler, context, replacement), "designer")
     assert taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED")) == old_fingerprint
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     new_fingerprint = taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED"))
     assert new_fingerprint != old_fingerprint
