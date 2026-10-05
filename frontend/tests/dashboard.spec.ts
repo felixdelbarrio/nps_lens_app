@@ -105,7 +105,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("tab",{name:"Análisis con LLM"}).click();
   await expect(page.getByText("1. Clasificar incidencias", {exact:true})).toBeVisible();
   await expect(page.getByText("2. Vincular", {exact:true})).toBeVisible();
-  await expect(page.getByRole("switch", {name:"Usar vinculación semántica LLM"})).toBeDisabled();
+  await expect(page.getByRole("option", {name:"LLM semántico"})).toHaveAttribute("disabled", "");
   await expect(page.getByLabel("Importar ZIP de vínculos evaluados")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
   await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
@@ -114,7 +114,14 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Propuesta de taxonomía importada/)).toBeVisible();
-  await page.getByRole("button", { name: "Activar propuesta DISCOVERED" }).click();
+  await expect(page.getByRole("region", {name:"Propuesta DISCOVERED"})).toContainText("Criterion:");
+  await page.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }).click();
+  await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
+  await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
+  await expect(page.getByLabel("Clasificación de comentarios")).toHaveValue("llm");
+  await expect(page.getByLabel("Clasificación de comentarios").locator('option[value="rules"]')).toHaveCount(0);
+  await page.getByText("Explorar Descubierta por LLM", {exact:true}).click();
+  await expect(page.getByText("Clasifica comentarios con esta taxonomía para ver volumen, NPS y ejemplos.")).toBeVisible();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
   let exportCount = 0;
   page.on("request", request => {
@@ -156,23 +163,8 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.getByRole("button", { name: /Insights/i }).click();
   await page.getByRole("tab", { name: "Comentarios", exact: true }).click();
-  const llmSwitch = page.getByRole("switch", {name:"Usar clasificación LLM"});
-  await expect(llmSwitch).toBeEnabled();
-  const [enabled] = await Promise.all([
-    page.waitForResponse(response => response.url().includes("/comments/engine") && response.request().method() === "PUT"),
-    llmSwitch.click(),
-  ]);
-  expect(enabled.ok()).toBeTruthy();
-  expect((await enabled.json()).selected_engine).toBe("llm");
-  await expect(llmSwitch).toBeChecked({ timeout: 15000 });
-  await expect(llmSwitch).toBeEnabled({ timeout: 15000 });
-  const [disabled] = await Promise.all([
-    page.waitForResponse(response => response.url().includes("/comments/engine") && response.request().method() === "PUT"),
-    llmSwitch.click(),
-  ]);
-  expect(disabled.ok()).toBeTruthy();
-  expect((await disabled.json()).selected_engine).toBe("rules");
-  await expect(llmSwitch).not.toBeChecked({ timeout: 15000 });
+  await expect(page.getByLabel("Clasificación de comentarios")).toHaveCount(0);
+  await expect(page.getByLabel("Método de vinculación")).toHaveCount(0);
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();

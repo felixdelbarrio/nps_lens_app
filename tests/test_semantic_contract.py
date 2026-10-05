@@ -33,6 +33,7 @@ from nps_lens.services.taxonomy_prompts import (
 def test_comments_reject_obsolete_response_atomically(exchange, change):
     handler, context, _, _ = exchange
     handler.import_response(context, designer_zip(handler, context), "designer")
+    handler.taxonomy.configure(context, {"accept_proposal": True})
     handler.taxonomy.configure(context, {"active": "DISCOVERED"})
     request = exported(handler.export(context, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)
@@ -105,7 +106,13 @@ def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exc
         "designer",
     )
 
-    assert result == {"stage": "designer", "imported": True, "activation_required": True}
+    assert result == {
+        "stage": "designer",
+        "imported": True,
+        "proposed_discovered_fingerprint": handler.taxonomy.state(context)[
+            "proposed_discovered_fingerprint"
+        ],
+    }
     assert handler.taxonomy.state(context)["designer_review"]["quotes"] == quotes
 
 

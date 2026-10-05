@@ -188,6 +188,7 @@ def test_suspicious_import_reports_without_heuristic_quality_gate(exchange):
     handler, ctx, frame, _ = exchange
     frame.loc[:, "Comment"] = "No funciona bien la página"
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     response = classifier_files(request["manifest.json"], request)

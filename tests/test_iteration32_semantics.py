@@ -72,6 +72,7 @@ def test_category_resolution_is_atomic_without_explanations():
 def test_partial_llm_pair_never_reaches_consumable_lens(exchange, missing):
     handler, ctx, frame, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
     handler.import_response(
@@ -91,6 +92,7 @@ def test_partial_llm_pair_never_reaches_consumable_lens(exchange, missing):
 def test_semantic_fingerprint_flows_and_rejects_mismatch(exchange):
     handler, ctx, _, _ = exchange
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     fingerprint = handler.taxonomy.state(ctx)["taxonomy_fingerprint"]
     request = exported(handler.export(ctx, "classifier")["saved_paths"])
@@ -210,6 +212,7 @@ def test_complete_semantic_identity_designer_comments_helix_application(helix):
 
     handler = TaxonomyExchange(helix_handler.taxonomy, helix_handler.downloads)
     handler.import_response(ctx, designer_zip(handler, ctx), "designer")
+    handler.taxonomy.configure(ctx, {"accept_proposal": True})
     handler.taxonomy.configure(ctx, {"active": "DISCOVERED"})
     fingerprint = handler.taxonomy.state(ctx)["taxonomy_fingerprint"]
     request = exported(handler.export(ctx, "classifier")["saved_paths"])

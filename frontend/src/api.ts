@@ -733,7 +733,8 @@ export type TaxonomyStatus = {
   discovered_catalog_available: boolean;
   active_fingerprint: string;
   proposed_discovered_fingerprint?: string;
-  activation_required?: boolean;
+  proposed_discovered_taxonomy?: { taxonomy: Array<{ lever: string; sublevers: Array<{name: string; criterion: string}> }> };
+  designer_review?: { reason: string; quotes: string[] };
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {

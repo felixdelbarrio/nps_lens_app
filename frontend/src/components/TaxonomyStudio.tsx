@@ -25,7 +25,7 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
     await mutate();
     await revalidate(key => {
       const url = Array.isArray(key) ? key[0] : key;
-      return typeof url === "string" && /^\/api\/taxonomy\/(manual|helix(?:\/engine)?|discovery\/progress|explore|compare)(\?|$)/.test(url);
+      return typeof url === "string" && /^\/api\/taxonomy\/(manual|comments\/engine|helix(?:\/engine)?|discovery\/progress|explore|compare)(\?|$)/.test(url);
     });
     await onChange();
   }
@@ -56,10 +56,9 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
       <article className="settings-subsection">
         <h3>Lente activa</h3>
         <p>{NAMES[activeMode]} · fingerprint <code>{data.active_fingerprint.slice(0, 8)}</code></p>
-        {data.activation_required ? <><p>Hay una propuesta DISCOVERED pendiente de activación{data.proposed_discovered_fingerprint ? <> · fingerprint <code>{data.proposed_discovered_fingerprint.slice(0, 8)}</code></> : null}.</p><button className="secondary-button" disabled={locked} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { active: "DISCOVERED" })))}>Activar propuesta DISCOVERED</button><button className="secondary-button" disabled={locked} onClick={() => void action(() => taxonomyRequest("/settings", context, jsonRequest("PUT", { discard_proposal: true })))}>Descartar propuesta DISCOVERED</button></> : null}
       </article>
       {data.discovery_local_available && discovery && !data.restored ? <>
-        <TaxonomyProject role="designer" context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
+        <TaxonomyProject role="designer" proposal={data.proposed_discovered_taxonomy} proposalFingerprint={data.proposed_discovered_fingerprint} review={data.designer_review} context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
         <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
         <p className="eyebrow">1. Clasificar incidencias</p>
         <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
@@ -88,8 +87,8 @@ function TaxonomyExplorer({ context, mode, left, right }: { context: TaxonomyCon
     {exploration ? <div className="taxonomy-exploration">
       <p>{exploration.note || exploration.audit?.note}</p>
       {exploration.audit ? <p>Subpalancas bajo varias Palancas: {exploration.audit.multi_parent_sublevers.join(", ") || "ninguna"}. Categorías genéricas: {exploration.audit.generic_labels.join(", ") || "ninguna"}.</p> : null}
-      <div className="table-scroll"><table><thead><tr>{(compare ? ["Origen", "Destino", "Volumen", "Share"] : ["Palanca", "Subpalanca", "Volumen", "Share", "NPS", "Promotores / Neutros / Detractores", "Ejemplos"]).map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{exploration.rows.map((row, i) => <tr key={i}>{compare ? <><td>{row.from_lever} &gt; {row.from_sublever}</td><td>{row.to_lever} &gt; {row.to_sublever}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td></> : <><td>{row.Palanca}</td><td>{row.Subpalanca}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td><td>{formatMetric(row.nps)}</td><td>{row.promoters} / {row.neutrals} / {row.detractors}</td><td>{Array.isArray(row.examples) ? row.examples.map((text, index) => <p key={index}>{text}</p>) : null}</td></>}</tr>)}</tbody></table></div>
-      <div className="inline-actions"><button disabled={isLoading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Anterior</button><span>{offset + 1}–{offset + exploration.rows.length} de {exploration.total}</span><button disabled={isLoading || offset + 100 >= exploration.total} onClick={() => setOffset(offset + 100)}>Siguiente</button></div>
+      {exploration.rows.length ? <><div className="table-scroll"><table><thead><tr>{(compare ? ["Origen", "Destino", "Volumen", "Share"] : ["Palanca", "Subpalanca", "Volumen", "Share", "NPS", "Promotores / Neutros / Detractores", "Ejemplos"]).map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{exploration.rows.map((row, i) => <tr key={i}>{compare ? <><td>{row.from_lever} &gt; {row.from_sublever}</td><td>{row.to_lever} &gt; {row.to_sublever}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td></> : <><td>{row.Palanca}</td><td>{row.Subpalanca}</td><td>{row.volume}</td><td>{formatPercentage(row.share)}</td><td>{formatMetric(row.nps)}</td><td>{row.promoters} / {row.neutrals} / {row.detractors}</td><td>{Array.isArray(row.examples) ? row.examples.map((text, index) => <p key={index}>{text}</p>) : null}</td></>}</tr>)}</tbody></table></div>
+      <div className="inline-actions"><button disabled={isLoading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Anterior</button><span>{offset + 1}–{offset + exploration.rows.length} de {exploration.total}</span><button disabled={isLoading || offset + 100 >= exploration.total} onClick={() => setOffset(offset + 100)}>Siguiente</button></div></> : null}
     </div> : null}
   </details>;
 }

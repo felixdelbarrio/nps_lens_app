@@ -56,6 +56,16 @@ def test_readiness_counts_categories_without_requiring_links(helix, monkeypatch,
         "/api/taxonomy/helix/engine", params={"service_origin": "Bank", "engine": "llm"}
     )
     assert response.status_code == (200 if received == 3 else 409)
+    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
+    assert (
+        client.put(
+            "/api/taxonomy/helix/engine", params={"service_origin": "Bank", "engine": "rules"}
+        ).status_code
+        == 200
+    )
+    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
+    if received == 3:
+        client.put("/api/taxonomy/helix/engine", params={"service_origin": "Bank", "engine": "llm"})
     if received == 3:
         diagnostic = dashboard.linking_dashboard(context=ctx)["diagnostics"]
         assert diagnostic["evaluation_state"] == "NOT_EVALUATED"

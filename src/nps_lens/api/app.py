@@ -975,6 +975,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with dashboard_layer._analytics_lock:
             context = taxonomy_context(request)
             status = dashboard_layer.classification_status(kind, context, **engine_scope(request))
+            if engine == "rules" and not status["base_available"]:
+                raise HTTPException(409, "Este Marco requiere clasificación LLM.")
             if engine == "llm" and not status["ready"]:
                 raise HTTPException(409, status["reason"])
             state = dashboard_layer.taxonomy.state(context)
