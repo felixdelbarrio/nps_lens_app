@@ -557,9 +557,9 @@ class TaxonomyExchange:
         pending = stage == "classifier"
         frame = self._frame(context)
         full_frame = frame
-        required, horizon = required_comments(full_frame, **scope)
+        horizon = None
         if pending:
-            frame = required
+            frame, horizon = required_comments(full_frame, **scope)
         horizon_keys = frame["_business_key"].tolist() if pending else []
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
@@ -652,7 +652,7 @@ class TaxonomyExchange:
             "id": uuid.uuid4().hex,
             "scope": scope if pending else {},
             "horizon_keys": horizon_keys,
-            "analysis_horizon": horizon.payload() if pending else None,
+            "analysis_horizon": horizon.payload() if horizon else None,
             "corpus": self._corpus(context, full_frame),
             "groups": {str(i): keys for i, keys in enumerate(groups.values(), 1)},
             "mode": mode,
