@@ -27,7 +27,7 @@ from nps_lens.analytics.taxonomy import MODES
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
-from nps_lens.services.analysis_horizon import analysis_horizon
+from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix
 from nps_lens.services.classification_protocol import (
     HELIX_SCHEMA,
     CompactClassification,
@@ -253,7 +253,13 @@ class HelixExchange:
         return digest([mode, fingerprint, HELIX_INSTRUCTIONS_VERSION])
 
     def inputs(
-        self, context: UploadContext, incidents: pd.DataFrame, mode: str, **scope: Any
+        self,
+        context: UploadContext,
+        incidents: pd.DataFrame,
+        mode: str,
+        *,
+        channel_assignments: list[str] | None = None,
+        **scope: Any,
     ) -> dict[str, Any]:
         if self.taxonomy.state(context).get("restored"):
             raise ValueError("Vuelve al dataset local para usar el intercambio Helix.")
@@ -262,9 +268,24 @@ class HelixExchange:
         source = self.taxonomy.source(context).sort_values("_business_key")
         horizon = analysis_horizon(source, **scope)
         if "Fecha" in source:
-            source = source.loc[horizon.mask(source["Fecha"])]
+            dates = pd.to_datetime(source["Fecha"], errors="coerce").dt.date
+            source = source.loc[
+                (
+                    dates.between(horizon.link_comment_start, horizon.link_comment_end)
+                    if horizon.link_comment_start and horizon.link_comment_end
+                    else dates.notna() & False
+                )
+            ]
+        if channel_assignments:
+            source = source.loc[
+                source["Canal"]
+                .astype("string")
+                .str.strip()
+                .str.casefold()
+                .eq(str(scope.get("score_channel") or "").strip().casefold())
+            ]
         all_incidents = incidents
-        incidents = incidents.loc[horizon.mask(incident_occurrence_dates(incidents)[0], helix=True)]
+        _, incidents = eligible_helix(incidents, horizon, channel_assignments or [])
         available = self.taxonomy.available(context, source, self.taxonomy.registry(context))
         frame = (
             self.taxonomy.resolve(context, source, mode)

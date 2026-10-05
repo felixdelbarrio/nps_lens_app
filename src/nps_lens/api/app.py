@@ -708,7 +708,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if proposal:
                 if mode != "DISCOVERED":
                     raise ValueError("Solo DISCOVERED tiene propuestas de taxonomía.")
-                catalog = dashboard_layer.taxonomy.state(context).get("proposed_discovered_taxonomy")
+                catalog = dashboard_layer.taxonomy.state(context).get(
+                    "proposed_discovered_taxonomy"
+                )
                 if not catalog:
                     raise ValueError("No hay una propuesta de taxonomía para descargar.")
             else:
@@ -720,7 +722,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return Response(
             content,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="taxonomia-{mode.lower()}{suffix}.xlsx"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="taxonomia-{mode.lower()}{suffix}.xlsx"'
+            },
         )
 
     @app.get("/api/taxonomy/compare")
@@ -910,11 +914,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         context = taxonomy_context(request)
         mode = dashboard_layer.taxonomy.state(context)["active"]
         helix = HelixExchange(dashboard_layer.taxonomy, handler.downloads)
+        scope = engine_scope(request)
+        scope["score_channel"] = dashboard_layer._resolve_score_channel(
+            dashboard_layer._load_nps_df(context), scope["score_channel"]
+        )
         return (
             helix,
             context,
             helix.inputs(
-                context, dashboard_layer._load_helix_df(context), mode, **engine_scope(request)
+                context,
+                dashboard_layer._load_helix_df(context),
+                mode,
+                channel_assignments=dashboard_layer.settings.service_origin_n2_map.get(
+                    context.service_origin, {}
+                ).get(scope["score_channel"], []),
+                **scope,
             ),
         )
 

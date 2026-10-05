@@ -50,7 +50,6 @@ from nps_lens.analytics.linking_policy import (
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
     evaluation_diagnostic,
-    temporal_scope_mask,
 )
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
@@ -80,14 +79,12 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
-from nps_lens.domain.helix import SOURCE_SERVICE_N1, SOURCE_SERVICE_N2
 from nps_lens.domain.helix_links import (
     build_helix_incident_url_lookup,
     enrich_helix_incident_links,
     resolve_helix_incident_url,
 )
 from nps_lens.domain.models import UploadContext
-from nps_lens.domain.normalization import equivalence_key
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.domain.publication_scope import build_publication_scope
 from nps_lens.domain.record_identity import analytical_response_ids
@@ -107,6 +104,7 @@ from nps_lens.reports.coherence import ReportCoherenceError, validate_classifica
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
+from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix, required_comments
 from nps_lens.services.analytics import (
     build_period_kpis,
     daily_nps_explanation,
@@ -582,13 +580,15 @@ class DashboardService:
         nps = self._apply_population_filters(
             self._apply_score_channel_filter(frame, resolved), pop_year, pop_month
         )
-        helix = self._load_helix_df(context, score_channel=channel if assignments else None)
-        return (
-            nps,
+        helix = self._load_helix_df(context)
+        history, eligible = eligible_helix(
             helix,
-            self._causal_helix_window(helix, nps, max_days_apart=max_days_apart),
-            resolved,
+            analysis_horizon(
+                frame, pop_year=pop_year, pop_month=pop_month, max_days_apart=max_days_apart
+            ),
+            assignments,
         )
+        return nps, history, eligible, resolved
 
     def analysis_engine(self, kind: str, context: UploadContext, **scope: Any) -> dict[str, Any]:
         preference = "comment_engine" if kind == "comments" else "causal_engine"
@@ -623,32 +623,21 @@ class DashboardService:
         try:
             if self.settings.auth_mode != "local" or state.get("restored"):
                 raise ValueError("Los motores LLM solo se activan en el dataset local.")
-            frame = self._load_nps_df(context)
+            frame = (
+                self.taxonomy.source(context) if kind == "comments" else self._load_nps_df(context)
+            )
             if kind == "comments":
                 base_available = mode != "DISCOVERED" and bool(
                     self.taxonomy.catalog(context, mode)["taxonomy"]
                 )
-                visible = self.comments_scope(
-                    frame,
-                    pop_year=pop_year,
-                    pop_month=pop_month,
-                    score_channel=score_channel,
-                    nps_group=nps_group,
+                visible, _ = required_comments(
+                    frame, pop_year=pop_year, pop_month=pop_month, max_days_apart=max_days_apart
                 )
                 total = len(visible)
                 received = len(
                     TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
                 )
             elif kind == "helix":
-                _, _, visible, _ = self.causal_scope(
-                    context,
-                    frame,
-                    pop_year=pop_year,
-                    pop_month=pop_month,
-                    score_channel=score_channel,
-                    max_days_apart=max_days_apart,
-                )
-                total = len(visible)
                 handler = HelixExchange(self.taxonomy, Path("."))
                 inputs = handler.inputs(
                     context,
@@ -656,17 +645,16 @@ class DashboardService:
                     mode,
                     pop_year=pop_year,
                     pop_month=pop_month,
-                    score_channel=score_channel,
+                    score_channel=self._resolve_score_channel(
+                        self._load_nps_df(context), score_channel
+                    ),
                     max_days_apart=max_days_apart,
+                    channel_assignments=self.settings.service_origin_n2_map.get(
+                        context.service_origin, {}
+                    ).get(self._resolve_score_channel(frame, score_channel), []),
                 )
-                received = (
-                    len(
-                        set(visible["Incident Number"].astype(str))
-                        & set(handler.classifications(context, inputs)[mode])
-                    )
-                    if total
-                    else 0
-                )
+                total = len(inputs["incidents"])
+                received = len(handler.classifications(context, inputs)[mode])
             else:
                 raise ValueError("Motor desconocido.")
             ready = total > 0 and received == total
@@ -687,7 +675,7 @@ class DashboardService:
                 else (
                     "Clasifica primero todas las incidencias Helix de la lente activa."
                     if kind == "helix"
-                    else "El ámbito visible requiere todas sus clasificaciones LLM."
+                    else "El horizonte analítico requiere todas sus clasificaciones LLM."
                 )
             ),
         }
@@ -1382,26 +1370,6 @@ class DashboardService:
             "has_more": offset + len(slice_df) < total_rows,
         }
 
-    @staticmethod
-    def _causal_helix_window(
-        helix_df: pd.DataFrame,
-        nps_df: pd.DataFrame,
-        *,
-        max_days_apart: int,
-    ) -> pd.DataFrame:
-        """Apply the one causal time policy without pretending Helix is an NPS dataset."""
-
-        if helix_df.empty or nps_df.empty or "Fecha" not in nps_df.columns:
-            return helix_df.iloc[0:0].copy()
-        return cast(
-            pd.DataFrame,
-            helix_df.loc[
-                temporal_scope_mask(
-                    nps_df["Fecha"], incident_occurrence_dates(helix_df)[0], max_days_apart
-                )
-            ].copy(),
-        )
-
     def _causal_analysis_bundle(
         self,
         *,
@@ -1440,9 +1408,14 @@ class DashboardService:
                 context,
                 self._load_helix_df(context),
                 llm_status["active"],
+                channel_assignments=self.settings.service_origin_n2_map.get(
+                    context.service_origin, {}
+                ).get(self._resolve_score_channel(active_frame, score_channel), []),
                 pop_year=pop_year,
                 pop_month=pop_month,
-                score_channel=score_channel,
+                score_channel=self._resolve_score_channel(
+                    self._load_nps_df(context), score_channel
+                ),
                 max_days_apart=max_days_apart,
             )
             if handler
@@ -1510,8 +1483,7 @@ class DashboardService:
             focus_group, focus_label = self._linking_focus_group(POP_ALL)
             focus_df = nps_slice.loc[focus_mask(nps_slice, focus_group=focus_group)].copy()
             helix_total = self._load_helix_df(context)
-            helix_annotated = annotate_incident_link_quality(helix_window)
-            helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
+            helix_slice = helix_window
             imported_links = None
             llm_links_pending = False
             if (
@@ -1537,8 +1509,8 @@ class DashboardService:
                 "nps_slice": nps_slice,
                 "focus_df": focus_df,
                 "helix_slice": helix_slice,
-                "helix_window_rows": int(len(helix_window)),
-                "helix_excluded_quality": int(len(helix_window) - len(helix_slice)),
+                "helix_window_rows": helix_window.attrs["window_total"],
+                "helix_excluded_quality": helix_window.attrs["window_total"] - len(helix_slice),
                 "causal_engine": llm_status["selected_engine"],
                 "signal_quality": signal_quality(nps_slice),
             }
@@ -2076,12 +2048,11 @@ class DashboardService:
                 raise ReportCoherenceError(
                     "Regenera la clasificación de comentarios con la taxonomía diseñada activa."
                 )
-            visible = self.comments_scope(
+            visible, _ = required_comments(
                 self._load_nps_df(context),
                 pop_year=pop_year,
                 pop_month=pop_month,
-                score_channel=score_channel,
-                nps_group=POP_ALL,
+                max_days_apart=max_days_apart,
             )
             valid = TaxonomyExchange(self.taxonomy, Path(".")).assignments(context, visible, mode)
             if len(valid) != len(visible):
@@ -2119,8 +2090,15 @@ class DashboardService:
                     mode,
                     pop_year=pop_year,
                     pop_month=pop_month,
-                    score_channel=score_channel,
+                    score_channel=self._resolve_score_channel(
+                        self._load_nps_df(context), score_channel
+                    ),
                     max_days_apart=max_days_apart,
+                    channel_assignments=self.settings.service_origin_n2_map.get(
+                        context.service_origin, {}
+                    ).get(
+                        self._resolve_score_channel(self._load_nps_df(context), score_channel), []
+                    ),
                 )
                 current = handler.current(context, inputs)[mode]
                 fingerprints = {row.get("taxonomy_fingerprint") for row in current.values()}
@@ -2999,8 +2977,6 @@ class DashboardService:
     def _load_helix_df(
         self,
         context: UploadContext,
-        *,
-        score_channel: Optional[str] = None,
     ) -> pd.DataFrame:
         restored = self.taxonomy.state(context).get("restored")
         if restored and restored.get("helix") is not None:
@@ -3013,14 +2989,8 @@ class DashboardService:
         key = (
             "helix-frame",
             *self._context_key(context),
-            str(score_channel or ""),
             self._path_revision(stored.path),
             self.taxonomy.registry(context).signature("helix"),
-            tuple(
-                self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
-                    str(score_channel or ""), []
-                )
-            ),
         )
         with self._analytics_lock:
             cached = self._frame_cache.get(key)
@@ -3028,28 +2998,6 @@ class DashboardService:
                 self._frame_cache.move_to_end(key)
                 return cached
             frame = self.taxonomy.registry(context).apply("helix", self.helix_store.load_df(stored))
-            assignments = self.settings.service_origin_n2_map.get(context.service_origin, {}).get(
-                str(score_channel or ""), []
-            )
-            assignment_keys = {
-                equivalence_key(value) for value in assignments if equivalence_key(value)
-            }
-            if assignment_keys:
-                n1 = frame.get(SOURCE_SERVICE_N1, pd.Series("", index=frame.index)).map(
-                    equivalence_key
-                )
-                n2_matches: pd.Series[bool] = (
-                    frame.get(SOURCE_SERVICE_N2, pd.Series("", index=frame.index))
-                    .astype(str)
-                    .map(
-                        lambda value: any(
-                            equivalence_key(token) in assignment_keys
-                            for token in value.split(",")
-                            if equivalence_key(token)
-                        )
-                    )
-                )
-                frame = frame.loc[n1.isin(assignment_keys) | n2_matches].copy()
             return cast(
                 pd.DataFrame,
                 self._remember_bounded(

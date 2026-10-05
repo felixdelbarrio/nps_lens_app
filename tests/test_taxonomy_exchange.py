@@ -124,7 +124,9 @@ def test_taxonomy_excel_downloads_proposal_and_saved_catalog(exchange, monkeypat
     response = client.get("/api/taxonomy/export", params={**params, "proposal": "true"})
     assert response.status_code == 200
     assert response.headers["content-disposition"].endswith('taxonomia-discovered-propuesta.xlsx"')
-    assert response.headers["content-type"] == ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     sheet = load_workbook(io.BytesIO(response.content)).active
     assert list(sheet.values) == [
         ("Palanca", "Subpalanca", "Criterio de clasificación"),
@@ -138,7 +140,9 @@ def test_taxonomy_excel_downloads_proposal_and_saved_catalog(exchange, monkeypat
     assert saved.status_code == 200
     saved_sheet = load_workbook(io.BytesIO(saved.content)).active
     assert saved_sheet.max_row == 1 + sum(len(b["sublevers"]) for b in TAXONOMY["taxonomy"])
-    assert saved_sheet["C2"].value == label_criterion(saved_sheet["A2"].value, saved_sheet["B2"].value)
+    assert saved_sheet["C2"].value == label_criterion(
+        saved_sheet["A2"].value, saved_sheet["B2"].value
+    )
     assert saved.headers["content-disposition"].endswith('taxonomia-discovered.xlsx"')
 
 

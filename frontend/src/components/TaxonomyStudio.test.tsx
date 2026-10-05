@@ -25,7 +25,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
     if (url.includes("/helix")) return new Response(JSON.stringify({ready:false,taxonomies:{SOURCE:{received:0,pending:1}},pending:1}));
     if (url.includes("/settings/equivalences")) return new Response(JSON.stringify({dimensions:{"nps.Palanca":[]},available_dimensions:["nps.Palanca"]}));
     if (url.includes("/settings")) { Object.assign(state,JSON.parse(String(init?.body))); state.requested_active = state.active; return new Response("{}"); }
-    if (url.includes("/explore") || url.includes("/compare")) return new Response(JSON.stringify({ rows: [], total: 0, note: "Comparación reproducible" }));
+    if (url.includes("/explore") || url.includes("/compare")) return new Response(JSON.stringify({ rows: [], total: 0, comparable: 0, groups: 0, note: "Comparación reproducible" }));
     return new Response(JSON.stringify(state));
   });
   vi.stubGlobal("fetch", fetcher);
@@ -138,7 +138,7 @@ it("previews and accepts a discovered proposal without changing the framework", 
 it("passes the changing analysis scope to classification while keeping designer on the dataset", async () => {
   const fetcher = vi.fn(async (url: string) => {
     if (url.includes("/instructions")) return Response.json({ versions: {designer:"test",classifier:"test",helix:"test",normalizer:"test"}, designer:"Reglas",classifier:"Reglas",helix:"Reglas" });
-    if (url.includes("/progress")) return Response.json({ total:3,received:1,pending:2,multiple:0,analysis_horizon:{comment_start:"2026-06-12",comment_end:"2026-09-20",helix_start:"2026-03-14",max_days_apart:90},designer:{total:4,received:0,pending:4,levers:0,sublevers:0} });
+    if (url.includes("/progress")) return Response.json({ total:3,received:1,pending:2,multiple:0,analysis_horizon:{comment_start:"2026-06-12",comment_end:"2026-09-20",helix_start:"2026-06-03",max_days_apart:90},designer:{total:4,received:0,pending:4,levers:0,sublevers:0} });
     if (url.includes("/discovery")) return Response.json({designer_url:"",classifier_url:"",helix_classifier_url:""});
     if (url.includes("/helix/engine")) return Response.json({selected_engine:"rules",ready:false,active:"SOURCE",total:2,received:0});
     if (url.includes("/helix")) return Response.json({total:2,received:0,pending:2,classified:0,unassigned:0,coverage:0,multiple:0,categories:[],taxonomies:{SOURCE:{received:0,pending:2}}});
@@ -149,7 +149,7 @@ it("passes the changing analysis scope to classification while keeping designer 
   const scope = {...context,pop_year:"2026",pop_month:"09",score_channel:"Web",nps_group:"Detractores",max_days_apart:"90"};
   const {rerender} = render(<SWRConfig value={{provider:()=>new Map()}}><TaxonomyStudio context={context} classificationContext={scope} onChange={async()=>{}} /></SWRConfig>);
   await user.click(await screen.findByRole("tab",{name:"Análisis con LLM"}));
-  expect(await screen.findByText(/Ámbito analítico: 2026-06-12/)).toHaveTextContent("Helix desde 2026-03-14 por ventana de 90 días");
+  expect(await screen.findByText(/Ámbito analítico: 2026-06-12/)).toHaveTextContent("Helix desde 2026-06-03 por ventana de 90 días");
   await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "09")).toBe(true));
   expect(fetcher.mock.calls.some(([url])=>url.includes("/discovery/progress?") && !new URL(url,"http://localhost").searchParams.has("pop_month"))).toBe(true);
   rerender(<SWRConfig><TaxonomyStudio context={context} classificationContext={{...scope,pop_month:"10"}} onChange={async()=>{}} /></SWRConfig>);

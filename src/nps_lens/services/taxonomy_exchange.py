@@ -20,7 +20,7 @@ from nps_lens.analytics.signal_quality import audit_classifications
 from nps_lens.analytics.taxonomy import signature
 from nps_lens.domain.models import UploadContext
 from nps_lens.platform.downloads import persist_download
-from nps_lens.services.analysis_horizon import analysis_horizon
+from nps_lens.services.analysis_horizon import required_comments
 from nps_lens.services.classification_protocol import (
     CLASSIFICATION_BATCH_BYTES,
     CLASSIFICATION_BATCH_ROWS,
@@ -499,12 +499,7 @@ class TaxonomyExchange:
 
     def progress(self, context: UploadContext, **scope: Any) -> dict[str, Any]:
         full_frame = self._frame(context)
-        horizon = analysis_horizon(full_frame, **scope)
-        frame = (
-            full_frame.loc[horizon.mask(full_frame["Fecha"])]
-            if scope and "Fecha" in full_frame
-            else full_frame
-        )
+        frame, horizon = required_comments(full_frame, **scope)
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"]
         catalog = self.taxonomy.catalog(context, mode)
@@ -562,9 +557,9 @@ class TaxonomyExchange:
         pending = stage == "classifier"
         frame = self._frame(context)
         full_frame = frame
-        horizon = analysis_horizon(full_frame, **scope)
-        if pending and scope and "Fecha" in frame:
-            frame = frame.loc[horizon.mask(frame["Fecha"])]
+        required, horizon = required_comments(full_frame, **scope)
+        if pending:
+            frame = required
         horizon_keys = frame["_business_key"].tolist() if pending else []
         state = self.taxonomy.state(context)
         mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
