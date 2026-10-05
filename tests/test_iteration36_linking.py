@@ -172,7 +172,8 @@ def test_categories_survive_comment_engine_date_changes_but_not_taxonomy_or_narr
         state["causal_engine"] = engine
         handler.taxonomy.save_state(ctx, state)
         assert handler.classifications(ctx, handler.inputs(ctx, incidents, "SOURCE")) == categories
-    request = exported(handler.export(ctx, updated)["saved_paths"])
+    assert handler.export(ctx, updated)["saved_paths"] == []
+    request = exported(handler.export(ctx, updated, only_linking=True)["saved_paths"])
     assert all(
         "classification" in row
         for name, batch in request.items()
@@ -182,7 +183,7 @@ def test_categories_survive_comment_engine_date_changes_but_not_taxonomy_or_narr
     response = helix_response(request, updated["comments"][1]["id"])
     handler.import_response(ctx, updated, zipped(response))
     assert handler.classifications(ctx, updated) == categories
-    incidents.loc[0, "Submit Date"] += pd.Timedelta(days=1)
+    incidents.loc[0, "Submit Date"] -= pd.Timedelta(days=1)
     redated = handler.inputs(ctx, incidents, "SOURCE")
     assert handler.classifications(ctx, redated) == categories
     assert "INC-0" not in handler.current(ctx, redated)["SOURCE"]
@@ -310,7 +311,7 @@ def test_imported_llm_empty_decision_distinguishes_no_match_from_not_evaluated(
     handler, ctx, frame, incidents, _ = helix
     incidents = incidents.iloc[:1]
     if not with_candidates:
-        frame["Fecha"] = pd.Timestamp("2020-01-01")
+        frame["Comment"] = ""
     inputs = handler.inputs(ctx, incidents, "SOURCE")
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     response = helix_response(request, "not-a-candidate")

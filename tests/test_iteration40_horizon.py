@@ -94,8 +94,8 @@ def test_comments_incremental_preserve_outside_horizon_and_late_job(exchange, mo
     pd.testing.assert_frame_equal(incremental, full)
 
 
-def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix):
-    handler, ctx, frame, incidents, _ = helix
+def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix, monkeypatch):
+    handler, ctx, frame, incidents, client = helix
     frame.loc[frame.index[-1], "Fecha"] = pd.Timestamp("2026-10-01")
     incidents = incidents.iloc[:5].copy()
     incidents["Submit Date"] = pd.to_datetime(
@@ -112,7 +112,18 @@ def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix):
     }
     assert sent == {"INC-1", "INC-2"}
     changed = handler.inputs(ctx, incidents, "SOURCE", **OCTOBER)
-    handler.import_response(ctx, changed, zipped(helix_response(request, "no-link")))
+    response = zipped(helix_response(request, "no-link"))
+    handler.import_response(ctx, changed, response)
+    monkeypatch.setattr(
+        client.app.state.dashboard_service, "_load_helix_df", lambda *args, **kwargs: incidents
+    )
+    imported = client.post(
+        "/api/taxonomy/helix/import",
+        params={"service_origin": "Bank", "service_origin_n1": "Web", **OCTOBER},
+        files={"file": ("september-response.zip", response, "application/zip")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["analysis_horizon"] == inputs["analysis_horizon"]
     assert handler.status(ctx, inputs)["pending"] == 0
     assert handler.export(ctx, inputs)["saved_paths"] == []
     assert handler.status(ctx, changed)["received"] == 2

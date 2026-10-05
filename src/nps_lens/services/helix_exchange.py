@@ -575,6 +575,8 @@ class HelixExchange:
     def import_response(
         self, context: UploadContext, inputs: dict[str, Any], content: bytes
     ) -> dict[str, Any]:
+        if self.taxonomy.state(context).get("restored"):
+            raise ValueError("Vuelve al dataset local para usar el intercambio Helix.")
         manifest, files = read_response(content, "helix")
         with self.repository._connect() as db:
             found = db.execute(
