@@ -43,8 +43,27 @@ def linking_diagnostics(
         matches=len(links),
         reason=str(links.attrs.get("evaluation_reason", "")) if links.empty else "",
     )
+    reuse = (
+        links.groupby("nps_id", sort=False)["incident_id"].nunique()
+        if not links.empty
+        else pd.Series(dtype="int64")
+    )
+    percentiles = (
+        reuse.quantile([0.5, 0.9, 0.95])
+        if not reuse.empty
+        else pd.Series(0.0, index=[0.5, 0.9, 0.95])
+    )
     return {
         **evaluation,
+        "incidents_per_comment": {
+            "p50": float(percentiles.loc[0.5]),
+            "p90": float(percentiles.loc[0.9]),
+            "p95": float(percentiles.loc[0.95]),
+            "max": int(reuse.max()) if not reuse.empty else 0,
+            "comments_gt1": int((reuse > 1).sum()),
+            "comments_gt5": int((reuse > 5).sum()),
+            "comments_gt10": int((reuse > 10).sum()),
+        },
         "nps_total": len(nps),
         "nps_focus": len(focus),
         "nps_matchable": matchable,

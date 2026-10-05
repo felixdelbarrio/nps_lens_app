@@ -116,9 +116,18 @@ cuenta registros con una principal y al menos una adicional, una sola vez por
 registro; las adicionales no multiplican los totales ni el NPS. Una incidencia sin encaje lleva
 `primary=null`, `secondary=[]` y ningún vínculo, y no vuelve a exportarse como pendiente.
 
-En causalidad LLM, la afinidad procede de los vínculos importados. El umbral local
+Taxonomy Studio ordena Helix en dos pasos: clasificar incidencias y vincular Helix ↔ VoC.
+La clasificación completa de la lente activa habilita el interruptor de vinculación
+LLM; sólo al seleccionarlo aparece el intercambio de vínculos que reutiliza las
+categorías. Evidencia consume el motor seleccionado. Las categorías recibidas y
+los vínculos pendientes se contabilizan por separado.
+
+En vinculación LLM, la afinidad procede de los vínculos importados. El umbral local
 no se aplica y su control queda desactivado. La ventana temporal sigue siendo
-configurable y se comprueba en cada pareja comentario–incidencia.
+configurable y se comprueba en cada pareja comentario–incidencia: sólo admite
+incidencias de la misma fecha o hasta N días antes del comentario. El diagnóstico
+canónico mide p50, p90, p95, máximo y comentarios con más de 1, 5 y 10 incidencias
+únicas entre comentarios enlazados, sin limitar incidencias por comentario.
 
 Las instrucciones requieren interpretar el contexto de banca de empresas,
 negaciones, tarea y resultado; no clasificar solo por palabras coincidentes. Una

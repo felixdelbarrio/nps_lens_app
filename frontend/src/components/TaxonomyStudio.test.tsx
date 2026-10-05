@@ -21,6 +21,7 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
     if (url.includes("/discovery/progress")) return new Response(JSON.stringify({total:96,received:0,pending:96,multiple:0,designer:{total:96,received:0,pending:96,levers:0,sublevers:0}}));
     if (url.includes("/discovery")) return new Response(JSON.stringify({ helix_classifier_url:"https://chatgpt.com/g/helix", designer_url: "https://chatgpt.com/g/designer", classifier_url: "https://chatgpt.com/g/classifier", session: "connected" }));
     if (url.includes("/manual")) { if (init?.method === "PUT") Object.assign(state.taxonomies[1], { available: true, coverage: 1, levers: 1, sublevers: 1 }); return new Response(JSON.stringify({revision:"",exists:false,templates:["NONE","SOURCE"],affected_comments:0, taxonomy: [{ lever: "Atención", sublevers: ["Resolución"] }] })); }
+    if (url.includes("/helix/engine")) return Response.json({selected_engine:"rules",ready:false,active:"SOURCE",received:0,total:1});
     if (url.includes("/helix")) return new Response(JSON.stringify({ready:false,taxonomies:{SOURCE:{received:0,pending:1}},pending:1}));
     if (url.includes("/settings/equivalences")) return new Response(JSON.stringify({dimensions:{"nps.Palanca":[]},available_dimensions:["nps.Palanca"]}));
     if (url.includes("/settings")) { Object.assign(state,JSON.parse(String(init?.body))); state.requested_active = state.active; return new Response("{}"); }
@@ -35,6 +36,11 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   expect(await screen.findByText("Explorar Taxonomía Manual")).toBeInTheDocument();
   expect(screen.queryByText("Normalización · tabla de equivalencias")).not.toBeInTheDocument();
   await user.click(screen.getByRole("tab", {name:"Análisis con LLM"}));
+  const classification = screen.getByRole("heading", { name: "Clasifica incidencias" });
+  const linking = screen.getByRole("heading", { name: "Vinculación Helix ↔ VoC" });
+  expect(classification.compareDocumentPosition(linking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole("switch", {name:"Usar vinculación semántica LLM"})).toBeDisabled();
+  expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();
   await user.upload(screen.getByLabelText("Importar ZIP de comentarios clasificados"), new File(["{}"], "result.zip", { type: "application/zip" }));

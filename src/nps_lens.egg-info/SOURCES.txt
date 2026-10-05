@@ -138,6 +138,7 @@ tests/test_ppt_wrapped_table_layout.py
 tests/test_publication_llm_regressions.py
 tests/test_publication_scope.py
 tests/test_semantic_contract.py
+tests/test_semantic_credibility.py
 tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
 tests/test_taxonomy_engine.py

@@ -244,8 +244,13 @@ def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monk
     )
     assert not payload["links_mode_df"].empty
     frame.loc[0, "Comment"] = "Changed comment"
-    blocked = client.put("/api/taxonomy/helix/engine", params=params)
-    assert blocked.status_code == 409
+    enabled = client.put("/api/taxonomy/helix/engine", params=params)
+    assert enabled.status_code == 200
+    assert enabled.json()["ready"]
+    assert (
+        dashboard.linking_dashboard(context=ctx)["diagnostics"]["evaluation_reason"]
+        == "evaluation_pending"
+    )
     assert (
         client.put("/api/taxonomy/helix/engine", params={**params, "engine": "rules"}).status_code
         == 200

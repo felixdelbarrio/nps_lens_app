@@ -188,9 +188,15 @@ def test_source_does_not_satisfy_pending_discovered_and_export_is_diagnosed(heli
 
 @pytest.mark.parametrize(
     "day,expected",
-    [("2026-06-03", True), ("2026-06-02", False), ("2026-11-30", True), (None, False)],
+    [
+        ("2026-09-01", True),
+        ("2026-06-03", True),
+        ("2026-06-02", False),
+        ("2026-09-02", False),
+        (None, False),
+    ],
 )
-def test_temporal_policy_inclusive_symmetric_and_shared(day, expected):
+def test_temporal_policy_inclusive_directional_and_shared(day, expected):
     assert bool(temporal_mask("2026-09-01", day)) is expected
     link = dict(
         nps_id="N",

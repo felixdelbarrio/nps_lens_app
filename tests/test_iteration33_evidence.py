@@ -81,7 +81,7 @@ def link(**overrides):
         ({"same_symptom": False}, "INDICIO_SEMANTICO"),
         ({"comment_quote": ""}, "INDICIO_SEMANTICO"),
         ({"comment_date": None}, "INDICIO_SEMANTICO"),
-        ({"comment_date": "2026-08-31"}, "EVIDENCIA_OPERATIVA_RECURRENTE"),
+        ({"comment_date": "2026-08-31"}, "INDICIO_SEMANTICO"),
         ({"comment_date": "2027-01-01"}, "INDICIO_SEMANTICO"),
         ({"incident_close_date": "2026-08-01"}, "INDICIO_SEMANTICO"),
         ({"semantic_confidence": 0.1}, "CAUSALIDAD_NO_ACREDITADA"),

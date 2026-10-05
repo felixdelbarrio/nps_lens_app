@@ -278,7 +278,7 @@ def retrieve_incident_candidates(
     max_features: int = LINK_MAX_FEATURES,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
     evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
-    max_days_apart: int | None = LINK_MAX_DAYS_APART,
+    max_days_apart: int = LINK_MAX_DAYS_APART,
     acceptance: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray] | None = None,
 ) -> pd.DataFrame:
     """Shared batched retrieval; acceptance is optional and runs after candidate ordering."""
@@ -326,12 +326,9 @@ def retrieve_incident_candidates(
 
     # Restrict the semantic search space before vectorisation.  Previously every incident in the
     # historical export competed for a period even when it could never pass the temporal policy.
-    if max_days_apart is not None:
-        helix = helix.loc[
-            temporal_scope_mask(nps["nps_date"], helix["incident_date"], max_days_apart)
-        ]
-        if helix.empty:
-            return empty
+    helix = helix.loc[temporal_scope_mask(nps["nps_date"], helix["incident_date"], max_days_apart)]
+    if helix.empty:
+        return empty
 
     nps["nps_topic"] = build_nps_topic(nps)
     helix["incident_topic"] = build_incident_topic(helix)
@@ -449,7 +446,7 @@ def retrieve_incident_candidates(
     chunk = max(1, int(evidence_chunk_size))
     per_incident_k = max(1, int(top_k_per_incident))
     candidate_count = with_candidates = 0
-    max_days = int(max_days_apart) if max_days_apart is not None else None
+    max_days = max(0, int(max_days_apart))
     for start in range(0, word_inc.shape[0], chunk):
         end = min(start + chunk, word_inc.shape[0])
         sim_block = (word_inc[start:end] @ word_nps.T).tocsr()
@@ -466,15 +463,16 @@ def retrieve_incident_candidates(
             candidate_idx = row.indices
             candidate_vals = row.data
             if acceptance is None:
-                if max_days is None:
-                    eligible_idx = date_order
-                elif np.isnat(inc_date):
+                if np.isnat(inc_date):
                     eligible_idx = np.array([], dtype=int)
                 else:
                     delta = np.timedelta64(max_days, "D")
-                    lo = np.searchsorted(sorted_dates, inc_date - delta, side="left")
+                    lo = np.searchsorted(sorted_dates, inc_date, side="left")
                     hi = np.searchsorted(sorted_dates, inc_date + delta, side="right")
                     eligible_idx = date_order[lo:hi]
+                    eligible_idx = eligible_idx[
+                        temporal_mask(nps_dates[eligible_idx], inc_date, max_days)
+                    ]
                 # Category compatibility is context, never an acceptance gate. For
                 # unclassified incidents use explicit taxonomy terms in their narrative.
                 context_terms = set(incident_context[inc_row].split()) | set(
@@ -528,9 +526,8 @@ def retrieve_incident_candidates(
                 scores = dict(zip(candidate_idx, candidate_vals, strict=False))
                 candidate_idx = np.asarray(chosen, dtype=int)
                 candidate_vals = np.array([scores.get(i, 0.0) for i in chosen], dtype=np.float32)
-            if max_days is not None:
-                valid = temporal_mask(nps_dates[candidate_idx], inc_date, max_days)
-                candidate_idx, candidate_vals = candidate_idx[valid], candidate_vals[valid]
+            valid = temporal_mask(nps_dates[candidate_idx], inc_date, max_days)
+            candidate_idx, candidate_vals = candidate_idx[valid], candidate_vals[valid]
             if not len(candidate_idx):
                 continue
             candidate_count += (
@@ -597,7 +594,7 @@ def link_incidents_to_nps_topics(
     max_features: int = LINK_MAX_FEATURES,
     top_k_per_incident: int = LINK_TOP_K_PER_INCIDENT,
     evidence_chunk_size: int = LINK_EVIDENCE_CHUNK_SIZE,
-    max_days_apart: int | None = LINK_MAX_DAYS_APART,
+    max_days_apart: int = LINK_MAX_DAYS_APART,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     def accept(similarities: np.ndarray, shared: np.ndarray, specific: np.ndarray) -> np.ndarray:
         return (similarities >= min_similarity) & (shared >= LINK_MIN_SHARED_TERMS) & (specific > 0)

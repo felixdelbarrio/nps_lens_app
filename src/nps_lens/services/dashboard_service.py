@@ -647,7 +647,7 @@ class DashboardService:
                 received = (
                     len(
                         set(visible["Incident Number"].astype(str))
-                        & set(handler.current(context, inputs)[mode])
+                        & set(handler.classifications(context, inputs)[mode])
                     )
                     if total
                     else 0
@@ -665,7 +665,15 @@ class DashboardService:
             "received": received,
             "pending": total - received,
             "reason": reason
-            or ("" if ready else "El ámbito visible requiere todas sus clasificaciones LLM."),
+            or (
+                ""
+                if ready
+                else (
+                    "Clasifica primero todas las incidencias Helix de la lente activa."
+                    if kind == "helix"
+                    else "El ámbito visible requiere todas sus clasificaciones LLM."
+                )
+            ),
         }
 
     def _safe_helix_operational_benchmark(
@@ -1434,6 +1442,7 @@ class DashboardService:
             .to_numpy()
             .tobytes()
         ).hexdigest()
+        current_links = handler.current(context, inputs) if handler and inputs else None
         evidence_signature = (
             frame_signature,
             self.taxonomy.lens_override or self.taxonomy.state(context)["active"],
@@ -1442,8 +1451,8 @@ class DashboardService:
             self._data_revision(context)[2],
             json.dumps(self.settings.service_origin_n2_map, sort_keys=True),
             (
-                json.dumps(handler.current(context, inputs), sort_keys=True)
-                if handler and inputs
+                json.dumps(current_links, sort_keys=True)
+                if current_links is not None
                 else "llm_pending" if llm_pending else "rules"
             ),
         )
@@ -1480,10 +1489,22 @@ class DashboardService:
             helix_annotated = annotate_incident_link_quality(helix_window)
             helix_slice = helix_annotated.loc[helix_annotated["Causal Match Eligible"]].copy()
             imported_links = None
-            if handler and inputs and not active_frame.attrs.get("classification_pending"):
-                imported_links = handler.links(
-                    context, inputs, focus_df, helix_slice, max_days_apart=max_days_apart
+            llm_links_pending = False
+            if (
+                handler
+                and inputs
+                and current_links is not None
+                and not active_frame.attrs.get("classification_pending")
+                and not helix_slice.empty
+            ):
+                current = current_links[inputs["modes"][0]]
+                llm_links_pending = not set(helix_slice["Incident Number"].astype(str)).issubset(
+                    current
                 )
+                if not llm_links_pending:
+                    imported_links = handler.links(
+                        context, inputs, focus_df, helix_slice, max_days_apart=max_days_apart
+                    )
             base: dict[str, object] = {
                 "ready": False,
                 "resolved_channel": resolved_channel,
@@ -1506,7 +1527,6 @@ class DashboardService:
                 eligible=helix_slice,
                 requested_scope=list(assignments),
             )
-            base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
             if active_frame.attrs.get("classification_pending") or (
                 (
                     active_frame.attrs.get("taxonomy_mode", "SOURCE") != "SOURCE"
@@ -1517,18 +1537,21 @@ class DashboardService:
                     | focus_df["Subpalanca"].fillna("").eq("").any()
                 )
             ):
+                base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
                 cast(dict[str, object], base["diagnostics"]).update(
                     evaluation_diagnostic(
                         eligible=len(helix_slice), reason="classification_pending"
                     )
                 )
                 return base
-            if llm_pending:
+            if llm_pending or llm_links_pending:
+                base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
                 cast(dict[str, object], base["diagnostics"]).update(
                     evaluation_diagnostic(eligible=len(helix_slice), reason="evaluation_pending")
                 )
                 return base
             if nps_slice.empty or focus_df.empty or helix_slice.empty:
+                base["diagnostics"] = linking_diagnostics(**diagnostic_inputs, links=pd.DataFrame())
                 return base
 
             operational_benchmark = self._safe_helix_operational_benchmark(
@@ -1931,7 +1954,7 @@ class DashboardService:
                         if analysis.get("causal_engine") == "llm"
                         else f"{method_spec.summary} La política Helix↔VoC está fijada en similitud ≥ "
                         f"{float(min_similarity):.2f}, al menos {LINK_MIN_SHARED_TERMS} términos específicos compartidos, "
-                        f"hasta {LINK_TOP_K_PER_INCIDENT} comentarios por incidencia y ventana de ±{int(max_days_apart)} días. "
+                        f"hasta {LINK_TOP_K_PER_INCIDENT} comentarios por incidencia y incidencias hasta {int(max_days_apart)} días antes del comentario. "
                         + EVIDENCE_COPY["INDICIO_SEMANTICO"][1]
                     ),
                     "metrics": self._build_situation_narrative_metrics(

@@ -121,7 +121,7 @@ def test_link_incidents_to_nps_topics_uses_detailed_description_for_matching() -
     helix = pd.DataFrame(
         {
             "Incident Number": ["INC-BIO-1"],
-            "Fecha": pd.to_datetime(["2026-01-12"]),
+            "Fecha": pd.to_datetime(["2026-01-09"]),
             "summary": ["Incidencia general de canal"],
             "Detailed Description": ["Error en biometria facial durante login de empresas"],
             "Product Categorization Tier 1": [""],
