@@ -106,7 +106,13 @@ def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exc
         "designer",
     )
 
-    assert result == {"stage": "designer", "imported": True, "activation_required": True}
+    assert result == {
+        "stage": "designer",
+        "imported": True,
+        "proposed_discovered_fingerprint": handler.taxonomy.state(context)[
+            "proposed_discovered_fingerprint"
+        ],
+    }
     assert handler.taxonomy.state(context)["designer_review"]["quotes"] == quotes
 
 

@@ -604,25 +604,26 @@ class TaxonomyService:
 
     def configure(self, context: UploadContext, changes: dict[str, Any]) -> dict[str, Any]:
         state = self.state(context)
+        if (
+            changes.get("accept_proposal") or changes.get("discard_proposal")
+        ) and "active" in changes:
+            raise ValueError("Revisa la propuesta y cambia el Marco en acciones separadas.")
+        if changes.get("accept_proposal") and changes.get("discard_proposal"):
+            raise ValueError("Elige aceptar o descartar la propuesta.")
         if changes.get("discard_proposal"):
             state.pop("proposed_discovered_taxonomy", None)
             state.pop("proposed_discovered_fingerprint", None)
-            self.save_state(context, state)
         if changes.get("accept_proposal") and state.get("proposed_discovered_taxonomy"):
             state["discovered_taxonomy"] = state.pop("proposed_discovered_taxonomy")
-            state["taxonomy_fingerprint"] = state.pop(
-                "proposed_discovered_fingerprint",
-                taxonomy_fingerprint(state["discovered_taxonomy"]),
-            )
+            state["taxonomy_fingerprint"] = state.pop("proposed_discovered_fingerprint")
             for field in ("artifacts", "llm_artifacts"):
                 artifacts = state.get(field, {})
                 item = self.artifact(artifacts.get("DISCOVERED", ""))
                 if item and item.get("taxonomy_fingerprint") != state["taxonomy_fingerprint"]:
                     artifacts.pop("DISCOVERED", None)
-            self.save_state(context, state)
-        frame, registry = self.source(context), self.registry(context)
-        available = self.available(context, frame, registry)
         if "active" in changes:
+            frame, registry = self.source(context), self.registry(context)
+            available = self.available(context, frame, registry)
             mode = changes["active"]
             if mode not in available or not self.catalog(context, mode)["taxonomy"]:
                 raise ValueError(
@@ -711,7 +712,13 @@ class TaxonomyService:
     def explore(
         self, context: UploadContext, mode: str, offset: int = 0, limit: int = 100
     ) -> dict[str, Any]:
-        if mode == "DISCOVERED" and not self.state(context).get("discovered_taxonomy"):
+        state = self.state(context)
+        if (
+            mode == "DISCOVERED"
+            and state.get("proposed_discovered_taxonomy")
+            and not state.get("discovered_taxonomy")
+            and not state.get("restored")
+        ):
             return {
                 "mode": mode,
                 "rows": [],

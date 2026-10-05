@@ -89,3 +89,28 @@ it("exports only linking when categories are complete and displays their fingerp
   await userEvent.click(button);
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*only_linking=true/), expect.objectContaining({method:"POST"})));
 });
+
+it("requires LLM for discovered comments and never offers rules", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({active:"DISCOVERED",selected_engine:"llm",base_available:false,ready:false,total:3,received:0,reason:"Clasificación pendiente"})));
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="comments" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText("Clasificación LLM requerida para DISCOVERED.");
+  expect(screen.getByLabelText("Clasificación de comentarios")).toHaveValue("llm");
+  expect(screen.queryByRole("option", {name:"Clasificación base"})).not.toBeInTheDocument();
+});
+
+it("selects available base and LLM comment classifications using the existing endpoint", async () => {
+  let selected_engine = "rules";
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") selected_engine = new URL(url,"http://localhost").searchParams.get("engine")!;
+    return Response.json({active:"COMPLETED",selected_engine,base_available:true,ready:true,total:3,received:3});
+  });
+  vi.stubGlobal("fetch",fetcher);
+  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="comments" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
+  await screen.findByText(/Marco: Taxonomía Manual/);
+  const selector = screen.getByLabelText("Clasificación de comentarios");
+  await userEvent.selectOptions(selector,"llm");
+  await waitFor(() => expect(selector).toHaveValue("llm"));
+  await userEvent.selectOptions(selector,"rules");
+  await waitFor(() => expect(selector).toHaveValue("rules"));
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/comments/engine?"), expect.objectContaining({method:"PUT"}));
+});

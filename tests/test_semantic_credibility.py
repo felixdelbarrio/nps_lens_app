@@ -49,7 +49,7 @@ def test_pending_proposal_guards_both_exports_and_late_results(helix):
         lambda: comments.export(ctx, "classifier"),
         lambda: handler.export(ctx, old_inputs),
     ):
-        with pytest.raises(ValueError, match="Activa o descarta"):
+        with pytest.raises(ValueError, match="Acepta o descarta"):
             export()
     assert taxonomy_fingerprint(handler.taxonomy.catalog(ctx, "DISCOVERED")) == old_fingerprint
     handler.taxonomy.configure(ctx, {"active": "SOURCE"})
