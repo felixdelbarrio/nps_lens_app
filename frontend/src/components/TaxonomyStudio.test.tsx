@@ -36,6 +36,8 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   expect(await screen.findByText("Explorar Taxonomía Manual")).toBeInTheDocument();
   expect(screen.queryByText("Normalización · tabla de equivalencias")).not.toBeInTheDocument();
   await user.click(screen.getByRole("tab", {name:"Análisis con LLM"}));
+  const commentsControl = screen.getByLabelText("Clasificación de comentarios");
+  expect(commentsControl.closest("article")).toHaveTextContent("Clasifica comentarios");
   const classification = screen.getByRole("heading", { name: "Clasifica incidencias" });
   const linking = screen.getByRole("heading", { name: "Vinculación Helix ↔ VoC" });
   expect(classification.compareDocumentPosition(linking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

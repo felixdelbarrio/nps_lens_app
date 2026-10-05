@@ -105,7 +105,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("tab",{name:"Análisis con LLM"}).click();
   await expect(page.getByText("1. Clasificar incidencias", {exact:true})).toBeVisible();
   await expect(page.getByText("2. Vincular", {exact:true})).toBeVisible();
-  await expect(page.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
+  await expect(page.getByRole("option", {name:"LLM semántico"})).toHaveAttribute("disabled", "");
   await expect(page.getByLabel("Importar ZIP de vínculos evaluados")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
   await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
