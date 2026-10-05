@@ -278,8 +278,10 @@ class HelixExchange:
             ]
         if channel_assignments:
             source = source.loc[
-                source["Canal"]
-                .astype("string")
+                self.taxonomy.registry(context)
+                .normalize_series(
+                    "nps.Canal", source["source_channel" if "source_channel" in source else "Canal"]
+                )
                 .str.strip()
                 .str.casefold()
                 .eq(str(scope.get("score_channel") or "").strip().casefold())
@@ -309,7 +311,7 @@ class HelixExchange:
             raise ValueError("Las incidencias requieren IDs únicos y no vacíos.")
         rows = [
             {"id": key, "description": text}
-            for key, text in zip(ids, build_incident_text(incidents), strict=False)
+            for key, text in zip(ids, incidents["_incident_semantic_text"], strict=False)
         ]
         for row, date in zip(rows, incident_occurrence_dates(incidents)[0], strict=False):
             row["date"] = date.isoformat() if pd.notna(date) else ""

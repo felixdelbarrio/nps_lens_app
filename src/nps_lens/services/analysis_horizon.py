@@ -81,8 +81,8 @@ def analysis_horizon(frame: pd.DataFrame, **scope: Any) -> AnalysisHorizon:
         ),
         max(current.end, selected.max() if len(selected) else current.end),
         days,
-        date.fromisoformat(start) if start else selected.min() if len(selected) else current.start,
-        selected.max() if len(selected) else current.end,
+        (date.fromisoformat(start) if start else selected.min()) if len(selected) else None,
+        selected.max() if len(selected) else None,
     )
 
 
