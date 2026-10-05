@@ -86,7 +86,7 @@ module = [
 ]
 ignore_errors = true
 [[tool.mypy.overrides]]
-module = [ "sklearn.*", "plotly.*", "webview.*",]
+module = [ "sklearn.*", "plotly.*", "webview.*", "openpyxl.*",]
 ignore_missing_imports = true
 
 [tool.setuptools.package-dir]

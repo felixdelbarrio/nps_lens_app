@@ -35,6 +35,7 @@ from nps_lens.domain.column_aliases import ColumnAliasRegistry
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import CATEGORICAL_DIMENSIONS, EquivalenceRegistry
 from nps_lens.platform.downloads import persist_download
+from nps_lens.reports.taxonomy_excel import taxonomy_excel
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.dashboard_service import DashboardService
 from nps_lens.services.equivalence_exchange import EquivalenceExchange
@@ -694,6 +695,33 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return dashboard_layer.taxonomy.explore(taxonomy_context(request), mode, max(offset, 0))
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/api/taxonomy/export")
+    def export_taxonomy_excel(
+        request: Request,
+        mode: str,
+        proposal: bool = False,
+        dashboard_layer: DashboardService = Depends(get_dashboard_service),
+    ) -> Response:
+        context = taxonomy_context(request)
+        try:
+            if proposal:
+                if mode != "DISCOVERED":
+                    raise ValueError("Solo DISCOVERED tiene propuestas de taxonomía.")
+                catalog = dashboard_layer.taxonomy.state(context).get("proposed_discovered_taxonomy")
+                if not catalog:
+                    raise ValueError("No hay una propuesta de taxonomía para descargar.")
+            else:
+                catalog = dashboard_layer.taxonomy.catalog(context, mode)
+            content = taxonomy_excel(catalog)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        suffix = "-propuesta" if proposal else ""
+        return Response(
+            content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="taxonomia-{mode.lower()}{suffix}.xlsx"'},
+        )
 
     @app.get("/api/taxonomy/compare")
     def taxonomy_compare(

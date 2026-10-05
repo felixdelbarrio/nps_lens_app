@@ -93,6 +93,7 @@ it("places the global framework before both tabs and disables classification wit
 it("previews and accepts a discovered proposal without changing the framework", async () => {
   const state = { ...status(), proposed_discovered_fingerprint: "discovered-abcdef", proposed_discovered_taxonomy: {taxonomy:[{lever:"Atención",sublevers:[{name:"Resolución",criterion:"Problema resuelto"}]}]}, designer_review:{reason:"La evidencia respalda las categorías",quotes:["Resolvieron mi problema"]} };
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/progress")) return Response.json({total:96,received:96,pending:0,multiple:0,designer:{total:96,received:96,pending:0,levers:1,sublevers:1}});
     if (url.includes("/instructions")) return Response.json({ versions: { designer: "1", classifier: "1", helix: "1", normalizer: "1" }, designer: "Reglas", classifier: "Reglas", helix: "Reglas" });
     if (url.includes("/settings") && init?.method === "PUT") {
       expect(JSON.parse(String(init.body))).toEqual({accept_proposal:true});
@@ -107,11 +108,28 @@ it("previews and accepts a discovered proposal without changing the framework", 
   await userEvent.setup().click(await screen.findByRole("tab", { name: "Análisis con LLM" }));
   expect(await screen.findByText("source-f")).toBeInTheDocument();
   const proposal = screen.getByRole("region", {name:"Propuesta DISCOVERED"});
+  const details = proposal.querySelector("details")!;
+  const project = proposal.closest("article")!;
+  const follows = (before: Element, after: Element) => expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await waitFor(() => expect(project.querySelector(".exchange-progress")).toBeInTheDocument());
+  follows(project.querySelector(".exchange-progress")!, screen.getByLabelText("URL · Crear Taxonomía"));
+  follows(screen.getByLabelText("URL · Crear Taxonomía"), screen.getByRole("button", {name:"Copiar instrucciones de Crear Taxonomía"}));
+  follows(screen.getByRole("button", {name:"Copiar instrucciones de Crear Taxonomía"}), screen.getByRole("button", {name:"Exportar comentarios para crear taxonomía"}));
+  follows(project.querySelector(".exchange-actions")!, proposal);
+  follows(details, screen.getByRole("link", {name:"Descargar taxonomía en Excel"}));
+  expect(details).not.toHaveAttribute("open");
+  expect(screen.getByRole("link", {name:"Descargar taxonomía en Excel"})).toHaveAttribute("href", expect.stringContaining("mode=DISCOVERED&proposal=true"));
+  expect(screen.getByRole("link", {name:"Descargar taxonomía en Excel"})).toHaveAttribute("href", expect.stringContaining("service_origin=Bank&service_origin_n1=Web"));
+  expect(screen.getByRole("button", {name:"Aceptar taxonomía DISCOVERED"})).toBeVisible();
+  await userEvent.setup().click(screen.getByText("Ver taxonomía", {exact:true}));
+  expect(details).toHaveAttribute("open");
   expect(proposal).toHaveTextContent("Atención");
   expect(proposal).toHaveTextContent("Resolución");
   expect(proposal).toHaveTextContent("Problema resuelto");
   expect(proposal).toHaveTextContent("Resolvieron mi problema");
   expect(proposal.closest("article")).toHaveTextContent("Crear Taxonomía");
+  await userEvent.setup().click(screen.getByText("Ver taxonomía", {exact:true}));
+  expect(details).not.toHaveAttribute("open");
   await userEvent.setup().click(screen.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }));
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/settings?"), expect.objectContaining({ method: "PUT" })));
   expect(screen.getByLabelText("Marco de clasificación")).toHaveValue("SOURCE");

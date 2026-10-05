@@ -114,7 +114,14 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Propuesta de taxonomía importada/)).toBeVisible();
-  await expect(page.getByRole("region", {name:"Propuesta DISCOVERED"})).toContainText("Criterion:");
+  const proposal = page.getByRole("region", {name:"Propuesta DISCOVERED"});
+  await expect(proposal.locator("details")).not.toHaveAttribute("open", "");
+  await expect(proposal.getByText("Criterio:", {exact:false}).first()).toBeHidden();
+  const downloadPromise = page.waitForEvent("download");
+  await proposal.getByRole("link", {name:"Descargar taxonomía en Excel"}).click();
+  expect((await downloadPromise).suggestedFilename()).toBe("taxonomia-discovered-propuesta.xlsx");
+  await proposal.getByText("Ver taxonomía", {exact:true}).click();
+  await expect(proposal.getByText("Criterio:", {exact:false}).first()).toBeVisible();
   await page.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }).click();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");

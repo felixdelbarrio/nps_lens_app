@@ -2,7 +2,8 @@ import { useState } from "react";
 import useSWR from "swr";
 import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyStatus } from "../api";
 import { exportClassification, classificationImportMessage, type ClassificationExport } from "../utils/classificationExchange";
-import { PROJECT_NAMES } from "../utils/taxonomy";
+import { PROJECT_NAMES, taxonomyCounts } from "../utils/taxonomy";
+import { TaxonomyDownload } from "./TaxonomyDownload";
 import { ExchangeFiles } from "./ExchangeFiles";
 import { ProjectUrlField } from "./ProjectUrlField";
 import { TaxonomyProjectInstructions } from "./TaxonomyProjectInstructions";
@@ -46,18 +47,11 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
   }
   const locked = disabled || busy;
   const counts = role === "designer" ? progress?.designer : progress;
+  const proposalCounts = proposal ? taxonomyCounts(proposal) : null;
   return <article className="settings-subsection taxonomy-project">
     <div className="section-heading"><div><h3>{PROJECT_NAMES[role]}</h3><p className="secondary-copy">{role === "designer" ? "Descubre dimensiones de experiencia que expliquen las opiniones del canal." : role === "classifier" ? "Clasifica con la lente activa. La categoría principal conserva los recuentos; los temas adicionales aportan contexto." : "Propón nombres principales y alias equivalentes para la compañía seleccionada."}</p></div></div>
     {counts && role !== "normalizer" ? <ExchangeProgress counts={counts} unit="comentarios" metrics={role === "designer" ? [{label:"Palancas",value:progress!.designer.levers},{label:"Subpalancas",value:progress!.designer.sublevers}] : [{...ADDITIONAL_TOPICS,value:progress!.multiple}]} /> : null}
     {role === "classifier" ? <ClassificationEngineControl kind="comments" context={context} disabled={locked || !canExport} onChange={onChange} /> : null}
-    {role === "designer" && proposal ? <section aria-label="Propuesta DISCOVERED">
-      <h4>Propuesta DISCOVERED · fingerprint <code>{proposalFingerprint?.slice(0, 8)}</code></h4>
-      <p>{proposal.taxonomy.length} Palancas · {proposal.taxonomy.reduce((sum, branch) => sum + branch.sublevers.length, 0)} Subpalancas</p>
-      {proposal.taxonomy.map(branch => <div key={branch.lever}><h4>{branch.lever}</h4><p className="field-hint">Criterion de Palanca: delimitado por los criterios de sus Subpalancas.</p><ul>{branch.sublevers.map(sub => <li key={sub.name}><strong>{sub.name}</strong><p>Criterion: {sub.criterion}</p></li>)}</ul></div>)}
-      {review ? <div><h4>Revisión del diseñador</h4><p>{review.reason}</p>{review.quotes.map((quote, index) => <blockquote key={index}>{quote}</blockquote>)}</div> : null}
-      <p>Aceptar la deja disponible; no cambia el Marco de clasificación.</p>
-      <div className="inline-actions">{[{label:"Aceptar taxonomía DISCOVERED", change:{accept_proposal:true}}, {label:"Descartar propuesta", change:{discard_proposal:true}}].map(({label, change}) => <button key={label} className="secondary-button" disabled={locked} onClick={() => void perform(async () => { await taxonomyRequest("/settings", context, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(change)}); await onChange(); setMessage(change.accept_proposal ? "Taxonomía DISCOVERED disponible. El Marco de clasificación no ha cambiado." : "Propuesta descartada."); })}>{label}</button>)}</div>
-    </section> : null}
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
     {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : progress.mode === "DISCOVERED" ? "Clasificación completa. La clasificación LLM está activa." : "Clasificación completa. Selecciona Clasificación LLM en este panel."}</p> : null}
@@ -66,6 +60,20 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
     <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(exportZips)}>{EXPORT_LABELS[role]}</button>
     <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(() => importZip(file)); }} /></label></div>
     <ExchangeFiles result={exported} />
+    {role === "designer" && proposal ? <section aria-label="Propuesta DISCOVERED">
+      <h4>Propuesta DISCOVERED · fingerprint <code>{proposalFingerprint?.slice(0, 8)}</code></h4>
+      <p>{proposalCounts!.levers} Palancas · {proposalCounts!.sublevers} Subpalancas</p>
+      <details className="taxonomy-details" key={proposalFingerprint}>
+        <summary>Ver taxonomía</summary>
+        <div className="taxonomy-detail-content">
+          {proposal.taxonomy.map(branch => <div key={branch.lever}><h4>{branch.lever}</h4><p className="field-hint">Criterio de Palanca: delimitado por los criterios de sus Subpalancas.</p><ul>{branch.sublevers.map(sub => <li key={sub.name}><strong>{sub.name}</strong><p>Criterio: {sub.criterion}</p></li>)}</ul></div>)}
+          {review ? <div><h4>Revisión del diseñador</h4><p>{review.reason}</p>{review.quotes.map((quote, index) => <blockquote key={index}>{quote}</blockquote>)}</div> : null}
+        </div>
+      </details>
+      <div className="inline-actions"><TaxonomyDownload context={context} mode="DISCOVERED" proposal /></div>
+      <p>Aceptar la deja disponible; no cambia el Marco de clasificación.</p>
+      <div className="inline-actions">{[{label:"Aceptar taxonomía DISCOVERED", change:{accept_proposal:true}}, {label:"Descartar propuesta", change:{discard_proposal:true}}].map(({label, change}) => <button key={label} className="secondary-button" disabled={locked} onClick={() => void perform(async () => { await taxonomyRequest("/settings", context, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(change)}); await onChange(); setMessage(change.accept_proposal ? "Taxonomía DISCOVERED disponible. El Marco de clasificación no ha cambiado." : "Propuesta descartada."); })}>{label}</button>)}</div>
+    </section> : null}
     {message ? <p role="status">{message}</p> : null}
   </article>;
 }
