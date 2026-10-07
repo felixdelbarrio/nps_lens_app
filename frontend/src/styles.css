@@ -743,10 +743,6 @@ ul {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.filters-inline-grid.fixed-causal-filters {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .taxonomy-project-instructions {
   display: grid;
   gap: 0.5rem;
@@ -1668,6 +1664,8 @@ input:disabled {
   .ingest-grid,
   .traceability-layout,
   .field-grid,
+  .filters-inline-grid,
+  .filters-inline-grid.has-causal-method,
   .maintenance-layout,
   .inline-editor,
   .hero-metrics,
@@ -1787,4 +1785,5 @@ input:disabled {
 .manual-sublever button { padding-inline: .75rem; }
 .manual-save-actions { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
 .classification-engine { align-self: end; }
+.classification-engine .switch-field { margin-top: var(--space-2); }
 @media (max-width: 720px) { .exchange-actions { grid-template-columns: 1fr; } }

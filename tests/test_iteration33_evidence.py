@@ -122,7 +122,10 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
             "NPS": [0] * 10 + [2],
         }
     )
-    assert [r.value for r in driver_table(frame, "Subpalanca")] == ["Token"]
+    assert {r.value for r in driver_table(frame, "Subpalanca")} == {
+        "Información insuficiente",
+        "Token",
+    }
     assert nps_matchable_mask(frame).sum() == 1
     quality = signal_quality(frame)
     assert quality["insufficient_comments"] == 10 and quality["warnings"]
@@ -134,7 +137,7 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
         }
     )
     assert select_negative_delta_rows(delta, max_rows=10).value.tolist() == ["Token"]
-    assert executive_ppt._period_overview(frame)["pain_point"] == "Token"
+    assert executive_ppt._period_overview(frame)["friction"]["topic"] == "Token"
 
 
 def test_ranking_prioritizes_unique_incidents_before_semantic_quality():
@@ -310,7 +313,7 @@ def test_report_preflight_rejects_incompatible_artifacts(field):
 
 
 def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(monkeypatch):
-    monkeypatch.setattr(executive_ppt, "_kaleido_png", lambda *a, **kw: None)
+    monkeypatch.setattr(executive_ppt, "_figure_png", lambda *a, **kw: None)
     payload = _sample_payload()
     attribution = payload["attribution"].copy()
     attribution["causal_engine"] = "llm"

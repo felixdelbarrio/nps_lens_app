@@ -39,6 +39,7 @@ src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
 src/nps_lens/domain/column_aliases.py
+src/nps_lens/domain/comment_text.py
 src/nps_lens/domain/helix.py
 src/nps_lens/domain/helix_links.py
 src/nps_lens/domain/labels.py
@@ -59,6 +60,7 @@ src/nps_lens/platform/publication.py
 src/nps_lens/platform/resources.py
 src/nps_lens/platform/webapp_preview.py
 src/nps_lens/reports/__init__.py
+src/nps_lens/reports/chart_renderer.py
 src/nps_lens/reports/coherence.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
@@ -97,6 +99,7 @@ src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
+tests/test_chart_renderer.py
 tests/test_classification_framework.py
 tests/test_cli.py
 tests/test_column_aliases.py
@@ -117,6 +120,7 @@ tests/test_incident_attribution.py
 tests/test_incident_rationale.py
 tests/test_ingest_contracts.py
 tests/test_ingest_features.py
+tests/test_insight_content.py
 tests/test_iteration26_ingestion_evidence.py
 tests/test_iteration28_taxonomy_helix.py
 tests/test_iteration30_workflows.py
@@ -138,6 +142,7 @@ tests/test_numbered_exchange.py
 tests/test_period_kpis.py
 tests/test_platform_resources.py
 tests/test_plotly_theme.py
+tests/test_ppt_period_scope.py
 tests/test_ppt_wrapped_table_layout.py
 tests/test_publication_llm_regressions.py
 tests/test_publication_scope.py

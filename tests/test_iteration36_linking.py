@@ -172,8 +172,7 @@ def test_categories_survive_comment_engine_date_changes_but_not_taxonomy_or_narr
         state["causal_engine"] = engine
         handler.taxonomy.save_state(ctx, state)
         assert handler.classifications(ctx, handler.inputs(ctx, incidents, "SOURCE")) == categories
-    assert handler.export(ctx, updated)["saved_paths"] == []
-    request = exported(handler.export(ctx, updated, only_linking=True)["saved_paths"])
+    request = exported(handler.export(ctx, updated)["saved_paths"])
     assert all(
         "classification" in row
         for name, batch in request.items()
@@ -274,7 +273,7 @@ def test_export_recall_with_distractors_and_mock_import(helix):
     handler, ctx, frame, incidents, _ = helix
     frame.drop(frame.index[16:], inplace=True)
     frame["Comment"] = [f"Token OTP con entrega fallida consulta {i}" for i in range(len(frame))]
-    frame["Palanca"], frame["Subpalanca"] = "Otros", "Consulta"
+    frame["Palanca"], frame["Subpalanca"] = "Otro producto", "Consulta"
     frame["Fecha"] = pd.Timestamp("2026-09-02")
     frame.loc[15, ["Comment", "Palanca", "Subpalanca", "Fecha"]] = [
         "No llega la clave al móvil",

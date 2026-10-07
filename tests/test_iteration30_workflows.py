@@ -126,6 +126,18 @@ def test_helix_toggle_uses_visible_window_and_llm_links_obey_dates(helix, monkey
     }
     status = client.get("/api/taxonomy/helix/engine", params=params).json()
     assert status["ready"] and status["total"] == 200
+    assert not status["linking_ready"]
+    assert (
+        client.put("/api/taxonomy/helix/engine", params={**params, "engine": "llm"}).status_code
+        == 409
+    )
+    scoped = handler.inputs(
+        ctx, incidents, "SOURCE", pop_year="2026", pop_month="09", max_days_apart=0
+    )
+    scoped_files = exported(handler.export(ctx, scoped)["saved_paths"])
+    handler.import_response(
+        ctx, scoped, zipped(helix_response(scoped_files, scoped["comments"][0]["id"]))
+    )
     assert (
         client.put("/api/taxonomy/helix/engine", params={**params, "engine": "llm"}).status_code
         == 200

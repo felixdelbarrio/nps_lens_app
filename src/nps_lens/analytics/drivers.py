@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.core.metrics import summarize
 from nps_lens.core.nps_math import valid_nps_scores
 
@@ -43,6 +42,7 @@ def grouped_driver_stats(
                 "n",
                 "valid_n",
                 "det_count",
+                "pro_count",
                 "nps",
                 "detractor_rate",
                 "promoter_rate",
@@ -72,7 +72,16 @@ def grouped_driver_stats(
     grouped["nps"] = (grouped["promoter_rate"] - grouped["detractor_rate"]) * 100.0
     grouped.loc[grouped["valid_n"] <= 0, ["nps", "detractor_rate", "promoter_rate"]] = np.nan
     return grouped[
-        [dimension, "n", "valid_n", "det_count", "nps", "detractor_rate", "promoter_rate"]
+        [
+            dimension,
+            "n",
+            "valid_n",
+            "det_count",
+            "pro_count",
+            "nps",
+            "detractor_rate",
+            "promoter_rate",
+        ]
     ]
 
 
@@ -90,9 +99,7 @@ def driver_table(
         if base_nps is not None and np.isfinite(float(base_nps))
         else compute_nps_from_scores(df[survey_score_col])
     )
-    grouped = grouped_driver_stats(
-        actionable_rows(df), dimension, survey_score_col=survey_score_col
-    )
+    grouped = grouped_driver_stats(df, dimension, survey_score_col=survey_score_col)
     out: list[DriverStat] = []
     for _, row in grouped.iterrows():
         n = int(row["n"])

@@ -99,10 +99,10 @@ from nps_lens.platform.publication import (
     build_publication_archive,
     build_static_data_snapshot,
 )
-from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.coherence import ReportCoherenceError, validate_classification_context
-from nps_lens.reports.content_selectors import select_causal_scenarios
+from nps_lens.reports.content_selectors import causal_scenario_title, select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
+from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix, required_comments
 from nps_lens.services.analytics import (
@@ -116,7 +116,7 @@ from nps_lens.services.classification_protocol import taxonomy_fingerprint
 from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 from nps_lens.services.taxonomy_service import TaxonomyService
-from nps_lens.settings import Settings, normalize_downloads_path
+from nps_lens.settings import DEFAULT_UI_SCORE_CHANNEL, Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     PeriodWindow,
     default_windows,
@@ -143,7 +143,6 @@ _FILENAME_SANITIZER_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _MONTH_LABEL_TO_NUMBER = {label: number for number, label in MONTH_LABELS_ES.items()}
 _DEFAULT_NPS_GROUPS = [POP_ALL, "Detractores", "Neutros", "Promotores"]
 _DEFAULT_SCORE_CHANNELS = [POP_ALL]
-_PREFERRED_SCORE_CHANNEL = "Web"
 _PREFERRED_NPS_GROUP = "Detractores"
 _DEFAULT_DIMENSIONS = ["Palanca", "Subpalanca"]
 _COHORT_ROW_DIMENSIONS = {"Palanca": "Palanca", "Subpalanca": "Subpalanca"}
@@ -618,6 +617,7 @@ class DashboardService:
             "llm" if kind == "comments" and mode == "DISCOVERED" else state.get(preference, "rules")
         )
         total = received = 0
+        linking_ready = False
         base_available = kind == "helix"
         reason = ""
         try:
@@ -655,6 +655,13 @@ class DashboardService:
                 )
                 total = len(inputs["incidents"])
                 received = len(handler.classifications(context, inputs)[mode])
+                if total and received == total:
+                    if not inputs["comments"] or inputs["frame"].attrs["classification_pending"]:
+                        reason = "Completa la clasificación de los comentarios de la lente activa."
+                    elif len(handler.current(context, inputs)[mode]) != total:
+                        reason = "Evalúa los vínculos pendientes desde Clasifica incidencias."
+                    else:
+                        linking_ready = True
             else:
                 raise ValueError("Motor desconocido.")
             ready = total > 0 and received == total
@@ -665,6 +672,7 @@ class DashboardService:
             "selected_engine": selected_engine,
             "base_available": base_available,
             "ready": ready,
+            "linking_ready": linking_ready,
             "total": total,
             "received": received,
             "pending": total - received,
@@ -1087,7 +1095,7 @@ class DashboardService:
         period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
         quality = signal_quality(analysis_current_df)
-        topics_df = self._topics_df(actionable_rows(analysis_current_df))
+        topics_df = self._topics_df(analysis_current_df)
         if not topics_df.empty:
             topics_df = topics_df.sort_values(
                 ["n", "cluster_id"], ascending=[False, True]
@@ -1312,7 +1320,7 @@ class DashboardService:
                 "groups": groups,
                 "dimensions": dimensions,
                 "defaults": {
-                    "channel": self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL),
+                    "channel": self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL),
                     "group": _PREFERRED_NPS_GROUP if _PREFERRED_NPS_GROUP in groups else POP_ALL,
                     "dimension": "Palanca",
                 },
@@ -2137,6 +2145,7 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
+        context = UploadContext(*self._context_key(context))
         report_context = self._report_classification_context(
             context,
             pop_year=pop_year,
@@ -2155,7 +2164,7 @@ class DashboardService:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
         topic_channel = self._resolve_score_channel(
             scope_history_df,
-            score_channel or _PREFERRED_SCORE_CHANNEL,
+            score_channel or DEFAULT_UI_SCORE_CHANNEL,
         )
         resolved_group = self._resolve_nps_group(scope_history_df, nps_group or POP_ALL)
         descriptive_current_df = self._apply_population_filters(
@@ -2245,6 +2254,7 @@ class DashboardService:
             include_causal_section=include_causal_section,
             linking_diagnostics=cast(dict[str, object], causal["diagnostics"]),
             report_context=report_context,
+            evidence_channel=str(causal.get("resolved_channel") or topic_channel),
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(
@@ -2298,12 +2308,12 @@ class DashboardService:
                 context,
                 pop_year=pop_year,
                 pop_month=pop_month,
-                score_channel=_PREFERRED_SCORE_CHANNEL,
+                score_channel=DEFAULT_UI_SCORE_CHANNEL,
                 nps_group=nps_group,
             )
-            publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            publish_channel = self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL)
             publish_group = self._resolve_nps_group(history_df, nps_group)
-            causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            causal_channel = self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL)
             causal_group = self._resolve_nps_group(history_df, POP_ALL)
             dashboard = dict(
                 self.nps_dashboard(
@@ -2720,7 +2730,7 @@ class DashboardService:
             return []
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
-            title = str(row.get("nps_topic", "") or "").strip()
+            title = causal_scenario_title(row, rank=index)
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]
@@ -2849,10 +2859,7 @@ class DashboardService:
                 if option.casefold() == requested.casefold():
                     return option
             return POP_ALL
-        for option in available:
-            if option.casefold() == _PREFERRED_SCORE_CHANNEL.casefold():
-                return option
-        return POP_ALL
+        return DEFAULT_UI_SCORE_CHANNEL
 
     def _resolve_nps_group(self, frame: pd.DataFrame, nps_group: Optional[str]) -> str:
         available = _DEFAULT_NPS_GROUPS
@@ -3036,7 +3043,7 @@ class DashboardService:
             return pd.DataFrame()
         safe = frame.copy()
         safe[comment_column] = (
-            safe[comment_column].fillna("").astype(str).map(redact_operational_snippet)
+            safe[comment_column].astype("string").fillna("").map(redact_operational_snippet)
         )
         topics = summarize_taxonomy(safe)
         return pd.DataFrame([topic.__dict__ for topic in topics])

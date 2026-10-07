@@ -84,14 +84,12 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
 
 def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() -> None:
     root = Path("webapp/apps-script")
-    config = (root / "00_Config.gs").read_text(encoding="utf-8")
     publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
     activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
     webapp = (root / "60_WebApp.gs").read_text(encoding="utf-8")
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '3.0.2'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
@@ -121,7 +119,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
-    assert "if(viewer.reportUrl)" in app
+    assert "updateReportLink(viewer.reportUrl);" in app
     assert "viewer.shellDeferred = Boolean(publication)" in webapp
     assert "function getPublishedShell(" in webapp
     assert "event.parameter.presentation === '1'" not in webapp
@@ -154,6 +152,28 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "_cacheKey_" in publication and "_cacheKey_" in activity and "_cacheKey_" in newsletter
     assert app.strip().endswith("</script>")
     assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")
+
+
+def test_evolution_visibility_save_updates_webapp_without_reloading_apps_script_iframe() -> None:
+    root = Path("webapp/apps-script")
+    app = (root / "App.html").read_text(encoding="utf-8")
+    administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
+
+    assert "location.reload()" not in app
+    assert "function applyEvolutionNpsVisibility(result)" in app
+    assert "insightSections.splice(summaryIndex,1)" in app
+    assert "insightSections.unshift(['summary','Evolución NPS'])" in app
+    assert "publication.scope?.key||viewer.scopeKey||''" in app
+    assert "applyEvolutionNpsVisibility(value)" in app
+    assert "button.disabled=false" in app
+    assert "function saveEvolutionNpsSettings(visible, scopeKey)" in administration
+    save_body = administration.split("function saveEvolutionNpsSettings", 1)[1].split(
+        "function getAdministration", 1
+    )[0]
+    assert "const savedVisible = visible !== false" in save_body
+    assert "_evolutionNpsVisible_()" not in save_body
+    assert save_body.index("const reportUrl =") < save_body.index("setProperty(")
+    assert "return {visible:savedVisible,reportUrl}" in save_body
 
 
 def test_publication_import_preserves_global_evolution_visibility() -> None:
@@ -210,7 +230,7 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
         project_root / "src" / "nps_lens" / "platform" / "publication.py"
     ).read_text(encoding="utf-8")
 
-    assert "const headline = showEvolutionNps ?" in newsletter
+    assert "const content = _newsletterContent_(insight, showEvolutionNps);" in newsletter
     assert (
         "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps)" in newsletter
     )
@@ -259,3 +279,18 @@ def test_admin_cleanup_trashes_every_publication_artifact_and_invalidates_caches
     assert "_compactSlidesProperty_" in setup
     assert "setTrashed(true)" in setup
     assert "cacheEpochProperty" in setup
+
+
+def test_report_link_uses_allowlisted_google_slides_url_before_dom_assignment() -> None:
+    app = Path("webapp/apps-script/App.html").read_text(encoding="utf-8")
+
+    assert "function safePresentationUrl(value)" in app
+    assert "prefix='https://docs.google.com/presentation/d/'" in app
+    assert "if(!url.startsWith(prefix))return ''" in app
+    assert "/^[A-Za-z0-9_-]+$/" in app
+    assert "prefix+encodeURIComponent(id)+'/edit'" in app
+    assert "reportLink.href=viewer.reportUrl" not in app
+    assert "$('report-link').href=viewer.reportUrl" not in app
+    assert "const reportUrl=safePresentationUrl(value),reportLink=" in app
+    assert "updateReportLink(viewer.reportUrl);" in app
+    assert "reportLink.removeAttribute('href')" in app

@@ -20,6 +20,7 @@ from nps_lens.reports.content_selectors import (
     select_negative_delta_rows,
     select_nonzero_kpis,
 )
+from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
@@ -346,9 +347,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
+    assert any(
+        "tiene el menor score medio entre los tópicos observados en Todos" in t for t in texts
+    )
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
@@ -386,7 +389,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 period_start=date(2026, 1, 1),
                 period_end=date(2026, 1, 31),
                 focus_name="detractores",
-                topic_channel="Web",
+                topic_channel="Todos",
                 attribution_df=payload["attribution"],
                 selected_nps_df=payload["selected_nps"],
                 comparison_nps_df=payload["comparison_nps"],
@@ -401,6 +404,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         )
     )
     causal_slide = prs.slides[6]
+    service = object.__new__(DashboardService)
+    cards = service._build_linking_scenario_cards(payload["attribution"])
+    assert cards[0]["title"] == causal_slide.shapes[1].text
     assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
     assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
     assert causal_slide.shapes[2].text == ""
@@ -421,6 +427,44 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
+
+
+def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
+    payload = _sample_payload()
+    payload["attribution"]["affected_task"] = "validar el teléfono para activar el token"
+    payload["attribution"]["observed_symptom"] = "la validación del teléfono no se completa"
+    out = generate_business_review_ppt(
+        service_origin="BBVA Argentina",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        attribution_df=payload["attribution"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
+    )
+    cards = object.__new__(DashboardService)._build_linking_scenario_cards(payload["attribution"])
+    slide = Presentation(BytesIO(out.content)).slides[6]
+    assert cards[0]["title"] == slide.shapes[1].text
+    assert cards[0]["title"] == (
+        "validar el teléfono para activar el token → la validación del teléfono no se completa"
+    )
+    newsletter = build_executive_newsletter(
+        current_df=payload["selected_nps"],
+        period_kpis=build_period_kpis(
+            history_df=payload["comparison_nps"],
+            current_df=payload["selected_nps"],
+            pop_year="2026",
+            pop_month="01",
+            context_label="Enero 2026",
+        ),
+        linking={"scenarios": {"cards": cards}},
+        topic_channel="Todos",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+    )
+    assert cards[0]["title"] in [signal["label"] for signal in newsletter["signals"]]
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -632,7 +676,7 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
     ]
     assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
-    assert any("VÍNCULOS SEMÁNTICOS" in t for t in texts)
+    assert any("VÍNCULOS EVALUADOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
@@ -703,10 +747,11 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert int(overview["comments"]) > 0
     assert float(overview["detractor_rate"]) > 0
 
-    palanca_change = executive_ppt._driver_change_table(
+    palanca_change = executive_ppt.get_changes_vs_historic(
         current_period,
         baseline_period,
         dimension="Palanca",
+        min_n=1,
     )
     assert not palanca_change.empty
     assert "delta_nps" in palanca_change.columns
@@ -767,7 +812,7 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
 
 
-def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None:
+def test_ppt_period_overview_ranks_signed_topic_contribution() -> None:
     current = pd.DataFrame(
         {
             "Canal": ["Web"] * 9,
@@ -778,8 +823,76 @@ def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None
 
     overview = executive_ppt._period_overview(current, topic_channel="Web")
 
-    assert overview["pain_point"] == "Falla"
-    assert overview["strength_point"] == "Fácil"
+    assert overview["friction"]["topic"] == "Falla"
+    assert overview["strength"]["topic"] == "Fácil"
+
+
+def test_comparison_card_text_stays_inside_template_cards() -> None:
+    prs = Presentation(executive_ppt.REPORT_TEMPLATE)
+    slide = prs.slides[1]
+    text = (
+        "Valoración general del canal y resolución de operaciones pendientes.\n"
+        "Mayor volumen promotor en Todos.\n"
+        "Calidad de señal: 1691 comentarios no accionables / 24 temas no cubiertos."
+    )
+    for body_index, card_index in ((8, 7), (12, 10)):
+        body, card = slide.shapes[body_index], slide.shapes[card_index]
+        executive_ppt._set_template_card_body(body, card, text)
+        assert body.left > card.left
+        assert body.top > card.top
+        assert body.left + body.width < card.left + card.width
+        assert body.top + body.height < card.top + card.height
+        assert " ".join(body.text.split()) == " ".join(text.split())
+        paragraph = body.text_frame.paragraphs[0]
+        assert len(body.text.splitlines()) * paragraph.runs[0].font.size.pt * 1.15 <= (
+            body.height / 12700
+        )
+
+
+def test_period_signals_do_not_call_the_same_large_mixed_topic_a_strength() -> None:
+    frame = pd.DataFrame(
+        {
+            "Subpalanca": ["General"] * 6 + ["Lentitud"] * 3 + ["Asistencia"] * 2,
+            "NPS": [0, 0, 0, 9, 9, 8, 0, 0, 0, 9, 9],
+            "Comment": ["opinión"] * 11,
+        }
+    )
+    overview = executive_ppt._period_overview(frame)
+    assert overview["friction"] == {
+        "topic": "Lentitud",
+        "n": 3,
+        "detractors": 3,
+        "promoters": 0,
+        "nps": -100.0,
+    }
+    assert overview["strength"] == {
+        "topic": "Asistencia",
+        "n": 2,
+        "detractors": 0,
+        "promoters": 2,
+        "nps": 100.0,
+    }
+    negative = executive_ppt._period_overview(frame[frame.NPS.le(6)])
+    assert negative["strength"] == {}
+    assert "No hay un tópico" in executive_ppt._topic_signal_copy(
+        negative["strength"], positive=True
+    )
+
+
+def test_signal_quality_counts_comments_not_blank_survey_responses() -> None:
+    frame = pd.DataFrame(
+        {
+            "Comment": ["", None, "nan", " ", "NO", "otro tema", "resuelto"],
+            "Subpalanca": ["Información insuficiente"] * 5 + ["Tema no cubierto", "Asistencia"],
+            "NPS": [0, 0, 10, 10, 0, 7, 10],
+        }
+    )
+    overview = executive_ppt._period_overview(frame)
+    quality = overview["signal_quality"]
+    assert overview["comments"] == quality["total_comments"] == 3
+    assert quality["insufficient_comments"] == 1
+    assert quality["uncovered_topics"] == 1
+    assert "De 3 comentarios" in quality["message"]
 
 
 def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:

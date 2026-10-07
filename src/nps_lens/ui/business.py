@@ -164,12 +164,12 @@ def driver_delta_table(
         return pd.DataFrame()
 
     cur_agg = grouped_driver_stats(
-        current_df.dropna(subset=[dimension]),
+        actionable_rows(current_df).dropna(subset=[dimension]),
         dimension,
         survey_score_col=score_col,
     )[[dimension, "valid_n", "nps"]].rename(columns={"valid_n": "n_current", "nps": "nps_current"})
     base_agg = grouped_driver_stats(
-        baseline_df.dropna(subset=[dimension]),
+        actionable_rows(baseline_df).dropna(subset=[dimension]),
         dimension,
         survey_score_col=score_col,
     )[[dimension, "valid_n", "nps"]].rename(
@@ -184,7 +184,6 @@ def driver_delta_table(
     if merged.empty:
         return pd.DataFrame()
 
-    merged = actionable_rows(merged)
     merged["delta_nps"] = merged["nps_current"] - merged["nps_baseline"]
     merged["value"] = merged[dimension]
     # Sort by deterioration first (most negative)

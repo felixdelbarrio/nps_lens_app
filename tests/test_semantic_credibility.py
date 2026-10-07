@@ -144,7 +144,6 @@ def test_narrative_invariant_to_titles_routing_and_template(helix):
 def test_relink_only_reuses_categories_when_classification_pending_is_zero(helix):
     handler, ctx, frame, incidents, _ = helix
     inputs = handler.inputs(ctx, incidents, "SOURCE")
-    assert handler.export(ctx, inputs, only_linking=True)["saved_paths"] == []
     request = exported(handler.export(ctx, inputs)["saved_paths"])
     handler.import_response(ctx, inputs, zipped(helix_response(request, "not-a-candidate")))
     before = handler.classifications(ctx, inputs)
@@ -152,7 +151,7 @@ def test_relink_only_reuses_categories_when_classification_pending_is_zero(helix
     updated = handler.inputs(ctx, incidents, "SOURCE")
     status = handler.status(ctx, updated)
     assert status["pending"] == 0 and status["link_pending"] == len(incidents)
-    request = exported(handler.export(ctx, updated, only_linking=True)["saved_paths"])
+    request = exported(handler.export(ctx, updated)["saved_paths"])
     assert all(
         "classification" in row
         for name, batch in request.items()

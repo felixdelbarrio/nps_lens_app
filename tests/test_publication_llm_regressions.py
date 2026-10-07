@@ -9,7 +9,7 @@ import pytest
 from test_iteration28_taxonomy_helix import discover
 from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
-from nps_lens.reports import BusinessPptResult
+from nps_lens.reports.executive_ppt import BusinessPptResult
 
 
 def classified_dashboard(exchange):
@@ -81,7 +81,7 @@ def test_static_defaults_reference_existing_channels_and_groups(exchange):
     controls = service._build_comments_snapshot(
         history_df=history, pop_year="2026", pop_month="08"
     )["controls"]
-    assert controls["defaults"]["channel"] == "WEB"
+    assert controls["defaults"]["channel"] == "Todos"
     assert controls["defaults"]["group"] in controls["groups"]
 
 

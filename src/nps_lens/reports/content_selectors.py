@@ -18,6 +18,14 @@ class MarkdownSegment:
     bold: bool = False
 
 
+def causal_scenario_title(row: Any, *, rank: int) -> str:
+    task = str(row.get("affected_task") or "").strip()
+    symptom = str(row.get("observed_symptom") or "").strip()
+    if task and symptom and task != "Tarea pendiente de validación":
+        return f"{task} → {symptom}"
+    return str(row.get("nps_topic") or f"Escenario de evidencia {rank}").replace(" > ", " / ")
+
+
 def _series(df: pd.DataFrame, column: str, default: object = 0.0) -> pd.Series[Any]:
     if column in df.columns:
         return df[column]
@@ -57,27 +65,6 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
         deteriorations.sort_values(
             ["delta_nps", "n_current", "value"], ascending=[True, False, True]
         )
-        .head(max_rows)
-        .copy()
-    )
-
-
-def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select the largest negative gaps against the classic-NPS base."""
-
-    if gap_df is None or gap_df.empty:
-        return pd.DataFrame(columns=getattr(gap_df, "columns", []))
-    work = actionable_rows(gap_df)
-    work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
-    work["n"] = _numeric_series(work, "n").fillna(0.0)
-    work = work.dropna(subset=["gap_vs_base"])
-    if work.empty:
-        return work
-    negative = work[work["gap_vs_base"] < 0].copy()
-    if negative.empty:
-        negative = work.copy()
-    return (
-        negative.sort_values(["gap_vs_base", "n", "value"], ascending=[True, False, True])
         .head(max_rows)
         .copy()
     )

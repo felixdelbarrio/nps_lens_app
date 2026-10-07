@@ -5,7 +5,7 @@ import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyProjec
 
 import { PROJECT_NAMES } from "../utils/taxonomy";
 
-export function TaxonomyProjectInstructions({ role, context, onlyLinking = false }: { onlyLinking?: boolean; role: keyof typeof PROJECT_NAMES; context: TaxonomyContext }) {
+export function TaxonomyProjectInstructions({ role, context }: { role: keyof typeof PROJECT_NAMES; context: TaxonomyContext }) {
   const { data, error, mutate } = useSWR(
     taxonomyUrl("/discovery/instructions", context),
     () => taxonomyRequest<Instructions>("/discovery/instructions", context),
@@ -29,11 +29,11 @@ export function TaxonomyProjectInstructions({ role, context, onlyLinking = false
 
   return <div className="taxonomy-project-instructions">
     <button type="button" className="secondary-button" disabled={!data} onClick={() => void copy()}>
-      {onlyLinking ? "Copiar instrucciones para evaluar vínculos" : `Copiar instrucciones de ${title}`}
+      {`Copiar instrucciones de ${title}`}
     </button>
     {error ? <p role="alert">No se pudieron cargar las instrucciones. <button type="button" onClick={() => void mutate()}>Reintentar</button></p> : null}
     {data ? <details className="taxonomy-details" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
-      <summary>{onlyLinking ? "Ver instrucciones para evaluar vínculos" : `Ver instrucciones de ${title}`}</summary>
+      <summary>{`Ver instrucciones de ${title}`}</summary>
       <p className="field-hint">Versión {data.versions[role]} · El batch utiliza estas mismas reglas.</p>
       <textarea aria-label={`Instrucciones de ${title}`} readOnly rows={12} value={data[role]} onFocus={event => event.currentTarget.select()} />
     </details> : null}
