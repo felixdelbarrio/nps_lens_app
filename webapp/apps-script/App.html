@@ -76,6 +76,23 @@
   function detailViews(section) {
     return PUBLIC_VIEW_REGISTRY[section] || [];
   }
+  function applyEvolutionNpsVisibility(result) {
+    const visible=result?.visible!==false;
+    viewer.evolutionNpsVisible=visible;
+    const summaryIndex=insightSections.findIndex(item=>item[0]==='summary');
+    if(visible&&summaryIndex<0)insightSections.unshift(['summary','Evolución NPS']);
+    if(!visible&&summaryIndex>=0)insightSections.splice(summaryIndex,1);
+    if(!visible&&state.area==='insights'&&state.section==='summary'){
+      state.section=insightSections[0]?.[0]||'nps-analysis';
+      state.view=detailViews(state.section)[0]?.[0]||state.section;
+    }
+    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))viewer.reportUrl=String(result.reportUrl||'');
+    const reportLink=$('report-link');
+    if(reportLink){
+      reportLink.href=viewer.reportUrl||'';
+      reportLink.hidden=!viewer.reportUrl;
+    }
+  }
   function richText(value) {
     return esc(value).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
   }
@@ -225,8 +242,9 @@
         if (name === 'getPublishedDataset') return resolve(localPublishedDataset(args[0]));
         if (name === 'getNewsletterWorkspace') return resolve({subject:`NPS e incidencias relacionadas - ${publication.scope?.label||'Edición local'}`,scope:publication.scope||{key:'local'},activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}],sender:{ready:true,name:'NPS Lens',effective:'nps-lens.group@bbva.com'}});
         if (name === 'getPublicationSettings') return resolve({id:'local-preview',name:'Vista previa local',url:''});
-        if (name === 'getEvolutionNpsSettings') return resolve({visible:true});
-        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope' || name === 'saveEvolutionNpsSettings') return resolve({visible:true});
+        if (name === 'getEvolutionNpsSettings') return resolve({visible:viewer.evolutionNpsVisible!==false});
+        if (name === 'saveEvolutionNpsSettings') return resolve({visible:args[0]!==false,reportUrl:viewer.reportUrl||''});
+        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope') return resolve({visible:true});
         if (name === 'testNewsletter') return resolve({sent:1});
         if (name === 'sendNewsletter') return resolve({sent:1});
         return resolve({});
@@ -368,7 +386,7 @@
     if($('activity-refresh')) $('activity-refresh').onclick=refresh;
     if($('activity-download')) $('activity-download').onclick=async()=>{try{await downloadActivityReport();$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
     if($('publication-folder-save')) $('publication-folder-save').onclick=async()=>{try{const folder=await rpc('savePublicationFolder',[$('publication-folder').value]);$('publication-folder-status').textContent='Carpeta validada y guardada.';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}};
-    if($('evolution-save')) $('evolution-save').onclick=async()=>{const button=$('evolution-save');button.disabled=true;$('evolution-status').textContent='Guardando visibilidad global…';try{await rpc('saveEvolutionNpsSettings',[$('evolution-visible').checked]);location.reload();}catch(error){button.disabled=false;$('evolution-status').textContent=error.message;}};
+    if($('evolution-save')) $('evolution-save').onclick=async()=>{const button=$('evolution-save'),status=$('evolution-status'),visible=$('evolution-visible').checked;button.disabled=true;status.textContent='Guardando visibilidad global…';try{const value=await rpc('saveEvolutionNpsSettings',[visible,publication.scope?.key||viewer.scopeKey||'']);applyEvolutionNpsVisibility(value);$('evolution-visible').checked=value.visible!==false;status.textContent=value.visible!==false?'Evolución NPS visible para todos los usuarios y ámbitos publicados.':'Evolución NPS oculta para todos los usuarios y ámbitos publicados.';}catch(error){status.textContent=error.message;}finally{button.disabled=false;}};
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-send')) $('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios activos.`;queueActivity('newsletter_sent');}catch(error){$('newsletter-status').textContent=error.message;}};

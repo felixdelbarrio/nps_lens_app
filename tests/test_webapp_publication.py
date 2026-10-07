@@ -156,6 +156,22 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "plotly-cartesian-2.35.2.min.js" in (root / "Index.html").read_text(encoding="utf-8")
 
 
+def test_evolution_visibility_save_updates_webapp_without_reloading_apps_script_iframe() -> None:
+    root = Path("webapp/apps-script")
+    app = (root / "App.html").read_text(encoding="utf-8")
+    administration = (root / "30_Administration.gs").read_text(encoding="utf-8")
+
+    assert "location.reload()" not in app
+    assert "function applyEvolutionNpsVisibility(result)" in app
+    assert "insightSections.splice(summaryIndex,1)" in app
+    assert "insightSections.unshift(['summary','Evolución NPS'])" in app
+    assert "publication.scope?.key||viewer.scopeKey||''" in app
+    assert "applyEvolutionNpsVisibility(value)" in app
+    assert "button.disabled=false" in app
+    assert "function saveEvolutionNpsSettings(visible, scopeKey)" in administration
+    assert "reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''" in administration
+
+
 def test_publication_import_preserves_global_evolution_visibility() -> None:
     publication = Path("webapp/apps-script/10_Publication.gs").read_text(encoding="utf-8")
     start = publication.index("function importPublicationArchive")

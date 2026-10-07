@@ -22,10 +22,15 @@ function getEvolutionNpsSettings() {
   return {visible:_evolutionNpsVisible_()};
 }
 
-function saveEvolutionNpsSettings(visible) {
+function saveEvolutionNpsSettings(visible, scopeKey) {
   const viewer = _viewer_(); _assertAdmin_(viewer);
   PropertiesService.getScriptProperties().setProperty(NPS_LENS.evolutionNpsVisibleProperty, visible === false ? 'false' : 'true');
-  return {visible:_evolutionNpsVisible_()};
+  const savedVisible = _evolutionNpsVisible_();
+  const publication = String(scopeKey || '').trim() ? _publicationByKey_(scopeKey) : null;
+  return {
+    visible:savedVisible,
+    reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''
+  };
 }
 
 function getAdministration() {
