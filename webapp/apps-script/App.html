@@ -14,6 +14,10 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/(^|\s)\p{L}/gu, char => char.toLocaleUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
+  function safePresentationUrl(value) {
+    const match = String(value || '').match(/^https:\/\/docs\.google\.com\/presentation\/d\/([A-Za-z0-9_-]+)(?:\/|$)/);
+    return match ? `https://docs.google.com/presentation/d/${encodeURIComponent(match[1])}/edit` : '';
+  }
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']];
   const npsViews = [['topics','Qué dicen los clientes'],['gaps','Brechas NPS']];
   const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen de evidencia'],['scenarios','Análisis de escenarios de evidencia']];
@@ -86,11 +90,13 @@
       state.section=insightSections[0]?.[0]||'nps-analysis';
       state.view=detailViews(state.section)[0]?.[0]||state.section;
     }
-    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))viewer.reportUrl=String(result.reportUrl||'');
+    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))viewer.reportUrl=safePresentationUrl(result.reportUrl);
     const reportLink=$('report-link');
     if(reportLink){
-      reportLink.href=viewer.reportUrl||'';
-      reportLink.hidden=!viewer.reportUrl;
+      const reportUrl=safePresentationUrl(viewer.reportUrl);
+      if(reportUrl) reportLink.href=reportUrl;
+      else reportLink.removeAttribute('href');
+      reportLink.hidden=!reportUrl;
     }
   }
   function richText(value) {
@@ -434,7 +440,8 @@
   if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
-  if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
+  const initialReportUrl=safePresentationUrl(viewer.reportUrl);
+  if(initialReportUrl){$('report-link').href=initialReportUrl;$('report-link').hidden=false;}
   window.addEventListener('error',() => queueActivity('client_error','client_error','error'));
   window.addEventListener('pagehide',flushActivity);
   async function start(){

@@ -121,7 +121,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
-    assert "if(viewer.reportUrl)" in app
+    assert "const initialReportUrl=safePresentationUrl(viewer.reportUrl);" in app
     assert "viewer.shellDeferred = Boolean(publication)" in webapp
     assert "function getPublishedShell(" in webapp
     assert "event.parameter.presentation === '1'" not in webapp
@@ -169,10 +169,13 @@ def test_evolution_visibility_save_updates_webapp_without_reloading_apps_script_
     assert "applyEvolutionNpsVisibility(value)" in app
     assert "button.disabled=false" in app
     assert "function saveEvolutionNpsSettings(visible, scopeKey)" in administration
-    assert (
-        "reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''"
-        in administration
-    )
+    save_body = administration.split("function saveEvolutionNpsSettings", 1)[1].split(
+        "function getAdministration", 1
+    )[0]
+    assert "const savedVisible = visible !== false" in save_body
+    assert "_evolutionNpsVisible_()" not in save_body
+    assert save_body.index("const reportUrl =") < save_body.index("setProperty(")
+    assert "return {visible:savedVisible,reportUrl}" in save_body
 
 
 def test_publication_import_preserves_global_evolution_visibility() -> None:
@@ -278,3 +281,17 @@ def test_admin_cleanup_trashes_every_publication_artifact_and_invalidates_caches
     assert "_compactSlidesProperty_" in setup
     assert "setTrashed(true)" in setup
     assert "cacheEpochProperty" in setup
+
+
+def test_report_link_uses_allowlisted_google_slides_url_before_dom_assignment() -> None:
+    app = Path("webapp/apps-script/App.html").read_text(encoding="utf-8")
+
+    assert "function safePresentationUrl(value)" in app
+    assert "^https:\\/\\/docs\\.google\\.com\\/presentation\\/d\\/" in app
+    assert "([A-Za-z0-9_-]+)" in app
+    assert "encodeURIComponent(match[1])" in app
+    assert "reportLink.href=viewer.reportUrl" not in app
+    assert "$('report-link').href=viewer.reportUrl" not in app
+    assert "const reportUrl=safePresentationUrl(viewer.reportUrl);" in app
+    assert "const initialReportUrl=safePresentationUrl(viewer.reportUrl);" in app
+    assert "reportLink.removeAttribute('href')" in app

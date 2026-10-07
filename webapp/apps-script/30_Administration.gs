@@ -24,13 +24,11 @@ function getEvolutionNpsSettings() {
 
 function saveEvolutionNpsSettings(visible, scopeKey) {
   const viewer = _viewer_(); _assertAdmin_(viewer);
-  PropertiesService.getScriptProperties().setProperty(NPS_LENS.evolutionNpsVisibleProperty, visible === false ? 'false' : 'true');
-  const savedVisible = _evolutionNpsVisible_();
+  const savedVisible = visible !== false;
   const publication = String(scopeKey || '').trim() ? _publicationByKey_(scopeKey) : null;
-  return {
-    visible:savedVisible,
-    reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''
-  };
+  const reportUrl = publication ? _reportUrl_(publication.scopeKey,savedVisible) : '';
+  PropertiesService.getScriptProperties().setProperty(NPS_LENS.evolutionNpsVisibleProperty, savedVisible ? 'true' : 'false');
+  return {visible:savedVisible,reportUrl};
 }
 
 function getAdministration() {
