@@ -2310,6 +2310,8 @@ def _set_template_text(
     tf.clear()
     tf.word_wrap = True
     tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.margin_top = min(tf.margin_top, Inches(0.025))
+    tf.margin_bottom = min(tf.margin_bottom, Inches(0.025))
     paragraph = tf.paragraphs[0]
     if align is not None:
         paragraph.alignment = align
