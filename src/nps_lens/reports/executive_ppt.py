@@ -2309,6 +2309,7 @@ def _set_template_text(
     tf = shape.text_frame
     tf.clear()
     tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     paragraph = tf.paragraphs[0]
     if align is not None:
         paragraph.alignment = align
@@ -2384,6 +2385,8 @@ def _set_template_messages(shape: object, messages: list[str], *, size: float) -
 
 
 def _set_template_table(table: object, rows: list[list[str]]) -> None:
+    while len(table.rows) < len(rows):
+        table._tbl.append(deepcopy(table._tbl.tr_lst[-1]))
     for row_index, table_row in enumerate(table.rows):
         table_row.height = Inches(0.42 if row_index == 0 else 0.40)
         values = rows[row_index] if row_index < len(rows) else []
@@ -2571,6 +2574,17 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
                 str(delta.get("display") or format_delta(delta.get("value"), kpi_key=key)),
             ]
         )
+    current_samples = _dict_payload(period.get("kpis")).get("samples", 0)
+    base_samples = _dict_payload(period.get("base_kpis")).get("samples", 0)
+    rows.insert(
+        2,
+        [
+            "RESPUESTAS NPS",
+            format_volume(base_samples),
+            format_volume(current_samples),
+            format_delta(float(current_samples) - float(base_samples), kpi_key="samples"),
+        ],
+    )
     return rows
 
 
@@ -2735,6 +2749,11 @@ def _fill_template_deck(
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
+    cover.shapes[1].top = Inches(1.35)
+    cover.shapes[1].width = Inches(5.9)
+    cover.shapes[1].height = Inches(0.85)
+    for slide_index, title_index in ((1, 4), (2, 5), (3, 4), (4, 0), (5, 0)):
+        prs.slides[slide_index].shapes[title_index].height = Inches(0.78)
     _set_template_text(
         cover.shapes[0],
         "NPS : Comentarios\ne incidencias",
@@ -2827,6 +2846,7 @@ def _fill_template_deck(
         color="FFFFFF",
         font="Source Serif 4",
     )
+    history.shapes[3].height = Inches(2.95)
     _set_template_messages(
         history.shapes[3],
         [
@@ -2907,10 +2927,11 @@ def _fill_template_deck(
             ]
         )
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
+    worst_name = str(view.change_table_df.iloc[0]["value"]) if len(change_rows) > 1 else ""
     _set_template_text(
         change.shapes[0],
         (
-            f"{worst[0]} lidera el deterioro entre los tópicos observados en {topic_channel}"
+            f"{worst_name} lidera el deterioro entre los tópicos observados en {topic_channel}"
             if len(change_rows) > 1
             else "Sin deterioros comparables frente a la base histórica"
         ),
@@ -2922,7 +2943,7 @@ def _fill_template_deck(
     change.shapes[4].height = Inches(0.78)
     _set_template_text(
         change.shapes[4],
-        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {context.baseline_label}",
+        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {historic_label}\n{metric_scope}",
         size=11,
         bold=True,
         color="FFFFFF",
@@ -2931,7 +2952,7 @@ def _fill_template_deck(
     _set_template_text(
         change.shapes[6],
         (
-            f"{worst[0]} presenta la mayor caída del NPS clásico ({worst[1]} puntos)."
+            f"{worst_name} presenta la mayor caída del NPS clásico ({worst[1]} puntos)."
             if len(change_rows) > 1
             else "No hay caídas del NPS clásico con datos comparables en ambos periodos."
         ),
@@ -2947,6 +2968,7 @@ def _fill_template_deck(
         view.change_figure,
         empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
     )
+    change.shapes[7].top = Inches(2.18)
     _replace_template_table(
         change,
         7,
@@ -3053,6 +3075,12 @@ def _fill_template_deck(
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
         )
+        slide.shapes[0].left = Inches(0.38)
+        slide.shapes[0].top = Inches(5.47)
+        slide.shapes[0].width = Inches(9.37)
+        slide.shapes[0].height = Inches(0.15)
+        slide.shapes[0].text_frame.margin_top = 0
+        slide.shapes[0].text_frame.margin_bottom = 0
         _set_template_text(
             slide.shapes[0],
             f"VoC: {context.period_label} · Canal: {context.causal.channel} · {7 + offset}",
