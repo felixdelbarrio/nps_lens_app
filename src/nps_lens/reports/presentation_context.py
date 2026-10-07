@@ -36,6 +36,7 @@ class CausalScenarioViewModel:
 
 @dataclass(frozen=True)
 class CausalViewModel:
+    channel: str
     touchpoint_source: str
     method_label: str
     method_title: str

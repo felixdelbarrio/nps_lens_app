@@ -99,10 +99,10 @@ from nps_lens.platform.publication import (
     build_publication_archive,
     build_static_data_snapshot,
 )
-from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.coherence import ReportCoherenceError, validate_classification_context
-from nps_lens.reports.content_selectors import select_causal_scenarios
+from nps_lens.reports.content_selectors import causal_scenario_title, select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
+from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix, required_comments
 from nps_lens.services.analytics import (
@@ -1095,7 +1095,7 @@ class DashboardService:
         period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
         quality = signal_quality(analysis_current_df)
-        topics_df = self._topics_df(actionable_rows(analysis_current_df))
+        topics_df = self._topics_df(analysis_current_df)
         if not topics_df.empty:
             topics_df = topics_df.sort_values(
                 ["n", "cluster_id"], ascending=[False, True]
@@ -2145,6 +2145,7 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
+        context = UploadContext(*self._context_key(context))
         report_context = self._report_classification_context(
             context,
             pop_year=pop_year,
@@ -2253,6 +2254,7 @@ class DashboardService:
             include_causal_section=include_causal_section,
             linking_diagnostics=cast(dict[str, object], causal["diagnostics"]),
             report_context=report_context,
+            evidence_channel=str(causal.get("resolved_channel") or topic_channel),
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(
@@ -2728,7 +2730,7 @@ class DashboardService:
             return []
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
-            title = str(row.get("nps_topic", "") or "").strip()
+            title = causal_scenario_title(row, rank=index)
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]
@@ -3041,7 +3043,7 @@ class DashboardService:
             return pd.DataFrame()
         safe = frame.copy()
         safe[comment_column] = (
-            safe[comment_column].fillna("").astype(str).map(redact_operational_snippet)
+            safe[comment_column].astype("string").fillna("").map(redact_operational_snippet)
         )
         topics = summarize_taxonomy(safe)
         return pd.DataFrame([topic.__dict__ for topic in topics])

@@ -9,7 +9,7 @@ import pytest
 from test_iteration28_taxonomy_helix import discover
 from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
-from nps_lens.reports import BusinessPptResult
+from nps_lens.reports.executive_ppt import BusinessPptResult
 
 
 def classified_dashboard(exchange):

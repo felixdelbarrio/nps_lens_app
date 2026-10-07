@@ -10,6 +10,7 @@ from nps_lens.analytics.causal_evidence import link_confidence_label, scenario_i
 from nps_lens.analytics.channel_topic_scope import restrict_to_topics, topics_observed_in_channel
 from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
+from nps_lens.domain.comment_text import is_nonspecific_content
 from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.reports.coherence import validate_metric_payload
 from nps_lens.services.analytics.kpis_service import format_metric, format_percentage, format_volume
@@ -92,6 +93,9 @@ def _focus_rows(current_df: pd.DataFrame, *, topic_channel: str) -> list[dict[st
 def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
     scenario_block = _dict(linking.get("scenarios"))
     cards = [card for card in _list(scenario_block.get("cards")) if isinstance(card, dict)]
+    if cards:
+        scoped = actionable_rows(pd.DataFrame(cards))
+        cards = scoped.astype(object).where(pd.notna(scoped), None).to_dict("records")
     selected = sorted(
         (card for card in cards if scenario_impact_score(card) > -1000),
         key=lambda card: (
@@ -103,12 +107,15 @@ def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
     )[:4]
     connections: list[dict[str, object]] = []
     for card in selected:
+        topic = str(card.get("title") or card.get("nps_topic") or "")
+        if is_nonspecific_content(topic):
+            continue
         comments = [
             record for record in _list(card.get("comment_records")) if isinstance(record, dict)
         ]
         connections.append(
             {
-                "topic": str(card.get("title") or card.get("nps_topic") or "Tópico observado"),
+                "topic": topic,
                 "semantic_links": int(_number(card.get("linked_pairs")) or 0),
                 "evidence_reason": card.get(
                     "evidence_reason",
@@ -158,18 +165,14 @@ def build_executive_newsletter(
         )
 
     focus = _focus_rows(current_df, topic_channel=topic_channel)
-    primary = (
-        focus[0]
-        if focus
-        else {"label": "la experiencia digital", "nps": "n/d", "detractors": "n/d", "opinions": "0"}
-    )
+    primary = focus[0] if focus else None
     connections = _connections(linking)
 
     quotes: list[str] = []
     for connection in connections:
         for raw_quote in _list(connection.get("comments")):
             quote = str(raw_quote)
-            if quote not in quotes:
+            if not is_nonspecific_content(quote) and quote not in quotes:
                 quotes.append(quote)
             if len(quotes) == 4:
                 break
@@ -193,26 +196,34 @@ def build_executive_newsletter(
                 }
             )
 
+    if primary:
+        headline = f"El principal foco de fricción está en {str(primary['label']).casefold()}"
+        reason = (
+            connections[0]["evidence_reason"]
+            if connections
+            else _dict(linking.get("diagnostics")).get(
+                "evaluation_message", "Vínculos no evaluados"
+            )
+        )
+        lead = (
+            f"La lectura del periodo sitúa {primary['label']} en el centro de la señal: "
+            f"NPS {primary['nps']}, {primary['detractors']} detractores y "
+            f"{primary['opinions']} opiniones. {reason}"
+        )
+    else:
+        headline = "No hay evidencia suficiente para destacar un foco de fricción"
+        lead = (
+            "El NPS incluye todas las respuestas del periodo. No hay temas específicos "
+            "con comentarios útiles para elaborar este insight."
+        )
+
     return {
         "brand": "BBVA BANCA DE EMPRESAS E INSTITUCIONES",
         "product": "NPS Lens",
         "promise": "La voz del cliente conectada con la operación",
         "period": _period_label(period_start, period_end),
-        "headline": f"El principal foco de fricción está en {str(primary['label']).casefold()}",
-        "lead": (
-            f"La lectura del periodo sitúa {primary['label']} en el centro de la señal: "
-            f"NPS {primary['nps']}, {primary['detractors']} detractores y "
-            f"{primary['opinions']} opiniones. "
-            + (
-                str(connections[0]["evidence_reason"])
-                if connections
-                else str(
-                    _dict(linking.get("diagnostics")).get(
-                        "evaluation_message", "Vínculos no evaluados"
-                    )
-                )
-            )
-        ),
+        "headline": headline,
+        "lead": lead,
         "signal_quality": signal_quality(current_df),
         "scorecard": scorecard,
         "quotes": quotes,

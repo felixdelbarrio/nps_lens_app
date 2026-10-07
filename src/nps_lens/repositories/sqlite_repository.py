@@ -1008,6 +1008,7 @@ class SqliteNpsRepository:
             )
 
         from nps_lens.analytics.drivers import driver_table
+        from nps_lens.analytics.signal_quality import actionable_rows
 
         scores = pd.to_numeric(records["NPS"], errors="coerce").dropna()
         promoter_rate = float((scores >= 9).mean()) if not scores.empty else None
@@ -1016,10 +1017,14 @@ class SqliteNpsRepository:
         if promoter_rate is not None and detractor_rate is not None:
             classic_nps = float((promoter_rate - detractor_rate) * 100.0)
 
+        insight_records = actionable_rows(records)
         top_drivers: dict[str, list[dict[str, Any]]] = {}
         for dimension in ["Palanca", "Subpalanca", "Canal"]:
             top_drivers[dimension] = [
-                stat.__dict__ for stat in driver_table(records, dimension=dimension)[:5]
+                stat.__dict__
+                for stat in driver_table(
+                    insight_records, dimension=dimension, base_nps=classic_nps
+                )[:5]
             ]
 
         return SummarySnapshot(

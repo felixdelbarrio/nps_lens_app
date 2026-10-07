@@ -1,5 +1,5 @@
 <script>
-(() => {
+(async () => {
   'use strict';
   let publication = JSON.parse(document.getElementById('publication-data').textContent || '{}');
   const viewer = JSON.parse(document.getElementById('viewer-data').textContent || '{}');
@@ -14,6 +14,20 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/(^|\s)\p{L}/gu, char => char.toLocaleUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
+  function safePresentationUrl(value) {
+    const url=String(value||''),prefix='https://docs.google.com/presentation/d/';
+    if(viewer.local && /^[A-Za-z0-9._-]+\.pptx$/i.test(url))return encodeURIComponent(url);
+    if(!url.startsWith(prefix))return '';
+    const id=url.slice(prefix.length).split('/')[0];
+    return /^[A-Za-z0-9_-]+$/.test(id) ? prefix+encodeURIComponent(id)+'/edit' : '';
+  }
+  function updateReportLink(value) {
+    const reportUrl=safePresentationUrl(value),reportLink=$('report-link');
+    viewer.reportUrl=reportUrl;
+    if(reportUrl)reportLink.href=reportUrl;
+    else reportLink.removeAttribute('href');
+    reportLink.hidden=!reportUrl;
+  }
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']];
   const npsViews = [['topics','Qué dicen los clientes'],['gaps','Brechas NPS']];
   const fallbackLinkingViews = [['situation','Situación del periodo'],['entity-summary','Resumen de evidencia'],['scenarios','Análisis de escenarios de evidencia']];
@@ -26,7 +40,7 @@
   ];
   const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,evidenceTopic:'',journeyTopic:'',scenarioDetail:'helix',evidenceView:'table',adminRoute:'',settingsView:'evolution',scoreChannel:'Web',npsGroup:'Detractores',gapDimension:'Palanca',started:performance.now()};
   const scopeCatalog = rows(viewer.publicationCatalog);
-  const sessionId = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0,80);
+  const sessionId = Array.from(window.crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');
   const activityQueue = [];
   const datasetCache = {};
   let activityTimer = 0;
@@ -75,6 +89,18 @@
 
   function detailViews(section) {
     return PUBLIC_VIEW_REGISTRY[section] || [];
+  }
+  function applyEvolutionNpsVisibility(result) {
+    const visible=result?.visible!==false;
+    viewer.evolutionNpsVisible=visible;
+    const summaryIndex=insightSections.findIndex(item=>item[0]==='summary');
+    if(visible&&summaryIndex<0)insightSections.unshift(['summary','Evolución NPS']);
+    if(!visible&&summaryIndex>=0)insightSections.splice(summaryIndex,1);
+    if(!visible&&state.area==='insights'&&state.section==='summary'){
+      state.section=insightSections[0]?.[0]||'nps-analysis';
+      state.view=detailViews(state.section)[0]?.[0]||state.section;
+    }
+    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))updateReportLink(result.reportUrl);
   }
   function richText(value) {
     return esc(value).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
@@ -225,8 +251,9 @@
         if (name === 'getPublishedDataset') return resolve(localPublishedDataset(args[0]));
         if (name === 'getNewsletterWorkspace') return resolve({subject:`NPS e incidencias relacionadas - ${publication.scope?.label||'Edición local'}`,scope:publication.scope||{key:'local'},activeCount:1,presentationUrl:viewer.reportUrl || '',recipients:[{email:'direccion@bbva.com',active:true},{email:'seguimiento@bbva.com',active:false}],sender:{ready:true,name:'NPS Lens',effective:'nps-lens.group@bbva.com'}});
         if (name === 'getPublicationSettings') return resolve({id:'local-preview',name:'Vista previa local',url:''});
-        if (name === 'getEvolutionNpsSettings') return resolve({visible:true});
-        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope' || name === 'saveEvolutionNpsSettings') return resolve({visible:true});
+        if (name === 'getEvolutionNpsSettings') return resolve({visible:viewer.evolutionNpsVisible!==false});
+        if (name === 'saveEvolutionNpsSettings') return resolve({visible:args[0]!==false,reportUrl:viewer.reportUrl||''});
+        if (name === 'saveNewsletterRecipient' || name === 'savePublicationFolder' || name === 'selectPublicationScope') return resolve({visible:true});
         if (name === 'testNewsletter') return resolve({sent:1});
         if (name === 'sendNewsletter') return resolve({sent:1});
         return resolve({});
@@ -309,16 +336,31 @@
     activityCache = {key,report};
     return report;
   }
+  function evolutionStatus(visible) {
+    return 'Evolución NPS '+(visible?'visible':'oculta')+' en la WebApp, newsletter y presentaciones.';
+  }
+  async function loadEvolutionSettings() {
+    const input=$('evolution-visible'),button=$('evolution-save'),status=$('evolution-status');
+    if(!input)return;
+    try{
+      const value=await rpc('getEvolutionNpsSettings');
+      if(!input.isConnected)return;
+      applyEvolutionNpsVisibility(value);
+      input.checked=value.visible!==false;
+      status.textContent=evolutionStatus(input.checked);
+      input.disabled=false;button.disabled=false;
+    }catch(error){if(status.isConnected)status.textContent=error.message;}
+  }
   function settings(view) {
     const tabs = contentTabs(settingsViews,view,'settings','Secciones de configuración');
     let title;
     let copy;
     let body;
     if(view==='evolution'){
-      setTimeout(async()=>{try{const value=await rpc('getEvolutionNpsSettings');$('evolution-visible').checked=value.visible!==false;}catch(error){$('evolution-status').textContent=error.message;}},0);
+      setTimeout(loadEvolutionSettings,0);
       title = 'Evolución NPS';
       copy = 'Control global de visibilidad para todos los ámbitos y usuarios de la WebApp y sus presentaciones.';
-      body = '<article class="surface-card stack-panel"><div class="toggle-row"><div><h3>Mostrar Evolución NPS</h3><p class="secondary-copy">Al ocultarla, la navegación pública omite la sección y la presentación abre la variante sin las diapositivas 2 y 3.</p></div><label class="switch"><input id="evolution-visible" type="checkbox"><span aria-hidden="true"></span></label></div><button id="evolution-save" class="button">Guardar visibilidad global</button><p id="evolution-status" class="status">El cambio se aplica a todos los usuarios y ámbitos publicados.</p></article>';
+      body = '<article class="surface-card stack-panel"><div class="toggle-row"><div><h3>Mostrar Evolución NPS</h3><p class="secondary-copy">Encendido: muestra los indicadores NPS. Apagado: los oculta en la WebApp y newsletter y abre la presentación sin las diapositivas 2 y 3.</p></div><label class="switch"><input id="evolution-visible" type="checkbox" aria-label="Mostrar Evolución NPS" disabled><span aria-hidden="true"></span></label></div><button id="evolution-save" class="button" disabled>Guardar visibilidad global</button><p id="evolution-status" class="status">Consultando la visibilidad guardada…</p></article>';
     } else if(view==='publication'){
       setTimeout(async()=>{try{const folder=await rpc('getPublicationSettings');$('publication-folder').value=folder.id||'';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}},0);
       title = 'Publicación';
@@ -368,7 +410,8 @@
     if($('activity-refresh')) $('activity-refresh').onclick=refresh;
     if($('activity-download')) $('activity-download').onclick=async()=>{try{await downloadActivityReport();$('activity-status').textContent='Diagnóstico descargado correctamente.';queueActivity('download_diagnostic');}catch(error){$('activity-status').textContent=error.message;}};
     if($('publication-folder-save')) $('publication-folder-save').onclick=async()=>{try{const folder=await rpc('savePublicationFolder',[$('publication-folder').value]);$('publication-folder-status').textContent='Carpeta validada y guardada.';if(folder.url){$('publication-folder-open').href=folder.url;$('publication-folder-open').hidden=false;}}catch(error){$('publication-folder-status').textContent=error.message;}};
-    if($('evolution-save')) $('evolution-save').onclick=async()=>{const button=$('evolution-save');button.disabled=true;$('evolution-status').textContent='Guardando visibilidad global…';try{await rpc('saveEvolutionNpsSettings',[$('evolution-visible').checked]);location.reload();}catch(error){button.disabled=false;$('evolution-status').textContent=error.message;}};
+    if($('evolution-visible')) $('evolution-visible').onchange=()=>{$('evolution-status').textContent='Sin guardar: '+evolutionStatus($('evolution-visible').checked);};
+    if($('evolution-save')) $('evolution-save').onclick=async()=>{const button=$('evolution-save'),status=$('evolution-status'),visible=$('evolution-visible').checked;button.disabled=true;status.textContent='Guardando visibilidad global…';try{const value=await rpc('saveEvolutionNpsSettings',[visible,publication.scope?.key||viewer.scopeKey||'']);applyEvolutionNpsVisibility(value);$('evolution-visible').checked=value.visible!==false;status.textContent=evolutionStatus(value.visible!==false);}catch(error){status.textContent=error.message;}finally{button.disabled=false;}};
     if($('recipient-add')) $('recipient-add').onclick=async()=>{try{await rpc('saveNewsletterRecipient',[{email:$('recipient-email').value,active:true}]);$('newsletter-status').textContent='Destinatario guardado como activo.';queueActivity('recipient_added');await loadNewsletter();}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-test')) $('newsletter-test').onclick=async()=>{try{const value=await rpc('testNewsletter');$('newsletter-status').textContent=`Prueba enviada al administrador conectado (${value.sent}).`;queueActivity('newsletter_test_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
     if($('newsletter-send')) $('newsletter-send').onclick=async()=>{try{const value=await rpc('sendNewsletter');$('newsletter-status').textContent=`Newsletter enviada a ${value.sent} destinatarios activos.`;queueActivity('newsletter_sent');}catch(error){$('newsletter-status').textContent=error.message;}};
@@ -416,7 +459,7 @@
   if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
-  if(viewer.reportUrl){$('report-link').href=viewer.reportUrl;$('report-link').hidden=false;}
+  updateReportLink(viewer.reportUrl);
   window.addEventListener('error',() => queueActivity('client_error','client_error','error'));
   window.addEventListener('pagehide',flushActivity);
   async function start(){
@@ -435,6 +478,11 @@
     queueActivity('app_enter','', 'ok', Math.max(0,Math.round(performance.now())));
     render();
   }
-  start();
-})();
+  await start();
+})().catch(error => {
+  const message=document.createElement('p');
+  message.className='error';
+  message.textContent=`No se ha podido abrir la edición: ${error.message||error}`;
+  document.getElementById('content').replaceChildren(message);
+});
 </script>

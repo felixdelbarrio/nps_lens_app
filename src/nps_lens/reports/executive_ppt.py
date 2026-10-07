@@ -29,7 +29,7 @@ from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
 )
-from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
@@ -46,8 +46,13 @@ from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
 from nps_lens.reports.chart_renderer import render_png
-from nps_lens.reports.coherence import assert_metric_equal, validate_metric_payload
+from nps_lens.reports.coherence import (
+    ReportCoherenceError,
+    assert_metric_equal,
+    validate_metric_payload,
+)
 from nps_lens.reports.content_selectors import (
+    causal_scenario_title,
     select_causal_scenarios,
     select_negative_delta_rows,
     select_nonzero_kpis,
@@ -388,7 +393,7 @@ def _split_source_period_frames(
         return pd.DataFrame(), pd.DataFrame()
 
     out = nps_df.copy()
-    out["Fecha"] = _coerce_datetime_series(out["Fecha"])
+    out["Fecha"] = _coerce_datetime_series(out["Fecha"]).dt.normalize()
     out = out.dropna(subset=["Fecha"]).copy()
     if out.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -456,24 +461,31 @@ def _period_overview(
     driver_source = actionable_rows(restrict_to_topics(current_nps_df, driver_col, topic_keys))
     if driver_col not in driver_source.columns:
         driver_col = "Palanca"
-    pain_point = ""
-    strength_point = ""
+    friction: dict[str, object] = {}
+    strength: dict[str, object] = {}
     if driver_col in driver_source.columns and "NPS" in driver_source.columns:
-        driver_view = driver_source[[driver_col, "NPS"]].copy().dropna(subset=["NPS"])
-        if not driver_view.empty:
-            driver_view[driver_col] = driver_view[driver_col].astype(str).str.strip()
-            driver_view = driver_view[driver_view[driver_col] != ""]
-            if not driver_view.empty:
-                detractor_counts = driver_view.loc[
-                    driver_view["NPS"].le(6), driver_col
-                ].value_counts()
-                promoter_counts = driver_view.loc[
-                    driver_view["NPS"].ge(9), driver_col
-                ].value_counts()
-                if not detractor_counts.empty:
-                    pain_point = str(detractor_counts.index[0])
-                if not promoter_counts.empty:
-                    strength_point = str(promoter_counts.index[0])
+        drivers = actionable_rows(grouped_driver_stats(driver_source, driver_col))
+        drivers["balance"] = drivers["pro_count"] - drivers["det_count"]
+        for negative in (True, False):
+            candidates = drivers.loc[
+                drivers["balance"].lt(0) if negative else drivers["balance"].gt(0)
+            ]
+            if candidates.empty:
+                continue
+            row = candidates.sort_values(
+                ["balance", "valid_n", driver_col], ascending=[negative, False, True]
+            ).iloc[0]
+            selected = {
+                "topic": str(row[driver_col]),
+                "n": int(row["valid_n"]),
+                "detractors": int(row["det_count"]),
+                "promoters": int(row["pro_count"]),
+                "nps": float(row["nps"]),
+            }
+            if negative:
+                friction = selected
+            else:
+                strength = selected
     return {
         "signal_quality": signal_quality(current_nps_df),
         "comments": _safe_int(
@@ -522,8 +534,8 @@ def _period_overview(
             )
             * 100.0
         ),
-        "pain_point": pain_point,
-        "strength_point": strength_point,
+        "friction": friction,
+        "strength": strength,
     }
 
 
@@ -567,68 +579,6 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
         lambda values: " | ".join([_clip(v, 42) for v in list(values)[:2] if str(v).strip()])
     )
     return d[cols].reset_index(drop=True)
-
-
-def _driver_change_table(
-    current_nps_df: pd.DataFrame,
-    baseline_nps_df: pd.DataFrame,
-    *,
-    dimension: str,
-) -> pd.DataFrame:
-    cols = [
-        "value",
-        "n_current",
-        "n_baseline",
-        "nps_current",
-        "nps_baseline",
-        "delta_nps",
-        "detr_current",
-        "detr_baseline",
-        "delta_detr_pp",
-    ]
-    if (
-        current_nps_df is None
-        or current_nps_df.empty
-        or baseline_nps_df is None
-        or baseline_nps_df.empty
-        or dimension not in current_nps_df.columns
-        or dimension not in baseline_nps_df.columns
-    ):
-        return pd.DataFrame(columns=cols)
-
-    cur = pd.DataFrame([s.__dict__ for s in driver_table(current_nps_df, dimension=dimension)])
-    base = pd.DataFrame([s.__dict__ for s in driver_table(baseline_nps_df, dimension=dimension)])
-    if cur.empty or base.empty:
-        return pd.DataFrame(columns=cols)
-
-    merged = cur.rename(
-        columns={
-            "n": "n_current",
-            "nps": "nps_current",
-            "detractor_rate": "detr_current",
-        }
-    ).merge(
-        base[["value", "n", "nps", "detractor_rate"]],
-        on="value",
-        how="inner",
-    )
-    if merged.empty:
-        return pd.DataFrame(columns=cols)
-    merged = merged.rename(
-        columns={
-            "nps": "nps_baseline",
-            "n": "n_baseline",
-            "detractor_rate": "detr_baseline",
-        }
-    )
-    merged["delta_nps"] = pd.to_numeric(merged["nps_current"], errors="coerce") - pd.to_numeric(
-        merged["nps_baseline"], errors="coerce"
-    )
-    merged["delta_detr_pp"] = (
-        pd.to_numeric(merged["detr_current"], errors="coerce")
-        - pd.to_numeric(merged["detr_baseline"], errors="coerce")
-    ) * 100.0
-    return merged[cols].sort_values(["delta_nps", "n_current"], ascending=[True, False])
 
 
 def _build_overview_figure(
@@ -2007,12 +1957,6 @@ def _build_dimension_view_model(
         dimension=dimension,
         min_n=EDITORIAL_LIMITS.min_change_rows_n,
     )
-    if delta_df.empty:
-        delta_df = _driver_change_table(
-            selected_raw,
-            pd.DataFrame(columns=selected_raw.columns),
-            dimension=dimension,
-        )
     change_table = select_negative_delta_rows(
         delta_df,
         max_rows=EDITORIAL_LIMITS.max_change_rows,
@@ -2122,8 +2066,24 @@ def _build_presentation_context(
     entity_summary_kpis: Optional[list[dict[str, str]]],
     broken_journeys_df: Optional[pd.DataFrame],
     period_kpis: Optional[dict[str, object]] = None,
+    evidence_channel: Optional[str] = None,
 ) -> PresentationContext:
-    period_label = f"{_safe_date(period_start)} -> {_safe_date(period_end)}"
+    if period_start > period_end:
+        raise ReportCoherenceError("El inicio del periodo no puede ser posterior a su fin.")
+    scope = {
+        "service_origin": service_origin,
+        "service_origin_n1": service_origin_n1,
+        "service_origin_n2": service_origin_n2,
+    }
+    for frame in (selected_nps_df, comparison_nps_df):
+        if frame is None:
+            continue
+        for column, expected in scope.items():
+            if expected and column in frame and not frame[column].eq(expected).fillna(False).all():
+                raise ReportCoherenceError(
+                    f"Los datos de {column} no corresponden al ámbito del informe."
+                )
+    period_label = f"{_safe_date(period_start)} → {_safe_date(period_end)}"
     if selected_nps_df is not None:
         selected_nps_df = selected_nps_df.copy()
         for col in ("Comment", "Comentario", "comment_txt", "_text_norm"):
@@ -2143,18 +2103,18 @@ def _build_presentation_context(
         period_start=period_start,
         period_end=period_end,
     )
-    if current_source_period.empty and selected_nps_df is not None:
+    if selected_nps_df is not None:
         current_source_period, _ = _split_source_period_frames(
             selected_nps_df,
             period_start=period_start,
             period_end=period_end,
         )
-    if selected_raw.empty:
+    if selected_raw.empty and selected_nps_df is None:
         selected_raw = current_period.copy()
     selected_raw = selected_raw.loc[
         selected_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
     ].copy()
-    if selected_raw.empty:
+    if selected_raw.empty and selected_nps_df is None:
         selected_raw = compare_raw.loc[
             compare_raw["date"].between(pd.Timestamp(period_start), pd.Timestamp(period_end))
         ].copy()
@@ -2175,6 +2135,26 @@ def _build_presentation_context(
         period_end=period_end,
     )
     validate_metric_payload(resolved_period_kpis)
+    period_payload = _dict_payload(resolved_period_kpis.get("period"))
+    actual_kpis = _dict_payload(period_payload.get("kpis"))
+    for name, expected in compute_score_kpis(kpi_current_df).to_dict().items():
+        assert_metric_equal(actual_kpis.get(name), expected, f"Población del periodo: {name}")
+    if period_kpis is not None and "base_end_date" in period_payload:
+        base_dates = pd.to_datetime(kpi_history_df["Fecha"], errors="coerce").dt.normalize()
+        base_mask = base_dates.notna()
+        for field, bound in (("base_start_date", "ge"), ("base_end_date", "le")):
+            if period_payload.get(field):
+                base_mask &= getattr(base_dates, bound)(pd.Timestamp(period_payload[field]))
+        expected_base = compute_score_kpis(kpi_history_df.loc[base_mask]).to_dict()
+        supplied_base = _dict_payload(period_payload.get("base_kpis"))
+        for name, expected in expected_base.items():
+            assert_metric_equal(supplied_base.get(name), expected, f"Población de la base: {name}")
+    if period_kpis is None:
+        period_payload["base_label"] = (
+            f"Histórico hasta {_safe_date(baseline_period['date'].max())}"
+            if not baseline_period.empty
+            else "Sin base histórica"
+        )
     channel_key = str(topic_channel or "").strip().casefold()
     channel_values = selected_raw["Canal"].fillna("").astype(str).str.strip()
     channel_selected = (
@@ -2199,6 +2179,8 @@ def _build_presentation_context(
     overview.update(
         {
             "base_classic_nps": base_kpis.classic_nps,
+            "base_detractor_rate": base_kpis.detractor_rate,
+            "cumulative_detractor_rate": cumulative_kpis.detractor_rate,
             "cumulative_classic_nps": cumulative_kpis.classic_nps,
             "cumulative_classic_delta": (
                 float(cumulative_kpis.classic_nps - base_kpis.classic_nps)
@@ -2221,15 +2203,6 @@ def _build_presentation_context(
     text_topics = _text_topics_table(
         actionable_rows(detractor_raw), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
     )
-    if not text_topics.empty:
-        text_topics = text_topics.loc[
-            ~text_topics["top_terms"].map(
-                lambda values: any(
-                    " ".join(str(value).casefold().split()) == "sin comentarios"
-                    for value in list(values or [])
-                )
-            )
-        ].reset_index(drop=True)
     dimensions = {
         "Palanca": _build_dimension_view_model(
             dimension="Palanca",
@@ -2248,12 +2221,22 @@ def _build_presentation_context(
     }
 
     chains = attribution_df.copy() if attribution_df is not None else pd.DataFrame()
+    for records in chains.get("comment_records", []):
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict) or not record.get("date"):
+                continue
+            comment_date = pd.to_datetime(record["date"], dayfirst=True, errors="coerce")
+            if pd.isna(comment_date) or not period_start <= comment_date.date() <= period_end:
+                raise ReportCoherenceError("Una evidencia VoC queda fuera del periodo del informe.")
     causal_entity_summary = (
         entity_summary_df.copy() if entity_summary_df is not None else pd.DataFrame()
     )
     method_spec = get_causal_method_spec(touchpoint_source)
     causal = CausalViewModel(
         touchpoint_source=str(touchpoint_source or "").strip(),
+        channel=evidence_channel or topic_channel,
         method_label=method_spec.label,
         method_title=method_spec.navigation_title,
         method_subtitle=method_spec.navigation_subtitle,
@@ -2313,18 +2296,39 @@ def _set_template_text(
     tf = shape.text_frame
     tf.clear()
     tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.margin_top = min(tf.margin_top, Inches(0.025))
+    tf.margin_bottom = min(tf.margin_bottom, Inches(0.025))
     paragraph = tf.paragraphs[0]
     if align is not None:
         paragraph.alignment = align
-    run = paragraph.add_run()
-    run.text = str(text or "")
-    run.font.name = font or "Lato"
-    if size is not None:
-        run.font.size = Pt(size)
-    if bold is not None:
-        run.font.bold = bold
-    if color:
-        run.font.color.rgb = _rgb(color)
+    for index, line in enumerate(str(text or "").split("\n")):
+        if index:
+            paragraph.add_line_break()
+        run = paragraph.add_run()
+        run.text = line
+        run.font.name = font or "Lato"
+        if size is not None:
+            run.font.size = Pt(size)
+        if bold is not None:
+            run.font.bold = bold
+        if color:
+            run.font.color.rgb = _rgb(color)
+
+
+def _topic_signal_copy(signal: object, *, positive: bool) -> str:
+    if not isinstance(signal, dict) or not signal:
+        return (
+            "No hay un tópico con comentarios útiles y saldo promotor positivo."
+            if positive
+            else "No hay un tópico con comentarios útiles y más detractores que promotores."
+        )
+    return (
+        f"{signal['topic']}.\n"
+        f"{signal['n']} opiniones: {signal['detractors']} detractoras / "
+        f"{signal['promoters']} promotoras.\n"
+        f"NPS del tópico: {_fmt_num_or_nd(signal['nps'])} pts."
+    )
 
 
 def _set_template_card_body(shape: object, card: object, text: str) -> None:
@@ -2373,6 +2377,8 @@ def _set_template_messages(shape: object, messages: list[str], *, size: float) -
 
 
 def _set_template_table(table: object, rows: list[list[str]]) -> None:
+    while len(table.rows) < len(rows):
+        table._tbl.append(deepcopy(table._tbl.tr_lst[-1]))
     for row_index, table_row in enumerate(table.rows):
         table_row.height = Inches(0.42 if row_index == 0 else 0.40)
         values = rows[row_index] if row_index < len(rows) else []
@@ -2547,7 +2553,7 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
         ("SCORE MEDIO", "nps_average"),
         ("PROMOTORES", "promoter_rate"),
         ("DETRACTORES", "detractor_rate"),
-        ("NPS CLÁSICO MENSUAL", "classic_nps"),
+        ("NPS CLÁSICO", "classic_nps"),
     )
     rows = [["Indicador", _clip(base_label, 24), _clip(actual_label, 24), "Variación"]]
     for label, key in specs:
@@ -2560,6 +2566,17 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
                 str(delta.get("display") or format_delta(delta.get("value"), kpi_key=key)),
             ]
         )
+    current_samples = _dict_payload(period.get("kpis")).get("samples", 0)
+    base_samples = _dict_payload(period.get("base_kpis")).get("samples", 0)
+    rows.insert(
+        2,
+        [
+            "RESPUESTAS NPS",
+            format_volume(base_samples),
+            format_volume(current_samples),
+            format_delta(float(current_samples) - float(base_samples), kpi_key="samples"),
+        ],
+    )
     return rows
 
 
@@ -2716,11 +2733,19 @@ def _fill_template_deck(
     dimension = "Subpalanca" if dimension_mode == "subpalanca" else "Palanca"
     view = context.dimensions[dimension]
     topic_channel = context.topic_channel or "Todos"
-    month = _month_label_es(context.period_end).title()
-    base_month = _month_label_es(context.period_start - pd.Timedelta(days=1)).title()
+    period = _dict_payload(context.period_kpis.get("period"))
+    actual_label = str(period.get("actual_label") or context.period_label)
+    base_label = str(period.get("base_label") or "Sin base histórica")
+    historic_label = context.baseline_label
+    metric_scope = f"Tópicos observados en {topic_channel}; métricas con todas sus opiniones."
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
+    cover.shapes[1].top = Inches(1.35)
+    cover.shapes[1].width = Inches(5.9)
+    cover.shapes[1].height = Inches(0.85)
+    for slide_index, title_index in ((1, 4), (2, 5), (3, 4), (4, 0), (5, 0)):
+        prs.slides[slide_index].shapes[title_index].height = Inches(0.78)
     _set_template_text(
         cover.shapes[0],
         "NPS : Comentarios\ne incidencias",
@@ -2736,7 +2761,8 @@ def _fill_template_deck(
     )
     _set_template_text(
         cover.shapes[1],
-        f"{scope} · {context.period_label} · Método de agrupación: "
+        f"{scope} · {context.period_label} · Tópicos: {topic_channel} · Opiniones: Todos\n"
+        "Método de agrupación: "
         f"{method.label if include_causal_section else (linking_diagnostics or {}).get('evaluation_message', 'Vínculos no evaluados')}",
         size=12,
         color="FFFFFF",
@@ -2750,11 +2776,11 @@ def _fill_template_deck(
         )
     ).get("value")
     assert_metric_equal(
-        delta, table_delta if table_delta is not None else float("nan"), "Titular NPS mensual"
+        delta, table_delta if table_delta is not None else float("nan"), "Titular NPS del periodo"
     )
     _set_template_text(
         comparison.shapes[4],
-        f"NPS clásico mensual · {month}",
+        f"NPS clásico del periodo · {actual_label}",
         size=25,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2762,7 +2788,7 @@ def _fill_template_deck(
     )
     _set_template_text(
         comparison.shapes[2],
-        f"Comparativa de indicadores\n{base_month} frente a {month}",
+        f"Comparativa de indicadores\n{base_label} frente a {actual_label}",
         size=12,
         bold=True,
         color="FFFFFF",
@@ -2772,15 +2798,12 @@ def _fill_template_deck(
     _set_template_card_body(
         comparison.shapes[8],
         comparison.shapes[7],
-        f"{context.overview.get('pain_point') or 'Sin señal suficiente'}.\n"
-        f"Mayor volumen detractor en {topic_channel}.",
+        _topic_signal_copy(context.overview.get("friction"), positive=False),
     )
     _set_template_card_body(
         comparison.shapes[12],
         comparison.shapes[10],
-        f"{context.overview.get('strength_point') or 'Sin señal suficiente'}.\n"
-        f"Mayor volumen promotor en {topic_channel}.\n"
-        + str(context.overview.get("signal_quality", {}).get("message", "")),
+        _topic_signal_copy(context.overview.get("strength"), positive=True),
     )
     for icon_index, card_index in ((9, 7), (11, 10)):
         icon, card = comparison.shapes[icon_index], comparison.shapes[card_index]
@@ -2788,9 +2811,9 @@ def _fill_template_deck(
         icon.left = card.left + card.width - icon.width - Inches(0.12)
     _set_template_text(
         comparison.shapes[3],
-        f"La experiencia de cliente {'mejora' if delta > 0 else 'empeora' if delta < 0 else 'se mantiene'}: "
-        f"el NPS clásico mensual varía {_fmt_signed_or_nd(delta)} pts y el peso detractor "
-        f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.",
+        f"Variación del periodo: {_fmt_signed_or_nd(delta)} pts NPS · Peso detractor: "
+        f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.\n"
+        + str(context.overview.get("signal_quality", {}).get("message", "")),
         size=11.5,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2801,7 +2824,7 @@ def _fill_template_deck(
     history = prs.slides[2]
     _set_template_text(
         history.shapes[5],
-        f"Evolución del NPS clásico acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
+        f"NPS clásico diario y balance acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
         size=22,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2815,18 +2838,19 @@ def _fill_template_deck(
         color="FFFFFF",
         font="Source Serif 4",
     )
+    history.shapes[3].height = Inches(2.95)
     _set_template_messages(
         history.shapes[3],
         [
-            f"El NPS clásico histórico terminó en {base_month} en {_fmt_num_or_nd(context.overview.get('base_classic_nps'))}.",
+            f"NPS clásico de la base histórica ({historic_label}): {_fmt_num_or_nd(context.overview.get('base_classic_nps'))}.",
             f"A {_long_date_es(context.period_end)} alcanza {_fmt_num_or_nd(context.overview.get('cumulative_classic_nps'))}.",
-            f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('start_detr'))} a {_fmt_pct_or_nd(context.overview.get('end_detr'))}.",
+            f"El peso detractor pasa de {_fmt_pct_or_nd(context.overview.get('base_detractor_rate'))} a {_fmt_pct_or_nd(context.overview.get('cumulative_detractor_rate'))}.",
         ],
         size=11.5,
     )
     _set_template_text(
         history.shapes[4],
-        f"El NPS clásico acumulado varía {_fmt_signed_or_nd(context.overview.get('cumulative_classic_delta'))} puntos frente a la base de {base_month}.",
+        f"El NPS clásico acumulado varía {_fmt_signed_or_nd(context.overview.get('cumulative_classic_delta'))} puntos frente a la base histórica ({historic_label}).",
         size=11.5,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2847,7 +2871,7 @@ def _fill_template_deck(
     topics = prs.slides[3]
     _set_template_text(
         topics.shapes[4],
-        f"Principales comentarios de los detractores del mes ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}) en el canal {topic_channel}",
+        f"Principales comentarios de los detractores del periodo ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}) en el canal {topic_channel}",
         size=22,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2870,10 +2894,14 @@ def _fill_template_deck(
         topic_rows,
         column_widths=[1.0, 2.45, 5.11],
     )
-    leader = topic_rows[1][1] if len(topic_rows) > 1 else "sin señal textual suficiente"
+    leader = topic_rows[1][1] if len(topic_rows) > 1 else ""
     _set_template_text(
         topics.shapes[3],
-        f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}.",
+        (
+            f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}."
+            if leader
+            else "No hay comentarios detractores útiles para identificar temas."
+        ),
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2895,18 +2923,23 @@ def _fill_template_deck(
             ]
         )
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
+    worst_name = str(view.change_table_df.iloc[0]["value"]) if len(change_rows) > 1 else ""
     _set_template_text(
         change.shapes[0],
-        f"{worst[0]} lidera el deterioro entre los tópicos observados en {topic_channel} en {month}, frente a la base de {base_month}",
+        (
+            f"{worst_name} lidera el deterioro entre los tópicos observados en {topic_channel}"
+            if len(change_rows) > 1
+            else "Sin deterioros comparables frente a la base histórica"
+        ),
         size=21,
         bold=True,
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
     )
-    change.shapes[4].height = Inches(0.62)
+    change.shapes[4].height = Inches(0.78)
     _set_template_text(
         change.shapes[4],
-        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {context.baseline_label}",
+        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {historic_label}\n{metric_scope}",
         size=11,
         bold=True,
         color="FFFFFF",
@@ -2914,7 +2947,11 @@ def _fill_template_deck(
     )
     _set_template_text(
         change.shapes[6],
-        f"{worst[0]} presenta el mayor Delta NPS Clásico ({worst[1]} puntos).",
+        (
+            f"{worst_name} presenta la mayor caída del NPS clásico ({worst[1]} puntos)."
+            if len(change_rows) > 1
+            else "No hay caídas del NPS clásico con datos comparables en ambos periodos."
+        ),
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2927,6 +2964,7 @@ def _fill_template_deck(
         view.change_figure,
         empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
     )
+    change.shapes[7].top = Inches(2.18)
     _replace_template_table(
         change,
         7,
@@ -2952,7 +2990,11 @@ def _fill_template_deck(
         )
     _set_template_text(
         pain.shapes[0],
-        f"{leader_name} concentra el mayor dolor entre los tópicos observados en {topic_channel}",
+        (
+            f"{leader_name} tiene el menor score medio entre los tópicos observados en {topic_channel}"
+            if pain_rows
+            else "Sin opiniones clasificadas para comparar tópicos"
+        ),
         size=25,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2989,7 +3031,7 @@ def _fill_template_deck(
         )
     _set_template_text(
         pain.shapes[7],
-        f"{leader_name} presenta la señal más crítica entre los tópicos observados en {topic_channel}.",
+        f"Periodo {context.current_label} · {metric_scope}",
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3009,13 +3051,7 @@ def _fill_template_deck(
     for offset, scenario in enumerate(scenarios):
         slide = prs.slides[6 + offset]
         row = scenario.row
-        title = str(row.get("nps_topic") or f"Escenario de evidencia {offset + 1}").replace(
-            " > ", " / "
-        )
-        task = str(row.get("affected_task") or "")
-        symptom = str(row.get("observed_symptom") or "")
-        if task and symptom and task != "Tarea pendiente de validación":
-            title = f"{task} → {symptom}"
+        title = causal_scenario_title(row, rank=offset + 1)
         title_shape = slide.shapes[1]
         full_title = title
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
@@ -3029,8 +3065,18 @@ def _fill_template_deck(
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
         )
+        slide.shapes[0].left = Inches(0.38)
+        slide.shapes[0].top = Inches(5.47)
+        slide.shapes[0].width = Inches(9.37)
+        slide.shapes[0].height = Inches(0.15)
+        slide.shapes[0].text_frame.margin_top = 0
+        slide.shapes[0].text_frame.margin_bottom = 0
         _set_template_text(
-            slide.shapes[0], str(7 + offset), size=8, color=BBVA_COLORS["ink"], align=PP_ALIGN.RIGHT
+            slide.shapes[0],
+            f"VoC: {context.period_label} · Canal: {context.causal.channel} · {7 + offset}",
+            size=8,
+            color=BBVA_COLORS["ink"],
+            align=PP_ALIGN.RIGHT,
         )
         _set_template_text(
             slide.shapes[4],
@@ -3074,7 +3120,7 @@ def _fill_template_deck(
         slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
             slide.shapes[9],
-            f"VÍNCULOS SEMÁNTICOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}"
+            f"VÍNCULOS EVALUADOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}"
             + (
                 f"\n{row['operational_recommendation']}"
                 if row.get("operational_recommendation")
@@ -3158,6 +3204,7 @@ def generate_business_review_ppt(
     include_causal_section: bool = True,
     linking_diagnostics: Optional[dict[str, object]] = None,
     report_context: Optional[dict[str, object]] = None,
+    evidence_channel: Optional[str] = None,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
     if attribution_df is not None and not attribution_df.empty:
@@ -3191,6 +3238,7 @@ def generate_business_review_ppt(
         entity_summary_kpis=entity_summary_kpis,
         broken_journeys_df=broken_journeys_df,
         period_kpis=period_kpis,
+        evidence_channel=evidence_channel,
     )
 
     _fill_template_deck(
@@ -3209,15 +3257,23 @@ def generate_business_review_ppt(
 
     buff = BytesIO()
     metadata = report_context or {}
-    quality = signal_quality(selected_nps_df if selected_nps_df is not None else pd.DataFrame())
+    quality = _dict_payload(context.overview.get("signal_quality"))
     report_note = (
         f"Taxonomía activa: {metadata.get('taxonomy_mode', 'No disponible')}\n"
         f"Fingerprint: {metadata.get('taxonomy_fingerprint', 'No disponible')}\n"
         f"Motor de vinculación: {metadata.get('causal_engine', 'rules')}\n"
         f"Fecha de clasificación comentarios: {metadata.get('comment_classified_at', 'No disponible')}\n"
         f"Fecha de clasificación incidencias: {metadata.get('incident_classified_at', 'No disponible')}\n"
-        f"Ámbito: {metadata.get('scope', {})}\n{quality['message']}\n"
+        f"Ámbito: {metadata.get('scope', {})}\n"
+        f"Periodo VoC: {context.period_label} · Tópicos: {context.topic_channel}\n"
+        f"Canal de evidencias Helix–VoC: {context.causal.channel}\n"
+        "Los NPS globales usan todas las respuestas válidas, con y sin comentario.\n"
+        "Las métricas de tópicos usan todas sus opiniones; el canal selecciona los tópicos.\n"
+        "Las incidencias pueden preceder al periodo VoC dentro de la ventana de vinculación.\n"
+        f"{quality['message']}\n"
         + " ".join(quality["warnings"])
+        + "\nLas tarjetas ordenan los tópicos por saldo neto de promotores y detractores. "
+        "La calidad de señal utiliza solo comentarios no vacíos del periodo."
     )
     for index, slide in enumerate(prs.slides):
         scenario_note = ""

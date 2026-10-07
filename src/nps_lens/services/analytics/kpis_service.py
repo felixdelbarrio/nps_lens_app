@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.core.metrics import summarize
+from nps_lens.domain.comment_text import nonempty_comment_mask
 from nps_lens.reports.coherence import validate_metric_payload
 from nps_lens.ui.population import MONTH_LABELS_ES, POP_ALL
 
@@ -23,7 +24,6 @@ _DELTA_UNITS = {
     "neutral_rate": "pp",
     "promoter_rate": "pp",
 }
-_COMMENT_COLUMNS = ("comment_txt", "Comment", "Comentario", "Comentarios", "comentario")
 _DATE_COLUMNS = ("Fecha", "date")
 
 
@@ -49,24 +49,10 @@ class ScoreKpis:
         }
 
 
-def _useful_comment_count(frame: pd.DataFrame, *, fallback: int) -> int:
-    if frame is None or frame.empty:
-        return 0
-    for column in _COMMENT_COLUMNS:
-        if column not in frame.columns:
-            continue
-        raw = frame[column]
-        if not isinstance(raw, pd.Series):
-            continue
-        text = raw.where(raw.notna(), "").astype(str).str.strip()
-        text = text[~text.str.casefold().isin({"", "nan", "none", "null"})]
-        return int(text.size)
-    return int(fallback)
-
-
 def compute_score_kpis(frame: pd.DataFrame) -> ScoreKpis:
     stats = summarize(frame)
-    comment_count = _useful_comment_count(frame, fallback=stats.n)
+    comment_mask = nonempty_comment_mask(frame)
+    comment_count = int(comment_mask.sum()) if comment_mask is not None else stats.n
     if not stats.n:
         return ScoreKpis(
             samples=0,
@@ -621,6 +607,12 @@ def build_period_kpis(
         base_label=previous_label,
         actual_label=context_label,
         note=_available_date_range_note(current_df, prefix="KPIs agregados del período"),
+    )
+    period_payload["base_start_date"] = (
+        previous_start.date().isoformat() if previous_start is not None else None
+    )
+    period_payload["base_end_date"] = (
+        previous_end.date().isoformat() if previous_end is not None else None
     )
     period_payload["temporal"] = temporal
     return {

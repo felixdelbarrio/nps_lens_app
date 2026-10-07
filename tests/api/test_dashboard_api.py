@@ -15,7 +15,7 @@ from nps_lens.analytics.drivers import compute_nps_from_scores
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
-from nps_lens.reports import BusinessPptResult
+from nps_lens.reports.executive_ppt import BusinessPptResult
 from nps_lens.settings import Settings
 from nps_lens.testing.fixtures import fixture_excel
 
@@ -1029,9 +1029,9 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "nps clásico acumulado histórico" in slide_2_text.lower()
+    assert "balance acumulado histórico" in slide_2_text.lower()
     assert "2026-01-01" in slide_2_text
-    assert "terminó en Febrero" in slide_2_text
+    assert "base histórica (2026-01-01 -> 2026-02-22)" in slide_2_text
 
     all_texts: list[str] = []
     for slide in presentation.slides:
