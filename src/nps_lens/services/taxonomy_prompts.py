@@ -94,7 +94,7 @@ ZIP con exactamente manifest.json y taxonomy.json:
 "review":{"quotes":["cita literal"],"reason":"Cobertura, fronteras y contraejemplos"}}.
 Cada criterion es obligatorio (1–500 caracteres): define el uso y la frontera frente
 a categorías próximas, sin listas extensas ni ejemplos repetidos.
-review debe acreditar la revisión con citas reales. No incluyas IDs ni clasificaciones.
+review usa citas copiadas literalmente del corpus, sin reescribirlas. No incluyas IDs ni clasificaciones.
 """
 
 CLASSIFIER_INSTRUCTIONS = """CLASIFICA COMENTARIOS · nps-lens-comments/5
