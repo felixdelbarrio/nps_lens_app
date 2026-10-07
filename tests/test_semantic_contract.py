@@ -19,6 +19,7 @@ from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
 from nps_lens.services.equivalence_exchange import EquivalenceExchange
 from nps_lens.services.semantic_validation import validate_quote
+from nps_lens.services.taxonomy_exchange import _ground_designer_quotes
 from nps_lens.services.taxonomy_prompts import (
     COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
     HELIX_INSTRUCTIONS_VERSION,
@@ -114,6 +115,15 @@ def test_designer_review_accepts_corpus_level_evidence_beyond_decision_limit(exc
         ],
     }
     assert handler.taxonomy.state(context)["designer_review"]["quotes"] == quotes
+
+
+def test_designer_review_repairs_unique_near_literal_quote_to_exact_corpus_text():
+    source = "NO ESTOY PUDIENDO PAGAR HABERES, POR FAVOR NECESITO UNA SOLUCION."
+    repaired = _ground_designer_quotes(
+        ["NO PUEDO PAGAR HABERES, POR FAVOR NECESITO UNA SOLUCION."],
+        [source, "La página está lenta y no carga correctamente."],
+    )
+    assert repaired == [source]
 
 
 def test_designer_review_cannot_cite_another_corpus(exchange):

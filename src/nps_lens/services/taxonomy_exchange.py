@@ -11,6 +11,7 @@ import uuid
 import zipfile
 import zlib
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable, TypeVar
 
@@ -113,6 +114,55 @@ def validate_payload(model: type[Model], payload: Any, filename: str) -> Model:
             f"{filename}: formato inválido en {location}. "
             "Revisa las instrucciones del proyecto y vuelve a generar este lote. No se importó nada."
         ) from exc
+
+
+_DESIGNER_QUOTE_MIN_SIMILARITY = 0.92
+_DESIGNER_QUOTE_MIN_MARGIN = 0.05
+
+
+def _ground_designer_quote(quote: str, comments: list[str]) -> str:
+    """Resolve a designer review quote to one source comment without accepting free paraphrase."""
+    normalized_quote = canonical_comment_key(quote)
+    if not normalized_quote:
+        raise ValueError("La revisión contiene una cita vacía.")
+
+    for text in comments:
+        if quote in text:
+            return quote
+    for text in comments:
+        normalized_text = canonical_comment_key(text)
+        if normalized_quote == normalized_text or (
+            len(normalized_quote.split()) >= 5 and normalized_quote in normalized_text
+        ):
+            return text
+
+    # LLMs occasionally make a tiny grammatical rewrite while intending to copy a
+    # source quote. Repair only a long, uniquely-near duplicate and persist the
+    # exact source text so downstream evidence remains grounded in the corpus.
+    if len(normalized_quote) < 30 or len(normalized_quote.split()) < 5:
+        raise ValueError(f"La revisión contiene evidencia ajena al corpus: {quote[:120]!r}.")
+
+    matches: list[tuple[float, str]] = []
+    quote_words = set(re.findall(r"\w+", normalized_quote, flags=re.UNICODE))
+    for text in comments:
+        normalized_text = canonical_comment_key(text)
+        text_words = set(re.findall(r"\w+", normalized_text, flags=re.UNICODE))
+        if quote_words and len(quote_words & text_words) / len(quote_words) < 0.7:
+            continue
+        score = SequenceMatcher(None, normalized_quote, normalized_text).ratio()
+        if score >= _DESIGNER_QUOTE_MIN_SIMILARITY:
+            matches.append((score, text))
+
+    matches.sort(key=lambda item: item[0], reverse=True)
+    if matches and (
+        len(matches) == 1 or matches[0][0] - matches[1][0] >= _DESIGNER_QUOTE_MIN_MARGIN
+    ):
+        return matches[0][1]
+    raise ValueError(f"La revisión contiene evidencia ajena al corpus: {quote[:120]!r}.")
+
+
+def _ground_designer_quotes(quotes: list[str], comments: list[str]) -> list[str]:
+    return [_ground_designer_quote(quote, comments) for quote in quotes]
 
 
 _CLASSIFIER_FIELDS = frozenset({"id", "primary", "secondary"})
@@ -717,17 +767,16 @@ class TaxonomyExchange:
             comments = frame["Comment"].fillna("").astype(str)
             if comments.str.strip().ne("").any() and not taxonomy.review.quotes:
                 raise ValueError("La revisión de taxonomía requiere evidencia del corpus.")
-            if any(
-                not quote.strip() or not any(quote in text for text in comments)
-                for quote in taxonomy.review.quotes
-            ):
-                raise ValueError("La revisión contiene evidencia ajena al corpus.")
+            grounded_quotes = _ground_designer_quotes(taxonomy.review.quotes, comments.tolist())
             TaxonomyValidator._validate_taxonomy(taxonomy)
             state = self.taxonomy.state(context)
             proposed = taxonomy.model_dump(exclude={"review"})
             state["proposed_discovered_taxonomy"] = proposed
             state["proposed_discovered_fingerprint"] = taxonomy_fingerprint(proposed)
-            state["designer_review"] = taxonomy.review.model_dump()
+            state["designer_review"] = {
+                **taxonomy.review.model_dump(),
+                "quotes": grounded_quotes,
+            }
             state["designer_progress"] = {
                 "received": len(frame),
                 "corpus": self._corpus(context, frame),
