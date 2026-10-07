@@ -463,8 +463,7 @@ def _period_overview(
     friction: dict[str, object] = {}
     strength: dict[str, object] = {}
     if driver_col in driver_source.columns and "NPS" in driver_source.columns:
-        drivers = grouped_driver_stats(driver_source, driver_col)
-        drivers = drivers.loc[drivers[driver_col].fillna("").astype(str).str.strip().ne("")]
+        drivers = actionable_rows(grouped_driver_stats(driver_source, driver_col))
         drivers["balance"] = drivers["pro_count"] - drivers["det_count"]
         for negative in (True, False):
             candidates = drivers.loc[

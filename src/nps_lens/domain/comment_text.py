@@ -69,6 +69,7 @@ _NONSPECIFIC_CONTENT = _CONTENT_PLACEHOLDERS | {
     "tema no cubierto",
 }
 _LABEL_TRIM = string.whitespace + string.punctuation + "¡¿—–…"
+_MAX_MARKER_LENGTH = 2 * max(map(len, _NONSPECIFIC_CONTENT))
 
 
 def normalize_content(value: object) -> str:
@@ -79,12 +80,19 @@ def normalize_content(value: object) -> str:
     return " ".join(text.split()).strip(_LABEL_TRIM)
 
 
+def _matches_marker(value: object, markers: frozenset[str]) -> bool:
+    text = (
+        "" if value is None or value is pd.NA else " ".join(str(value).split()).strip(_LABEL_TRIM)
+    )
+    return len(text) <= _MAX_MARKER_LENGTH and normalize_content(text) in markers
+
+
 def is_content_placeholder(value: object) -> bool:
-    return normalize_content(value) in _CONTENT_PLACEHOLDERS
+    return _matches_marker(value, _CONTENT_PLACEHOLDERS)
 
 
 def is_nonspecific_content(value: object) -> bool:
-    return normalize_content(value) in _NONSPECIFIC_CONTENT
+    return _matches_marker(value, _NONSPECIFIC_CONTENT)
 
 
 def _comment_mask(

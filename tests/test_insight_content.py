@@ -30,7 +30,8 @@ from nps_lens.services.dashboard_service import DashboardService
     ],
 )
 def test_placeholder_categories_never_qualify_as_insights(label):
-    assert is_reserve_category(label)
+    if label is not None and label is not pd.NA and pd.notna(label) and str(label):
+        assert is_reserve_category(label)
     frame = pd.DataFrame({"Subpalanca": [label], "Comment": ["No puedo generar token"], "NPS": [0]})
     assert actionable_rows(frame).empty
 
@@ -105,3 +106,36 @@ def test_no_meaningful_topic_produces_an_explicit_empty_insight():
         assert "No hay un tópico con comentarios útiles" in executive_ppt._topic_signal_copy(
             {}, positive=positive
         )
+
+
+def test_newsletter_does_not_invent_a_generic_friction_when_only_empty_topics_remain():
+    from datetime import date
+    from nps_lens.reports.executive_newsletter import build_executive_newsletter
+    from nps_lens.services.analytics.kpis_service import build_period_kpis
+
+    frame = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-08-01", "2026-08-02"]),
+            "Palanca": ["Genérico", "Sin contenido"],
+            "Comment": ["opinión", ""],
+            "NPS": [0, 10],
+        }
+    )
+    kpis = build_period_kpis(
+        history_df=frame,
+        current_df=frame,
+        pop_year="2026",
+        pop_month="08",
+        context_label="Agosto 2026",
+    )
+    newsletter = build_executive_newsletter(
+        current_df=frame,
+        period_kpis=kpis,
+        linking={},
+        topic_channel="Todos",
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 2),
+    )
+    assert newsletter["headline"] == "No hay evidencia suficiente para destacar un foco de fricción"
+    assert newsletter["signals"] == []
+    assert newsletter["scorecard"][1]["value"] == "0,00"

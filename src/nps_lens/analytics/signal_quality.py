@@ -19,12 +19,14 @@ INSUFFICIENT_WARNING_RATE = 0.20
 
 def is_reserve_category(value: object) -> bool:
     parts = re.split(r"\s*(?:>|/|::|·)\s*", normalize_content(value))
-    return any(is_nonspecific_content(part) for part in parts)
+    return any(bool(part) and is_nonspecific_content(part) for part in parts)
 
 
 def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
     comment_mask = useful_comment_mask(frame)
     mask = comment_mask if comment_mask is not None else pd.Series(True, index=frame.index)
+    named_topic = pd.Series(False, index=frame.index)
+    has_topic_columns = False
     for column in (
         "Palanca",
         "Subpalanca",
@@ -36,9 +38,14 @@ def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
         "incident_topic",
     ):
         if column in frame:
+            has_topic_columns = True
             labels = frame[column].astype(object)
+            names = {value: bool(normalize_content(value)) for value in labels.unique()}
+            named_topic |= labels.map(names).astype(bool)
             reserves = {value: is_reserve_category(value) for value in labels.unique()}
             mask &= ~labels.map(reserves).astype(bool)
+    if has_topic_columns:
+        mask &= named_topic
     return frame.loc[mask].copy()
 
 

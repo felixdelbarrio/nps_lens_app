@@ -3043,7 +3043,7 @@ class DashboardService:
             return pd.DataFrame()
         safe = frame.copy()
         safe[comment_column] = (
-            safe[comment_column].fillna("").astype(str).map(redact_operational_snippet)
+            safe[comment_column].astype("string").fillna("").map(redact_operational_snippet)
         )
         topics = summarize_taxonomy(safe)
         return pd.DataFrame([topic.__dict__ for topic in topics])
