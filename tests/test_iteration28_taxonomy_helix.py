@@ -246,8 +246,10 @@ def test_helix_five_methods_and_engine_without_rules(helix, method, entity, monk
     assert not payload["links_mode_df"].empty
     frame.loc[0, "Comment"] = "Changed comment"
     enabled = client.put("/api/taxonomy/helix/engine", params=params)
-    assert enabled.status_code == 200
-    assert enabled.json()["ready"]
+    assert enabled.status_code == 409
+    assert "Clasifica incidencias" in enabled.json()["detail"]
+    status = client.get("/api/taxonomy/helix/engine", params=params).json()
+    assert status["ready"] and not status["linking_ready"]
     assert (
         dashboard.linking_dashboard(context=ctx)["diagnostics"]["evaluation_reason"]
         == "evaluation_pending"

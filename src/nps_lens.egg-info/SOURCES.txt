@@ -59,6 +59,7 @@ src/nps_lens/platform/publication.py
 src/nps_lens/platform/resources.py
 src/nps_lens/platform/webapp_preview.py
 src/nps_lens/reports/__init__.py
+src/nps_lens/reports/chart_renderer.py
 src/nps_lens/reports/coherence.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
@@ -97,6 +98,7 @@ src/nps_lens/ui/theme.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
+tests/test_chart_renderer.py
 tests/test_classification_framework.py
 tests/test_cli.py
 tests/test_column_aliases.py

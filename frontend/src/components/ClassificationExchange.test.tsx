@@ -45,7 +45,7 @@ it.each([
   expect(screen.getByText("2_2_comentarios.zip")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByLabelText(role === "classifier" ? "Importar ZIP de comentarios clasificados" : "Importar ZIP de incidencias clasificadas")).toBeEnabled());
   expect(screen.getByRole("progressbar")).toHaveAttribute("value", String(2 - pending));
-  expect(screen.getByRole("button", { name: role === "classifier" ? "Descargar todos los ZIP de comentarios pendientes" : "Descargar todos los ZIP de incidencias pendientes" })).toHaveProperty("disabled", !pending);
+  expect(screen.getByRole("button", { name: role === "classifier" ? "Descargar todos los ZIP de comentarios pendientes" : pending ? "Descargar todos los ZIP de incidencias pendientes" : "Reevaluar vínculos conservando categorías" })).toHaveProperty("disabled", role === "classifier" && !pending);
 });
 
 it("refreshes locally resolved empty comments without showing a nonexistent ZIP", async () => {

@@ -1,3 +1,4 @@
+import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
 
@@ -227,7 +228,7 @@ export function App() {
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
   const [npsGroup, setNpsGroup] = useState("Detractores");
-  const [scoreChannel, setScoreChannel] = useState("Web");
+  const [scoreChannel, setScoreChannel] = useState("Todos");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
@@ -301,7 +302,7 @@ export function App() {
     setPopYear(latestYear);
     setPopMonth(latestMonth);
     setScoreChannel(
-      chooseDefaultOption(config.score_channels || ["Todos"], "Web", config.preferences.score_channel)
+      chooseDefaultOption(config.score_channels || ["Todos"], "Todos", config.preferences.score_channel)
     );
     setNpsGroup(
       chooseDefaultOption(config.nps_groups || ["Todos"], "Detractores", config.preferences.nps_group_choice)
@@ -336,7 +337,7 @@ export function App() {
     }
     const options = config.score_channels || ["Todos"];
     if (!options.some((option) => option === scoreChannel)) {
-      setScoreChannel(chooseDefaultOption(options, "Web", config.preferences.score_channel));
+      setScoreChannel(chooseDefaultOption(options, "Todos", config.preferences.score_channel));
     }
   }, [config, scoreChannel]);
 
@@ -537,11 +538,7 @@ export function App() {
       setStatusCopy("La interfaz no pudo sincronizar el contexto operativo.");
       return;
     }
-    setError(null);
-    if (operationalState === "generando") {
-      setStatusCopy("Generando la presentación ejecutiva en PowerPoint...");
-      return;
-    }
+    if (operationalState === "generando") return;
     if (isSavingHierarchy) {
       setStatusCopy("Persistiendo la configuración de canales...");
       return;
@@ -554,7 +551,8 @@ export function App() {
       setStatusCopy("Cargando contexto, histórico e insights...");
       return;
     }
-    setStatusCopy("Producto sincronizado con histórico persistente y reglas de negocio desacopladas.");
+    setStatusCopy(current => current.startsWith("Informe ") || current.startsWith("Publicación Web ")
+      ? current : "Producto sincronizado con histórico persistente y reglas de negocio desacopladas.");
   }, [
     isGeneratingReport,
     isMutating,
@@ -799,6 +797,7 @@ export function App() {
   }
 
   async function handleDownloadReport() {
+    setStatusCopy("Generando la presentación ejecutiva en PowerPoint…");
     setIsGeneratingReport(true);
     setError(null);
     try {
@@ -840,6 +839,7 @@ export function App() {
   }
 
   async function handleDownloadPublication() {
+    setStatusCopy("Preparando la edición Web…");
     setIsGeneratingReport(true);
     setError(null);
     try {
@@ -952,7 +952,7 @@ export function App() {
     showCausalMethodFilter: boolean,
     showScoreGroup: boolean = true
   ) {
-    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method fixed-causal-filters" : ""}`;
+    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method" : ""}`;
 
     return (
       <section className="surface-card context-strip-card" data-testid="analysis-filters">
@@ -1014,6 +1014,7 @@ export function App() {
               </select>
             </label>
           ) : null}
+          {showCausalMethodFilter && isAdmin && config?.access?.local !== false ? <ClassificationEngineControl kind="helix" context={{...classificationContext, nps_group: LINKING_NPS_GROUP}} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
         </div>
       </section>
     );

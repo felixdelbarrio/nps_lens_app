@@ -457,7 +457,11 @@ class HelixExchange:
         }
 
     def export(
-        self, context: UploadContext, inputs: dict[str, Any], *, only_linking: bool = False
+        self,
+        context: UploadContext,
+        inputs: dict[str, Any],
+        *,
+        reevaluate: bool = False,
     ) -> dict[str, Any]:
         for mode in inputs["modes"]:
             self.taxonomy.guard_export(context, mode)
@@ -468,12 +472,7 @@ class HelixExchange:
             modes = [
                 mode
                 for mode in inputs["modes"]
-                if row["id"] not in known[mode]
-                and (
-                    row["id"] in categories[mode]
-                    if only_linking
-                    else row["id"] not in categories[mode]
-                )
+                if (row["id"] in categories[mode] if reevaluate else row["id"] not in known[mode])
             ]
             if modes:
                 pending.append({**row, "pending_taxonomies": modes})
@@ -557,6 +556,7 @@ class HelixExchange:
             "analysis_horizon": inputs["analysis_horizon"],
             "schema_version": HELIX_SCHEMA,
             "instructions_version": HELIX_INSTRUCTIONS_VERSION,
+            "reevaluate": reevaluate,
             "taxonomies_sha256": digest(catalogs),
             "taxonomy_fingerprint": taxonomy_fingerprint(inputs["taxonomies"][mode]),
             "taxonomy_mode": mode,
@@ -756,7 +756,11 @@ class HelixExchange:
                 links = {k: value[k] for k in ("links", "candidates")}
                 links["linking_version"] = HELIX_INSTRUCTIONS_VERSION
                 combined = {**category, **links}
-                if key in existing[mode] and combined != existing[mode][key]:
+                if (
+                    key in existing[mode]
+                    and combined != existing[mode][key]
+                    and not manifest.get("reevaluate")
+                ):
                     raise ValueError(
                         "Una incidencia ya tiene una respuesta diferente para esa taxonomía."
                     )
