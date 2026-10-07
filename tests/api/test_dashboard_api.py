@@ -288,7 +288,7 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
     assert dashboard_payload["context_label"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
-    assert "Canal: Web" in dashboard_payload["context_pills"]
+    assert "Canal: Todos" in dashboard_payload["context_pills"]
     assert dashboard_payload["gaps"]["base_nps"] is None
     assert dashboard_payload["gaps"]["table"] == []
     assert dashboard_payload["scope"]["cumulative"]["label"].startswith("Datos acumulados hasta")
@@ -1041,7 +1041,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                     all_texts.append(paragraph.text or "")
 
     assert any(
-        "lidera el deterioro entre los tópicos observados en Web" in text for text in all_texts
+        "lidera el deterioro entre los tópicos observados en Todos" in text for text in all_texts
     )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
 
