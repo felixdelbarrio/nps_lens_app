@@ -1,5 +1,5 @@
 <script>
-(() => {
+(async () => {
   'use strict';
   let publication = JSON.parse(document.getElementById('publication-data').textContent || '{}');
   const viewer = JSON.parse(document.getElementById('viewer-data').textContent || '{}');
@@ -15,8 +15,16 @@
   const label = value => String(value ?? '').replace(/_/g, ' ').replace(/(^|\s)\p{L}/gu, char => char.toLocaleUpperCase());
   const format = value => typeof value === 'number' ? new Intl.NumberFormat('es-ES', {maximumFractionDigits: 1}).format(value) : String(value ?? '—');
   function safePresentationUrl(value) {
+    if(viewer.local && /^[A-Za-z0-9._-]+\.pptx$/i.test(String(value)))return encodeURIComponent(value);
     const match = String(value || '').match(/^https:\/\/docs\.google\.com\/presentation\/d\/([A-Za-z0-9_-]+)(?:\/|$)/);
     return match ? `https://docs.google.com/presentation/d/${encodeURIComponent(match[1])}/edit` : '';
+  }
+  function updateReportLink(value) {
+    const reportUrl=safePresentationUrl(value),reportLink=$('report-link');
+    viewer.reportUrl=reportUrl;
+    if(reportUrl)reportLink.href=reportUrl;
+    else reportLink.removeAttribute('href');
+    reportLink.hidden=!reportUrl;
   }
   const summaryViews = [['period-aggregates','Agregados por periodo'],['daily','NPS clásico vs detractores'],['volume-mix','Cómo y cuándo lo dicen'],['cohorts','Comparativas cruzadas']];
   const npsViews = [['topics','Qué dicen los clientes'],['gaps','Brechas NPS']];
@@ -90,14 +98,7 @@
       state.section=insightSections[0]?.[0]||'nps-analysis';
       state.view=detailViews(state.section)[0]?.[0]||state.section;
     }
-    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))viewer.reportUrl=safePresentationUrl(result.reportUrl);
-    const reportLink=$('report-link');
-    if(reportLink){
-      const reportUrl=safePresentationUrl(viewer.reportUrl);
-      if(reportUrl) reportLink.href=reportUrl;
-      else reportLink.removeAttribute('href');
-      reportLink.hidden=!reportUrl;
-    }
+    if(Object.prototype.hasOwnProperty.call(result||{},'reportUrl'))updateReportLink(result.reportUrl);
   }
   function richText(value) {
     return esc(value).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+)\*/g,'<em>$1</em>');
@@ -440,8 +441,7 @@
   if (hashArea && hashArea.sections.some(section => section[0] === hash[1])) { state.area = hash[0]; state.section = hash[1]; state.view = hash[2] || detailViews(state.section)[0]?.[0] || state.section; state.scenarioIndex=Math.max(0,Number(hash[3]||1)-1); }
   const monthLabels = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   function updatePublicationChrome(){const filters=publication.filters||{};$('edition-date').textContent=publication.generated_at?new Date(publication.generated_at).toLocaleString('es-ES'):'Pendiente de publicación';$('edition-context').innerHTML=[filters.service_origin,filters.year,monthLabels[filters.month]||filters.month].filter(Boolean).map(value=>`<span>${esc(value)}</span>`).join('');}
-  const initialReportUrl=safePresentationUrl(viewer.reportUrl);
-  if(initialReportUrl){$('report-link').href=initialReportUrl;$('report-link').hidden=false;}
+  updateReportLink(viewer.reportUrl);
   window.addEventListener('error',() => queueActivity('client_error','client_error','error'));
   window.addEventListener('pagehide',flushActivity);
   async function start(){
@@ -460,6 +460,11 @@
     queueActivity('app_enter','', 'ok', Math.max(0,Math.round(performance.now())));
     render();
   }
-  start();
-})();
+  await start();
+})().catch(error => {
+  const message=document.createElement('p');
+  message.className='error';
+  message.textContent=`No se ha podido abrir la edición: ${error.message||error}`;
+  document.getElementById('content').replaceChildren(message);
+});
 </script>

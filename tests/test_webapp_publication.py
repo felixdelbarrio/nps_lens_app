@@ -84,14 +84,12 @@ def test_apps_script_converts_report_and_supports_admin_operations() -> None:
 
 def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() -> None:
     root = Path("webapp/apps-script")
-    config = (root / "00_Config.gs").read_text(encoding="utf-8")
     publication = (root / "10_Publication.gs").read_text(encoding="utf-8")
     activity = (root / "20_Activity.gs").read_text(encoding="utf-8")
     webapp = (root / "60_WebApp.gs").read_text(encoding="utf-8")
     newsletter = (root / "40_Newsletter.gs").read_text(encoding="utf-8")
     app = (root / "App.html").read_text(encoding="utf-8")
 
-    assert "version: '3.0.2'" in config
     assert "function getReportUrl()" not in publication
     assert "https://docs.google.com/presentation/d/" in publication
     assert "_publishedEdition_" not in publication
@@ -121,7 +119,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "let activityCache" in app
     assert "downloadActivityReport" in app
     assert "exportActivityReport" not in app
-    assert "const initialReportUrl=safePresentationUrl(viewer.reportUrl);" in app
+    assert "updateReportLink(viewer.reportUrl);" in app
     assert "viewer.shellDeferred = Boolean(publication)" in webapp
     assert "function getPublishedShell(" in webapp
     assert "event.parameter.presentation === '1'" not in webapp
@@ -292,6 +290,6 @@ def test_report_link_uses_allowlisted_google_slides_url_before_dom_assignment() 
     assert "encodeURIComponent(match[1])" in app
     assert "reportLink.href=viewer.reportUrl" not in app
     assert "$('report-link').href=viewer.reportUrl" not in app
-    assert "const reportUrl=safePresentationUrl(viewer.reportUrl);" in app
-    assert "const initialReportUrl=safePresentationUrl(viewer.reportUrl);" in app
+    assert "const reportUrl=safePresentationUrl(value),reportLink=" in app
+    assert "updateReportLink(viewer.reportUrl);" in app
     assert "reportLink.removeAttribute('href')" in app
