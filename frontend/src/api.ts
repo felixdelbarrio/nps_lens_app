@@ -670,7 +670,7 @@ async function downloadArtifact(
   const revealFile = getDesktopBridge()?.reveal_file;
   if (savedPath && revealFile) {
     await response.body?.cancel();
-    await revealFile(savedPath);
+    await revealFile(savedPath).catch(() => false);
     return savedPath;
   }
   const blob = await response.blob();

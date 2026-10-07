@@ -950,7 +950,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             with dashboard_layer._analytics_lock:
                 handler, context, inputs = helix_exchange(request, dashboard_layer)
                 return handler.export(
-                    context, inputs, only_linking=request.query_params.get("only_linking") == "true"
+                    context,
+                    inputs,
+                    reevaluate=request.query_params.get("reevaluate") == "true",
                 )
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -1019,7 +1021,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             status = dashboard_layer.classification_status(kind, context, **engine_scope(request))
             if engine == "rules" and not status["base_available"]:
                 raise HTTPException(409, "Este Marco requiere clasificación LLM.")
-            if engine == "llm" and not status["ready"]:
+            if engine == "llm" and not status["linking_ready" if kind == "helix" else "ready"]:
                 raise HTTPException(409, status["reason"])
             state = dashboard_layer.taxonomy.state(context)
             state["comment_engine" if kind == "comments" else "causal_engine"] = engine

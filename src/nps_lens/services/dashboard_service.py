@@ -618,6 +618,7 @@ class DashboardService:
             "llm" if kind == "comments" and mode == "DISCOVERED" else state.get(preference, "rules")
         )
         total = received = 0
+        linking_ready = False
         base_available = kind == "helix"
         reason = ""
         try:
@@ -655,6 +656,13 @@ class DashboardService:
                 )
                 total = len(inputs["incidents"])
                 received = len(handler.classifications(context, inputs)[mode])
+                if total and received == total:
+                    if not inputs["comments"] or inputs["frame"].attrs["classification_pending"]:
+                        reason = "Completa la clasificación de los comentarios de la lente activa."
+                    elif len(handler.current(context, inputs)[mode]) != total:
+                        reason = "Evalúa los vínculos pendientes desde Clasifica incidencias."
+                    else:
+                        linking_ready = True
             else:
                 raise ValueError("Motor desconocido.")
             ready = total > 0 and received == total
@@ -665,6 +673,7 @@ class DashboardService:
             "selected_engine": selected_engine,
             "base_available": base_available,
             "ready": ready,
+            "linking_ready": linking_ready,
             "total": total,
             "received": received,
             "pending": total - received,

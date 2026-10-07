@@ -137,8 +137,7 @@ def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix, m
     incidents.loc[incidents.index[1], "Submit Date"] = pd.Timestamp("2026-06-04")
     moved = handler.inputs(ctx, incidents, "SOURCE", **SEPTEMBER)
     assert handler.status(ctx, moved)["pending"] == 0
-    assert handler.export(ctx, moved)["saved_paths"] == []
-    assert handler.export(ctx, moved, only_linking=True)["pending"] == 1
+    assert handler.export(ctx, moved)["pending"] == 1
 
 
 def test_restarted_comment_accumulation_retains_completed_period(exchange):

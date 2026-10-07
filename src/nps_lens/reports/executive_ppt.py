@@ -3,9 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import math
-import os
 import re
-import tempfile
 import textwrap
 import unicodedata
 from collections import OrderedDict
@@ -13,14 +11,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import BytesIO
-from pathlib import Path
 from threading import RLock
 from typing import Iterable, Optional
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
@@ -49,6 +45,7 @@ from nps_lens.design.tokens import (
 from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
+from nps_lens.reports.chart_renderer import render_png
 from nps_lens.reports.coherence import assert_metric_equal, validate_metric_payload
 from nps_lens.reports.content_selectors import (
     select_causal_scenarios,
@@ -95,6 +92,7 @@ REPORT_TEMPLATE = REPORT_ASSETS / "nps-thermal-causality-v3-template.pptx"
 _FIGURE_PNG_CACHE: OrderedDict[str, bytes] = OrderedDict()
 _FIGURE_PNG_LOCK = RLock()
 _FIGURE_PNG_CACHE_LIMIT = 24
+_RENDERER_AVAILABLE = True
 
 
 @dataclass(frozen=True)
@@ -984,47 +982,6 @@ def _build_journey_summary_figure(
     return fig
 
 
-def _patch_kaleido_executable_for_space_paths() -> None:
-    """Patch kaleido executable lookup when project path contains spaces."""
-    try:
-        from kaleido.scopes import base as kaleido_base
-    except Exception:
-        return
-
-    cls = kaleido_base.BaseScope
-    if getattr(cls, "_nps_lens_kaleido_patched", False):
-        return
-
-    try:
-        default_exec = str(cls.executable_path())
-    except Exception:
-        return
-
-    if " " not in default_exec or os.name == "nt":
-        cls._nps_lens_kaleido_patched = True
-        return
-
-    exec_path = Path(default_exec)
-    exec_dir = exec_path.parent
-    real_bin = exec_dir / "bin" / "kaleido"
-    if not real_bin.exists():
-        cls._nps_lens_kaleido_patched = True
-        return
-
-    shim_dir = Path(tempfile.gettempdir()) / "nps_lens_kaleido"
-    shim_dir.mkdir(parents=True, exist_ok=True)
-    shim_path = shim_dir / "kaleido-shim"
-    shim_path.write_text(
-        f'#!/bin/sh\ncd "{exec_dir}" || exit 1\nexec "./bin/kaleido" "$@"\n',
-        encoding="utf-8",
-    )
-    with contextlib.suppress(Exception):
-        shim_path.chmod(0o755)
-
-    cls.executable_path = classmethod(lambda scope_cls: str(shim_path))  # type: ignore[assignment]
-    cls._nps_lens_kaleido_patched = True
-
-
 def _apply_ppt_figure_theme(
     fig: go.Figure,
     *,
@@ -1870,21 +1827,7 @@ def _pillow_render_xy(
     return output.getvalue()
 
 
-def _pillow_chart_png(
-    fig: go.Figure, *, width: int, height: int
-) -> Optional[bytes]:  # pragma: no cover
-    try:
-        themed = _apply_ppt_figure_theme(go.Figure(fig))
-    except Exception:
-        themed = fig
-    if any(
-        str(getattr(trace, "type", "") or "").strip().lower() == "heatmap" for trace in themed.data
-    ):
-        return _pillow_render_heatmap(themed, width, height)
-    return _pillow_render_xy(themed, width, height)
-
-
-def _kaleido_png(
+def _figure_png(
     fig: go.Figure,
     *,
     width: int = 1600,
@@ -1892,58 +1835,35 @@ def _kaleido_png(
     panel_width_in: float | None = None,
     panel_height_in: float | None = None,
 ) -> Optional[bytes]:
-    try:
-        _patch_kaleido_executable_for_space_paths()
-        themed = _apply_ppt_figure_theme(
-            go.Figure(fig),
-            panel_width_in=panel_width_in,
-            panel_height_in=panel_height_in,
-        )
-        fingerprint = hashlib.sha256(
-            (themed.to_json() + f"|{width}|{height}|{panel_width_in}|{panel_height_in}").encode(
-                "utf-8"
+    global _RENDERER_AVAILABLE
+    themed = _apply_ppt_figure_theme(
+        go.Figure(fig), panel_width_in=panel_width_in, panel_height_in=panel_height_in
+    )
+    width, height = max(int(width), 960), max(int(height), 540)
+    fingerprint = hashlib.sha256((themed.to_json() + f"|{width}|{height}").encode()).hexdigest()
+    with _FIGURE_PNG_LOCK:
+        cached = _FIGURE_PNG_CACHE.get(fingerprint)
+        if cached is not None:
+            _FIGURE_PNG_CACHE.move_to_end(fingerprint)
+            return cached
+        rendered = None
+        if _RENDERER_AVAILABLE:
+            try:
+                rendered = render_png(themed, width, height)
+            except Exception:
+                _RENDERER_AVAILABLE = False
+        if rendered is None:
+            renderer = (
+                _pillow_render_heatmap
+                if any(trace.type == "heatmap" for trace in themed.data)
+                else _pillow_render_xy
             )
-        ).hexdigest()
-        with _FIGURE_PNG_LOCK:
-            cached = _FIGURE_PNG_CACHE.get(fingerprint)
-            if cached is not None:
-                _FIGURE_PNG_CACHE.move_to_end(fingerprint)
-                return cached
-        attempts = [
-            (themed, max(int(width), 960), max(int(height), 540)),
-            (
-                themed,
-                min(max(int(width), 960), 1800),
-                min(max(int(height), 540), 1080),
-            ),
-            (
-                _apply_ppt_figure_theme(
-                    go.Figure(fig),
-                    panel_width_in=panel_width_in,
-                    panel_height_in=panel_height_in,
-                ),
-                1280,
-                720,
-            ),
-        ]
-        for candidate, attempt_width, attempt_height in attempts:
-            with contextlib.suppress(Exception):
-                rendered = pio.to_image(
-                    candidate,
-                    format="png",
-                    width=attempt_width,
-                    height=attempt_height,
-                    scale=1,
-                )
-                with _FIGURE_PNG_LOCK:
-                    _FIGURE_PNG_CACHE[fingerprint] = rendered
-                    _FIGURE_PNG_CACHE.move_to_end(fingerprint)
-                    while len(_FIGURE_PNG_CACHE) > _FIGURE_PNG_CACHE_LIMIT:
-                        _FIGURE_PNG_CACHE.popitem(last=False)
-                return rendered
-    except Exception:
-        pass
-    return _pillow_chart_png(fig, width=max(int(width), 960), height=max(int(height), 540))
+            rendered = renderer(themed, width, height)
+        if rendered is not None:
+            _FIGURE_PNG_CACHE[fingerprint] = rendered
+            while len(_FIGURE_PNG_CACHE) > _FIGURE_PNG_CACHE_LIMIT:
+                _FIGURE_PNG_CACHE.popitem(last=False)
+        return rendered
 
 
 def _dict_payload(value: object) -> dict[str, object]:
@@ -2575,7 +2495,7 @@ def _replace_template_picture(
             align=PP_ALIGN.CENTER,
         )
         return
-    png = _kaleido_png(
+    png = _figure_png(
         figure,
         width=max(int(width / 914400 * 190), 1200),
         height=max(int(height / 914400 * 190), 700),

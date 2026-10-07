@@ -634,6 +634,8 @@ describe("App", () => {
     );
     expect(createObjectUrl).toHaveBeenCalled();
     expect(anchorClick).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO"));
+    expect(screen.getByTestId("status-copy")).toHaveTextContent("Informe descargado correctamente.");
   });
 
   it("shows the operational state while loading and unlocks actions when stable", async () => {
@@ -744,4 +746,44 @@ describe("App", () => {
       ])
     );
   });
+  it("keeps an export failure visible when generation finishes", async () => {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fetcher = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("/api/dashboard/report/pptx")
+        ? Response.json({detail: "No se pudo guardar la presentación"}, {status: 500})
+        : fetcher(input, init));
+    renderApp();
+    const button = screen.getByRole("button", {name: /Generar reporte en PowerPoint/i});
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.click(button);
+    await waitFor(() => expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO"));
+    expect(screen.getByTestId("error-banner")).toHaveTextContent("No se pudo guardar la presentación");
+  });
+
+  it("places the linking toggle inside Evidence filters and persists the selected method", async () => {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fetcher = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    let engine = "rules";
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/taxonomy/helix/engine")) {
+        if (init?.method === "PUT") engine = new URL(url, "http://localhost").searchParams.get("engine")!;
+        return Response.json({active:"SOURCE",selected_engine:engine,ready:true,linking_ready:true,total:2,received:2,reason:""});
+      }
+      return fetcher(input, init);
+    });
+    renderApp();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("operational-state")).toHaveTextContent("OPERATIVO"));
+    expect(screen.queryByRole("switch", {name:"Vinculación con LLM"})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", {name:"Evidencia Helix ↔ VoC"}));
+    const toggle = await screen.findByRole("switch", {name:"Vinculación con LLM"});
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle.closest('[data-testid="analysis-filters"]')).toBeInTheDocument();
+    await user.click(toggle);
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/helix\/engine\?.*engine=llm/), expect.objectContaining({method:"PUT"}));
+  });
+
 });

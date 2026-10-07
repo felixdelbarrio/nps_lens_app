@@ -38,10 +38,9 @@ it("edits completed taxonomy, imports discovery, explores and selects", async ()
   await user.click(screen.getByRole("tab", {name:"Análisis con LLM"}));
   const commentsControl = screen.getByLabelText("Clasificación de comentarios");
   expect(commentsControl.closest("article")).toHaveTextContent("Clasifica comentarios");
-  const classification = screen.getByRole("heading", { name: "Clasifica incidencias" });
-  const linking = screen.getByRole("heading", { name: "Vinculación Helix ↔ VoC" });
-  expect(classification.compareDocumentPosition(linking) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
+  expect(screen.getByRole("heading", { name: "Clasifica incidencias" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Vinculación Helix ↔ VoC" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("switch", {name:"Vinculación con LLM"})).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }));
   expect(await screen.findByText(/ZIP guardado en/)).toBeInTheDocument();

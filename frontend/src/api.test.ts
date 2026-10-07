@@ -87,3 +87,12 @@ describe("artifact downloads", () => {
     expect(click).not.toHaveBeenCalled();
   });
 });
+
+describe("desktop reveal failures", () => {
+  afterEach(() => { delete window.pywebview; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  it("keeps the saved export available if Finder cannot be opened", async () => {
+    window.pywebview = { api: { reveal_file: vi.fn(async () => { throw new Error("Finder unavailable"); }) } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("pptx", {headers: {"X-NPS-LENS-SAVED-PATH":"/tmp/report.pptx"}})));
+    expect(await downloadTelemetry()).toBe("/tmp/report.pptx");
+  });
+});

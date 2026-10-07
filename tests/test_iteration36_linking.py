@@ -172,8 +172,7 @@ def test_categories_survive_comment_engine_date_changes_but_not_taxonomy_or_narr
         state["causal_engine"] = engine
         handler.taxonomy.save_state(ctx, state)
         assert handler.classifications(ctx, handler.inputs(ctx, incidents, "SOURCE")) == categories
-    assert handler.export(ctx, updated)["saved_paths"] == []
-    request = exported(handler.export(ctx, updated, only_linking=True)["saved_paths"])
+    request = exported(handler.export(ctx, updated)["saved_paths"])
     assert all(
         "classification" in row
         for name, batch in request.items()

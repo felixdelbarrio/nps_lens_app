@@ -22,72 +22,44 @@ it("imports independent taxonomy assignments without method selectors and autosa
   await user.upload(screen.getByLabelText("Importar ZIP de incidencias clasificadas"), new File(["ZIP"], "response.zip", {type:"application/zip"}));
   await waitFor(() => expect(onChange).toHaveBeenCalled());
 });
-it.each([false,true])("allows activation only when ready=%s", async ready => {
+it.each([false,true])("enables the linking toggle only when linking_ready=%s", async ready => {
   let engine = "rules";
-  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "PUT") engine = new URL(url, "http://localhost").searchParams.get("engine")!;
-    return new Response(JSON.stringify({selected_engine:engine,ready,active:"SOURCE"}));
-  }));
+    return Response.json({selected_engine:engine,ready:true,linking_ready:ready,reason:ready ? "" : "Completa comentarios e incidencias",active:"SOURCE"});
+  });
+  vi.stubGlobal("fetch",fetcher);
   const user = userEvent.setup();
   render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
   await screen.findByText(/Marco: Taxonomía Original/);
-  const selector = screen.getByLabelText("Método de vinculación");
+  const toggle = screen.getByRole("switch", {name:"Vinculación con LLM"});
   expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
   if (ready) {
-    expect(selector).toBeEnabled();
-    await user.selectOptions(selector, "llm");
-    await waitFor(()=>expect(selector).toHaveValue("llm"));
-    expect(screen.getByLabelText("Importar ZIP de vínculos evaluados")).toBeInTheDocument();
-    await user.selectOptions(selector, "rules");
-    await waitFor(()=>expect(selector).toHaveValue("rules"));
-    expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  } else expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
+    expect(toggle).toBeEnabled();
+    await user.click(toggle);
+    await waitFor(()=>expect(toggle).toBeChecked());
+    await user.click(toggle);
+    await waitFor(()=>expect(toggle).not.toBeChecked());
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("engine=rules"),expect.objectContaining({method:"PUT"}));
+  } else {
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/Completa comentarios e incidencias/)).toBeInTheDocument();
+  }
 });
-it("blocks unavailable LLM activation and explains pending classifications", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/instructions") ? Response.json({versions:{helix:"2"},helix:"Reglas Helix"}) : new Response(JSON.stringify({selected_engine:"rules",ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}))));
-  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={async () => {}} /></SWRConfig>);
-  await screen.findByText(/Marco: Taxonomía Original/);
-  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
-  expect(screen.getByRole("option", {name:"LLM semántico"})).toBeDisabled();
-  expect(screen.getByLabelText("Método de vinculación")).toHaveValue("rules");
-});
-it("keeps unavailable LLM selected and permits switching back to rules", async () => {
-  let selected_engine = "llm";
-  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
-    if (init?.method === "PUT") selected_engine = new URL(url, "http://localhost").searchParams.get("engine")!;
-    return new Response(JSON.stringify({selected_engine,ready:false,reason:"Ámbito pendiente",active:"SOURCE",received:1,total:2}));
-  });
-  vi.stubGlobal("fetch", fetcher);
-  const onChange = vi.fn(async () => {});
-  render(<SWRConfig value={{provider: () => new Map()}}><ClassificationEngineControl kind="helix" context={{service_origin:"Bank"}} disabled={false} onChange={onChange} /></SWRConfig>);
-  await screen.findByText(/Ámbito pendiente/);
-  const selector = screen.getByLabelText("Método de vinculación");
-  expect(selector).toHaveValue("llm");
-  expect(selector).toBeEnabled();
-  expect(screen.queryByLabelText("Importar ZIP de vínculos evaluados")).not.toBeInTheDocument();
-  await userEvent.selectOptions(selector, "rules");
-  await waitFor(() => expect(selector).toHaveValue("rules"));
-  expect(selected_engine).toBe("rules");
-  expect(screen.getByText(/Ámbito pendiente/)).toBeInTheDocument();
-  expect(onChange).toHaveBeenCalledOnce();
-});
-
-it("exports only linking when categories are complete and displays their fingerprint", async () => {
+it("exports pending link evaluations from the incident classifier", async () => {
   const fetcher = vi.fn(async (url: string) => {
     if (url.includes("/instructions")) return Response.json({versions:{helix:"2"},helix:"Reglas Helix"});
     if (url.includes("/export")) return Response.json({saved_paths:[],saved_directory:null,batches:0});
     return Response.json({mode:"DISCOVERED",taxonomy_fingerprint:"abcdef123456",pending:0,link_pending:2,total:2,received:2});
   });
   vi.stubGlobal("fetch", fetcher);
-  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="DISCOVERED" url="" disabled={false} onlyLinking onChange={async () => {}} /></SWRConfig>);
+  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="DISCOVERED" url="" disabled={false} onChange={async () => {}} /></SWRConfig>);
   await screen.findByText("abcdef12");
-  const button = screen.getByRole("button",{name:"Exportar linking reutilizando categorías"});
+  const button = screen.getByRole("button",{name:"Descargar todos los ZIP de incidencias pendientes"});
   expect(button).toBeEnabled();
   expect(screen.queryByText("Vínculos NPS")).not.toBeInTheDocument();
   await userEvent.click(button);
-  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*only_linking=true/), expect.objectContaining({method:"POST"})));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*reevaluate=false/), expect.objectContaining({method:"POST"})));
 });
 
 it("requires LLM for discovered comments and never offers rules", async () => {
@@ -113,4 +85,18 @@ it("selects available base and LLM comment classifications using the existing en
   await userEvent.selectOptions(selector,"rules");
   await waitFor(() => expect(selector).toHaveValue("rules"));
   expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/comments/engine?"), expect.objectContaining({method:"PUT"}));
+});
+
+it("allows reevaluating links when the previous evaluation has no pending incidents", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/instructions")) return Response.json({versions:{helix:"1"},helix:"Clasifica incidencias y evalúa vínculos"});
+    if (url.includes("/export")) return Response.json({saved_paths:[],saved_directory:null,batches:0});
+    return Response.json({mode:"DISCOVERED",pending:0,link_pending:0,total:1902,received:1902});
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<SWRConfig value={{provider: () => new Map()}}><HelixClassifier context={{service_origin:"Bank"}} mode="DISCOVERED" url="" disabled={false} onChange={async () => {}} /></SWRConfig>);
+  const button = await screen.findByRole("button",{name:"Reevaluar vínculos conservando categorías"});
+  expect(button).toBeEnabled();
+  await userEvent.click(button);
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/\/helix\/export\?.*reevaluate=true/), expect.objectContaining({method:"POST"})));
 });

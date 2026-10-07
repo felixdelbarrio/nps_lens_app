@@ -310,7 +310,7 @@ def test_report_preflight_rejects_incompatible_artifacts(field):
 
 
 def test_ppt_newsletter_and_dashboard_share_confidence_copy_and_safe_evidence(monkeypatch):
-    monkeypatch.setattr(executive_ppt, "_kaleido_png", lambda *a, **kw: None)
+    monkeypatch.setattr(executive_ppt, "_figure_png", lambda *a, **kw: None)
     payload = _sample_payload()
     attribution = payload["attribution"].copy()
     attribution["causal_engine"] = "llm"

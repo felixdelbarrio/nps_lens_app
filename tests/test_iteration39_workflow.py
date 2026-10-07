@@ -39,23 +39,22 @@ def test_readiness_counts_categories_without_requiring_links(helix, monkeypatch,
         assert (
             engine["reason"] == "Clasifica primero todas las incidencias Helix de la lente activa."
         )
-    result = handler.export(ctx, inputs, only_linking=True)
-    if received:
-        request = exported(result["saved_paths"])
-        rows = [
-            row
-            for name, batch in request.items()
-            if name.startswith("incidents/")
-            for row in batch["incidents"]
-        ]
-        assert len(rows) == received
-        assert all("classification" in row for row in rows)
-    else:
-        assert result["saved_paths"] == []
-    response = client.put(
-        "/api/taxonomy/helix/engine", params={"service_origin": "Bank", "engine": "llm"}
-    )
-    assert response.status_code == (200 if received == 3 else 409)
+    result = handler.export(ctx, inputs)
+    request = exported(result["saved_paths"])
+    rows = [
+        row
+        for name, batch in request.items()
+        if name.startswith("incidents/")
+        for row in batch["incidents"]
+    ]
+    assert len(rows) == 3
+    assert sum("classification" in row for row in rows) == received
+    params = {"service_origin": "Bank", "engine": "llm"}
+    assert client.put("/api/taxonomy/helix/engine", params=params).status_code == 409
+    if received == 3:
+        handler.import_response(ctx, inputs, zipped(helix_response(request, "not-a-candidate")))
+        assert dashboard.classification_status("helix", ctx)["linking_ready"]
+        assert client.put("/api/taxonomy/helix/engine", params=params).status_code == 200
     assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
     assert (
         client.put(
@@ -63,13 +62,6 @@ def test_readiness_counts_categories_without_requiring_links(helix, monkeypatch,
         ).status_code
         == 200
     )
-    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
-    if received == 3:
-        client.put("/api/taxonomy/helix/engine", params={"service_origin": "Bank", "engine": "llm"})
-    if received == 3:
-        diagnostic = dashboard.linking_dashboard(context=ctx)["diagnostics"]
-        assert diagnostic["evaluation_state"] == "NOT_EVALUATED"
-        assert diagnostic["evaluation_reason"] == "evaluation_pending"
 
 
 def test_directional_retrieval_rules_and_uncapped_reuse(record_property):
@@ -151,3 +143,29 @@ def test_llm_links_reject_incidents_after_the_comment(helix):
     )
     earlier = frame.assign(Fecha=pd.Timestamp("2026-08-31"))
     assert handler.links(ctx, inputs, earlier, incidents).empty
+
+
+def test_reevaluate_existing_empty_links_preserves_categories_and_shared_rules(helix):
+    import zipfile
+
+    from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
+
+    handler, ctx, _, incidents, _ = helix
+    inputs = handler.inputs(ctx, incidents.iloc[:1], "SOURCE")
+    initial = exported(handler.export(ctx, inputs)["saved_paths"])
+    handler.import_response(ctx, inputs, zipped(helix_response(initial, "not-a-candidate")))
+    assert handler.status(ctx, inputs)["link_pending"] == 0
+    before = handler.classifications(ctx, inputs)
+    result = handler.export(ctx, inputs, reevaluate=True)
+    request = exported(result["saved_paths"])
+    with zipfile.ZipFile(result["saved_paths"][0]) as archive:
+        assert archive.read("INSTRUCCIONES.txt").decode() == PROJECT_INSTRUCTIONS["helix"]
+    response = helix_response(request, inputs["comments"][0]["id"])
+    handler.import_response(ctx, inputs, zipped(response))
+    assert handler.classifications(ctx, inputs) == before
+    assert handler.current(ctx, inputs)["SOURCE"]["INC-0"]["links"]
+    assert handler.status(ctx, inputs)["link_pending"] == 0
+    altered = helix_response(request, "not-a-candidate")
+    altered["results/000001.json"]["classifications"][0]["primary"] = None
+    with pytest.raises(ValueError, match="conserva sus categorías"):
+        handler.import_response(ctx, inputs, zipped(altered))

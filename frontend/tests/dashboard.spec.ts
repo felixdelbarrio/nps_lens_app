@@ -103,9 +103,9 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await expect(page.getByText("Normalización · tabla de equivalencias")).toHaveCount(0);
   await page.getByRole("tab",{name:"Análisis con LLM"}).click();
-  await expect(page.getByText("1. Clasificar incidencias", {exact:true})).toBeVisible();
-  await expect(page.getByText("2. Vincular", {exact:true})).toBeVisible();
-  await expect(page.getByRole("option", {name:"LLM semántico"})).toHaveAttribute("disabled", "");
+  await expect(page.getByRole("heading", {name:"Clasifica incidencias",exact:true})).toBeVisible();
+  await expect(page.getByRole("heading", {name:"Vinculación Helix ↔ VoC",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("switch", {name:"Vinculación con LLM"})).toHaveCount(0);
   await expect(page.getByLabel("Importar ZIP de vínculos evaluados")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Usar como lente" })).toHaveCount(0);
   await page.getByRole("button", { name: "Exportar comentarios para crear taxonomía" }).click();
@@ -114,6 +114,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   responseZip(designerInput, designerOutput, "designer");
   await page.getByLabel("Importar ZIP de taxonomía", {exact:true}).setInputFiles(designerOutput);
   await expect(page.getByText(/Propuesta de taxonomía importada/)).toBeVisible();
+  await expect(page.getByLabel("Importar ZIP de taxonomía", {exact:true})).toBeEnabled({timeout:30000});
   const proposal = page.getByRole("region", {name:"Propuesta DISCOVERED"});
   await expect(proposal.locator("details")).not.toHaveAttribute("open", "");
   await expect(proposal.getByText("Criterio:", {exact:false}).first()).toBeHidden();
@@ -175,4 +176,8 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
+  await page.getByRole("button",{name:"Insights",exact:true}).click();
+  await page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true}).click();
+  await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled();
+
 });

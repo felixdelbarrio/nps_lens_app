@@ -1,3 +1,4 @@
+import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
 
@@ -537,11 +538,7 @@ export function App() {
       setStatusCopy("La interfaz no pudo sincronizar el contexto operativo.");
       return;
     }
-    setError(null);
-    if (operationalState === "generando") {
-      setStatusCopy("Generando la presentación ejecutiva en PowerPoint...");
-      return;
-    }
+    if (operationalState === "generando") return;
     if (isSavingHierarchy) {
       setStatusCopy("Persistiendo la configuración de canales...");
       return;
@@ -554,7 +551,8 @@ export function App() {
       setStatusCopy("Cargando contexto, histórico e insights...");
       return;
     }
-    setStatusCopy("Producto sincronizado con histórico persistente y reglas de negocio desacopladas.");
+    setStatusCopy(current => current.startsWith("Informe ") || current.startsWith("Publicación Web ")
+      ? current : "Producto sincronizado con histórico persistente y reglas de negocio desacopladas.");
   }, [
     isGeneratingReport,
     isMutating,
@@ -799,6 +797,7 @@ export function App() {
   }
 
   async function handleDownloadReport() {
+    setStatusCopy("Generando la presentación ejecutiva en PowerPoint…");
     setIsGeneratingReport(true);
     setError(null);
     try {
@@ -840,6 +839,7 @@ export function App() {
   }
 
   async function handleDownloadPublication() {
+    setStatusCopy("Preparando la edición Web…");
     setIsGeneratingReport(true);
     setError(null);
     try {
@@ -952,7 +952,7 @@ export function App() {
     showCausalMethodFilter: boolean,
     showScoreGroup: boolean = true
   ) {
-    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method fixed-causal-filters" : ""}`;
+    const gridClass = `field-grid filters-inline-grid${showCausalMethodFilter ? " has-causal-method" : ""}`;
 
     return (
       <section className="surface-card context-strip-card" data-testid="analysis-filters">
@@ -1014,6 +1014,7 @@ export function App() {
               </select>
             </label>
           ) : null}
+          {showCausalMethodFilter && isAdmin && config?.access?.local !== false ? <ClassificationEngineControl kind="helix" context={{...classificationContext, nps_group: LINKING_NPS_GROUP}} disabled={actionsDisabled} onChange={refreshTaxonomy} /> : null}
         </div>
       </section>
     );
