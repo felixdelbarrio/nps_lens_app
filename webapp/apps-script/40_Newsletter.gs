@@ -116,19 +116,21 @@ function _publishedNewsletterInsight_(scopeKey) {
   catch (error) { throw new Error('El insight de newsletter no es válido. Vuelve a importar el ámbito.'); }
 }
 
-function _newsletterEvolution_(insight, visible) {
-  return visible ? insight : {headline:'',lead:'',scorecard:[]};
+function _newsletterContent_(insight, visible) {
+  if(visible)return insight;
+  const signals=(insight.signals||[]).map(item=>({label:item.label,reason:String(item.reason||'').startsWith('NPS ')?'':item.reason}));
+  return {headline:'',lead:'',scorecard:[],signals};
 }
 
 function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
   const webUrl = ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey);
   const e = _newsletterEscape_;
-  const evolution = _newsletterEvolution_(insight, showEvolutionNps);
-  const scorecard = (evolution.scorecard || []).map(item => '<td class="metric-cell" width="20%" valign="top" style="padding:12px 9px;border-top:3px solid #85C8FF;background:#F7F8F8;overflow-wrap:anywhere"><small style="color:#52627A;text-transform:uppercase">' + e(item.label) + '</small><br><b style="font:700 23px Georgia,serif;color:#001391">' + e(item.value) + '</b><br><small style="color:#52627A">' + e(item.delta) + '</small></td>').join('');
+  const content = _newsletterContent_(insight, showEvolutionNps);
+  const scorecard = (content.scorecard || []).map(item => '<td class="metric-cell" width="20%" valign="top" style="padding:12px 9px;border-top:3px solid #85C8FF;background:#F7F8F8;overflow-wrap:anywhere"><small style="color:#52627A;text-transform:uppercase">' + e(item.label) + '</small><br><b style="font:700 23px Georgia,serif;color:#001391">' + e(item.value) + '</b><br><small style="color:#52627A">' + e(item.delta) + '</small></td>').join('');
   const metrics = scorecard ? '<table class="metric-table" role="presentation" width="100%" cellspacing="6"><tr>' + scorecard + '</tr></table>' : '';
   const quotes = (insight.quotes || []).slice(0,2).map(text => '<td class="quote-cell" width="50%" valign="top" style="padding:14px;background:#EAF3FA;border-left:3px solid #2DCCCD;font:italic 16px Georgia,serif;overflow-wrap:anywhere">“' + e(text) + '”</td>').join('');
-  const signals = (insight.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
-  const headline = evolution.headline ? '<h2 class="email-headline" style="font:700 31px Georgia,serif;color:#070E46;margin:10px 0">' + e(evolution.headline) + '</h2><p style="line-height:1.55">' + e(evolution.lead) + '</p>' : '';
+  const signals = (content.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
+  const headline = content.headline ? '<h2 class="email-headline" style="font:700 31px Georgia,serif;color:#070E46;margin:10px 0">' + e(content.headline) + '</h2><p style="line-height:1.55">' + e(content.lead) + '</p>' : '';
   const reportButton = reportUrl ? '<a href="' + reportUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Ver análisis completo</a> ' : '';
   const mobileCss = '<style>body{margin:0!important;padding:0!important;width:100%!important;background:#F4F6F8}td,th,p,h1,h2,div,a{overflow-wrap:anywhere;word-break:normal}img{max-width:100%;height:auto}@media only screen and (max-width:600px){.email-shell-padding{padding:0!important}.email-card{width:100%!important;max-width:100%!important}.email-hero{padding:24px 20px!important}.email-body{padding:24px 18px!important}.email-title{font-size:34px!important;line-height:1.05!important}.email-headline{font-size:27px!important;line-height:1.12!important}.metric-table,.metric-table tbody,.metric-table tr,.quote-table,.quote-table tbody,.quote-table tr{display:block!important;width:100%!important;box-sizing:border-box!important}.metric-table,.quote-table{border-spacing:0 8px!important}.metric-cell,.quote-cell{display:block!important;width:auto!important;margin:0 0 8px!important}.email-actions a{display:block!important;margin:8px 0!important;text-align:center!important}.email-body>table{max-width:100%!important}}</style>';
   return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + mobileCss + '</head><body><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F4F6F8"><tr><td class="email-shell-padding" align="center" style="padding:24px 10px"><table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff"><tr><td class="email-hero" style="background:#070E46;color:#fff;padding:34px 38px"><small style="letter-spacing:1px">' + e(insight.brand) + '</small><h1 class="email-title" style="font:700 42px Georgia,serif;margin:22px 0 5px">' + e(insight.product) + '</h1><div>' + e(insight.promise) + '</div></td></tr><tr><td class="email-body" style="padding:32px 38px">' +
@@ -139,13 +141,13 @@ function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
 }
 
 function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps) {
-  const evolution = _newsletterEvolution_(insight, showEvolutionNps);
+  const content = _newsletterContent_(insight, showEvolutionNps);
   const lines = [insight.brand, insight.product, insight.promise, insight.period];
-  if (evolution.headline) lines.push('', evolution.headline, evolution.lead);
-  if ((evolution.scorecard || []).length) lines.push('', 'INDICADORES');
-  (evolution.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
+  if (content.headline) lines.push('', content.headline, content.lead);
+  if ((content.scorecard || []).length) lines.push('', 'INDICADORES');
+  (content.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
   lines.push('', 'LA VOZ DEL CLIENTE'); (insight.quotes || []).slice(0,2).forEach(text => lines.push('• “' + text + '”'));
-  lines.push('', 'SEÑALES A VIGILAR'); (insight.signals || []).forEach(item => lines.push('• ' + item.label + ': ' + item.reason));
+  lines.push('', 'SEÑALES A VIGILAR'); (content.signals || []).forEach(item => lines.push('• ' + item.label + (item.reason ? ': ' + item.reason : '')));
   if (reportUrl) lines.push('Ver análisis completo: ' + reportUrl);
   lines.push('Explorar NPS Lens: ' + ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey));
   return lines.filter(value => value !== null && value !== undefined).join('\n');

@@ -230,7 +230,7 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
         project_root / "src" / "nps_lens" / "platform" / "publication.py"
     ).read_text(encoding="utf-8")
 
-    assert "const evolution = _newsletterEvolution_(insight, showEvolutionNps);" in newsletter
+    assert "const content = _newsletterContent_(insight, showEvolutionNps);" in newsletter
     assert (
         "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps)" in newsletter
     )

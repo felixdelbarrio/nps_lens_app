@@ -39,7 +39,7 @@ _newsletterSenderIdentity_=()=>({ready:true,effective:'sender@bbva.com'});
 const insight={brand:'BBVA',product:'NPS Lens',promise:'Escucha del cliente',period:'Agosto',
   headline:'Titular con NPS',lead:'Balance de NPS del periodo',
   scorecard:[{label:'NPS clásico mensual',value:'17,42',delta:'-0,68'}],
-  quotes:['La página es lenta'],signals:[{label:'Continuidad',reason:'Incidencias recurrentes'}]};
+  quotes:['La página es lenta'],signals:[{label:'Continuidad',reason:'Incidencias recurrentes'},{label:'Tema cliente',reason:'NPS -94,67; 94,67% detractores; 150 opiniones.'}]};
 publicationRowsCache=[{scopeKey:'edition',slidesFileId:'full',newsletterInsight:JSON.stringify(insight)}];
 properties.set(_compactSlidesProperty_('edition'),'compact');
 const original=JSON.stringify(insight);
@@ -56,6 +56,8 @@ for(const visible of [false,true,false]){
     assert.equal(content.includes(insight.lead),visible);
     assert.equal(content.includes('NPS clásico mensual'),visible);
     assert.equal(content.includes('17,42'),visible);
+    assert.equal(content.includes('NPS -94,67'),visible);
+    assert.ok(content.includes('Tema cliente'));
     assert.ok(content.includes('La página es lenta'));
     assert.ok(content.includes('Incidencias recurrentes'));
     assert.ok(content.includes(saved.reportUrl));
