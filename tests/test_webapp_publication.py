@@ -230,7 +230,7 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
         project_root / "src" / "nps_lens" / "platform" / "publication.py"
     ).read_text(encoding="utf-8")
 
-    assert "const headline = showEvolutionNps ?" in newsletter
+    assert "const evolution = _newsletterEvolution_(insight, showEvolutionNps);" in newsletter
     assert (
         "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps)" in newsletter
     )
@@ -285,9 +285,10 @@ def test_report_link_uses_allowlisted_google_slides_url_before_dom_assignment() 
     app = Path("webapp/apps-script/App.html").read_text(encoding="utf-8")
 
     assert "function safePresentationUrl(value)" in app
-    assert "^https:\\/\\/docs\\.google\\.com\\/presentation\\/d\\/" in app
-    assert "([A-Za-z0-9_-]+)" in app
-    assert "encodeURIComponent(match[1])" in app
+    assert "prefix='https://docs.google.com/presentation/d/'" in app
+    assert "if(!url.startsWith(prefix))return ''" in app
+    assert "/^[A-Za-z0-9_-]+$/" in app
+    assert "prefix+encodeURIComponent(id)+'/edit'" in app
     assert "reportLink.href=viewer.reportUrl" not in app
     assert "$('report-link').href=viewer.reportUrl" not in app
     assert "const reportUrl=safePresentationUrl(value),reportLink=" in app
