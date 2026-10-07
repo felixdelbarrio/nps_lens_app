@@ -8,6 +8,8 @@ from typing import Any
 
 import pandas as pd
 
+from nps_lens.domain.comment_text import nonempty_comment_mask
+
 INSUFFICIENT_WARNING_RATE = 0.20
 
 
@@ -47,6 +49,8 @@ def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def signal_quality(frame: pd.DataFrame) -> dict[str, Any]:
+    comment_mask = nonempty_comment_mask(frame)
+    frame = frame.loc[comment_mask] if comment_mask is not None else frame.iloc[:0]
     sub = frame.get("Subpalanca", pd.Series("", index=frame.index)).map(_normalize)
     insufficient = int(sub.eq("informacion insuficiente").sum())
     uncovered = int(sub.eq("tema no cubierto").sum())
@@ -60,7 +64,10 @@ def signal_quality(frame: pd.DataFrame) -> dict[str, Any]:
         "uncovered_topics": uncovered,
         "total_comments": len(frame),
         "warnings": warnings,
-        "message": f"Calidad de señal: {insufficient} comentarios no accionables / {uncovered} temas no cubiertos.",
+        "message": (
+            f"De {len(frame)} comentarios: {insufficient} no accionables / "
+            f"{uncovered} con tema no cubierto."
+        ),
     }
 
 

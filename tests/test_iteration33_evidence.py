@@ -134,7 +134,7 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
         }
     )
     assert select_negative_delta_rows(delta, max_rows=10).value.tolist() == ["Token"]
-    assert executive_ppt._period_overview(frame)["pain_point"] == "Token"
+    assert executive_ppt._period_overview(frame)["friction"]["topic"] == "Token"
 
 
 def test_ranking_prioritizes_unique_incidents_before_semantic_quality():

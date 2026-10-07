@@ -29,7 +29,7 @@ from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
 )
-from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.drivers import driver_table, grouped_driver_stats
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
@@ -43,6 +43,7 @@ from nps_lens.design.tokens import (
     executive_report_palette,
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
+from nps_lens.domain.comment_text import nonempty_comment_mask
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
 from nps_lens.reports.chart_renderer import render_png
@@ -456,24 +457,35 @@ def _period_overview(
     driver_source = actionable_rows(restrict_to_topics(current_nps_df, driver_col, topic_keys))
     if driver_col not in driver_source.columns:
         driver_col = "Palanca"
-    pain_point = ""
-    strength_point = ""
+    friction: dict[str, object] = {}
+    strength: dict[str, object] = {}
     if driver_col in driver_source.columns and "NPS" in driver_source.columns:
-        driver_view = driver_source[[driver_col, "NPS"]].copy().dropna(subset=["NPS"])
-        if not driver_view.empty:
-            driver_view[driver_col] = driver_view[driver_col].astype(str).str.strip()
-            driver_view = driver_view[driver_view[driver_col] != ""]
-            if not driver_view.empty:
-                detractor_counts = driver_view.loc[
-                    driver_view["NPS"].le(6), driver_col
-                ].value_counts()
-                promoter_counts = driver_view.loc[
-                    driver_view["NPS"].ge(9), driver_col
-                ].value_counts()
-                if not detractor_counts.empty:
-                    pain_point = str(detractor_counts.index[0])
-                if not promoter_counts.empty:
-                    strength_point = str(promoter_counts.index[0])
+        comment_mask = nonempty_comment_mask(driver_source)
+        if comment_mask is not None:
+            driver_source = driver_source.loc[comment_mask]
+        drivers = grouped_driver_stats(driver_source, driver_col)
+        drivers = drivers.loc[drivers[driver_col].fillna("").astype(str).str.strip().ne("")]
+        drivers["balance"] = drivers["pro_count"] - drivers["det_count"]
+        for negative in (True, False):
+            candidates = drivers.loc[
+                drivers["balance"].lt(0) if negative else drivers["balance"].gt(0)
+            ]
+            if candidates.empty:
+                continue
+            row = candidates.sort_values(
+                ["balance", "valid_n", driver_col], ascending=[negative, False, True]
+            ).iloc[0]
+            selected = {
+                "topic": str(row[driver_col]),
+                "n": int(row["valid_n"]),
+                "detractors": int(row["det_count"]),
+                "promoters": int(row["pro_count"]),
+                "nps": float(row["nps"]),
+            }
+            if negative:
+                friction = selected
+            else:
+                strength = selected
     return {
         "signal_quality": signal_quality(current_nps_df),
         "comments": _safe_int(
@@ -522,8 +534,8 @@ def _period_overview(
             )
             * 100.0
         ),
-        "pain_point": pain_point,
-        "strength_point": strength_point,
+        "friction": friction,
+        "strength": strength,
     }
 
 
@@ -2327,6 +2339,21 @@ def _set_template_text(
         run.font.color.rgb = _rgb(color)
 
 
+def _topic_signal_copy(signal: object, *, positive: bool) -> str:
+    if not isinstance(signal, dict) or not signal:
+        return (
+            "Ningún tópico tiene más promotores que detractores."
+            if positive
+            else "Ningún tópico tiene más detractores que promotores."
+        )
+    return (
+        f"{signal['topic']}.\n"
+        f"{signal['n']} opiniones: {signal['detractors']} detractoras / "
+        f"{signal['promoters']} promotoras.\n"
+        f"NPS del tópico: {_fmt_num_or_nd(signal['nps'])} pts."
+    )
+
+
 def _set_template_card_body(shape: object, card: object, text: str) -> None:
     shape.left = card.left + Inches(0.16)
     shape.top = card.top + Inches(0.72)
@@ -2772,15 +2799,12 @@ def _fill_template_deck(
     _set_template_card_body(
         comparison.shapes[8],
         comparison.shapes[7],
-        f"{context.overview.get('pain_point') or 'Sin señal suficiente'}.\n"
-        f"Mayor volumen detractor en {topic_channel}.",
+        _topic_signal_copy(context.overview.get("friction"), positive=False),
     )
     _set_template_card_body(
         comparison.shapes[12],
         comparison.shapes[10],
-        f"{context.overview.get('strength_point') or 'Sin señal suficiente'}.\n"
-        f"Mayor volumen promotor en {topic_channel}.\n"
-        + str(context.overview.get("signal_quality", {}).get("message", "")),
+        _topic_signal_copy(context.overview.get("strength"), positive=True),
     )
     for icon_index, card_index in ((9, 7), (11, 10)):
         icon, card = comparison.shapes[icon_index], comparison.shapes[card_index]
@@ -2788,9 +2812,9 @@ def _fill_template_deck(
         icon.left = card.left + card.width - icon.width - Inches(0.12)
     _set_template_text(
         comparison.shapes[3],
-        f"La experiencia de cliente {'mejora' if delta > 0 else 'empeora' if delta < 0 else 'se mantiene'}: "
-        f"el NPS clásico mensual varía {_fmt_signed_or_nd(delta)} pts y el peso detractor "
-        f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.",
+        f"NPS mensual: {_fmt_signed_or_nd(delta)} pts · Peso detractor: "
+        f"{_fmt_signed_or_nd(context.overview.get('detractor_delta_pp'))} pp.\n"
+        + str(context.overview.get("signal_quality", {}).get("message", "")),
         size=11.5,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -3209,7 +3233,7 @@ def generate_business_review_ppt(
 
     buff = BytesIO()
     metadata = report_context or {}
-    quality = signal_quality(selected_nps_df if selected_nps_df is not None else pd.DataFrame())
+    quality = _dict_payload(context.overview.get("signal_quality"))
     report_note = (
         f"Taxonomía activa: {metadata.get('taxonomy_mode', 'No disponible')}\n"
         f"Fingerprint: {metadata.get('taxonomy_fingerprint', 'No disponible')}\n"
@@ -3218,6 +3242,8 @@ def generate_business_review_ppt(
         f"Fecha de clasificación incidencias: {metadata.get('incident_classified_at', 'No disponible')}\n"
         f"Ámbito: {metadata.get('scope', {})}\n{quality['message']}\n"
         + " ".join(quality["warnings"])
+        + "\nLas tarjetas ordenan los tópicos por saldo neto de promotores y detractores. "
+        "La calidad de señal utiliza solo comentarios no vacíos del periodo."
     )
     for index, slide in enumerate(prs.slides):
         scenario_note = ""

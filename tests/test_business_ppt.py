@@ -767,7 +767,7 @@ def test_ppt_period_overview_reuses_period_kpis_payload_values() -> None:
     assert overview["promoter_rate"] == period_kpis["period"]["kpis"]["promoter_rate"]
 
 
-def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None:
+def test_ppt_period_overview_ranks_signed_topic_contribution() -> None:
     current = pd.DataFrame(
         {
             "Canal": ["Web"] * 9,
@@ -778,8 +778,8 @@ def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None
 
     overview = executive_ppt._period_overview(current, topic_channel="Web")
 
-    assert overview["pain_point"] == "Falla"
-    assert overview["strength_point"] == "Fácil"
+    assert overview["friction"]["topic"] == "Falla"
+    assert overview["strength"]["topic"] == "Fácil"
 
 
 def test_comparison_card_text_stays_inside_template_cards() -> None:
@@ -802,6 +802,50 @@ def test_comparison_card_text_stays_inside_template_cards() -> None:
         assert len(body.text.splitlines()) * paragraph.runs[0].font.size.pt * 1.15 <= (
             body.height / 12700
         )
+
+
+def test_period_signals_do_not_call_the_same_large_mixed_topic_a_strength() -> None:
+    frame = pd.DataFrame(
+        {
+            "Subpalanca": ["General"] * 6 + ["Lentitud"] * 3 + ["Asistencia"] * 2,
+            "NPS": [0, 0, 0, 9, 9, 8, 0, 0, 0, 9, 9],
+            "Comment": ["opinión"] * 11,
+        }
+    )
+    overview = executive_ppt._period_overview(frame)
+    assert overview["friction"] == {
+        "topic": "Lentitud",
+        "n": 3,
+        "detractors": 3,
+        "promoters": 0,
+        "nps": -100.0,
+    }
+    assert overview["strength"] == {
+        "topic": "Asistencia",
+        "n": 2,
+        "detractors": 0,
+        "promoters": 2,
+        "nps": 100.0,
+    }
+    negative = executive_ppt._period_overview(frame[frame.NPS.le(6)])
+    assert negative["strength"] == {}
+    assert "Ningún tópico" in executive_ppt._topic_signal_copy(negative["strength"], positive=True)
+
+
+def test_signal_quality_counts_comments_not_blank_survey_responses() -> None:
+    frame = pd.DataFrame(
+        {
+            "Comment": ["", None, "nan", " ", "NO", "otro tema", "resuelto"],
+            "Subpalanca": ["Información insuficiente"] * 5 + ["Tema no cubierto", "Asistencia"],
+            "NPS": [0, 0, 10, 10, 0, 7, 10],
+        }
+    )
+    overview = executive_ppt._period_overview(frame)
+    quality = overview["signal_quality"]
+    assert overview["comments"] == quality["total_comments"] == 3
+    assert quality["insufficient_comments"] == 1
+    assert quality["uncovered_topics"] == 1
+    assert "De 3 comentarios" in quality["message"]
 
 
 def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:

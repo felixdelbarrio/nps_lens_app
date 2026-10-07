@@ -15,7 +15,7 @@ from nps_lens.analytics.drivers import compute_nps_from_scores
 from nps_lens.api.app import create_app
 from nps_lens.domain.helix_links import build_helix_incident_url_lookup, enrich_helix_incident_links
 from nps_lens.domain.models import UploadContext
-from nps_lens.reports import BusinessPptResult
+from nps_lens.reports.executive_ppt import BusinessPptResult
 from nps_lens.settings import Settings
 from nps_lens.testing.fixtures import fixture_excel
 

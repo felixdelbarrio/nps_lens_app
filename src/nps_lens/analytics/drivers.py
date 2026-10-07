@@ -43,6 +43,7 @@ def grouped_driver_stats(
                 "n",
                 "valid_n",
                 "det_count",
+                "pro_count",
                 "nps",
                 "detractor_rate",
                 "promoter_rate",
@@ -72,7 +73,16 @@ def grouped_driver_stats(
     grouped["nps"] = (grouped["promoter_rate"] - grouped["detractor_rate"]) * 100.0
     grouped.loc[grouped["valid_n"] <= 0, ["nps", "detractor_rate", "promoter_rate"]] = np.nan
     return grouped[
-        [dimension, "n", "valid_n", "det_count", "nps", "detractor_rate", "promoter_rate"]
+        [
+            dimension,
+            "n",
+            "valid_n",
+            "det_count",
+            "pro_count",
+            "nps",
+            "detractor_rate",
+            "promoter_rate",
+        ]
     ]
 
 

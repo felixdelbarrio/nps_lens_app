@@ -99,7 +99,7 @@ from nps_lens.platform.publication import (
     build_publication_archive,
     build_static_data_snapshot,
 )
-from nps_lens.reports import BusinessPptResult, generate_business_review_ppt
+from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
 from nps_lens.reports.coherence import ReportCoherenceError, validate_classification_context
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
