@@ -29,7 +29,7 @@ from nps_lens.analytics.channel_topic_scope import (
     restrict_to_topics,
     topics_observed_in_channel,
 )
-from nps_lens.analytics.drivers import driver_table, grouped_driver_stats
+from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
@@ -583,68 +583,6 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
         lambda values: " | ".join([_clip(v, 42) for v in list(values)[:2] if str(v).strip()])
     )
     return d[cols].reset_index(drop=True)
-
-
-def _driver_change_table(
-    current_nps_df: pd.DataFrame,
-    baseline_nps_df: pd.DataFrame,
-    *,
-    dimension: str,
-) -> pd.DataFrame:
-    cols = [
-        "value",
-        "n_current",
-        "n_baseline",
-        "nps_current",
-        "nps_baseline",
-        "delta_nps",
-        "detr_current",
-        "detr_baseline",
-        "delta_detr_pp",
-    ]
-    if (
-        current_nps_df is None
-        or current_nps_df.empty
-        or baseline_nps_df is None
-        or baseline_nps_df.empty
-        or dimension not in current_nps_df.columns
-        or dimension not in baseline_nps_df.columns
-    ):
-        return pd.DataFrame(columns=cols)
-
-    cur = pd.DataFrame([s.__dict__ for s in driver_table(current_nps_df, dimension=dimension)])
-    base = pd.DataFrame([s.__dict__ for s in driver_table(baseline_nps_df, dimension=dimension)])
-    if cur.empty or base.empty:
-        return pd.DataFrame(columns=cols)
-
-    merged = cur.rename(
-        columns={
-            "n": "n_current",
-            "nps": "nps_current",
-            "detractor_rate": "detr_current",
-        }
-    ).merge(
-        base[["value", "n", "nps", "detractor_rate"]],
-        on="value",
-        how="inner",
-    )
-    if merged.empty:
-        return pd.DataFrame(columns=cols)
-    merged = merged.rename(
-        columns={
-            "nps": "nps_baseline",
-            "n": "n_baseline",
-            "detractor_rate": "detr_baseline",
-        }
-    )
-    merged["delta_nps"] = pd.to_numeric(merged["nps_current"], errors="coerce") - pd.to_numeric(
-        merged["nps_baseline"], errors="coerce"
-    )
-    merged["delta_detr_pp"] = (
-        pd.to_numeric(merged["detr_current"], errors="coerce")
-        - pd.to_numeric(merged["detr_baseline"], errors="coerce")
-    ) * 100.0
-    return merged[cols].sort_values(["delta_nps", "n_current"], ascending=[True, False])
 
 
 def _build_overview_figure(
@@ -2145,7 +2083,7 @@ def _build_presentation_context(
         if frame is None:
             continue
         for column, expected in scope.items():
-            if expected and column in frame and not frame[column].fillna("").eq(expected).all():
+            if expected and column in frame and not frame[column].eq(expected).fillna(False).all():
                 raise ReportCoherenceError(
                     f"Los datos de {column} no corresponden al ámbito del informe."
                 )

@@ -14,7 +14,8 @@ def history():
     return pd.DataFrame(
         {
             "Fecha": pd.to_datetime(
-                ["2026-01-10", "2026-02-10", "2026-03-01", "2026-03-18 23:59", "2026-04-01"]
+                ["2026-01-10", "2026-02-10", "2026-03-01", "2026-03-18 23:59", "2026-04-01"],
+                format="mixed",
             ),
             "NPS": [0, 10, 0, 10, 0],
             "Comment": ["mal", "bien", "lento", "rápido", "fuera del periodo"],
@@ -125,3 +126,24 @@ def test_multimonth_deck_has_no_monthly_or_fabricated_deterioration_claim(monkey
     assert "2026-01-01" in texts and "2026-03-18" in texts
     for slide in deck.slides:
         assert "Periodo VoC:" in slide.notes_slide.notes_text_frame.text
+
+
+def test_selected_month_across_years_keeps_intervening_months_out_of_topic_metrics():
+    frame = history().iloc[:3].copy()
+    frame["Fecha"] = pd.to_datetime(["2025-03-01", "2025-04-01", "2026-03-01"])
+    selected = frame.loc[frame.Fecha.dt.month.eq(3)]
+    kpis = build_period_kpis(history_df=frame, current_df=selected, pop_year="Todos",
+        pop_month="03", context_label="Marzo (todos los años)")
+    result = context(frame, selected_nps_df=selected, period_start=date(2025, 3, 1),
+        period_end=date(2026, 3, 1), period_kpis=kpis)
+    assert result.overview["comments"] == 2
+    assert result.dimensions["Palanca"].topic_table_df.iloc[0]["n"] == 2
+
+
+def test_comparison_base_is_verified_against_history_not_just_its_own_formula():
+    frame = history()
+    current = frame.loc[frame.Fecha.dt.month.eq(3)]
+    wrong = build_period_kpis(history_df=frame.loc[~frame.Fecha.dt.month.eq(2)],
+        current_df=current, pop_year="2026", pop_month="03", context_label="Marzo 2026")
+    with pytest.raises(ReportCoherenceError, match="Población de la base"):
+        context(frame, period_kpis=wrong)

@@ -2145,6 +2145,7 @@ class DashboardService:
         touchpoint_source: str = "",
         report_dimension_analysis: str = "",
     ) -> BusinessPptResult:
+        context = UploadContext(*self._context_key(context))
         report_context = self._report_classification_context(
             context,
             pop_year=pop_year,

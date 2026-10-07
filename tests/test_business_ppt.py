@@ -705,10 +705,11 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert int(overview["comments"]) > 0
     assert float(overview["detractor_rate"]) > 0
 
-    palanca_change = executive_ppt._driver_change_table(
+    palanca_change = executive_ppt.get_changes_vs_historic(
         current_period,
         baseline_period,
         dimension="Palanca",
+        min_n=1,
     )
     assert not palanca_change.empty
     assert "delta_nps" in palanca_change.columns
