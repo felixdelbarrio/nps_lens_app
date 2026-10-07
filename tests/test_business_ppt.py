@@ -346,9 +346,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("lidera el deterioro entre los tópicos observados en Web" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("concentra el mayor dolor entre los tópicos observados en Web" in t for t in texts)
+    assert any("concentra el mayor dolor entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
@@ -386,7 +386,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 period_start=date(2026, 1, 1),
                 period_end=date(2026, 1, 31),
                 focus_name="detractores",
-                topic_channel="Web",
+                topic_channel="Todos",
                 attribution_df=payload["attribution"],
                 selected_nps_df=payload["selected_nps"],
                 comparison_nps_df=payload["comparison_nps"],
@@ -780,6 +780,28 @@ def test_ppt_period_overview_ranks_friction_and_signal_by_group_volume() -> None
 
     assert overview["pain_point"] == "Falla"
     assert overview["strength_point"] == "Fácil"
+
+
+def test_comparison_card_text_stays_inside_template_cards() -> None:
+    prs = Presentation(executive_ppt.REPORT_TEMPLATE)
+    slide = prs.slides[1]
+    text = (
+        "Valoración general del canal y resolución de operaciones pendientes.\n"
+        "Mayor volumen promotor en Todos.\n"
+        "Calidad de señal: 1691 comentarios no accionables / 24 temas no cubiertos."
+    )
+    for body_index, card_index in ((8, 7), (12, 10)):
+        body, card = slide.shapes[body_index], slide.shapes[card_index]
+        executive_ppt._set_template_card_body(body, card, text)
+        assert body.left > card.left
+        assert body.top > card.top
+        assert body.left + body.width < card.left + card.width
+        assert body.top + body.height < card.top + card.height
+        assert " ".join(body.text.split()) == " ".join(text.split())
+        paragraph = body.text_frame.paragraphs[0]
+        assert len(body.text.splitlines()) * paragraph.runs[0].font.size.pt * 1.15 <= (
+            body.height / 12700
+        )
 
 
 def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:

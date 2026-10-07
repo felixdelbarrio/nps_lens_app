@@ -116,7 +116,7 @@ from nps_lens.services.classification_protocol import taxonomy_fingerprint
 from nps_lens.services.helix_exchange import HelixExchange
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange
 from nps_lens.services.taxonomy_service import TaxonomyService
-from nps_lens.settings import Settings, normalize_downloads_path
+from nps_lens.settings import DEFAULT_UI_SCORE_CHANNEL, Settings, normalize_downloads_path
 from nps_lens.ui.business import (
     PeriodWindow,
     default_windows,
@@ -143,7 +143,6 @@ _FILENAME_SANITIZER_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _MONTH_LABEL_TO_NUMBER = {label: number for number, label in MONTH_LABELS_ES.items()}
 _DEFAULT_NPS_GROUPS = [POP_ALL, "Detractores", "Neutros", "Promotores"]
 _DEFAULT_SCORE_CHANNELS = [POP_ALL]
-_PREFERRED_SCORE_CHANNEL = "Web"
 _PREFERRED_NPS_GROUP = "Detractores"
 _DEFAULT_DIMENSIONS = ["Palanca", "Subpalanca"]
 _COHORT_ROW_DIMENSIONS = {"Palanca": "Palanca", "Subpalanca": "Subpalanca"}
@@ -1321,7 +1320,7 @@ class DashboardService:
                 "groups": groups,
                 "dimensions": dimensions,
                 "defaults": {
-                    "channel": self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL),
+                    "channel": self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL),
                     "group": _PREFERRED_NPS_GROUP if _PREFERRED_NPS_GROUP in groups else POP_ALL,
                     "dimension": "Palanca",
                 },
@@ -2164,7 +2163,7 @@ class DashboardService:
             raise ValueError("No hay datos NPS para el contexto seleccionado.")
         topic_channel = self._resolve_score_channel(
             scope_history_df,
-            score_channel or _PREFERRED_SCORE_CHANNEL,
+            score_channel or DEFAULT_UI_SCORE_CHANNEL,
         )
         resolved_group = self._resolve_nps_group(scope_history_df, nps_group or POP_ALL)
         descriptive_current_df = self._apply_population_filters(
@@ -2307,12 +2306,12 @@ class DashboardService:
                 context,
                 pop_year=pop_year,
                 pop_month=pop_month,
-                score_channel=_PREFERRED_SCORE_CHANNEL,
+                score_channel=DEFAULT_UI_SCORE_CHANNEL,
                 nps_group=nps_group,
             )
-            publish_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            publish_channel = self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL)
             publish_group = self._resolve_nps_group(history_df, nps_group)
-            causal_channel = self._resolve_score_channel(history_df, _PREFERRED_SCORE_CHANNEL)
+            causal_channel = self._resolve_score_channel(history_df, DEFAULT_UI_SCORE_CHANNEL)
             causal_group = self._resolve_nps_group(history_df, POP_ALL)
             dashboard = dict(
                 self.nps_dashboard(
@@ -2858,10 +2857,7 @@ class DashboardService:
                 if option.casefold() == requested.casefold():
                     return option
             return POP_ALL
-        for option in available:
-            if option.casefold() == _PREFERRED_SCORE_CHANNEL.casefold():
-                return option
-        return POP_ALL
+        return DEFAULT_UI_SCORE_CHANNEL
 
     def _resolve_nps_group(self, frame: pd.DataFrame, nps_group: Optional[str]) -> str:
         available = _DEFAULT_NPS_GROUPS

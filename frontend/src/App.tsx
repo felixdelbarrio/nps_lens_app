@@ -228,7 +228,7 @@ export function App() {
   const [popYear, setPopYear] = useState("Todos");
   const [popMonth, setPopMonth] = useState("Todos");
   const [npsGroup, setNpsGroup] = useState("Detractores");
-  const [scoreChannel, setScoreChannel] = useState("Web");
+  const [scoreChannel, setScoreChannel] = useState("Todos");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readStoredThemeMode());
   const [downloadsPath, setDownloadsPath] = useState("");
   const [helixBaseUrl, setHelixBaseUrl] = useState("");
@@ -302,7 +302,7 @@ export function App() {
     setPopYear(latestYear);
     setPopMonth(latestMonth);
     setScoreChannel(
-      chooseDefaultOption(config.score_channels || ["Todos"], "Web", config.preferences.score_channel)
+      chooseDefaultOption(config.score_channels || ["Todos"], "Todos", config.preferences.score_channel)
     );
     setNpsGroup(
       chooseDefaultOption(config.nps_groups || ["Todos"], "Detractores", config.preferences.nps_group_choice)
@@ -337,7 +337,7 @@ export function App() {
     }
     const options = config.score_channels || ["Todos"];
     if (!options.some((option) => option === scoreChannel)) {
-      setScoreChannel(chooseDefaultOption(options, "Web", config.preferences.score_channel));
+      setScoreChannel(chooseDefaultOption(options, "Todos", config.preferences.score_channel));
     }
   }, [config, scoreChannel]);
 

@@ -553,7 +553,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Comentarios" }));
     expect(screen.getByRole("heading", { name: "FILTROS" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Todos");
     expect(screen.getByRole("combobox", { name: "Grupo Score" })).toHaveValue("Detractores");
     expect(screen.getByRole("tab", { name: "Brechas NPS" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Comparativas cruzadas" })).not.toBeInTheDocument();
@@ -562,7 +562,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("tab", { name: "Brechas NPS" }));
     expect(screen.queryByRole("combobox", { name: "Grupo Score" })).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Web");
+    expect(screen.getByRole("combobox", { name: "Canal" })).toHaveValue("Todos");
     expect(screen.getByRole("combobox", { name: "Dimensión" })).toHaveValue("Palanca");
     for (const column of [
       "Peso en la muestra",

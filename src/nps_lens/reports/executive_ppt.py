@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
@@ -405,7 +405,7 @@ def _period_overview(
     current_nps_df: pd.DataFrame,
     *,
     period_kpis: Optional[dict[str, object]] = None,
-    topic_channel: str = "Web",
+    topic_channel: str = POP_ALL,
 ) -> dict[str, object]:
     period_block = (
         period_kpis.get("period", {})
@@ -2327,6 +2327,29 @@ def _set_template_text(
         run.font.color.rgb = _rgb(color)
 
 
+def _set_template_card_body(shape: object, card: object, text: str) -> None:
+    shape.left = card.left + Inches(0.16)
+    shape.top = card.top + Inches(0.72)
+    shape.width = card.width - Inches(0.32)
+    shape.height = card.height - Inches(0.86)
+    tf = shape.text_frame
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    size = 13.0
+    while True:
+        wrapped = "\n".join(
+            _wrap_text_to_width(line, column_width_in=shape.width / Inches(1), font_size_pt=size)
+            for line in text.splitlines()
+        )
+        if len(wrapped.splitlines()) * size * 1.15 <= shape.height / Pt(1) or size <= 8:
+            break
+        size -= 0.5
+    _set_template_text(shape, wrapped, size=size, color=BBVA_COLORS["ink"])
+    paragraph = tf.paragraphs[0]
+    paragraph.line_spacing = 1.05
+    paragraph.space_before = paragraph.space_after = Pt(0)
+
+
 def _set_template_messages(shape: object, messages: list[str], *, size: float) -> None:
     tf = shape.text_frame
     tf.clear()
@@ -2731,7 +2754,7 @@ def _fill_template_deck(
     )
     _set_template_text(
         comparison.shapes[4],
-        f"Evolución del NPS clásico mensual ({_safe_date(context.period_start)} a {_safe_date(context.period_end)})",
+        f"NPS clásico mensual · {month}",
         size=25,
         bold=True,
         color=BBVA_COLORS["ink"],
@@ -2746,23 +2769,23 @@ def _fill_template_deck(
         font="Source Serif 4",
     )
     _set_template_table(comparison.shapes[6].table, _template_period_rows(context))
-    _set_template_text(
+    _set_template_card_body(
         comparison.shapes[8],
-        f"Entre los tópicos observados en {topic_channel}, la mayor fricción por volumen detractor se concentra en {context.overview.get('pain_point') or 'sin señal suficiente'}.",
-        size=13,
-        color=BBVA_COLORS["ink"],
+        comparison.shapes[7],
+        f"{context.overview.get('pain_point') or 'Sin señal suficiente'}.\n"
+        f"Mayor volumen detractor en {topic_channel}.",
     )
-    _set_template_text(
+    _set_template_card_body(
         comparison.shapes[12],
-        f"Entre los tópicos observados en {topic_channel}, la mejor señal por volumen promotor se concentra en {context.overview.get('strength_point') or 'sin señal suficiente'}.\n"
+        comparison.shapes[10],
+        f"{context.overview.get('strength_point') or 'Sin señal suficiente'}.\n"
+        f"Mayor volumen promotor en {topic_channel}.\n"
         + str(context.overview.get("signal_quality", {}).get("message", "")),
-        size=13,
-        color=BBVA_COLORS["ink"],
     )
-    comparison.shapes[8].top = Inches(1.58)
-    comparison.shapes[8].height = Inches(1.16)
-    comparison.shapes[12].top = Inches(3.48)
-    comparison.shapes[12].height = Inches(1.24)
+    for icon_index, card_index in ((9, 7), (11, 10)):
+        icon, card = comparison.shapes[icon_index], comparison.shapes[card_index]
+        icon.top = card.top + Inches(0.18)
+        icon.left = card.left + card.width - icon.width - Inches(0.12)
     _set_template_text(
         comparison.shapes[3],
         f"La experiencia de cliente {'mejora' if delta > 0 else 'empeora' if delta < 0 else 'se mantiene'}: "
@@ -3122,7 +3145,7 @@ def generate_business_review_ppt(
     period_start: date,
     period_end: date,
     focus_name: str,
-    topic_channel: str = "Web",
+    topic_channel: str = POP_ALL,
     attribution_df: Optional[pd.DataFrame] = None,
     selected_nps_df: Optional[pd.DataFrame] = None,
     comparison_nps_df: Optional[pd.DataFrame] = None,

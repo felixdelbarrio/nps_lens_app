@@ -936,25 +936,25 @@ def test_publication_embeds_the_executive_report_with_causal_slides(
     assert captured["touchpoint_source"] == "broken_journeys"
     assert captured["report_dimension_analysis"] == ""
     assert dashboard_request["nps_group"] == "Promotores"
-    assert dashboard_request["score_channel"] == "Web"
+    assert dashboard_request["score_channel"] == "Todos"
     assert linking_request["nps_group"] == "Todos"
-    assert linking_request["score_channel"] == "Web"
+    assert linking_request["score_channel"] == "Todos"
     assert captured["nps_group"] == "Todos"
     assert dataset_requests["nps"]["nps_group"] == "Promotores"
-    assert dataset_requests["nps"]["score_channel"] == "Web"
+    assert dataset_requests["nps"]["score_channel"] == "Todos"
     with ZipFile(BytesIO(artifact.content)) as archive:
         assert archive.read("informe-ejecutivo.pptx") == b"EXECUTIVE"
         assert archive.read("informe-ejecutivo-sin-evolucion-nps.pptx") == b"COMPACT"
         assert b"presentaci\xc3\xb3n ejecutiva" in archive.read("newsletter.html")
         publication = json.loads(archive.read("publication.json"))
         assert publication["static_views"] == {
-            "default": {"nps_group": "Promotores", "score_channel": "Web"},
+            "default": {"nps_group": "Promotores", "score_channel": "Todos"},
             "immutable": True,
         }
         assert "comments" in publication["screens"]
         comment_controls = publication["screens"]["comments"]["controls"]
         assert comment_controls["defaults"] == {
-            "channel": "Web",
+            "channel": "Todos",
             "group": "Detractores",
             "dimension": "Palanca",
         }
