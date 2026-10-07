@@ -9,7 +9,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.drivers import driver_table
+from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.linking_policy import (
     HOTSPOT_MIN_TERM_OCCURRENCES,
     LINK_MAX_DAYS_APART,
@@ -17,6 +17,7 @@ from nps_lens.analytics.linking_policy import (
     temporal_mask,
 )
 from nps_lens.analytics.nps_helix_link import build_incident_display_text, build_nps_topic
+from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.domain.record_identity import analytical_response_ids
 from nps_lens.ingest.helix_dates import incident_occurrence_dates
 
@@ -467,10 +468,14 @@ def select_best_business_axis_for_hotspots(
     red_labels: dict[str, list[str]] = {"Palanca": [], "Subpalanca": []}
     label_hits: dict[str, dict[str, int]] = {"Palanca": {}, "Subpalanca": {}}
 
+    insight_df = actionable_rows(nps_df)
+    base_nps = compute_nps_from_scores(nps_df["NPS"])
     for axis in ["Palanca", "Subpalanca"]:
         if axis not in nps_df.columns:
             continue
-        stats = pd.DataFrame([s.__dict__ for s in driver_table(nps_df, axis)])
+        stats = pd.DataFrame(
+            [s.__dict__ for s in driver_table(insight_df, axis, base_nps=base_nps)]
+        )
         if stats.empty:
             continue
         stats["gap_vs_base"] = pd.to_numeric(stats.get("gap_vs_base"), errors="coerce")

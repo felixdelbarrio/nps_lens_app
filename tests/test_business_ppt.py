@@ -832,7 +832,9 @@ def test_period_signals_do_not_call_the_same_large_mixed_topic_a_strength() -> N
     }
     negative = executive_ppt._period_overview(frame[frame.NPS.le(6)])
     assert negative["strength"] == {}
-    assert "Ningún tópico" in executive_ppt._topic_signal_copy(negative["strength"], positive=True)
+    assert "No hay un tópico" in executive_ppt._topic_signal_copy(
+        negative["strength"], positive=True
+    )
 
 
 def test_signal_quality_counts_comments_not_blank_survey_responses() -> None:

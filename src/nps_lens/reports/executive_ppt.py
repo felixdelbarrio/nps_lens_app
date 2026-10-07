@@ -43,7 +43,6 @@ from nps_lens.design.tokens import (
     executive_report_palette,
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
-from nps_lens.domain.comment_text import nonempty_comment_mask
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.platform.resources import resource_root
 from nps_lens.reports.chart_renderer import render_png
@@ -464,9 +463,6 @@ def _period_overview(
     friction: dict[str, object] = {}
     strength: dict[str, object] = {}
     if driver_col in driver_source.columns and "NPS" in driver_source.columns:
-        comment_mask = nonempty_comment_mask(driver_source)
-        if comment_mask is not None:
-            driver_source = driver_source.loc[comment_mask]
         drivers = grouped_driver_stats(driver_source, driver_col)
         drivers = drivers.loc[drivers[driver_col].fillna("").astype(str).str.strip().ne("")]
         drivers["balance"] = drivers["pro_count"] - drivers["det_count"]
@@ -2207,15 +2203,6 @@ def _build_presentation_context(
     text_topics = _text_topics_table(
         actionable_rows(detractor_raw), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
     )
-    if not text_topics.empty:
-        text_topics = text_topics.loc[
-            ~text_topics["top_terms"].map(
-                lambda values: any(
-                    " ".join(str(value).casefold().split()) == "sin comentarios"
-                    for value in list(values or [])
-                )
-            )
-        ].reset_index(drop=True)
     dimensions = {
         "Palanca": _build_dimension_view_model(
             dimension="Palanca",
@@ -2332,9 +2319,9 @@ def _set_template_text(
 def _topic_signal_copy(signal: object, *, positive: bool) -> str:
     if not isinstance(signal, dict) or not signal:
         return (
-            "Ningún tópico tiene más promotores que detractores."
+            "No hay un tópico con comentarios útiles y saldo promotor positivo."
             if positive
-            else "Ningún tópico tiene más detractores que promotores."
+            else "No hay un tópico con comentarios útiles y más detractores que promotores."
         )
     return (
         f"{signal['topic']}.\n"

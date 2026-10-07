@@ -122,7 +122,10 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
             "NPS": [0] * 10 + [2],
         }
     )
-    assert [r.value for r in driver_table(frame, "Subpalanca")] == ["Token"]
+    assert {r.value for r in driver_table(frame, "Subpalanca")} == {
+        "Información insuficiente",
+        "Token",
+    }
     assert nps_matchable_mask(frame).sum() == 1
     quality = signal_quality(frame)
     assert quality["insufficient_comments"] == 10 and quality["warnings"]

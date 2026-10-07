@@ -1095,7 +1095,7 @@ class DashboardService:
         period_aggregates = cast(list[dict[str, object]], scope_kpis.get("period_aggregates", []))
         scope_daily_metrics = daily_metrics(scope_current_df, days=60)
         quality = signal_quality(analysis_current_df)
-        topics_df = self._topics_df(actionable_rows(analysis_current_df))
+        topics_df = self._topics_df(analysis_current_df)
         if not topics_df.empty:
             topics_df = topics_df.sort_values(
                 ["n", "cluster_id"], ascending=[False, True]

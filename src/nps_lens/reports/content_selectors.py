@@ -62,27 +62,6 @@ def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.D
     )
 
 
-def select_gap_rows(gap_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select the largest negative gaps against the classic-NPS base."""
-
-    if gap_df is None or gap_df.empty:
-        return pd.DataFrame(columns=getattr(gap_df, "columns", []))
-    work = actionable_rows(gap_df)
-    work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
-    work["n"] = _numeric_series(work, "n").fillna(0.0)
-    work = work.dropna(subset=["gap_vs_base"])
-    if work.empty:
-        return work
-    negative = work[work["gap_vs_base"] < 0].copy()
-    if negative.empty:
-        negative = work.copy()
-    return (
-        negative.sort_values(["gap_vs_base", "n", "value"], ascending=[True, False, True])
-        .head(max_rows)
-        .copy()
-    )
-
-
 def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
     """Order evidence by unique populations and engine-specific quality."""
 

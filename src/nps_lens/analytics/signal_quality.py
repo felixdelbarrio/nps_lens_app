@@ -3,36 +3,28 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Any
 
 import pandas as pd
 
-from nps_lens.domain.comment_text import nonempty_comment_mask
+from nps_lens.domain.comment_text import (
+    is_nonspecific_content,
+    nonempty_comment_mask,
+    normalize_content,
+    useful_comment_mask,
+)
 
 INSUFFICIENT_WARNING_RATE = 0.20
 
 
-def _normalize(value: object) -> str:
-    return "".join(
-        c
-        for c in unicodedata.normalize(
-            "NFKD", str("" if value is None or value is pd.NA else value).casefold()
-        )
-        if not unicodedata.combining(c)
-    )
-
-
 def is_reserve_category(value: object) -> bool:
-    parts = re.split(r"\s*(?:>|/|::|·)\s*", _normalize(value))
-    return any(
-        p.strip() in {"sin clasificacion tematica", "informacion insuficiente", "tema no cubierto"}
-        for p in parts
-    )
+    parts = re.split(r"\s*(?:>|/|::|·)\s*", normalize_content(value))
+    return any(is_nonspecific_content(part) for part in parts)
 
 
 def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    mask = pd.Series(True, index=frame.index)
+    comment_mask = useful_comment_mask(frame)
+    mask = comment_mask if comment_mask is not None else pd.Series(True, index=frame.index)
     for column in (
         "Palanca",
         "Subpalanca",
@@ -44,14 +36,16 @@ def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
         "incident_topic",
     ):
         if column in frame:
-            mask &= ~frame[column].astype(object).map(is_reserve_category).astype(bool)
+            labels = frame[column].astype(object)
+            reserves = {value: is_reserve_category(value) for value in labels.unique()}
+            mask &= ~labels.map(reserves).astype(bool)
     return frame.loc[mask].copy()
 
 
 def signal_quality(frame: pd.DataFrame) -> dict[str, Any]:
     comment_mask = nonempty_comment_mask(frame)
     frame = frame.loc[comment_mask] if comment_mask is not None else frame.iloc[:0]
-    sub = frame.get("Subpalanca", pd.Series("", index=frame.index)).map(_normalize)
+    sub = frame.get("Subpalanca", pd.Series("", index=frame.index)).map(normalize_content)
     insufficient = int(sub.eq("informacion insuficiente").sum())
     uncovered = int(sub.eq("tema no cubierto").sum())
     warnings = []
@@ -80,13 +74,13 @@ def audit_classifications(
     suspicious = []
     uncovered_suspicious = []
     labels = {
-        _normalize(pair["sublever"])
+        normalize_content(pair["sublever"])
         for pair in (catalog or {}).values()
         if not is_reserve_category(pair["lever"])
     }
     for key, assignment in assignments.items():
-        sub = _normalize(assignment.get("primary_classification", {}).get("sublever", ""))
-        text = _normalize(comments.get(key, ""))
+        sub = normalize_content(assignment.get("primary_classification", {}).get("sublever", ""))
+        text = normalize_content(comments.get(key, ""))
         if sub == "informacion insuficiente":
             insufficient.append(key)
             if re.search(
