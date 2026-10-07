@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from nps_lens.analytics.drivers import driver_table
-from nps_lens.analytics.signal_quality import actionable_rows, is_reserve_category
+from nps_lens.analytics.signal_quality import actionable_rows, is_reserve_category, signal_quality
 from nps_lens.domain.comment_text import useful_comment_mask
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_newsletter import _focus_rows
@@ -21,6 +21,8 @@ from nps_lens.services.dashboard_service import DashboardService
         "GENÉRICA",
         "Comentario genérico",
         "Otros",
+        "Valoración general del canal",
+        "Experiencia global",
         "Sin clasificación temática > Información insuficiente",
         "Acceso / sin comentarios",
         "",
@@ -39,7 +41,7 @@ def test_placeholder_categories_never_qualify_as_insights(label):
 @pytest.mark.parametrize(
     "label",
     [
-        "Valoración general del canal",
+        "Información sobre el estado de una transferencia",
         "Error genérico al firmar",
         "Sin acceso a la cuenta",
         "Faltan comentarios en el expediente",
@@ -87,6 +89,7 @@ def test_generic_topics_remain_in_nps_and_gaps_but_never_lead_editorial_rankings
     insights = executive_ppt._period_overview(frame)
     assert insights["friction"]["topic"] == "Token"
     assert insights["strength"]["topic"] == "Ayuda eficaz"
+    assert signal_quality(frame)["insufficient_comments"] == 12
     assert {row["label"] for row in _focus_rows(frame, topic_channel="Todos")} == {
         "Acceso",
         "Atención",
@@ -110,6 +113,7 @@ def test_no_meaningful_topic_produces_an_explicit_empty_insight():
 
 def test_newsletter_does_not_invent_a_generic_friction_when_only_empty_topics_remain():
     from datetime import date
+
     from nps_lens.reports.executive_newsletter import build_executive_newsletter
     from nps_lens.services.analytics.kpis_service import build_period_kpis
 
@@ -139,3 +143,39 @@ def test_newsletter_does_not_invent_a_generic_friction_when_only_empty_topics_re
     assert newsletter["headline"] == "No hay evidencia suficiente para destacar un foco de fricción"
     assert newsletter["signals"] == []
     assert newsletter["scorecard"][1]["value"] == "0,00"
+
+
+def test_ppt_does_not_turn_an_empty_topic_list_into_a_generic_conclusion(monkeypatch):
+    from datetime import date
+    from io import BytesIO
+
+    from pptx import Presentation
+
+    monkeypatch.setattr(executive_ppt, "_RENDERER_AVAILABLE", False)
+    frame = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-08-01", "2026-08-02"]),
+            "Palanca": ["Genérico", "Sin contenido"],
+            "Subpalanca": ["Sin comentarios"] * 2,
+            "Comment": ["opinión", ""],
+            "NPS": [0, 10],
+        }
+    )
+    report = executive_ppt.generate_business_review_ppt(
+        service_origin="Banco",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 2),
+        focus_name="Todos",
+        selected_nps_df=frame,
+        comparison_nps_df=frame,
+        include_causal_section=False,
+    )
+    deck = Presentation(BytesIO(report.content))
+    comparison = deck.slides[2]
+    assert "No hay un tópico con comentarios útiles" in " ".join(comparison.shapes[8].text.split())
+    assert "No hay un tópico con comentarios útiles" in " ".join(comparison.shapes[12].text.split())
+    topics = " ".join(shape.text for shape in deck.slides[3].shapes if shape.has_text_frame)
+    assert "No hay comentarios detractores útiles para identificar temas" in topics
+    assert "concentra su señal principal" not in topics

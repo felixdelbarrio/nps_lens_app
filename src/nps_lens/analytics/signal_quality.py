@@ -22,7 +22,7 @@ def is_reserve_category(value: object) -> bool:
     return any(bool(part) and is_nonspecific_content(part) for part in parts)
 
 
-def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
+def _actionable_mask(frame: pd.DataFrame) -> pd.Series[bool]:
     comment_mask = useful_comment_mask(frame)
     mask = comment_mask if comment_mask is not None else pd.Series(True, index=frame.index)
     named_topic = pd.Series(False, index=frame.index)
@@ -46,15 +46,20 @@ def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
             mask &= ~labels.map(reserves).astype(bool)
     if has_topic_columns:
         mask &= named_topic
-    return frame.loc[mask].copy()
+    return mask
+
+
+def actionable_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.loc[_actionable_mask(frame)].copy()
 
 
 def signal_quality(frame: pd.DataFrame) -> dict[str, Any]:
     comment_mask = nonempty_comment_mask(frame)
     frame = frame.loc[comment_mask] if comment_mask is not None else frame.iloc[:0]
     sub = frame.get("Subpalanca", pd.Series("", index=frame.index)).map(normalize_content)
-    insufficient = int(sub.eq("informacion insuficiente").sum())
-    uncovered = int(sub.eq("tema no cubierto").sum())
+    uncovered_mask = sub.eq("tema no cubierto")
+    insufficient = int((~_actionable_mask(frame) & ~uncovered_mask).sum())
+    uncovered = int(uncovered_mask.sum())
     warnings = []
     if len(frame) and insufficient / len(frame) > INSUFFICIENT_WARNING_RATE:
         warnings.append(

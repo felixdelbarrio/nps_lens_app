@@ -2893,10 +2893,14 @@ def _fill_template_deck(
         topic_rows,
         column_widths=[1.0, 2.45, 5.11],
     )
-    leader = topic_rows[1][1] if len(topic_rows) > 1 else "sin señal textual suficiente"
+    leader = topic_rows[1][1] if len(topic_rows) > 1 else ""
     _set_template_text(
         topics.shapes[3],
-        f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}.",
+        (
+            f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}."
+            if leader
+            else "No hay comentarios detractores útiles para identificar temas."
+        ),
         size=11,
         bold=True,
         color=BBVA_COLORS["ink"],

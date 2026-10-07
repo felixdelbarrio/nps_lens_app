@@ -107,12 +107,15 @@ def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
     )[:4]
     connections: list[dict[str, object]] = []
     for card in selected:
+        topic = str(card.get("title") or card.get("nps_topic") or "")
+        if is_nonspecific_content(topic):
+            continue
         comments = [
             record for record in _list(card.get("comment_records")) if isinstance(record, dict)
         ]
         connections.append(
             {
-                "topic": str(card.get("title") or card.get("nps_topic") or "Tópico observado"),
+                "topic": topic,
                 "semantic_links": int(_number(card.get("linked_pairs")) or 0),
                 "evidence_reason": card.get(
                     "evidence_reason",
