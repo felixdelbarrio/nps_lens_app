@@ -2253,6 +2253,7 @@ class DashboardService:
             include_causal_section=include_causal_section,
             linking_diagnostics=cast(dict[str, object], causal["diagnostics"]),
             report_context=report_context,
+            evidence_channel=str(causal.get("resolved_channel") or topic_channel),
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(

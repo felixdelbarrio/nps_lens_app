@@ -608,6 +608,12 @@ def build_period_kpis(
         actual_label=context_label,
         note=_available_date_range_note(current_df, prefix="KPIs agregados del período"),
     )
+    period_payload["base_start_date"] = (
+        previous_start.date().isoformat() if previous_start is not None else None
+    )
+    period_payload["base_end_date"] = (
+        previous_end.date().isoformat() if previous_end is not None else None
+    )
     period_payload["temporal"] = temporal
     return {
         "historical": _kpi_payload(

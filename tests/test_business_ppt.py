@@ -348,7 +348,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
     assert any("lidera el deterioro entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("concentra el mayor dolor entre los tópicos observados en Todos" in t for t in texts)
+    assert any(
+        "tiene el menor score medio entre los tópicos observados en Todos" in t for t in texts
+    )
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
@@ -632,7 +634,7 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
     ]
     assert not any("NPS EN RIESGO" in t or "NPS RECUPERABLE" in t for t in slide_9_texts)
     assert any("INC000104257175" in t for t in texts)
-    assert any("VÍNCULOS SEMÁNTICOS" in t for t in texts)
+    assert any("VÍNCULOS EVALUADOS" in t for t in texts)
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
