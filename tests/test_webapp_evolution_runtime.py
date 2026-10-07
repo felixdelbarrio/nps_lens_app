@@ -56,8 +56,10 @@ for(const visible of [false,true,false]){
     assert.equal(content.includes(insight.lead),visible);
     assert.equal(content.includes('NPS clásico mensual'),visible);
     assert.equal(content.includes('17,42'),visible);
-    assert.equal(content.includes('NPS -94,67'),visible);
-    assert.ok(content.includes('Tema cliente'));
+    for(const signal of insight.signals){
+      assert.ok(content.includes(signal.label));
+      assert.ok(content.includes(signal.reason));
+    }
     assert.ok(content.includes('La página es lenta'));
     assert.ok(content.includes('Incidencias recurrentes'));
     assert.ok(content.includes(saved.reportUrl));

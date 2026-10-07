@@ -117,9 +117,7 @@ function _publishedNewsletterInsight_(scopeKey) {
 }
 
 function _newsletterContent_(insight, visible) {
-  if(visible)return insight;
-  const signals=(insight.signals||[]).map(item=>({label:item.label,reason:String(item.reason||'').startsWith('NPS ')?'':item.reason}));
-  return {headline:'',lead:'',scorecard:[],signals};
+  return visible ? insight : {headline:'',lead:'',scorecard:[]};
 }
 
 function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
@@ -129,7 +127,7 @@ function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
   const scorecard = (content.scorecard || []).map(item => '<td class="metric-cell" width="20%" valign="top" style="padding:12px 9px;border-top:3px solid #85C8FF;background:#F7F8F8;overflow-wrap:anywhere"><small style="color:#52627A;text-transform:uppercase">' + e(item.label) + '</small><br><b style="font:700 23px Georgia,serif;color:#001391">' + e(item.value) + '</b><br><small style="color:#52627A">' + e(item.delta) + '</small></td>').join('');
   const metrics = scorecard ? '<table class="metric-table" role="presentation" width="100%" cellspacing="6"><tr>' + scorecard + '</tr></table>' : '';
   const quotes = (insight.quotes || []).slice(0,2).map(text => '<td class="quote-cell" width="50%" valign="top" style="padding:14px;background:#EAF3FA;border-left:3px solid #2DCCCD;font:italic 16px Georgia,serif;overflow-wrap:anywhere">“' + e(text) + '”</td>').join('');
-  const signals = (content.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
+  const signals = (insight.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
   const headline = content.headline ? '<h2 class="email-headline" style="font:700 31px Georgia,serif;color:#070E46;margin:10px 0">' + e(content.headline) + '</h2><p style="line-height:1.55">' + e(content.lead) + '</p>' : '';
   const reportButton = reportUrl ? '<a href="' + reportUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Ver análisis completo</a> ' : '';
   const mobileCss = '<style>body{margin:0!important;padding:0!important;width:100%!important;background:#F4F6F8}td,th,p,h1,h2,div,a{overflow-wrap:anywhere;word-break:normal}img{max-width:100%;height:auto}@media only screen and (max-width:600px){.email-shell-padding{padding:0!important}.email-card{width:100%!important;max-width:100%!important}.email-hero{padding:24px 20px!important}.email-body{padding:24px 18px!important}.email-title{font-size:34px!important;line-height:1.05!important}.email-headline{font-size:27px!important;line-height:1.12!important}.metric-table,.metric-table tbody,.metric-table tr,.quote-table,.quote-table tbody,.quote-table tr{display:block!important;width:100%!important;box-sizing:border-box!important}.metric-table,.quote-table{border-spacing:0 8px!important}.metric-cell,.quote-cell{display:block!important;width:auto!important;margin:0 0 8px!important}.email-actions a{display:block!important;margin:8px 0!important;text-align:center!important}.email-body>table{max-width:100%!important}}</style>';
@@ -147,7 +145,7 @@ function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps) {
   if ((content.scorecard || []).length) lines.push('', 'INDICADORES');
   (content.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
   lines.push('', 'LA VOZ DEL CLIENTE'); (insight.quotes || []).slice(0,2).forEach(text => lines.push('• “' + text + '”'));
-  lines.push('', 'SEÑALES A VIGILAR'); (content.signals || []).forEach(item => lines.push('• ' + item.label + (item.reason ? ': ' + item.reason : '')));
+  lines.push('', 'SEÑALES A VIGILAR'); (insight.signals || []).forEach(item => lines.push('• ' + item.label + (item.reason ? ': ' + item.reason : '')));
   if (reportUrl) lines.push('Ver análisis completo: ' + reportUrl);
   lines.push('Explorar NPS Lens: ' + ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey));
   return lines.filter(value => value !== null && value !== undefined).join('\n');
