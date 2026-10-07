@@ -6,6 +6,8 @@ Se elimina el contenedor de vinculación de Taxonomy Studio. El método TF-IDF /
 
 El renderizado de gráficos se ejecuta en un proceso aislado con un máximo de 15 segundos. Ante bloqueo se termina el grupo de procesos y se usa el renderizador Pillow existente. No se vuelve a intentar un motor que ha fallado durante la sesión. Ambos renderizadores comparten tema y caché acotada. Se eliminan el parche de rutas y los reintentos anteriores. Los mensajes de éxito y fallo de las exportaciones ya no se borran al terminar la generación; un fallo al abrir Finder no invalida un archivo guardado.
 
+El hook de empaquetado de python-pptx conserva el directorio `pptx/oxml`, necesario para resolver las plantillas XML de las notas desde el ejecutable macOS. Sin ese directorio, la ruta `oxml/../templates/notes.xml` fallaba aunque la plantilla estuviera incluida.
+
 ## Comprobación con datos locales
 
 Se utiliza una copia SQLite y una copia de la configuración y Helix en `build/verification-20261007`; las clasificaciones originales no se modifican.
@@ -15,4 +17,4 @@ Se utiliza una copia SQLite y una copia de la configuración y Helix en `build/v
 - Publicación Web: 4.594.731 bytes, 30,09 segundos; incluye ambas presentaciones.
 - Pruebas de componentes y API cubren posición del toggle, disponibilidad, persistencia del motor, evaluaciones que quedan pendientes al cambiar el horizonte/comentarios, conservación de categorías, reevaluación, limpieza del proceso de gráficos y mensajes de exportación.
 
-La aplicación macOS recompilada se entrega en `build/pyinstaller/macos/dist/nps-lens.app`. La aplicación que estaba abierta no se sustituye durante la verificación.
+La aplicación macOS verificada se entrega en `build/verified-package/dist/nps-lens.app`. Se comprueba utilizando una copia de datos y configuración.
