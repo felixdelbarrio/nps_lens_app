@@ -273,7 +273,7 @@ def test_export_recall_with_distractors_and_mock_import(helix):
     handler, ctx, frame, incidents, _ = helix
     frame.drop(frame.index[16:], inplace=True)
     frame["Comment"] = [f"Token OTP con entrega fallida consulta {i}" for i in range(len(frame))]
-    frame["Palanca"], frame["Subpalanca"] = "Otros", "Consulta"
+    frame["Palanca"], frame["Subpalanca"] = "Otro producto", "Consulta"
     frame["Fecha"] = pd.Timestamp("2026-09-02")
     frame.loc[15, ["Comment", "Palanca", "Subpalanca", "Fecha"]] = [
         "No llega la clave al móvil",
