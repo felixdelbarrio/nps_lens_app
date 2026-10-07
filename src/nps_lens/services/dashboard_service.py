@@ -100,7 +100,7 @@ from nps_lens.platform.publication import (
     build_static_data_snapshot,
 )
 from nps_lens.reports.coherence import ReportCoherenceError, validate_classification_context
-from nps_lens.reports.content_selectors import select_causal_scenarios
+from nps_lens.reports.content_selectors import causal_scenario_title, select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
@@ -2730,7 +2730,7 @@ class DashboardService:
             return []
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
-            title = str(row.get("nps_topic", "") or "").strip()
+            title = causal_scenario_title(row, rank=index)
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]

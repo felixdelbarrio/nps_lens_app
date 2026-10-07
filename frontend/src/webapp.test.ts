@@ -98,7 +98,8 @@ it.each([
 });
 
 it('starts and records activity without crypto.randomUUID', async () => {
-  vi.stubGlobal('crypto', {});
+  const getRandomValues = vi.fn((bytes: Uint8Array) => bytes.fill(7));
+  vi.stubGlobal('crypto', {getRandomValues});
   let success: (value: unknown) => void;
   const run = {
     withSuccessHandler(callback: typeof success) { success = callback; return this; },
@@ -112,7 +113,8 @@ it('starts and records activity without crypto.randomUUID', async () => {
   expect(run.recordActivityEvents).toHaveBeenCalledOnce();
   const events = run.recordActivityEvents.mock.calls[0][0];
   expect(events).toHaveLength(2);
-  for (const event of events) expect(event.sessionId).toMatch(/^\d+-[a-z0-9]+$/);
+  expect(getRandomValues).toHaveBeenCalledOnce();
+  for (const event of events) expect(event.sessionId).toBe('07'.repeat(16));
 });
 
 it('shows bootstrap errors as text instead of leaving an empty screen', async () => {

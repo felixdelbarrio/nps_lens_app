@@ -40,7 +40,7 @@
   ];
   const state = {area:'insights',section:'summary',view:'period-aggregates',scenarioIndex:0,evidenceTopic:'',journeyTopic:'',scenarioDetail:'helix',evidenceView:'table',adminRoute:'',settingsView:'evolution',scoreChannel:'Web',npsGroup:'Detractores',gapDimension:'Palanca',started:performance.now()};
   const scopeCatalog = rows(viewer.publicationCatalog);
-  const sessionId = (window.crypto?.randomUUID?.() || Date.now()+'-'+Math.random().toString(36).slice(2)).slice(0,80);
+  const sessionId = Array.from(window.crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');
   const activityQueue = [];
   const datasetCache = {};
   let activityTimer = 0;

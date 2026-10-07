@@ -52,6 +52,7 @@ from nps_lens.reports.coherence import (
     validate_metric_payload,
 )
 from nps_lens.reports.content_selectors import (
+    causal_scenario_title,
     select_causal_scenarios,
     select_negative_delta_rows,
     select_nonzero_kpis,
@@ -3050,13 +3051,7 @@ def _fill_template_deck(
     for offset, scenario in enumerate(scenarios):
         slide = prs.slides[6 + offset]
         row = scenario.row
-        title = str(row.get("nps_topic") or f"Escenario de evidencia {offset + 1}").replace(
-            " > ", " / "
-        )
-        task = str(row.get("affected_task") or "")
-        symptom = str(row.get("observed_symptom") or "")
-        if task and symptom and task != "Tarea pendiente de validación":
-            title = f"{task} → {symptom}"
+        title = causal_scenario_title(row, rank=offset + 1)
         title_shape = slide.shapes[1]
         full_title = title
         title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)

@@ -20,6 +20,7 @@ from nps_lens.reports.content_selectors import (
     select_negative_delta_rows,
     select_nonzero_kpis,
 )
+from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
@@ -403,6 +404,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         )
     )
     causal_slide = prs.slides[6]
+    service = object.__new__(DashboardService)
+    cards = service._build_linking_scenario_cards(payload["attribution"])
+    assert cards[0]["title"] == causal_slide.shapes[1].text
     assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
     assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
     assert causal_slide.shapes[2].text == ""
@@ -423,6 +427,44 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
     assert "https://helix.example/INC00001" in rels
+
+
+def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
+    payload = _sample_payload()
+    payload["attribution"]["affected_task"] = "validar el teléfono para activar el token"
+    payload["attribution"]["observed_symptom"] = "la validación del teléfono no se completa"
+    out = generate_business_review_ppt(
+        service_origin="BBVA Argentina",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        attribution_df=payload["attribution"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
+    )
+    cards = object.__new__(DashboardService)._build_linking_scenario_cards(payload["attribution"])
+    slide = Presentation(BytesIO(out.content)).slides[6]
+    assert cards[0]["title"] == slide.shapes[1].text
+    assert cards[0]["title"] == (
+        "validar el teléfono para activar el token → la validación del teléfono no se completa"
+    )
+    newsletter = build_executive_newsletter(
+        current_df=payload["selected_nps"],
+        period_kpis=build_period_kpis(
+            history_df=payload["comparison_nps"],
+            current_df=payload["selected_nps"],
+            pop_year="2026",
+            pop_month="01",
+            context_label="Enero 2026",
+        ),
+        linking={"scenarios": {"cards": cards}},
+        topic_channel="Todos",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+    )
+    assert cards[0]["title"] in [signal["label"] for signal in newsletter["signals"]]
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
