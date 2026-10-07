@@ -2315,15 +2315,18 @@ def _set_template_text(
     paragraph = tf.paragraphs[0]
     if align is not None:
         paragraph.alignment = align
-    run = paragraph.add_run()
-    run.text = str(text or "")
-    run.font.name = font or "Lato"
-    if size is not None:
-        run.font.size = Pt(size)
-    if bold is not None:
-        run.font.bold = bold
-    if color:
-        run.font.color.rgb = _rgb(color)
+    for index, line in enumerate(str(text or "").split("\n")):
+        if index:
+            paragraph.add_line_break()
+        run = paragraph.add_run()
+        run.text = line
+        run.font.name = font or "Lato"
+        if size is not None:
+            run.font.size = Pt(size)
+        if bold is not None:
+            run.font.bold = bold
+        if color:
+            run.font.color.rgb = _rgb(color)
 
 
 def _topic_signal_copy(signal: object, *, positive: bool) -> str:
@@ -2834,7 +2837,7 @@ def _fill_template_deck(
     history = prs.slides[2]
     _set_template_text(
         history.shapes[5],
-        f"Evolución del NPS clásico acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
+        f"NPS clásico diario y balance acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
         size=22,
         bold=True,
         color=BBVA_COLORS["ink"],

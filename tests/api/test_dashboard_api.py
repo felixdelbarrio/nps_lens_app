@@ -1029,7 +1029,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 slide_2_texts.append(paragraph.text or "")
     slide_2_text = " ".join(slide_2_texts)
 
-    assert "nps clásico acumulado histórico" in slide_2_text.lower()
+    assert "balance acumulado histórico" in slide_2_text.lower()
     assert "2026-01-01" in slide_2_text
     assert "base histórica (2026-01-01 -> 2026-02-22)" in slide_2_text
 
