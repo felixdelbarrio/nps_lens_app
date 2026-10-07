@@ -169,7 +169,10 @@ def test_evolution_visibility_save_updates_webapp_without_reloading_apps_script_
     assert "applyEvolutionNpsVisibility(value)" in app
     assert "button.disabled=false" in app
     assert "function saveEvolutionNpsSettings(visible, scopeKey)" in administration
-    assert "reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''" in administration
+    assert (
+        "reportUrl:publication ? _reportUrl_(publication.scopeKey,savedVisible) : ''"
+        in administration
+    )
 
 
 def test_publication_import_preserves_global_evolution_visibility() -> None:
