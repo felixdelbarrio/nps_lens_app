@@ -2676,140 +2676,165 @@ def _evidence_blocks(scenario: CausalScenarioViewModel) -> list[tuple[str, str, 
     return blocks or [("comment", "", "Sin evidencia vinculada en el periodo.", [], "")]
 
 
-def _evidence_pages(
+def _evidence_slide_blocks(
     scenario: CausalScenarioViewModel,
-) -> list[list[tuple[str, str, str, object, str, float]]]:
+) -> list[tuple[str, str, str, object, str, float]]:
+    """Fit one case, reserving a detailed incident and an overflow ID cell."""
     layout = EVIDENCE_LAYOUT
     line_height = layout.body_font / 72 * 1.20
-    max_lines = int((layout.body_bottom - layout.body_top - 2 * layout.padding) / line_height) - 1
-    pages: list[list[tuple[str, str, str, object, str, float]]] = [[]]
-    used = 0.0
-    for kind, label, text, segments, url in _evidence_blocks(scenario):
-        lines = _wrap_text_to_width(
-            text,
-            column_width_in=layout.content_width - 2 * layout.padding,
-            font_size_pt=layout.body_font,
+    width = layout.content_width - 2 * layout.padding
+
+    def wrap(value: str) -> list[str]:
+        return _wrap_text_to_width(
+            value, column_width_in=width, font_size_pt=layout.body_font
         ).splitlines() or [""]
-        label_lines = max(
-            1,
-            len(
-                _wrap_text_to_width(
-                    label,
-                    column_width_in=layout.content_width - 2 * layout.padding,
-                    font_size_pt=layout.body_font,
-                ).splitlines()
-            ),
-        )
-        chunk_size = max(1, max_lines - label_lines)
-        for offset in range(0, len(lines), chunk_size):
-            chunk = "\n".join(lines[offset : offset + chunk_size])
-            # Reserve a label line separately so bold identifiers/counts never clip.
-            height = (
-                label_lines + len(lines[offset : offset + chunk_size])
-            ) * line_height + 2 * layout.padding
-            if pages[-1] and used + height > layout.body_bottom - layout.body_top:
-                pages.append([])
-                used = 0.0
-            pages[-1].append((kind, label, chunk, segments, url, height))
-            used += height + layout.gap
-    return pages
+
+    def fit(block: tuple[str, str, str, object, str], budget: float):
+        kind, label, text, segments, url = block
+        label_lines = len(wrap(label))
+        available = max(1, int((budget - 2 * layout.padding + 1e-9) / line_height) - label_lines)
+        lines = wrap(text)
+        visible = lines[:available]
+        if len(lines) > available:
+            visible[-1] = visible[-1].rstrip(".,; ") + "…"
+        height = (label_lines + len(visible)) * line_height + 2 * layout.padding
+        return kind, label, "\n".join(visible), segments, url, height
+
+    blocks = _evidence_blocks(scenario)
+    measured = [fit(block, layout.body_bottom - layout.body_top) for block in blocks]
+    total = sum(block[-1] for block in measured) + layout.gap * (len(measured) - 1)
+    if total <= layout.body_bottom - layout.body_top:
+        return measured
+    comments = [block for block in blocks if block[0] == "comment"]
+    incidents = [block for block in blocks if block[0] == "incident"]
+    minimum = 2 * line_height + 2 * layout.padding
+    reserve = (minimum + layout.gap) * min(len(incidents), 2)
+    remaining = layout.body_bottom - layout.body_top
+    result = []
+    for block in comments:
+        budget = remaining - reserve
+        if budget < minimum:
+            break
+        fitted = fit(block, budget)
+        result.append(fitted)
+        remaining -= fitted[-1] + layout.gap
+    for index, block in enumerate(incidents):
+        tail = incidents[index + 1 :]
+        budget = remaining - (minimum + layout.gap if tail else 0)
+        fitted = fit(block, budget)
+        result.append(fitted)
+        remaining -= fitted[-1] + layout.gap
+        if not tail:
+            break
+        tail_height = sum(fit(item, remaining)[-1] for item in tail)
+        tail_height += layout.gap * (len(tail) - 1)
+        if tail_height <= remaining:
+            continue
+        label = f"{len(tail)} Incidencias:"
+        ids = [item[1].rstrip(": ") for item in tail]
+        text = ", ".join(f"[{identity}]" for identity in ids)
+        summary = fit(("incident_summary", label, text, [], ""), remaining)
+        result.append(summary)
+        break
+    return result
 
 
-def _add_scenario_pages(prs: Presentation, scenario: CausalScenarioViewModel) -> None:
+def _add_scenario_slide(prs: Presentation, scenario: CausalScenarioViewModel) -> None:
     layout = EVIDENCE_LAYOUT
     row = scenario.row
-    pages = _evidence_pages(scenario)
-    for page, blocks in enumerate(pages, start=1):
-        slide = _report_slide(prs)
-        title = causal_scenario_title(row, rank=scenario.index, include_topic=True)
-        if len(pages) > 1:
-            title += f" ({page}/{len(pages)})"
+    blocks = _evidence_slide_blocks(scenario)
+    slide = _report_slide(prs)
+    title = causal_scenario_title(row, rank=scenario.index, include_topic=True)
+    _report_text(
+        slide,
+        "Report title",
+        title,
+        (0.38, 0.24, 7.8, 0.92),
+        size=layout.title_font,
+        serif=True,
+        bold=True,
+    )
+    metrics = (
+        ("NOTA MEDIA DE COMENTARIOS ENLAZADOS", _fmt_num_or_nd(row.get("avg_nps"))),
+        (
+            link_confidence_label(str(row.get("causal_engine") or "rules")),
+            format_percentage(engine_quality(row.to_dict())),
+        ),
+    )
+    for index, (label, value) in enumerate(metrics):
+        top = layout.body_top + index * 1.60
+        _report_panel(
+            slide, "Scenario metric panel", (0.62, top, layout.metric_width, 1.48), "FFFFFF"
+        )
         _report_text(
             slide,
-            "Report title",
-            title,
-            (0.38, 0.24, 7.8, 0.92),
-            size=layout.title_font,
-            serif=True,
-            bold=True,
+            "Scenario metric label",
+            label,
+            (0.78, top + 0.14, 2.28, 0.53),
+            size=layout.label_font,
+            color=BBVA_COLORS["blue"],
+            align=PP_ALIGN.CENTER,
         )
-        metrics = (
-            ("NOTA MEDIA DE COMENTARIOS ENLAZADOS", _fmt_num_or_nd(row.get("avg_nps"))),
-            (
-                link_confidence_label(str(row.get("causal_engine") or "rules")),
-                format_percentage(engine_quality(row.to_dict())),
-            ),
-        )
-        for index, (label, value) in enumerate(metrics):
-            top = layout.body_top + index * 1.60
-            _report_panel(
-                slide, "Scenario metric panel", (0.62, top, layout.metric_width, 1.48), "FFFFFF"
-            )
-            _report_text(
-                slide,
-                "Scenario metric label",
-                label,
-                (0.78, top + 0.14, 2.28, 0.53),
-                size=layout.label_font,
-                color=BBVA_COLORS["blue"],
-                align=PP_ALIGN.CENTER,
-            )
-            _report_text(
-                slide,
-                "Scenario metric value",
-                value,
-                (0.78, top + 0.78, 2.28, 0.57),
-                size=layout.kpi_font,
-                bold=True,
-                serif=True,
-                align=PP_ALIGN.CENTER,
-            )
-        top = layout.body_top
-        for kind, label, text, segments, url, height in blocks:
-            _report_panel(
-                slide,
-                "Comment panel" if kind == "comment" else "Incident panel",
-                (layout.content_left, top, layout.content_width, height),
-                BBVA_COLORS["sky"] if kind == "comment" else "FFFFFF",
-            )
-            shape = _report_text(
-                slide,
-                "Comment evidence" if kind == "comment" else "Incident evidence",
-                "",
-                (
-                    layout.content_left + layout.padding,
-                    top + layout.padding,
-                    layout.content_width - 2 * layout.padding,
-                    height - 2 * layout.padding,
-                ),
-                size=layout.body_font,
-            )
-            paragraph = shape.text_frame.paragraphs[0]
-            run = paragraph.add_run()
-            run.text = label
-            run.font.name = "Lato"
-            run.font.size = Pt(layout.body_font)
-            run.font.bold = True
-            run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-            if url:
-                run.hyperlink.address = url
-            paragraph.add_line_break()
-            _add_highlighted_runs(
-                paragraph, text, segments, size=layout.body_font, color=BBVA_COLORS["ink"]
-            )
-            top += height + layout.gap
-        reason = str(row.get("evidence_reason") or EVIDENCE_COPY["INDICIO_SEMANTICO"][1])
-        recommendation = str(row.get("operational_recommendation") or "")
-        _report_conclusion(
+        _report_text(
             slide,
-            f"VÍNCULOS EVALUADOS: {_safe_int(row.get('linked_pairs'))} · {reason}\n{recommendation}",
+            "Scenario metric value",
+            value,
+            (0.78, top + 0.78, 2.28, 0.57),
+            size=layout.kpi_font,
+            bold=True,
+            serif=True,
+            align=PP_ALIGN.CENTER,
         )
-        ids = ", ".join(
-            str(r.get("comment_id", ""))
-            for r in (row.get("comment_records") or [])
-            if isinstance(r, dict)
+    top = layout.body_top
+    for kind, label, text, segments, url, height in blocks:
+        _report_panel(
+            slide,
+            "Comment panel" if kind == "comment" else "Incident panel",
+            (layout.content_left, top, layout.content_width, height),
+            BBVA_COLORS["sky"] if kind == "comment" else "FFFFFF",
         )
-        slide.notes_slide.notes_text_frame.text = f"Escenario: {title}\nAgrupación de origen: {row.get('nps_topic', '')}\nComentarios: {ids}\n{row.get('chain_story', '')}\n{reason}"
+        shape = _report_text(
+            slide,
+            "Comment evidence" if kind == "comment" else "Incident evidence",
+            "",
+            (
+                layout.content_left + layout.padding,
+                top + layout.padding,
+                layout.content_width - 2 * layout.padding,
+                height - 2 * layout.padding,
+            ),
+            size=layout.body_font,
+        )
+        paragraph = shape.text_frame.paragraphs[0]
+        run = paragraph.add_run()
+        run.text = label
+        run.font.name = "Lato"
+        run.font.size = Pt(layout.body_font)
+        run.font.bold = True
+        run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+        if url:
+            run.hyperlink.address = url
+        paragraph.add_line_break()
+        _add_highlighted_runs(
+            paragraph, text, segments, size=layout.body_font, color=BBVA_COLORS["ink"]
+        )
+        top += height + layout.gap
+    reason = str(row.get("evidence_reason") or EVIDENCE_COPY["INDICIO_SEMANTICO"][1])
+    recommendation = str(row.get("operational_recommendation") or "")
+    _report_conclusion(
+        slide,
+        f"VÍNCULOS EVALUADOS: {_safe_int(row.get('linked_pairs'))} · {reason}\n{recommendation}",
+    )
+    ids = ", ".join(
+        str(r.get("comment_id", ""))
+        for r in (row.get("comment_records") or [])
+        if isinstance(r, dict)
+    )
+    incident_notes = "\n".join(
+        f"{record.incident_id}: {record.summary} {record.url}"
+        for record in scenario.helix_evidence_records
+    )
+    slide.notes_slide.notes_text_frame.text = f"Escenario: {title}\nAgrupación de origen: {row.get('nps_topic', '')}\nComentarios: {ids}\n{row.get('chain_story', '')}\n{reason}\nIncidencias completas:\n{incident_notes}"
 
 
 def _fill_template_deck(
@@ -3070,7 +3095,7 @@ def _fill_template_deck(
             if topic != current_topic:
                 _add_topic_separator(prs, topic)
                 current_topic = topic
-            _add_scenario_pages(prs, scenario)
+            _add_scenario_slide(prs, scenario)
 
     _move_slide(prs, 2, 1)
 

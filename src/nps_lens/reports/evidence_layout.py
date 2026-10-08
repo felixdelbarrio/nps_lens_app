@@ -1,4 +1,4 @@
-"""Shared geometry for topic summaries, separators and paginated evidence."""
+"""Shared geometry for topic summaries, separators and single-slide evidence."""
 
 from dataclasses import dataclass
 

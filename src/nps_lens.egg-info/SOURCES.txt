@@ -40,6 +40,7 @@ src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
 src/nps_lens/domain/column_aliases.py
+src/nps_lens/domain/comment_scores.py
 src/nps_lens/domain/comment_text.py
 src/nps_lens/domain/helix.py
 src/nps_lens/domain/helix_links.py
@@ -66,8 +67,10 @@ src/nps_lens/reports/chart_renderer.py
 src/nps_lens/reports/coherence.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
+src/nps_lens/reports/evidence_layout.py
 src/nps_lens/reports/executive_newsletter.py
 src/nps_lens/reports/executive_ppt.py
+src/nps_lens/reports/narrative.py
 src/nps_lens/reports/presentation_context.py
 src/nps_lens/reports/taxonomy_excel.py
 src/nps_lens/repositories/__init__.py
@@ -138,6 +141,7 @@ tests/test_iteration40_horizon.py
 tests/test_linked_comment_scores.py
 tests/test_linking_precision.py
 tests/test_local_processes.py
+tests/test_narrative_sequence.py
 tests/test_normalization_registry.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
