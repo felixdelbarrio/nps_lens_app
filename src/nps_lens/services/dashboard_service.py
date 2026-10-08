@@ -78,6 +78,7 @@ from nps_lens.domain.causal_methods import (
     get_causal_method_spec,
     linking_navigation,
 )
+from nps_lens.domain.comment_scores import score_group_label
 from nps_lens.domain.helix_links import (
     build_helix_incident_url_lookup,
     enrich_helix_incident_links,
@@ -102,7 +103,7 @@ from nps_lens.reports.coherence import ReportCoherenceError, validate_classifica
 from nps_lens.reports.content_selectors import causal_scenario_title, select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
-from nps_lens.reports.narrative import comment_groups, experience_topics, ordered_scenarios
+from nps_lens.reports.narrative import experience_topics, ordered_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix, required_comments
 from nps_lens.services.analytics import (
@@ -2625,7 +2626,6 @@ class DashboardService:
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]
-            groups = comment_groups(card.get("comment_records"))
             card.update(
                 {
                     "identity_rows": [
@@ -2640,9 +2640,12 @@ class DashboardService:
                     ],
                     "rank": index,
                     "title": title,
-                    "comment_records": [record for group in groups for record in group["records"]],
                     "score_distribution": [
-                        {key: group[key] for key in ("score", "count", "label")} for group in groups
+                        {
+                            **bucket,
+                            "label": score_group_label(bucket["score"], int(bucket["count"])),
+                        }
+                        for bucket in (card.get("score_distribution") or [])
                     ],
                     "statement": (
                         f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "

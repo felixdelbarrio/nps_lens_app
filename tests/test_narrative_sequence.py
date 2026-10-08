@@ -109,16 +109,15 @@ def test_scenario_card_keeps_anchor_only_in_the_descriptive_fact_sheet():
         assert card["anchor_topic"] not in card["title"]
 
 
-def test_scenario_score_labels_are_derived_from_unique_records_not_stored_labels():
+def test_scenario_score_labels_keep_full_aggregate_counts_with_partial_records():
     source = cases().iloc[:1].copy()
     record = {"comment_id": "c", "nps": 0, "comment": "No puedo operar"}
-    source.at[0, "comment_records"] = [record, record]
+    source.at[0, "comment_records"] = [record]
     source["score_distribution"] = [[{"score": 0, "count": 99, "label": "Etiqueta obsoleta"}]]
     card = object.__new__(DashboardService)._build_linking_scenario_cards(source)[0]
     assert card["score_distribution"] == [
-        {"score": 0, "count": 1, "label": "Score 0 / 1 Comentario"}
+        {"score": 0, "count": 99, "label": "Score 0 / 99 Comentarios"}
     ]
-    assert len(card["comment_records"]) == 1
 
 
 def test_webapp_renders_anchor_once_in_fact_sheet_and_uses_the_short_heading():
