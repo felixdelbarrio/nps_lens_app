@@ -348,7 +348,9 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("lidera el deterioro entre los tópicos observados" in t for t in texts)
     assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("tiene el menor score medio entre el top 3 de los tópicos observados" in t for t in texts)
+    assert any(
+        "tiene el menor score medio entre el top 3 de los tópicos observados" in t for t in texts
+    )
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
@@ -409,7 +411,11 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     cards = service._build_linking_scenario_cards(payload["attribution"])
     causal_slide = causal_slides[0]
     title = next(shape for shape in causal_slide.shapes if shape.name == "Report title")
-    assert " ".join(title.text.split()).startswith(cards[0]["title"])
+    assert " ".join(title.text.split()).startswith(
+        executive_ppt.causal_scenario_title(
+            payload["attribution"].iloc[0], rank=1, include_topic=True
+        )
+    )
     labels = [shape.text for shape in causal_slide.shapes if shape.name == "Scenario metric label"]
     assert labels == ["NOTA MEDIA DE COMENTARIOS ENLAZADOS", "SIMILITUD TEXTUAL"]
     assert len(cards[0]["spotlight_metrics"]) == 4
@@ -457,9 +463,13 @@ def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
         if any(shape.name == "Scenario metric value" for shape in slide.shapes)
     )
     title = next(shape for shape in slide.shapes if shape.name == "Report title")
-    assert " ".join(title.text.split()).startswith(cards[0]["title"])
+    assert " ".join(title.text.split()).startswith(
+        executive_ppt.causal_scenario_title(
+            payload["attribution"].iloc[0], rank=1, include_topic=True
+        )
+    )
     assert cards[0]["title"] == (
-        f"{payload['attribution'].iloc[0]['nps_topic']}: validar el teléfono para activar el token → la validación del teléfono no se completa"
+        "validar el teléfono para activar el token → la validación del teléfono no se completa"
     )
     newsletter = build_executive_newsletter(
         current_df=payload["selected_nps"],

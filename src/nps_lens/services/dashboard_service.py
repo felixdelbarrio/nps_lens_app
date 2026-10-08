@@ -238,12 +238,6 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
                 return 0
         return 0
 
-    topic = (
-        out.get("nps_topic", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
-    )
-    touchpoint = (
-        out.get("touchpoint", pd.Series([""] * len(out), index=out.index)).astype(str).str.strip()
-    )
     base_keys: list[str] = []
     for _, row in out.iterrows():
         key_payload = {
@@ -274,19 +268,6 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
         key_counts[base_key] = next_count
         chain_keys.append(base_key if next_count == 1 else f"{base_key}-{next_count}")
     out["chain_key"] = chain_keys
-    out["selection_label"] = [
-        (
-            f"{touchpoint_val or 'Touchpoint sin etiquetar'} | {topic_val or 'Tema sin etiqueta'} | "
-            f"{_safe_int_label(inc)} INC | {_safe_int_label(com)} VoC"
-        )
-        for topic_val, touchpoint_val, inc, com in zip(
-            topic.tolist(),
-            touchpoint.tolist(),
-            out.get("linked_incidents", pd.Series([0] * len(out), index=out.index)).tolist(),
-            out.get("linked_comments", pd.Series([0] * len(out), index=out.index)).tolist(),
-            strict=False,
-        )
-    ]
     return out
 
 
@@ -2640,7 +2621,7 @@ class DashboardService:
             chain_df = ordered_scenarios(chain_df, pd.DataFrame())
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
-            title = causal_scenario_title(row, rank=index)
+            title = causal_scenario_title(row, rank=index, include_topic=False)
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]

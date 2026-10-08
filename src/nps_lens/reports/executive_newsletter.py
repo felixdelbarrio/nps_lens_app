@@ -11,6 +11,7 @@ from nps_lens.design.brand import BRAND
 from nps_lens.domain.comment_text import is_nonspecific_content
 from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.reports.coherence import validate_metric_payload
+from nps_lens.reports.content_selectors import causal_scenario_title
 from nps_lens.reports.narrative import (
     experience_topics,
     ordered_scenarios,
@@ -81,8 +82,8 @@ def _connections(linking: dict[str, object], topics: pd.DataFrame) -> list[dict[
     if "narrative_rank" not in ordered:
         ordered = ordered_scenarios(ordered, topics)
     connections = []
-    for card in ordered.to_dict("records"):
-        topic = str(card.get("title") or card.get("nps_topic") or "")
+    for index, card in enumerate(ordered.to_dict("records"), start=1):
+        topic = causal_scenario_title(card, rank=index, include_topic=True)
         if is_nonspecific_content(topic):
             continue
         comments = unique_comments(card.get("comment_records"))

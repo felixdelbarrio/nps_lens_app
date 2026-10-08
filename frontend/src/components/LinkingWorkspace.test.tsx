@@ -127,6 +127,19 @@ it("uses the published evidence column order with semantic confidence last", () 
   expect(screen.queryByText("Similitud textual")).not.toBeInTheDocument();
 });
 
+it("shows the scenario anchor only inside the descriptive fact sheet", () => {
+  const anchor = "Continuidad y rendimiento > Lentitud de respuesta";
+  const linking = {...payload,scenarios:{cards:[{
+    title:"ingresar a la app → queda conectando",nps_topic:anchor,anchor_topic:anchor,
+    identity_rows:[{label:"Tópico NPS ancla",value:anchor}]
+  }]}} as unknown as LinkingPayload;
+  render(<LinkingWorkspace linking={linking} tab="scenarios" onTabChange={() => {}} />);
+  expect(screen.getByRole("heading",{name:"ingresar a la app → queda conectando"})).toBeInTheDocument();
+  const sheet = screen.getByRole("heading",{name:"Ficha descriptiva"}).closest("article")!;
+  expect(within(sheet).getByText(anchor)).toBeInTheDocument();
+  expect(screen.getAllByText(anchor)).toHaveLength(1);
+});
+
 it("respects the server sequence and resets navigation when the scope changes with the same number of cases", async () => {
   const user = userEvent.setup();
   const first = {
@@ -141,12 +154,14 @@ it("respects the server sequence and resets navigation when the scope changes wi
   expect(screen.getByRole("heading", { name: "Operativa: primero" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Ver siguiente" }));
   expect(screen.getByRole("heading", { name: "Continuidad: segundo" })).toBeInTheDocument();
+  rerender(<LinkingWorkspace linking={{ ...first, context_pills: [...first.context_pills] }} tab="scenarios" onTabChange={() => {}} />);
+  expect(screen.getByRole("heading", { name: "Continuidad: segundo" })).toBeInTheDocument();
   const second = {
     ...first,
     context_pills: ["México", "Septiembre"],
     scenarios: { cards: [
-      { scenario_id: "c", title: "Acceso: primero del nuevo ámbito" },
-      { scenario_id: "d", title: "Información: segundo del nuevo ámbito" }
+      { scenario_id: "a", title: "Acceso: primero del nuevo ámbito" },
+      { scenario_id: "b", title: "Información: segundo del nuevo ámbito" }
     ] }
   } as unknown as LinkingPayload;
   rerender(<LinkingWorkspace linking={second} tab="scenarios" onTabChange={() => {}} />);

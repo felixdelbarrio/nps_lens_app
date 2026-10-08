@@ -120,6 +120,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const scenarios = asRecord(linking.scenarios);
   const scenarioCards = asRows(scenarios.cards);
   const scenarioSequence = scenarioCards.map(card => asString(card.scenario_id, asString(card.title))).join("|");
+  const scenarioScope = JSON.stringify(linking.context_pills);
   const narrativeMetrics = asRows(narrative.metrics);
   const navigationItems = useMemo(() => {
     const items = asRows(linking.navigation).map((item) => ({
@@ -178,7 +179,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
   useEffect(() => {
     setActiveChainIndex(0);
-  }, [scenarioSequence, linking.focus_group, method.value, linking.context_pills]);
+  }, [scenarioSequence, linking.focus_group, method.value, scenarioScope]);
 
   useEffect(() => {
     setEvidenceTopic("");
@@ -354,7 +355,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 </button>
                 <div className="scenario-nav-meta">
                   <strong>{`Escenario ${activeChainIndex + 1} de ${scenarioCards.length}`}</strong>
-                  <span>{asString(activeCard.selection_label, asString(activeCard.title))}</span>
+                  <span>{asString(activeCard.title)}</span>
                 </div>
                 <button
                   className="secondary-button"
@@ -374,7 +375,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                 <div className="spotlight-head">
                   <div className="spotlight-copy">
                     <p className="eyebrow">Evidencia observada</p>
-                    <h3>{asString(activeCard.title, asString(activeCard.nps_topic))}</h3>
+                    <h3>{asString(activeCard.title, "Escenario de evidencia")}</h3>
                     <p>{asString(activeCard.statement, asString(activeCard.chain_story))}</p>
                   </div>
                   <div className="spotlight-rank">{`#${asString(activeCard.rank, String(activeChainIndex + 1))}`}</div>

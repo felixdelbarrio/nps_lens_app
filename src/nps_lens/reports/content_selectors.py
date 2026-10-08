@@ -18,14 +18,14 @@ class MarkdownSegment:
     bold: bool = False
 
 
-def causal_scenario_title(row: Any, *, rank: int) -> str:
+def causal_scenario_title(row: Any, *, rank: int, include_topic: bool) -> str:
     task = text(row.get("affected_task"))
     symptom = text(row.get("observed_symptom"))
     topic = text(row.get("anchor_topic")) or text(row.get("nps_topic"))
     if task and symptom and task != "Tarea pendiente de validación":
         case = f"{task} → {symptom}"
-        return f"{topic}: {case}" if topic else case
-    return topic or f"Escenario de evidencia {rank}"
+        return f"{topic}: {case}" if include_topic and topic else case
+    return topic if include_topic and topic else f"Escenario de evidencia {rank}"
 
 
 def _series(df: pd.DataFrame, column: str, default: object = 0.0) -> pd.Series[Any]:

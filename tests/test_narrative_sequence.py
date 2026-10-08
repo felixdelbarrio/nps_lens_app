@@ -98,6 +98,50 @@ def test_invalid_scenario_average_sorts_after_valid_zero():
     ]
 
 
+def test_scenario_card_keeps_anchor_only_in_the_descriptive_fact_sheet():
+    cards = object.__new__(DashboardService)._build_linking_scenario_cards(cases())
+    for card in cards:
+        assert card["title"] == "operar → la operación falla"
+        assert card["identity_rows"][0] == {
+            "label": "Tópico NPS ancla",
+            "value": card["anchor_topic"],
+        }
+        assert card["anchor_topic"] not in card["title"]
+
+
+def test_webapp_renders_anchor_once_in_fact_sheet_and_uses_the_short_heading():
+    import json
+    import subprocess
+    from pathlib import Path
+
+    source = Path("webapp/apps-script/App.html").read_text()
+    renderer = source[
+        source.index("  function scenarioCard(") : source.index("  function scenarioWorkspace(")
+    ]
+    card = object.__new__(DashboardService)._build_linking_scenario_cards(cases())[0]
+    script = (
+        """
+const assert=require('node:assert/strict');
+const state={scenarioDetail:'helix',evidenceView:'table'};
+const rows=value=>Array.isArray(value)?value:[];
+const esc=value=>String(value);
+const scenarioEvidence=()=>'';
+const contentTabs=()=>'';
+"""
+        + renderer
+        + "\nconst card="
+        + json.dumps(card)
+        + ";\n"
+        + """
+const html=scenarioCard(card,0,1);
+assert.ok(html.includes('<h3>operar → la operación falla</h3>'));
+assert.equal(html.split(card.anchor_topic).length-1,1);
+assert.ok(html.includes('<dt>Tópico NPS ancla</dt><dd>'+card.anchor_topic+'</dd>'));
+"""
+    )
+    subprocess.run(["node"], input=script, check=True, capture_output=True, text=True)
+
+
 def test_groups_count_unique_comments_sort_scores_and_preserve_zero_and_missing():
     records = [
         {"comment_id": "a", "nps": 3, "comment": "No puedo operar"},
@@ -270,7 +314,9 @@ def test_ppt_has_one_top_four_overview_and_keeps_evidence_outside_that_top():
     assert [sh.text for sh in overview[0].shapes if sh.name == "Topic heading"] == [
         f"Topic {i}" for i in range(4)
     ]
-    title = next(sh.text for sh in overview[0].shapes if sh.name == "Report title")
+    title = " ".join(
+        next(sh.text for sh in overview[0].shapes if sh.name == "Report title").split()
+    )
     assert "top 4 de los tópicos" in title and "(1/" not in title
     assert [sh.text for s in deck.slides for sh in s.shapes if sh.name == "Topic separator"] == [
         "VoC : Topic 4",

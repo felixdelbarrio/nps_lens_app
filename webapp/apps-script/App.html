@@ -188,7 +188,7 @@
   function scenarioEvidence(records,kind){if(state.evidenceView==='table'){if(kind==='helix')return table(rows(records).map(row=>({ID:row.incident_id,ID__href:row.url||row.incident_id__href,'Evidencia Helix':row.summary,'Evidencia Helix__segments':row.summary_segments})),50,['ID','Evidencia Helix']);return table(rows(records).map(row=>({ID:row.comment_id,Fecha:row.date,Score:row.nps,Grupo:row.group,Palanca:row.palanca,Subpalanca:row.subpalanca,Comentario:row.comment,Comentario__segments:row.comment_segments})),50,['ID','Fecha','Score','Grupo','Palanca','Subpalanca','Comentario']);}return `<div class="evidence-card-grid">${rows(records).map(row=>`<article class="evidence-card"><div class="evidence-pill-row"><span class="evidence-pill">${esc(kind==='helix'?(row.incident_id||'INC'):`ID: ${row.comment_id||'-'}`)}</span>${kind==='voc'?`<span class="evidence-pill">Fecha: ${esc(format(row.date))}</span><span class="evidence-pill">Score: ${esc(format(row.nps))}</span>`:''}</div><p>${evidenceText(row.summary||row.comment||'',kind==='helix'?row.summary_segments:row.comment_segments)}</p></article>`).join('')||'<div class="empty">Sin evidencia visible.</div>'}</div>`;}
   function scenarioCard(card,index,total) {
     if (!card) return '<div class="empty">No hay evidencia vinculada en esta edición.</div>';
-    const title=card.title||card.anchor_topic||`Escenario ${index+1}`;
+    const title=card.title||`Escenario ${index+1}`;
     const story=card.statement||card.chain_story||card.rationale||card.summary||'';
     const helix=rows(card.incident_records), voc=rows(card.comment_records);
     const details=[['helix',`Evidencia Helix (${helix.length})`],['voc',`Comentarios (${voc.length})`]];
@@ -200,7 +200,7 @@
     if(!total)return scenarioCard(null,0,0);
     state.scenarioIndex=((state.scenarioIndex%total)+total)%total;
     const card=items[state.scenarioIndex], disabled=total<=1?'disabled':'';
-    return `<nav class="scenario-nav" aria-label="Navegación entre escenarios de evidencia"><button class="button ghost" data-scenario-step="-1" ${disabled}>Anterior</button><div class="scenario-nav-meta" aria-live="polite"><strong>Escenario ${state.scenarioIndex+1} de ${total}</strong><span>${esc(card.selection_label||card.title||'Escenario de evidencia')}</span></div><button class="button ghost" data-scenario-step="1" ${disabled}>Ver siguiente</button></nav>${scenarioCard(card,state.scenarioIndex,total)}`;
+    return `<nav class="scenario-nav" aria-label="Navegación entre escenarios de evidencia"><button class="button ghost" data-scenario-step="-1" ${disabled}>Anterior</button><div class="scenario-nav-meta" aria-live="polite"><strong>Escenario ${state.scenarioIndex+1} de ${total}</strong><span>${esc(card.title||'Escenario de evidencia')}</span></div><button class="button ghost" data-scenario-step="1" ${disabled}>Ver siguiente</button></nav>${scenarioCard(card,state.scenarioIndex,total)}`;
   }
   function linkingDiagnostics(diagnostic) {
     if (!diagnostic || typeof diagnostic !== 'object' || !Object.keys(diagnostic).length) return '';

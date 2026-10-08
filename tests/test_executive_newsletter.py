@@ -39,6 +39,7 @@ def test_newsletter_uses_monthly_kpis_and_keeps_only_the_short_editorial_model()
             "cards": [
                 {
                     "title": "Funcionamiento continuo / Fallas en login",
+                    "anchor_topic": "Funcionamiento continuo > Fallas en login",
                     "avg_nps": 2.0,
                     "linked_pairs": 3,
                     "comment_records": [{"comment": "no funciona"}],

@@ -2721,7 +2721,7 @@ def _add_scenario_pages(prs: Presentation, scenario: CausalScenarioViewModel) ->
     pages = _evidence_pages(scenario)
     for page, blocks in enumerate(pages, start=1):
         slide = _report_slide(prs)
-        title = causal_scenario_title(row, rank=scenario.index)
+        title = causal_scenario_title(row, rank=scenario.index, include_topic=True)
         if len(pages) > 1:
             title += f" ({page}/{len(pages)})"
         _report_text(

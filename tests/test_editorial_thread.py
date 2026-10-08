@@ -53,12 +53,12 @@ def test_case_title_keeps_the_anchor_and_the_concrete_task():
         "observed_symptom": "la validación no se completa",
     }
     assert (
-        causal_scenario_title(row, rank=1)
+        causal_scenario_title(row, rank=1, include_topic=True)
         == "Acceso > Token: validar el teléfono → la validación no se completa"
     )
     row["affected_task"] = "Tarea pendiente de validación"
-    assert causal_scenario_title(row, rank=1) == "Acceso > Token"
-    assert causal_scenario_title({}, rank=3) == "Escenario de evidencia 3"
+    assert causal_scenario_title(row, rank=1, include_topic=True) == "Acceso > Token"
+    assert causal_scenario_title({}, rank=3, include_topic=True) == "Escenario de evidencia 3"
 
 
 def test_newsletter_never_attributes_another_topics_evidence_to_the_primary_signal():
@@ -72,6 +72,8 @@ def test_newsletter_never_attributes_another_topics_evidence_to_the_primary_sign
     card = {
         "title": "Acceso > Token: validar el teléfono → falla la validación",
         "anchor_topic": "Acceso > Token",
+        "affected_task": "validar el teléfono",
+        "observed_symptom": "falla la validación",
         "linked_pairs": 2,
         "linked_comments": 1,
         "linked_incidents": 2,
@@ -92,6 +94,8 @@ def test_newsletter_never_attributes_another_topics_evidence_to_the_primary_sign
     assert [item["label"] for item in result["signals"]] == ["Continuidad", "Acceso"]
     card["anchor_topic"] = "Continuidad > Cuelgue"
     card["title"] = "Continuidad > Cuelgue: operar → se interrumpe"
+    card["affected_task"] = "operar"
+    card["observed_symptom"] = "se interrumpe"
     result = build_executive_newsletter(linking={"scenarios": {"cards": [card]}}, **kwargs)
     assert card["title"] in result["lead"] and card["evidence_reason"] in result["lead"]
 
