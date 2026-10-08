@@ -63,3 +63,18 @@ def test_shared_gap_windows_use_latest_month_for_accumulated_scope():
     assert result.current.Fecha.tolist() == [pd.Timestamp("2026-08-18")]
     assert len(result.baseline) == 2
     assert result.base_window.end.isoformat() == "2026-07-31"
+
+
+def test_no_valid_historical_scores_produces_no_fabricated_gaps():
+    current = pd.DataFrame({"NPS": [0, 10], "Palanca": ["A", "B"]})
+    for baseline in [pd.DataFrame(), pd.DataFrame({"NPS": [None, -1, 11]})]:
+        result = nps_gaps(current, baseline, "Palanca")
+        assert result.base_nps is None and result.base_n == 0 and result.rows.empty
+
+
+def test_valid_zero_baseline_is_not_treated_as_missing():
+    current = pd.DataFrame({"NPS": [0], "Palanca": ["Nuevo"]})
+    baseline = pd.DataFrame({"NPS": [0, 10, None, 11], "Palanca": ["Otro"] * 4})
+    result = nps_gaps(current, baseline, "Palanca")
+    assert result.base_nps == 0 and result.base_n == 2
+    assert result.rows.gap_vs_base.tolist() == [-100]

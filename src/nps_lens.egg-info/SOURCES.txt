@@ -22,6 +22,7 @@ src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/linking_diagnostics.py
 src/nps_lens/analytics/linking_policy.py
+src/nps_lens/analytics/nps_gaps.py
 src/nps_lens/analytics/nps_helix_link.py
 src/nps_lens/analytics/signal_quality.py
 src/nps_lens/analytics/taxonomy.py
@@ -96,7 +97,6 @@ src/nps_lens/testing/fixtures.py
 src/nps_lens/ui/__init__.py
 src/nps_lens/ui/business.py
 src/nps_lens/ui/charts.py
-src/nps_lens/ui/historic_changes.py
 src/nps_lens/ui/narratives.py
 src/nps_lens/ui/plotly_theme.py
 src/nps_lens/ui/population.py

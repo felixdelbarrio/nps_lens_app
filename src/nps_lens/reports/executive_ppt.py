@@ -664,6 +664,8 @@ def _build_gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Option
     fig.update_yaxes(
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
         automargin=False,
+        tickmode="array",
+        tickvals=rendered_labels,
         title_text="",
     )
     fig.update_xaxes(
@@ -3058,6 +3060,11 @@ def _fill_template_deck(
     _set_template_text(
         change.shapes[2],
         "Brechas NPS\nNPS del tópico frente al NPS global de la base histórica",
+        size=11,
+        bold=True,
+        color="FFFFFF",
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER,
     )
     change.shapes[4].height = Inches(0.78)
     _set_template_text(
