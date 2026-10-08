@@ -42,19 +42,6 @@ SIGNATURE_CSS = """
 """
 
 
-def email_corporate_logo(image_src: str) -> str:
-    return (
-        f'<img src="{image_src}" width="230" height="81" alt="{BRAND["name"]}" '
-        'style="display:block;width:230px;height:81px;max-width:100%;border:0">'
-    )
-
-
-EMAIL_CORPORATE_LOGO = email_corporate_logo(
-    "data:image/png;base64,"
-    + b64encode((BRAND_ASSETS / "bbva-bei-email.png").read_bytes()).decode()
-)
-
-
 # Gmail iOS preserves gradients but may invert solid backgrounds and white text.
 # Black in the two Gmail-only blend layers is a compositing operand, not a brand color.
 _EMAIL_PALETTE = palette(DesignTokens.default(), "light")
@@ -75,3 +62,8 @@ EMAIL_LIGHT_META = (
 )
 EMAIL_HERO_TEXT_OPEN = '<div class="gmail-blend-screen"><div class="gmail-blend-difference">'
 EMAIL_HERO_TEXT_CLOSE = "</div></div>"
+
+EMAIL_CORPORATE_HEADING = (
+    '<div style="font:600 12px Arial,sans-serif;letter-spacing:1.3px;color:#ffffff">'
+    f'{BRAND["name"]}</div>'
+)
