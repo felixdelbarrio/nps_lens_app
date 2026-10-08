@@ -333,7 +333,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False):
                 for paragraph in shape.text_frame.paragraphs:
-                    texts.append(paragraph.text or "")
+                    texts.append(" ".join((paragraph.text or "").split()))
 
     cover_texts = []
     for shape in prs.slides[0].shapes:
