@@ -345,17 +345,17 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("presenta la mayor brecha negativa entre los tópicos observados" in t for t in texts)
+    assert any("mayor brecha NPS negativa frente a la base global" in t for t in texts)
     assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
     assert any(
-        "tiene el menor score medio entre el top 3 de los tópicos observados" in t for t in texts
+        "menor score medio (0–10) · Top 3 tópicos · todos los grupos NPS" in t for t in texts
     )
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
     assert any("Acceso > Login" in t for t in texts)
-    assert any("Brechas NPS" in t for t in texts)
+    assert any("NPS clásico del tópico − NPS global histórico (puntos)" in t for t in texts)
     assert not any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)

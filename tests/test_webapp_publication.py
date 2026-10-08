@@ -247,7 +247,8 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
         assert removed_heading not in newsletter
         assert removed_heading not in publication_renderer
     assert "La voz del cliente" in newsletter
-    assert "Señales a vigilar" in newsletter
+    assert "insight.signals_title" in newsletter
+    assert "insight.signals_basis" in newsletter
     assert newsletter.index("Ver análisis completo</a>") < newsletter.index("Explorar NPS Lens</a>")
     assert "background:#001391;color:#fff" in newsletter
     assert "background:#004481;color:#fff" in newsletter

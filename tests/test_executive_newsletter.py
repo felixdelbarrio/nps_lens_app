@@ -77,6 +77,8 @@ def test_newsletter_uses_monthly_kpis_and_keeps_only_the_short_editorial_model()
     colors = palette(DesignTokens.default(), "light")
     assert result["signals"][0]["reason_color"] == colors["color.primary.bg.alert"]
     assert result["signals"][1]["reason_color"] == colors["color.primary.bg.success"]
+    assert "todos los grupos NPS" in result["signals_title"]
+    assert "detractores, pasivos y promotores" in result["signals_basis"]
     assert "insights" not in result
     assert "focus" not in result
     assert "connections" not in result

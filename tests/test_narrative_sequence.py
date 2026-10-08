@@ -328,7 +328,7 @@ def test_ppt_has_one_top_four_overview_and_keeps_evidence_outside_that_top():
     title = " ".join(
         next(sh.text for sh in overview[0].shapes if sh.name == "Report title").split()
     )
-    assert "top 4 de los tópicos" in title and "(1/" not in title
+    assert "Top 4 tópicos · todos los grupos NPS" in title and "(1/" not in title
     assert [sh.text for s in deck.slides for sh in s.shapes if sh.name == "Topic separator"] == [
         "VoC : Topic 4",
         "VoC : Topic 5",

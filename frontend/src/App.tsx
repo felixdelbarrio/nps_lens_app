@@ -1029,13 +1029,17 @@ export function App() {
     }
 
     const topicRows = (dashboard?.overview.topics_table || []).map((row) => ({
-      Comentarios: row.n ?? "",
+      [dashboard?.overview.topic_scope?.count_label || "Comentarios (grupo seleccionado)"]: row.n ?? "",
       "Tópico > problema": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
       Ejemplos: Array.isArray(row.examples) ? row.examples.join(" · ") : row.examples ?? ""
     }));
 
     return (
       <section className="surface-card stack-panel">
+        <div className="section-heading">
+          <h2>{dashboard?.overview.topic_scope?.title}</h2>
+          <p>{dashboard?.overview.topic_scope?.subtitle}</p>
+        </div>
         <PlotFigure
           emptyMessage="No hay texto suficiente para extraer temas."
           figure={dashboard?.overview.topics_figure}
@@ -1120,7 +1124,7 @@ export function App() {
                 <h2>{gapTitle}</h2>
                 <p>{gapSubtitle}</p>
                 <p className="metric-note">
-                  NPS clásico base: {formatNumber(dashboard?.gaps.base_nps)}
+                  NPS clásico global de la base histórica: {formatNumber(dashboard?.gaps.base_nps)}
                   {dashboard?.gaps.base_range?.start && dashboard?.gaps.base_range?.end
                     ? ` (${formatDateLabel(dashboard.gaps.base_range.start)} - ${formatDateLabel(dashboard.gaps.base_range.end)})`
                     : ""}
