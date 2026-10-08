@@ -119,6 +119,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
   const entitySummary = asRecord(linking.entity_summary);
   const scenarios = asRecord(linking.scenarios);
   const scenarioCards = asRows(scenarios.cards);
+  const scenarioSequence = scenarioCards.map(card => asString(card.scenario_id, asString(card.title))).join("|");
   const narrativeMetrics = asRows(narrative.metrics);
   const navigationItems = useMemo(() => {
     const items = asRows(linking.navigation).map((item) => ({
@@ -177,7 +178,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
 
   useEffect(() => {
     setActiveChainIndex(0);
-  }, [scenarioCards.length, linking.focus_group, method.value]);
+  }, [scenarioSequence, linking.focus_group, method.value, linking.context_pills]);
 
   useEffect(() => {
     setEvidenceTopic("");

@@ -27,8 +27,6 @@ class DimensionViewModel:
 class CausalScenarioViewModel:
     index: int
     row: pd.Series[Any]
-    kpis: list[tuple[str, str, str]]
-    incident_lines: list[str]
     comment_lines: list[str]
     helix_evidence_lines: list[str]
     helix_evidence_records: list[CausalEvidenceRecord]

@@ -89,7 +89,7 @@ def test_newsletter_never_attributes_another_topics_evidence_to_the_primary_sign
     result = build_executive_newsletter(linking={"scenarios": {"cards": [card]}}, **kwargs)
     assert "continuidad" in result["headline"]
     assert card["evidence_reason"] not in result["lead"]
-    assert any(item["label"] == card["title"] for item in result["signals"])
+    assert [item["label"] for item in result["signals"]] == ["Continuidad", "Acceso"]
     card["anchor_topic"] = "Continuidad > Cuelgue"
     card["title"] = "Continuidad > Cuelgue: operar → se interrumpe"
     result = build_executive_newsletter(linking={"scenarios": {"cards": [card]}}, **kwargs)

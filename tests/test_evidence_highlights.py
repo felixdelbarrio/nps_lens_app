@@ -44,7 +44,7 @@ def test_linking_carries_contributing_terms_from_existing_sparse_vectors():
 
 
 def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
-    from nps_lens.services.dashboard_service import DashboardService, _cap_chain_evidence_rows
+    from nps_lens.services.dashboard_service import DashboardService
 
     segments = evidence_segments("Error transferencia", {"transferencia"})
     chains = pd.DataFrame(
@@ -69,7 +69,7 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
             }
         ]
     )
-    capped = _cap_chain_evidence_rows(chains, max_incident_examples=1, max_comment_examples=1)
+    capped = chains
     service = object.__new__(DashboardService)
     card = service._build_linking_scenario_cards(capped)[0]
     assert card["incident_records"][0]["summary_segments"] == segments
@@ -86,6 +86,6 @@ def test_snapshot_preserves_nested_emphasis_and_canonical_identity():
         "Incidencias relacionadas",
         "Comentarios relacionados",
         "Vínculos semánticos",
-        "Calidad del vínculo",
         "Nota media (0–10)",
+        "Calidad del vínculo",
     ]

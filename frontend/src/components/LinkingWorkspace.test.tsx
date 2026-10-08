@@ -95,16 +95,16 @@ it("shows the complete server score distribution instead of IDs or sample counts
   const linking = { ...payload, scenarios: { cards: [{
     ...cards[0], linked_comments: 4,
     score_distribution: [
-      { score: 0, count: 3, label: "Score 0 : 3 comentarios" },
-      { score: 1, count: 1, label: "Score 1 : 1 comentario" }
+      { score: 0, count: 3, label: "Score 0 / 3 Comentarios" },
+      { score: 1, count: 1, label: "Score 1 / 1 Comentario" }
     ],
     comment_records: [{ comment_id: "private-id", nps: "0", comment: "No puedo acceder" }],
     spotlight_metrics: [{label:"NOTA MEDIA DE COMENTARIOS ENLAZADOS",value:"0,25"}]
   }] } };
   render(<LinkingWorkspace linking={linking} tab="scenarios" onTabChange={() => {}} />);
   const overview = screen.getByRole("heading", {name:"4 comentarios enlazados"}).closest("article")!;
-  expect(within(overview).getByText("Score 0 : 3 comentarios")).toBeInTheDocument();
-  expect(within(overview).getByText("Score 1 : 1 comentario")).toBeInTheDocument();
+  expect(within(overview).getByText("Score 0 / 3 Comentarios")).toBeInTheDocument();
+  expect(within(overview).getByText("Score 1 / 1 Comentario")).toBeInTheDocument();
   expect(within(overview).queryByText("private-id")).not.toBeInTheDocument();
   expect(screen.getByText("0,25")).toBeInTheDocument();
 });
@@ -125,4 +125,31 @@ it("uses the published evidence column order with semantic confidence last", () 
   expect(screen.getByText("90,0%")).toBeInTheDocument();
   expect(screen.queryByText("Tasa Foco")).not.toBeInTheDocument();
   expect(screen.queryByText("Similitud textual")).not.toBeInTheDocument();
+});
+
+it("respects the server sequence and resets navigation when the scope changes with the same number of cases", async () => {
+  const user = userEvent.setup();
+  const first = {
+    ...payload,
+    context_pills: ["Argentina", "Agosto"],
+    scenarios: { cards: [
+      { scenario_id: "a", title: "Operativa: primero" },
+      { scenario_id: "b", title: "Continuidad: segundo" }
+    ] }
+  } as unknown as LinkingPayload;
+  const { rerender } = render(<LinkingWorkspace linking={first} tab="scenarios" onTabChange={() => {}} />);
+  expect(screen.getByRole("heading", { name: "Operativa: primero" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Ver siguiente" }));
+  expect(screen.getByRole("heading", { name: "Continuidad: segundo" })).toBeInTheDocument();
+  const second = {
+    ...first,
+    context_pills: ["México", "Septiembre"],
+    scenarios: { cards: [
+      { scenario_id: "c", title: "Acceso: primero del nuevo ámbito" },
+      { scenario_id: "d", title: "Información: segundo del nuevo ámbito" }
+    ] }
+  } as unknown as LinkingPayload;
+  rerender(<LinkingWorkspace linking={second} tab="scenarios" onTabChange={() => {}} />);
+  expect(screen.getByRole("heading", { name: "Acceso: primero del nuevo ámbito" })).toBeInTheDocument();
+  expect(screen.getByText("Escenario 1 de 2")).toBeInTheDocument();
 });

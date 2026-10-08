@@ -60,7 +60,7 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
                 assert initiative.left > Inches(8)
                 assert corporate.top == initiative.top == Inches(0.25)
                 assert scope.top == title.top + title.height + Inches(0.08)
-            if index:
+            if index and "Topic separator" not in names:
                 callout = next(shape for shape in slide.shapes if shape.name == "Report conclusion")
                 title = next(shape for shape in slide.shapes if shape.name == "Report title")
                 corporate = next(shape for shape in slide.shapes if shape.name == BRAND["name"])

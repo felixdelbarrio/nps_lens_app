@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.reports.coherence import validate_delta_rows
+from nps_lens.reports.narrative import text
 
 
 @dataclass(frozen=True)
@@ -19,9 +19,9 @@ class MarkdownSegment:
 
 
 def causal_scenario_title(row: Any, *, rank: int) -> str:
-    task = str(row.get("affected_task") or "").strip()
-    symptom = str(row.get("observed_symptom") or "").strip()
-    topic = str(row.get("anchor_topic") or row.get("nps_topic") or "").strip()
+    task = text(row.get("affected_task"))
+    symptom = text(row.get("observed_symptom"))
+    topic = text(row.get("anchor_topic")) or text(row.get("nps_topic"))
     if task and symptom and task != "Tarea pendiente de validación":
         case = f"{task} → {symptom}"
         return f"{topic}: {case}" if topic else case
@@ -113,22 +113,6 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     )
 
 
-def select_nonzero_kpis(
-    kpis: Iterable[tuple[str, object, str]], *, max_items: int
-) -> list[tuple[str, str, str]]:
-    """Keep only KPIs with a meaningful non-zero numeric value."""
-
-    selected: list[tuple[str, str, str]] = []
-    for label, raw_value, accent in kpis:
-        numeric = _extract_numeric(raw_value)
-        if numeric is None or abs(numeric) <= 1e-12:
-            continue
-        selected.append((str(label), str(raw_value), str(accent)))
-        if len(selected) >= max_items:
-            break
-    return selected
-
-
 def parse_markdown_strong(text: object) -> list[MarkdownSegment]:
     """Parse the small markdown subset used by business bullets: **bold**."""
 
@@ -151,18 +135,3 @@ def parse_markdown_strong(text: object) -> list[MarkdownSegment]:
 
 def strip_markdown_strong(text: object) -> str:
     return "".join(segment.text for segment in parse_markdown_strong(text))
-
-
-def _extract_numeric(value: object) -> float | None:
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        out = float(value)
-        return out if np.isfinite(out) else None
-    text = str(value or "").replace(",", ".")
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
-    if not match:
-        return None
-    try:
-        out = float(match.group(0))
-    except ValueError:
-        return None
-    return out if np.isfinite(out) else None

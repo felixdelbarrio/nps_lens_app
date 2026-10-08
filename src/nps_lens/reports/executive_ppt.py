@@ -57,10 +57,16 @@ from nps_lens.reports.content_selectors import (
     causal_scenario_title,
     select_causal_scenarios,
     select_negative_delta_rows,
-    select_nonzero_kpis,
     select_text_clusters,
 )
 from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
+from nps_lens.reports.evidence_layout import EVIDENCE_LAYOUT
+from nps_lens.reports.narrative import (
+    comment_groups,
+    experience_topics,
+    ordered_scenarios,
+    topic_name,
+)
 from nps_lens.reports.presentation_context import (
     CausalEvidenceRecord,
     CausalScenarioViewModel,
@@ -709,34 +715,8 @@ def _build_driver_delta_figure(
 
 
 def _build_topic_dimension_table(source_df: pd.DataFrame, *, dimension: str) -> pd.DataFrame:
-    cols = ["value", "n", "nps", "detractor_rate"]
-    required = {dimension, "NPS"}
-    if source_df is None or source_df.empty or not required.issubset(set(source_df.columns)):
-        return pd.DataFrame(columns=cols)
-    work = _normalize_presentation_categories(actionable_rows(source_df), columns=[dimension])
-    work = work.dropna(subset=[dimension, "NPS"]).copy()
-    work[dimension] = work[dimension].astype(str).str.strip()
-    work["NPS"] = valid_nps_scores(work["NPS"])
-    work = work[work[dimension].ne("")].dropna(subset=["NPS"]).copy()
-    if work.empty:
-        return pd.DataFrame(columns=cols)
-    out = (
-        work.groupby(dimension, as_index=False)
-        .agg(
-            n=("NPS", "size"),
-            nps=("NPS", "mean"),
-            detractor_rate=(
-                "NPS",
-                lambda s: float((pd.to_numeric(s, errors="coerce") <= 6).mean()),
-            ),
-        )
-        .rename(columns={dimension: "value"})
-    )
-    return (
-        out.sort_values(["nps", "n"], ascending=[True, False])
-        .head(EDITORIAL_LIMITS.max_topic_rows)[cols]
-        .copy()
-    )
+    topics = experience_topics(source_df, dimension=dimension)
+    return topics.drop(columns="nps").rename(columns={"score": "nps"})
 
 
 def _first_existing_series(df: pd.DataFrame, *columns: str) -> pd.Series:
@@ -1915,10 +1895,10 @@ def _chain_list(value: object) -> list[str]:
     return [txt] if txt else []
 
 
-def _chain_incident_records(value: object) -> list[dict[str, str]]:
+def _chain_incident_records(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for entry in value:
         if not isinstance(entry, dict):
             continue
@@ -1937,6 +1917,7 @@ def _chain_incident_records(value: object) -> list[dict[str, str]]:
                     "incident_id": incident_id,
                     "summary": summary,
                     "url": url,
+                    "summary_segments": entry.get("summary_segments", []),
                 }
             )
     return out
@@ -1979,49 +1960,18 @@ def _build_dimension_view_model(
 
 def _build_causal_scenarios(
     chains: pd.DataFrame,
+    topics: pd.DataFrame,
 ) -> list[CausalScenarioViewModel]:
     scenarios: list[CausalScenarioViewModel] = []
-    selected = select_causal_scenarios(chains, max_rows=len(chains))
+    selected = chains if "narrative_rank" in chains else ordered_scenarios(chains, topics)
     for idx, (_, row) in enumerate(selected.iterrows(), start=1):
-        raw_kpis = [
-            (
-                "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
-                _fmt_num_or_nd(row.get("avg_nps", np.nan)),
-                BBVA_COLORS["green"],
-            ),
-            (
-                "Vínculos semánticos",
-                str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
-                BBVA_COLORS["sky"],
-            ),
-        ] + (
-            [
-                (
-                    link_confidence_label("llm"),
-                    _fmt_pct_or_nd(engine_quality(row), decimals=0),
-                    BBVA_COLORS["blue"],
-                )
-            ]
-            if row.get("causal_engine") == "llm"
-            else []
-        )
-        incident_lines = [
-            _clean_evidence_excerpt(line, max_len=130)
-            for line in _chain_list(row.get("incident_examples"))[
-                : EDITORIAL_LIMITS.max_helix_evidence
-            ]
-        ]
-        comment_lines = [
-            _clean_evidence_excerpt(line, max_len=135)
-            for line in _chain_list(row.get("comment_examples"))[
-                : EDITORIAL_LIMITS.max_voc_evidence
-            ]
-        ]
+        incident_lines = _chain_list(row.get("incident_examples"))
+        comment_lines = _chain_list(row.get("comment_examples"))
         helix_records = _chain_incident_records(row.get("incident_records"))
         helix_evidence_records = [
             CausalEvidenceRecord(
                 incident_id=record.get("incident_id", ""),
-                summary=_clean_evidence_excerpt(record.get("summary", ""), max_len=170),
+                summary=str(record.get("summary", "")),
                 url=record.get("url", ""),
                 segments=(record.get("summary_segments") or []),
             )
@@ -2034,15 +1984,11 @@ def _build_causal_scenarios(
             for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
         ]
         if not helix_lines:
-            helix_lines = incident_lines[: EDITORIAL_LIMITS.max_helix_evidence]
+            helix_lines = incident_lines
         scenarios.append(
             CausalScenarioViewModel(
                 index=idx,
                 row=row,
-                kpis=select_nonzero_kpis(
-                    raw_kpis, max_items=EDITORIAL_LIMITS.max_visible_causal_kpis
-                ),
-                incident_lines=incident_lines,
                 comment_lines=comment_lines,
                 helix_evidence_lines=helix_lines,
                 helix_evidence_records=helix_evidence_records,
@@ -2252,7 +2198,10 @@ def _build_presentation_context(
             entity_summary_df=causal_entity_summary,
             broken_journeys_df=broken_journeys_df,
         ),
-        scenarios=_build_causal_scenarios(chains),
+        scenarios=_build_causal_scenarios(
+            chains,
+            dimensions["Palanca"].topic_table_df,
+        ),
     )
     return PresentationContext(
         service_origin=service_origin,
@@ -2429,31 +2378,6 @@ def _replace_template_table(
     return table
 
 
-def _set_template_labeled_value(
-    shape: object,
-    label: str,
-    value: str,
-    *,
-    size: float = 10.5,
-    color: str = "666666",
-) -> None:
-    tf = shape.text_frame
-    tf.clear()
-    tf.word_wrap = True
-    paragraph = tf.paragraphs[0]
-    label_run = paragraph.add_run()
-    label_run.text = f"{label}\n"
-    label_run.font.name = "Lato"
-    label_run.font.size = Pt(size)
-    label_run.font.color.rgb = _rgb(color)
-    value_run = paragraph.add_run()
-    value_run.text = value
-    value_run.font.name = "Lato"
-    value_run.font.size = Pt(size)
-    value_run.font.bold = True
-    value_run.font.color.rgb = _rgb(color)
-
-
 def _add_highlighted_runs(
     paragraph: object,
     text: str,
@@ -2471,7 +2395,12 @@ def _add_highlighted_runs(
     }
     pattern = (
         re.compile(
-            "(" + "|".join(re.escape(term) for term in sorted(terms, key=len, reverse=True)) + ")",
+            "("
+            + "|".join(
+                re.escape(term).replace(r"\ ", r"\s+")
+                for term in sorted(terms, key=len, reverse=True)
+            )
+            + ")",
             re.IGNORECASE,
         )
         if terms
@@ -2485,24 +2414,8 @@ def _add_highlighted_runs(
         run.text = part
         run.font.name = "Lato"
         run.font.size = Pt(size)
-        run.font.bold = part.casefold() in terms
+        run.font.bold = " ".join(part.casefold().split()) in terms
         run.font.color.rgb = _rgb(color)
-
-
-def _duplicate_slide(prs: Presentation, source_index: int) -> object:
-    source = prs.slides[source_index]
-    target = prs.slides.add_slide(source.slide_layout)
-    for shape in list(target.shapes):
-        shape._element.getparent().remove(shape._element)
-    source_bg = getattr(source.element.cSld, "bg", None)
-    target_bg = getattr(target.element.cSld, "bg", None)
-    if target_bg is not None:
-        target.element.cSld.remove(target_bg)
-    if source_bg is not None:
-        target.element.cSld.insert(0, deepcopy(source_bg))
-    for shape in source.shapes:
-        target.shapes._spTree.insert_element_before(deepcopy(shape.element), "p:extLst")
-    return target
 
 
 def _move_slide(prs: Presentation, source_index: int, target_index: int) -> None:
@@ -2588,143 +2501,340 @@ def _template_period_rows(context: PresentationContext) -> list[list[str]]:
     return rows
 
 
-def _scenario_evidence(shape: object, scenario: CausalScenarioViewModel) -> None:
-    records = scenario.helix_evidence_records
-    fallback = scenario.helix_evidence_lines[: EDITORIAL_LIMITS.max_helix_evidence]
-    tf = shape.text_frame
-    tf.clear()
-    tf.word_wrap = True
-    entries = records or [CausalEvidenceRecord("", line, "") for line in fallback]
-    if not entries:
-        entries = [CausalEvidenceRecord("", "Sin evidencia Helix vinculada en el periodo.", "")]
-    max_entries = 3
-    has_overflow = len(entries) > max_entries
-    detailed_entries = list(entries[: max_entries - 1] if has_overflow else entries[:max_entries])
-
-    def prepare_paragraph(paragraph: object, *, size: float) -> None:
-        paragraph_properties = paragraph._p.get_or_add_pPr()
-        for child in list(paragraph_properties):
-            if child.tag.rsplit("}", 1)[-1] in {"buAutoNum", "buBlip", "buChar", "buNone"}:
-                paragraph_properties.remove(child)
-        paragraph_properties.insert(0, OxmlElement("a:buNone"))
-        paragraph_properties.set("marL", str(int(Pt(14))))
-        paragraph_properties.set("indent", str(-int(Pt(10))))
-        paragraph.level = 0
-        paragraph.alignment = PP_ALIGN.LEFT
-        paragraph.space_after = Pt(5)
-        bullet_run = paragraph.add_run()
-        bullet_run.text = "• "
-        bullet_run.font.name = "Lato"
-        bullet_run.font.size = Pt(size)
-        bullet_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-
-    visible_count = len(detailed_entries) + (1 if has_overflow else 0)
-    size = 11 if visible_count <= 2 else 9.5
-    for index, record in enumerate(detailed_entries):
-        paragraph = tf.paragraphs[0] if index == 0 else tf.add_paragraph()
-        prepare_paragraph(paragraph, size=size)
-        if record.incident_id:
-            id_run = paragraph.add_run()
-            id_run.text = record.incident_id
-            id_run.font.name = "Lato"
-            id_run.font.size = Pt(size)
-            id_run.font.bold = True
-            id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-            if record.url:
-                id_run.hyperlink.address = record.url
-        if record.summary:
-            separator = paragraph.add_run()
-            separator.text = ": "
-            separator.font.name = "Lato"
-            separator.font.size = Pt(size)
-            separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-            _add_highlighted_runs(
-                paragraph,
-                _clip(record.summary, 130),
-                record.segments,
-                size=size,
-                color=BBVA_COLORS["ink"],
-            )
-
-    if has_overflow:
-        remaining = [record for record in entries[len(detailed_entries) :] if record.incident_id]
-        if remaining:
-            paragraph = tf.add_paragraph()
-            prepare_paragraph(paragraph, size=size)
-            line_length = 0
-            for record in remaining:
-                incident_length = len(record.incident_id) + (2 if line_length else 0)
-                if line_length + incident_length > 64:
-                    ellipsis = paragraph.add_run()
-                    ellipsis.text = ", …"
-                    ellipsis.font.name = "Lato"
-                    ellipsis.font.size = Pt(size)
-                    ellipsis.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-                    break
-                if line_length:
-                    separator = paragraph.add_run()
-                    separator.text = ", "
-                    separator.font.name = "Lato"
-                    separator.font.size = Pt(size)
-                    separator.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-                id_run = paragraph.add_run()
-                id_run.text = record.incident_id
-                id_run.font.name = "Lato"
-                id_run.font.size = Pt(size)
-                id_run.font.bold = True
-                id_run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-                if record.url:
-                    id_run.hyperlink.address = record.url
-                line_length += incident_length
-
-
 def _scenario_comment_groups(
-    row: pd.Series, fallback: list[str]
+    row: pd.Series[Any], fallback: list[str]
 ) -> list[tuple[str, str, list[dict[str, object]]]]:
-    records = row.get("comment_records")
-    source = records if isinstance(records, list) else []
-    grouped: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
-    for record in source:
-        if not isinstance(record, dict):
-            continue
-        score = str(record.get("nps", "n/d") or "n/d")
-        grouped.setdefault(score, []).append(record)
-    output: list[tuple[str, str, list[dict[str, object]]]] = []
-    for score, score_records in grouped.items():
-        comments = [str(record.get("comment", "")).strip() for record in score_records]
-        comments = [comment for comment in comments if comment]
-        segments = [
-            segment
-            for record in score_records
-            for segment in (record.get("comment_segments") or [])
-            if isinstance(segment, dict)
-        ]
-        if comments:
-            output.append((f"Score {score}: ", "; ".join(comments), segments))
-    if output:
-        return output[:2]
-    return [("", line.replace("NPS ", "Score "), []) for line in fallback[:2]]
+    groups = comment_groups(row.get("comment_records"))
+    if not groups:
+        return [("", line.replace("NPS ", "Score "), []) for line in fallback]
+    return [
+        (
+            group["label"] + ": ",
+            "; ".join(str(r.get("comment") or "") for r in group["records"]),
+            [
+                segment
+                for r in group["records"]
+                for segment in (r.get("comment_segments") or [])
+                if isinstance(segment, dict)
+            ],
+        )
+        for group in groups
+    ]
 
 
-def _set_scenario_comment(shape: object, label: str, text: str, segments: object) -> None:
+def _report_text(
+    slide: Any,
+    name: str,
+    text: str,
+    bounds: tuple[float, float, float, float],
+    *,
+    size: float = 11,
+    color: str | None = None,
+    bold: bool = False,
+    align: Any = PP_ALIGN.LEFT,
+    serif: bool = False,
+) -> Any:
+    shape = slide.shapes.add_textbox(*(Inches(value) for value in bounds))
+    shape.name = name
     tf = shape.text_frame
-    tf.clear()
     tf.word_wrap = True
-    paragraph = tf.paragraphs[0]
-    paragraph.alignment = PP_ALIGN.CENTER
-    if label:
-        run = paragraph.add_run()
-        run.text = label
-        run.font.name = "Lato"
-        run.font.size = Pt(11)
-        run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
-    _add_highlighted_runs(
-        paragraph,
-        _clip(text, 205),
-        segments,
-        size=11,
-        color=BBVA_COLORS["ink"],
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = MSO_ANCHOR.TOP
+    _set_template_text(
+        shape,
+        text,
+        size=size,
+        color=color or BBVA_COLORS["ink"],
+        bold=bold,
+        font="Source Serif 4" if serif else "Lato",
+        align=align,
     )
+    for paragraph in tf.paragraphs:
+        paragraph.space_before = paragraph.space_after = Pt(0)
+        paragraph.line_spacing = 1.1
+    return shape
+
+
+def _report_panel(
+    slide: Any, name: str, bounds: tuple[float, float, float, float], color: str
+) -> Any:
+    shape = slide.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE, *(Inches(value) for value in bounds)
+    )
+    shape.name = name
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = _rgb(color)
+    shape.line.fill.background()
+    shape.adjustments[0] = 0.06
+    shape._element.spPr.append(OxmlElement("a:effectLst"))
+    return shape
+
+
+def _report_slide(prs: Presentation) -> Any:
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for shape in list(slide.shapes):
+        shape._element.getparent().remove(shape._element)
+    slide.background.fill.solid()
+    slide.background.fill.fore_color.rgb = _rgb("F7F8F8")
+    return slide
+
+
+def _report_conclusion(slide: Any, text: str) -> None:
+    layout = EVIDENCE_LAYOUT
+    bounds = (layout.margin, layout.conclusion_top, 9.24, layout.conclusion_height)
+    _report_panel(slide, "Conclusion panel", bounds, BBVA_COLORS["sky"])
+    _report_text(
+        slide,
+        "Report conclusion",
+        text,
+        bounds,
+        size=11,
+        bold=True,
+        serif=True,
+        align=PP_ALIGN.CENTER,
+    )
+
+
+def _add_topic_overviews(
+    prs: Presentation,
+    context: PresentationContext,
+    topics: pd.DataFrame,
+    channel_scope: str,
+    metric_scope: str,
+) -> None:
+    layout = EVIDENCE_LAYOUT
+    rows = topics.to_dict("records")
+    pages = [
+        rows[index : index + layout.topics_per_page]
+        for index in range(0, len(rows), layout.topics_per_page)
+    ] or [[]]
+    leader = str(rows[0]["value"]) if rows else ""
+    for page, records in enumerate(pages, start=1):
+        slide = _report_slide(prs)
+        title = (
+            f"{leader} tiene el menor score medio entre los tópicos observados{channel_scope}"
+            if rows
+            else "Sin opiniones clasificadas para comparar tópicos"
+        )
+        if len(pages) > 1:
+            title += f" ({page}/{len(pages)})"
+        _report_text(
+            slide,
+            "Report title",
+            title,
+            (layout.margin, 0.24, 7.8, 0.92),
+            size=layout.title_font,
+            bold=True,
+            serif=True,
+        )
+        labels = ("Volumen de\nopiniones", "Score de\nexperiencia", "Peso de\ndetractores")
+        for index, label in enumerate(labels):
+            _report_text(
+                slide,
+                f"Overview row {index}",
+                label,
+                (0.58, 2.0 + index * 0.86, 1.28, 0.60),
+                size=11,
+                bold=True,
+            )
+        for index, row in enumerate(records):
+            x = 2.05 + index * 1.80
+            _report_text(
+                slide,
+                "Topic heading",
+                _wrap_text_to_width(row["value"], column_width_in=1.63, font_size_pt=10),
+                (x, layout.body_top, 1.63, 0.58),
+                size=10,
+                bold=True,
+                align=PP_ALIGN.CENTER,
+            )
+            for offset, (label, value) in enumerate(
+                (
+                    ("Opiniones totales", _fmt_count_or_nd(row["n"])),
+                    ("Score total", _fmt_num_or_nd(row["nps"], decimals=1)),
+                    ("Detractores del periodo", _fmt_pct_or_nd(row["detractor_rate"])),
+                )
+            ):
+                top = 1.98 + offset * 0.86
+                _report_panel(slide, "Overview metric panel", (x, top, 1.63, 0.75), "FFFFFF")
+                _report_text(
+                    slide,
+                    "Overview metric",
+                    f"{label}:\n{value}",
+                    (x + 0.15, top + 0.15, 1.33, 0.52),
+                    size=10,
+                )
+        _report_conclusion(slide, f"Periodo {context.current_label} · {metric_scope}")
+
+
+def _add_topic_separator(prs: Presentation, topic: str) -> None:
+    slide = _report_slide(prs)
+    slide.background.fill.fore_color.rgb = _rgb(BBVA_COLORS["blue"])
+    _report_text(
+        slide,
+        "Topic separator",
+        f"VoC : {topic}",
+        (0.38, 2.0, 8.6, 1.7),
+        size=32,
+        color="FFFFFF",
+        bold=True,
+        serif=True,
+    )
+
+
+def _evidence_blocks(scenario: CausalScenarioViewModel) -> list[tuple[str, str, str, object, str]]:
+    comments = _scenario_comment_groups(scenario.row, scenario.comment_lines)
+    blocks = [("comment", label, text, segments, "") for label, text, segments in comments]
+    records = scenario.helix_evidence_records or [
+        CausalEvidenceRecord("", text) for text in scenario.helix_evidence_lines
+    ]
+    blocks.extend(
+        (
+            "incident",
+            record.incident_id + (": " if record.incident_id else ""),
+            record.summary,
+            record.segments,
+            record.url,
+        )
+        for record in records
+    )
+    return blocks or [("comment", "", "Sin evidencia vinculada en el periodo.", [], "")]
+
+
+def _evidence_pages(
+    scenario: CausalScenarioViewModel,
+) -> list[list[tuple[str, str, str, object, str, float]]]:
+    layout = EVIDENCE_LAYOUT
+    line_height = layout.body_font / 72 * 1.20
+    max_lines = int((layout.body_bottom - layout.body_top - 2 * layout.padding) / line_height) - 1
+    pages: list[list[tuple[str, str, str, object, str, float]]] = [[]]
+    used = 0.0
+    for kind, label, text, segments, url in _evidence_blocks(scenario):
+        lines = _wrap_text_to_width(
+            text,
+            column_width_in=layout.content_width - 2 * layout.padding,
+            font_size_pt=layout.body_font,
+        ).splitlines() or [""]
+        label_lines = max(
+            1,
+            len(
+                _wrap_text_to_width(
+                    label,
+                    column_width_in=layout.content_width - 2 * layout.padding,
+                    font_size_pt=layout.body_font,
+                ).splitlines()
+            ),
+        )
+        chunk_size = max(1, max_lines - label_lines)
+        for offset in range(0, len(lines), chunk_size):
+            chunk = "\n".join(lines[offset : offset + chunk_size])
+            # Reserve a label line separately so bold identifiers/counts never clip.
+            height = (
+                label_lines + len(lines[offset : offset + chunk_size])
+            ) * line_height + 2 * layout.padding
+            if pages[-1] and used + height > layout.body_bottom - layout.body_top:
+                pages.append([])
+                used = 0.0
+            pages[-1].append((kind, label, chunk, segments, url, height))
+            used += height + layout.gap
+    return pages
+
+
+def _add_scenario_pages(prs: Presentation, scenario: CausalScenarioViewModel) -> None:
+    layout = EVIDENCE_LAYOUT
+    row = scenario.row
+    pages = _evidence_pages(scenario)
+    for page, blocks in enumerate(pages, start=1):
+        slide = _report_slide(prs)
+        title = causal_scenario_title(row, rank=scenario.index)
+        if len(pages) > 1:
+            title += f" ({page}/{len(pages)})"
+        _report_text(
+            slide,
+            "Report title",
+            title,
+            (0.38, 0.24, 7.8, 0.92),
+            size=layout.title_font,
+            serif=True,
+            bold=True,
+        )
+        metrics = (
+            ("NOTA MEDIA DE COMENTARIOS ENLAZADOS", _fmt_num_or_nd(row.get("avg_nps"))),
+            (
+                link_confidence_label(str(row.get("causal_engine") or "rules")),
+                _fmt_pct_or_nd(engine_quality(row.to_dict()), decimals=0),
+            ),
+        )
+        for index, (label, value) in enumerate(metrics):
+            top = layout.body_top + index * 1.60
+            _report_panel(
+                slide, "Scenario metric panel", (0.62, top, layout.metric_width, 1.48), "FFFFFF"
+            )
+            _report_text(
+                slide,
+                "Scenario metric label",
+                label,
+                (0.78, top + 0.14, 2.28, 0.53),
+                size=layout.label_font,
+                color=BBVA_COLORS["blue"],
+                align=PP_ALIGN.CENTER,
+            )
+            _report_text(
+                slide,
+                "Scenario metric value",
+                value,
+                (0.78, top + 0.78, 2.28, 0.57),
+                size=layout.kpi_font,
+                bold=True,
+                serif=True,
+                align=PP_ALIGN.CENTER,
+            )
+        top = layout.body_top
+        for kind, label, text, segments, url, height in blocks:
+            _report_panel(
+                slide,
+                "Comment panel" if kind == "comment" else "Incident panel",
+                (layout.content_left, top, layout.content_width, height),
+                BBVA_COLORS["sky"] if kind == "comment" else "FFFFFF",
+            )
+            shape = _report_text(
+                slide,
+                "Comment evidence" if kind == "comment" else "Incident evidence",
+                "",
+                (
+                    layout.content_left + layout.padding,
+                    top + layout.padding,
+                    layout.content_width - 2 * layout.padding,
+                    height - 2 * layout.padding,
+                ),
+                size=layout.body_font,
+            )
+            paragraph = shape.text_frame.paragraphs[0]
+            run = paragraph.add_run()
+            run.text = label
+            run.font.name = "Lato"
+            run.font.size = Pt(layout.body_font)
+            run.font.bold = True
+            run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+            if url:
+                run.hyperlink.address = url
+            paragraph.add_line_break()
+            _add_highlighted_runs(
+                paragraph, text, segments, size=layout.body_font, color=BBVA_COLORS["ink"]
+            )
+            top += height + layout.gap
+        reason = str(row.get("evidence_reason") or EVIDENCE_COPY["INDICIO_SEMANTICO"][1])
+        recommendation = str(row.get("operational_recommendation") or "")
+        _report_conclusion(
+            slide,
+            f"VÍNCULOS EVALUADOS: {_safe_int(row.get('linked_pairs'))} · {reason}\n{recommendation}",
+        )
+        ids = ", ".join(
+            str(r.get("comment_id", ""))
+            for r in (row.get("comment_records") or [])
+            if isinstance(r, dict)
+        )
+        slide.notes_slide.notes_text_frame.text = f"Escenario: {title}\nAgrupación de origen: {row.get('nps_topic', '')}\nComentarios: {ids}\n{row.get('chain_story', '')}\n{reason}"
 
 
 def _fill_template_deck(
@@ -2973,205 +3083,19 @@ def _fill_template_deck(
         column_widths=[1.00, 0.64, 0.63, 0.70, 0.70, 0.70],
     )
 
-    pain = prs.slides[5]
-    pain_rows = list(view.topic_table_df.head(4).itertuples())
-    leader_name = str(getattr(pain_rows[0], "value", "Sin señal")) if pain_rows else "Sin señal"
-    for index, label in (
-        (1, "Volumen de opiniones"),
-        (11, "Score de experiencia"),
-        (12, "Peso de detractores"),
-    ):
-        _set_template_text(
-            pain.shapes[index],
-            label,
-            size=11,
-            bold=True,
-            font="Lato Black",
-            color=BBVA_COLORS["ink"],
-        )
-    _set_template_text(
-        pain.shapes[0],
-        (
-            f"{leader_name} tiene el menor score medio entre los tópicos observados{channel_scope}"
-            if pain_rows
-            else "Sin opiniones clasificadas para comparar tópicos"
-        ),
-    )
-    for column in range(4):
-        row = pain_rows[column] if column < len(pain_rows) else None
-        header_index = (2, 8, 9, 10)[column]
-        volume_index = (14, 17, 20, 23)[column]
-        score_index = (13, 16, 19, 22)[column]
-        detractor_index = (6, 15, 18, 21)[column]
-        header = pain.shapes[header_index]
-        header.left -= Inches(0.05)
-        header.width = Inches(1.65)
-        header.height = Inches(0.48)
-        header.top = Inches(1.38)
-        label = str(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios")
-        _set_template_text(
-            header,
-            label.replace("/", " / "),
-            size=10,
-            bold=True,
-            color=BBVA_COLORS["ink"],
-            align=PP_ALIGN.CENTER,
-        )
-        _set_template_labeled_value(
-            pain.shapes[volume_index],
-            "Opiniones totales:",
-            _fmt_count_or_nd(getattr(row, "n", 0)) if row else "Sin comentarios",
-        )
-        _set_template_labeled_value(
-            pain.shapes[score_index],
-            "Score total:",
-            _fmt_num_or_nd(getattr(row, "nps", np.nan), decimals=1) if row else "n/d",
-        )
-        _set_template_labeled_value(
-            pain.shapes[detractor_index],
-            "Detractores del periodo:",
-            _fmt_pct_or_nd(getattr(row, "detractor_rate", np.nan)) if row else "n/d",
-        )
-    _set_template_text(
-        pain.shapes[7],
-        f"Periodo {context.current_label} · {metric_scope}",
-        size=11,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
-        align=PP_ALIGN.CENTER,
-    )
-
-    scenarios = context.causal.scenarios if include_causal_section else []
-    while len(prs.slides) < 6 + len(scenarios):
-        # The first causal slide is the canonical scenario layout. Later
-        # template slides may use alternate masters, so extending from the
-        # first one keeps every generated scenario visually consistent.
-        _duplicate_slide(prs, 6)
-    keep_slides = 6 + len(scenarios)
-    while len(prs.slides) > keep_slides:
+    while len(prs.slides) > 5:
         _remove_slide(prs, len(prs.slides) - 1)
-    for offset, scenario in enumerate(scenarios):
-        slide = prs.slides[6 + offset]
-        row = scenario.row
-        title = causal_scenario_title(row, rank=offset + 1)
-        title_shape = slide.shapes[1]
-        full_title = title
-        _set_template_text(
-            title_shape,
-            full_title,
-        )
-        _set_template_text(
-            slide.shapes[4],
-            "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
-            size=12,
-            bold=False,
-            color=BBVA_COLORS["blue"],
-            align=PP_ALIGN.CENTER,
-        )
-        _set_template_text(
-            slide.shapes[3],
-            _fmt_num_or_nd(row.get("avg_nps")),
-            size=30,
-            bold=True,
-            color=BBVA_COLORS["ink"],
-            font="Source Serif 4",
-            align=PP_ALIGN.CENTER,
-        )
-        _set_template_text(
-            slide.shapes[7],
-            link_confidence_label("llm") if row.get("causal_engine") == "llm" else "",
-            size=12,
-            bold=False,
-            color=BBVA_COLORS["blue"],
-            align=PP_ALIGN.CENTER,
-        )
-        _set_template_text(
-            slide.shapes[6],
-            (
-                _fmt_pct_or_nd(engine_quality(row), decimals=0)
-                if row.get("causal_engine") == "llm"
-                else ""
-            ),
-            size=30,
-            bold=True,
-            color=BBVA_COLORS["ink"],
-            font="Source Serif 4",
-            align=PP_ALIGN.CENTER,
-        )
-        slide.shapes[9].fill.solid()
-        slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
-        _set_template_text(
-            slide.shapes[9],
-            f"VÍNCULOS EVALUADOS: {_safe_int(row.get('linked_pairs', 0))} · {row.get('evidence_reason', EVIDENCE_COPY['INDICIO_SEMANTICO'][1])}"
-            + (
-                f"\n{row['operational_recommendation']}"
-                if row.get("operational_recommendation")
-                else ""
-            ),
-            size=9,
-            bold=True,
-            color=BBVA_COLORS["ink"],
-            font="Source Serif 4",
-            align=PP_ALIGN.CENTER,
-        )
-        content_shapes = [
-            shape for shape in list(slide.shapes)[10:] if getattr(shape, "has_text_frame", False)
-        ]
-        comments = _scenario_comment_groups(
-            row,
-            scenario.comment_lines or ["Sin comentario VoC vinculado en el periodo."],
-        )
-        evidence_shape = content_shapes[-1]
-        quote_shapes = content_shapes[:-1]
-        if len(quote_shapes) == 1 and len(comments) >= 2:
-            first_quote = quote_shapes[0]
-            first_quote.left = Inches(3.55)
-            second_quote = slide.shapes.add_shape(
-                MSO_AUTO_SHAPE_TYPE.RECTANGLE,
-                Inches(3.55),
-                Inches(1.63),
-                Inches(5.83),
-                Inches(0.67),
-            )
-            second_quote.fill.solid()
-            second_quote.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
-            second_quote.line.fill.background()
-            second_quote.text_frame.margin_left = Inches(0.10)
-            second_quote.text_frame.margin_right = Inches(0.10)
-            second_quote.text_frame.margin_top = Inches(0.07)
-            second_quote.text_frame.margin_bottom = Inches(0.05)
-            quote_shapes.append(second_quote)
-        for unused_quote in quote_shapes[len(comments) :]:
-            unused_quote._element.getparent().remove(unused_quote._element)
-        quote_shapes = quote_shapes[: len(comments)]
-        if row.get("causal_engine") != "llm":
-            slide.shapes[5].fill.background()
-            slide.shapes[5].line.fill.background()
-        for metric_shape in (slide.shapes[2], slide.shapes[3], slide.shapes[4]):
-            metric_shape.top += Inches(0.16)
-        slide.shapes[8].top = Inches(1.35)
-        slide.shapes[8].height = Inches(3.34)
-        content_top = 1.35
-        for index, quote_shape in enumerate(quote_shapes):
-            _, comment_text, _ = comments[index] if index < len(comments) else ("", "", [])
-            estimated_lines = max(1, min(3, int(np.ceil(max(len(comment_text), 1) / 82))))
-            quote_shape.left = Inches(3.55)
-            quote_shape.top = Inches(content_top)
-            quote_shape.width = Inches(5.83)
-            quote_shape.height = Inches(0.34 + 0.19 * estimated_lines)
-            quote_shape.fill.solid()
-            quote_shape.fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
-            quote_shape.line.fill.background()
-            content_top += 0.34 + 0.19 * estimated_lines + 0.08
-        evidence_shape.left = Inches(3.55)
-        evidence_shape.top = Inches(content_top + 0.03)
-        evidence_shape.width = Inches(5.83)
-        evidence_shape.height = Inches(max(1.15, 4.66 - content_top))
-        for index, quote_shape in enumerate(quote_shapes):
-            label, text, segments = comments[index] if index < len(comments) else ("", "", [])
-            _set_scenario_comment(quote_shape, label, text, segments)
-        _scenario_evidence(evidence_shape, scenario)
+    _add_topic_overviews(
+        prs, context, context.dimensions["Palanca"].topic_table_df, channel_scope, metric_scope
+    )
+    if include_causal_section:
+        current_topic = None
+        for scenario in context.causal.scenarios:
+            topic = topic_name(scenario.row.to_dict())
+            if topic != current_topic:
+                _add_topic_separator(prs, topic)
+                current_topic = topic
+            _add_scenario_pages(prs, scenario)
 
     _move_slide(prs, 2, 1)
 
@@ -3233,31 +3157,35 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
     )
     scope.text_frame.vertical_anchor = MSO_ANCHOR.TOP
     for index, slide in enumerate(prs.slides):
-        footer_color = "FFFFFF" if index == 0 else BBVA_COLORS["ink"]
+        separator = any(shape.name == "Topic separator" for shape in slide.shapes)
+        dark_slide = index == 0 or separator
+        footer_color = "FFFFFF" if dark_slide else BBVA_COLORS["ink"]
         logo = slide.shapes.add_picture(
-            str(BRAND_ASSETS / ("bbva-bei-dark.png" if index else "bbva-bei.png")),
-            Inches(8.42 if index else 0.38),
-            Inches(0.24 if index else 0.25),
-            width=Inches(1.20 if index else 2.30),
+            str(BRAND_ASSETS / ("bbva-bei.png" if dark_slide else "bbva-bei-dark.png")),
+            Inches(0.38 if dark_slide else 8.42),
+            Inches(0.25 if dark_slide else 0.24),
+            width=Inches(2.30 if dark_slide else 1.20),
         )
         logo.name = BRAND["name"]
         logo._element.nvPicPr.cNvPr.set("descr", BRAND["name"])
-        if index:
+        if index and not separator:
             elements = {shape.name: shape for shape in slide.shapes}
             _layout_report_text(elements["Report title"], (0.38, 0.24, 7.80, 0.92), size=22)
             _layout_report_text(elements["Report conclusion"], (0.38, 4.91, 9.24, 0.39), size=10)
         wordmark = slide.shapes.add_picture(
             str(BRAND_ASSETS / "bia.png"),
-            Inches(0.38 if index else 8.67),
-            Inches(5.34 if index else 0.25),
-            width=Inches(0.45 if index else 0.95),
+            Inches(8.67 if dark_slide else 0.38),
+            Inches(0.25 if dark_slide else 5.34),
+            width=Inches(0.95 if dark_slide else 0.45),
         )
         wordmark.name = BRAND["initiative"]
         wordmark._element.nvPicPr.cNvPr.set("descr", BRAND["initiative_name"])
         signature = slide.shapes.add_textbox(
             *(
                 Inches(value)
-                for value in ((0.93, 5.37, 1.98, 0.23) if index else (7.64, 0.91, 1.98, 0.28))
+                for value in (
+                    (0.93, 5.37, 1.98, 0.23) if not dark_slide else (7.64, 0.91, 1.98, 0.28)
+                )
             )
         )
         signature.name = "bIA initiative credit"
@@ -3267,9 +3195,9 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
             size=6.8,
             color=footer_color,
             font=BRAND["font"],
-            align=PP_ALIGN.LEFT if index else PP_ALIGN.RIGHT,
+            align=PP_ALIGN.RIGHT if dark_slide else PP_ALIGN.LEFT,
         )
-        footer = slide.shapes[0] if index >= 6 else slide.shapes.add_textbox(0, 0, 0, 0)
+        footer = slide.shapes.add_textbox(0, 0, 0, 0)
         footer.left, footer.top, footer.width, footer.height = (
             Inches(value) for value in (3.12, 5.36, 5.70, 0.25)
         )
@@ -3389,17 +3317,12 @@ def generate_business_review_ppt(
         "Las incidencias pueden preceder al periodo VoC dentro de la ventana de vinculación.\n"
         f"{quality['message']}\n"
         + " ".join(quality["warnings"])
-        + "\nLas tarjetas ordenan los tópicos por saldo neto de promotores y detractores. "
+        + "\nEl resumen y las secciones ordenan tópicos por score medio ascendente; los casos, por nota de comentarios enlazados. "
         "La calidad de señal utiliza solo comentarios no vacíos del periodo."
     )
-    for index, slide in enumerate(prs.slides):
-        scenario_note = ""
-        if index >= 6 and index - 6 < len(context.causal.scenarios):
-            row = context.causal.scenarios[index - 6].row
-            scenario_note = (
-                "\n" + str(row.get("chain_story", "")) + "\n" + str(row.get("evidence_reason", ""))
-            )
-        slide.notes_slide.notes_text_frame.text = report_note + scenario_note
+    for slide in prs.slides:
+        notes = slide.notes_slide.notes_text_frame
+        notes.text = report_note + "\n" + notes.text
     prs.save(buff)
     content = buff.getvalue()
     compact_prs = Presentation(BytesIO(content))

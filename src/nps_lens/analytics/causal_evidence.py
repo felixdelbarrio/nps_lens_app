@@ -14,6 +14,7 @@ import pandas as pd
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, temporal_mask
 from nps_lens.analytics.signal_quality import is_reserve_category
 from nps_lens.core.nps_math import valid_nps_scores
+from nps_lens.domain.comment_scores import score_group_label
 
 EVIDENCE_COPY = {
     "SIN_EVIDENCIA": ("Sin evidencia", "No hay vínculo defendible."),
@@ -58,7 +59,7 @@ def linked_comment_metrics(links: pd.DataFrame) -> dict[str, Any]:
         {
             "score": int(score),
             "count": int(count),
-            "label": f"Score {score} : {count} {'comentario' if count == 1 else 'comentarios'}",
+            "label": score_group_label(float(score), int(count)),
         }
         for score, count in counts.items()
     ]
@@ -68,7 +69,7 @@ def linked_comment_metrics(links: pd.DataFrame) -> dict[str, Any]:
             {
                 "score": None,
                 "count": missing,
-                "label": f"Sin score : {missing} {'comentario' if missing == 1 else 'comentarios'}",
+                "label": score_group_label(None, missing),
             }
         )
     return {
@@ -83,12 +84,15 @@ def linked_comment_metrics(links: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def engine_quality(row: Mapping[str, Any]) -> float:
+def engine_quality(row: Mapping[Any, Any]) -> float | None:
     """Select the engine's own score, without treating confidence as cosine similarity."""
     column = (
-        "avg_semantic_confidence" if row.get("causal_engine") == "llm" else "avg_text_similarity"
+        "avg_semantic_confidence"
+        if str(row.get("causal_engine")) == "llm"
+        else "avg_text_similarity"
     )
-    return number(row.get(column))
+    value = number(row.get(column), float("nan"))
+    return value if math.isfinite(value) and 0 <= value <= 1 else None
 
 
 def scenario_impact_score(row: Mapping[str, Any]) -> float:
@@ -98,7 +102,7 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
         return -1000.0
     comments = max(0, number(row.get("linked_comments")))
     incidents = max(0, number(row.get("linked_incidents")))
-    confidence = min(1, max(0, engine_quality(row)))
+    confidence = min(1, max(0, number(engine_quality(row))))
     score = min(10, max(0, number(row.get("avg_nps", row.get("avg_score")), 10)))
     detractors = min(1, max(0, number(row.get("detractor_rate"))))
     # Bounded contributions keep a large, vague cluster from dominating strong evidence.

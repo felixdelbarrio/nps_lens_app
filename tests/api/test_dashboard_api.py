@@ -1036,7 +1036,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False):
                 for paragraph in shape.text_frame.paragraphs:
-                    all_texts.append(paragraph.text or "")
+                    all_texts.append(" ".join((paragraph.text or "").split()))
 
     assert any("lidera el deterioro entre los tópicos observados" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)

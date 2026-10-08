@@ -60,6 +60,7 @@
 
   function applyPublication(payload) {
     publication=payload||{};
+    state.scenarioIndex=0;
     state.evidenceTopic='';
     state.journeyTopic='';
     staticViews=publication.static_views||{};

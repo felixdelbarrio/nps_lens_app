@@ -44,8 +44,6 @@ from nps_lens.analytics.incident_rationale import build_incident_nps_rationale
 from nps_lens.analytics.linking_diagnostics import linking_diagnostics
 from nps_lens.analytics.linking_policy import (
     LINK_MAX_DAYS_APART,
-    LINK_MAX_VISIBLE_COMMENTS,
-    LINK_MAX_VISIBLE_INCIDENTS,
     LINK_MIN_SHARED_TERMS,
     LINK_MIN_SIMILARITY,
     LINK_TOP_K_PER_INCIDENT,
@@ -104,6 +102,7 @@ from nps_lens.reports.coherence import ReportCoherenceError, validate_classifica
 from nps_lens.reports.content_selectors import causal_scenario_title, select_causal_scenarios
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import BusinessPptResult, generate_business_review_ppt
+from nps_lens.reports.narrative import experience_topics, ordered_scenarios
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
 from nps_lens.services.analysis_horizon import analysis_horizon, eligible_helix, required_comments
 from nps_lens.services.analytics import (
@@ -287,77 +286,6 @@ def _annotate_chain_candidates(chain_df: pd.DataFrame) -> pd.DataFrame:
             out.get("linked_comments", pd.Series([0] * len(out), index=out.index)).tolist(),
             strict=False,
         )
-    ]
-    return out
-
-
-def _cap_chain_evidence_rows(
-    chain_df: pd.DataFrame,
-    *,
-    max_incident_examples: int = 5,
-    max_comment_examples: int = 2,
-) -> pd.DataFrame:
-    if chain_df is None or chain_df.empty:
-        return pd.DataFrame()
-
-    out = chain_df.copy()
-
-    def _normalize_list(value: object) -> list[str]:
-        if isinstance(value, list):
-            values = value
-        elif value in (None, ""):
-            values = []
-        else:
-            values = [value]
-        return [str(v).strip() for v in values if str(v).strip()]
-
-    def _cap(values: list[str], limit: int) -> list[str]:
-        try:
-            max_items = int(limit)
-        except Exception:
-            return values
-        if max_items <= 0:
-            return values
-        return values[:max_items]
-
-    def _normalize_records(value: object) -> list[dict[str, object]]:
-        if isinstance(value, list):
-            values = value
-        elif value in (None, ""):
-            values = []
-        else:
-            values = [value]
-        records: list[dict[str, object]] = []
-        for entry in values:
-            if not isinstance(entry, dict):
-                continue
-            records.append(dict(entry))
-        return records
-
-    def _cap_records(values: list[dict[str, object]], limit: int) -> list[dict[str, object]]:
-        try:
-            max_items = int(limit)
-        except Exception:
-            return values
-        if max_items <= 0:
-            return values
-        return values[:max_items]
-
-    out["incident_examples"] = [
-        _cap(_normalize_list(v), max_incident_examples)
-        for v in out.get("incident_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
-    ]
-    out["comment_examples"] = [
-        _cap(_normalize_list(v), max_comment_examples)
-        for v in out.get("comment_examples", pd.Series([[]] * len(out), index=out.index)).tolist()
-    ]
-    out["incident_records"] = [
-        _cap_records(_normalize_records(v), max_incident_examples)
-        for v in out.get("incident_records", pd.Series([[]] * len(out), index=out.index)).tolist()
-    ]
-    out["comment_records"] = [
-        _cap_records(_normalize_records(v), max_comment_examples)
-        for v in out.get("comment_records", pd.Series([[]] * len(out), index=out.index)).tolist()
     ]
     return out
 
@@ -1780,16 +1708,10 @@ class DashboardService:
         )
         chain_candidates_df = cast(pd.DataFrame, analysis["chains"])
         chain_candidates_summary = summarize_attribution_chains(chain_candidates_df)
-        ordered_chain_candidates = select_causal_scenarios(
-            chain_candidates_df,
-            max_rows=len(chain_candidates_df),
+        ordered_chain_candidates = ordered_scenarios(
+            chain_candidates_df, experience_topics(nps_slice, channel=resolved_channel)
         )
-        chain_cards_df = _cap_chain_evidence_rows(
-            ordered_chain_candidates,
-            max_incident_examples=LINK_MAX_VISIBLE_INCIDENTS,
-            max_comment_examples=LINK_MAX_VISIBLE_COMMENTS,
-        )
-        scenario_cards = self._build_linking_scenario_cards(chain_cards_df)
+        scenario_cards = self._build_linking_scenario_cards(ordered_chain_candidates)
         entity_summary_df = self._build_entity_summary_df(
             chain_candidates_df,
             touchpoint_source=active_touchpoint_source,
@@ -2209,9 +2131,8 @@ class DashboardService:
         if bool(causal["ready"]):
             focus_name = self._focus_name(str(causal["focus_group"]))
             attribution_all_df = cast(pd.DataFrame, causal["chains"])
-            attribution_df = select_causal_scenarios(
-                attribution_all_df,
-                max_rows=len(attribution_all_df),
+            attribution_df = ordered_scenarios(
+                attribution_all_df, experience_topics(descriptive_current_df, channel=topic_channel)
             )
             mode_payload = cast(dict[str, object], causal["mode_payload"])
             broken_journeys_df = cast(pd.DataFrame, mode_payload["broken_journeys_df"])
@@ -2677,13 +2598,9 @@ class DashboardService:
         ]
         if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
-        if _series_or_default(summary, "causal_engine").eq("llm").any():
-            summary["Calidad del vínculo"] = summary.apply(
-                lambda row: engine_quality(row) if row.get("causal_engine") == "llm" else np.nan,
-                axis=1,
-            ).map(format_percentage)
-        else:
-            columns.remove("Calidad del vínculo")
+        summary["Calidad del vínculo"] = [
+            format_percentage(engine_quality(row)) for row in summary.to_dict("records")
+        ]
         return summary[columns].rename(
             columns={
                 "nps_topic": entity_name,
@@ -2719,6 +2636,8 @@ class DashboardService:
     def _build_linking_scenario_cards(self, chain_df: pd.DataFrame) -> list[dict[str, object]]:
         if chain_df is None or chain_df.empty:
             return []
+        if "narrative_topic" not in chain_df:
+            chain_df = ordered_scenarios(chain_df, pd.DataFrame())
         cards: list[dict[str, object]] = []
         for index, (_, row) in enumerate(chain_df.reset_index(drop=True).iterrows(), start=1):
             title = causal_scenario_title(row, rank=index)
@@ -2758,16 +2677,14 @@ class DashboardService:
                             "value": str(int(row.get("linked_incidents", 0) or 0)),
                         },
                     ]
-                    + (
-                        [
-                            {
-                                "label": link_confidence_label("llm"),
-                                "value": format_percentage(engine_quality(row.to_dict())),
-                            }
-                        ]
-                        if row.get("causal_engine") == "llm"
-                        else []
-                    ),
+                    + [
+                        {
+                            "label": link_confidence_label(
+                                str(row.get("causal_engine") or "rules")
+                            ),
+                            "value": format_percentage(engine_quality(row.to_dict())),
+                        }
+                    ],
                     "flow_steps": [
                         str(row.get("affected_task") or "Tarea pendiente de validación"),
                         str(row.get("observed_symptom") or title),
