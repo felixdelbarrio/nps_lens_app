@@ -2735,7 +2735,8 @@ def _evidence_slide_blocks(
         label = f"{len(tail)} Incidencias:"
         ids = [item[1].rstrip(": ") for item in tail]
         text = ", ".join(f"[{identity}]" for identity in ids)
-        summary = fit(("incident_summary", label, text, [], ""), remaining)
+        links = {f"[{item[1].rstrip(': ')}]": item[4] for item in tail}
+        summary = fit(("incident_summary", label, text, links, ""), remaining)
         result.append(summary)
         break
     return result
@@ -2817,9 +2818,19 @@ def _add_scenario_slide(prs: Presentation, scenario: CausalScenarioViewModel) ->
         if url:
             run.hyperlink.address = url
         paragraph.add_line_break()
-        _add_highlighted_runs(
-            paragraph, text, segments, size=layout.body_font, color=BBVA_COLORS["ink"]
-        )
+        if kind == "incident_summary" and isinstance(segments, dict):
+            for token in re.split(r"(\[[^\]]+\])", text):
+                run = paragraph.add_run()
+                run.text = token
+                run.font.name = "Lato"
+                run.font.size = Pt(layout.body_font)
+                run.font.color.rgb = _rgb(BBVA_COLORS["ink"])
+                if segments.get(token):
+                    run.hyperlink.address = segments[token]
+        else:
+            _add_highlighted_runs(
+                paragraph, text, segments, size=layout.body_font, color=BBVA_COLORS["ink"]
+            )
         top += height + layout.gap
     reason = str(row.get("evidence_reason") or EVIDENCE_COPY["INDICIO_SEMANTICO"][1])
     recommendation = str(row.get("operational_recommendation") or "")

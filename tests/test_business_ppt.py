@@ -1211,7 +1211,7 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert {"touchpoint", "subpalanca", "links", "text_similarity"}.issubset(table.columns)
 
 
-def test_scenario_many_incidents_paginate_without_losing_text_or_links():
+def test_scenario_many_incidents_use_one_slide_with_full_sources_in_notes():
     from pptx.util import Inches
 
     from nps_lens.reports.presentation_context import CausalEvidenceRecord, CausalScenarioViewModel
@@ -1231,16 +1231,19 @@ def test_scenario_many_incidents_paginate_without_losing_text_or_links():
         [],
         records,
     )
-    executive_ppt._add_scenario_pages(prs, scenario)
-    assert len(prs.slides) > 1
+    executive_ppt._add_scenario_slide(prs, scenario)
+    assert len(prs.slides) == 1
     text = "".join(
         shape.text
         for slide in prs.slides
         for shape in slide.shapes
         if shape.name == "Incident evidence"
     )
-    assert " ".join(text.split()).count("Descripción extensa") == 20 * 30
-    assert all(record.incident_id in text for record in records)
+    assert "Descripción extensa" in text
+    assert "19 Incidencias:" in text and "…" in text
+    notes = prs.slides[0].notes_slide.notes_text_frame.text
+    assert all(record.incident_id in notes and record.url in notes for record in records)
+    assert notes.count("Descripción extensa") == 20 * 30
     links = {
         run.hyperlink.address
         for slide in prs.slides
@@ -1249,5 +1252,5 @@ def test_scenario_many_incidents_paginate_without_losing_text_or_links():
         for paragraph in shape.text_frame.paragraphs
         for run in paragraph.runs
     }
-    assert all(record.url in links for record in records)
+    assert records[0].url in links and records[1].url in links
     _assert_no_shape_overflow(prs)
