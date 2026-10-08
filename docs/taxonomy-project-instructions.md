@@ -17,14 +17,14 @@ heredando la compañía seleccionada.
 2. La selección se guarda por Owner Support Company en
    `NPS_LENS_CLASSIFICATION_FRAMEWORKS` del `.env`. Cada taxonomía conserva sus
    resultados LLM al alternar marcos. Los nuevos comentarios/incidencias quedan
-   pendientes; no invalidan los registros ya procesados. Cambiar el catálogo o la
-   revisión manual exige reclasificar esa taxonomía. Un cambio en evidencia NPS
+   pendientes; no invalidan los registros ya procesados. Cambiar las categorías o los criterios
+   exige reclasificar esa taxonomía; guardar un catálogo idéntico conserva resultados. Un cambio en evidencia NPS
    enlazada invalida solo las incidencias que dependían de ella. Actualizar estado,
    fechas, responsable o enrutamiento operativo de una incidencia Helix conserva su
    categoría; solo un cambio de narrativa o taxonomía exige reclasificarla. En NPS,
    los cambios de metadatos conservan la categoría mientras el ID y Comment no cambien.
 3. Crear Taxonomía exporta los comentarios; su respuesta contiene `manifest.json`
-   y `taxonomy.json`. Su importación habilita el catálogo Descubierta para elegirlo.
+   y `taxonomy.json`. Su importación crea una propuesta que debe aceptarse antes de usarla.
 4. Clasifica comentarios exporta solo pendientes de la lente elegida. Cada lote
    válido actualiza el progreso acumulado. Clasifica incidencias hace lo mismo
    con Helix, incluyendo evidencias NPS.
@@ -62,30 +62,30 @@ por la clasificación y se guarda en la carpeta configurada en la app local.
 ## Contrato
 
 Cada ZIP de entrada contiene un manifiesto versionado, las instrucciones, y lotes
-deterministas. Designer y normalizer conservan 200 filas / 80.000 bytes.
-Classifier (`nps-lens-comments/3`) y Helix (`nps-lens-helix/3`) usan hasta 1.000
+deterministas. Designer, semantic y normalizer conservan 200 filas / 80.000 bytes.
+Classifier (`nps-lens-comments/5`) y Helix (`nps-lens-helix/5`) usan hasta 1.000
 elementos / 300.000 bytes UTF-8 por lote, sin truncar elementos excesivos.
 El manifiesto liga el intercambio
 al corpus, taxonomía, conteos y SHA-256 de cada lote. Los IDs enviados son opacos,
 secuenciales y no exponen las claves internas de negocio.
 
 - Designer devuelve exactamente `manifest.json` y `taxonomy.json`.
-- Classifier exporta todos los representantes pendientes de textos exactamente iguales,
-  sin normalizar mayúsculas ni espacios. Antes resuelve localmente los vacíos
+- Classifier exporta todos los representantes pendientes de textos equivalentes por
+  Unicode NFC, espacios y mayúsculas, conservando el representante original. Antes resuelve localmente los vacíos
   (`fillna("")`) solo si existe `Sin clasificación temática / Información insuficiente`.
   Persiste cada asignación con la huella individual del comentario, incluidas las
   asignaciones propagadas a duplicados. Si todo queda resuelto, no crea un ZIP.
 - Classifier devuelve `manifest.json` y uno o varios `results/NNNNNN.json` completos:
   `{"classifications":[{"id":"1","primary":"c001","secondary":["c002"]}]}`.
-  `taxonomy.json.categories` contiene el mapping determinista ID → lever/sublever;
+  `taxonomy.json.categories` contiene el mapping determinista ID → lever/sublever/criterion;
   se reconstruyen las etiquetas antes de persistirlas. No cambia analytics/reporting.
 - Una descarga prepara todos los ZIP pendientes, con un lote por archivo, en una
   carpeta propia de Descargas: `1_2_comentarios.zip`, `2_2_comentarios.zip` o
   `1_2_incidencias_helix.zip`, `2_2_incidencias_helix.zip`. La UI muestra la carpeta
   y los archivos. Cada respuesta se importa por separado, en cualquier orden.
   Importar actualiza el progreso sin generar otros ZIP. Una nueva descarga manual
-  contiene solo pendientes. Se conservan las tres últimas series completas.
-- ZIP classifier/Helix anteriores a v3 se rechazan explícitamente. Las asignaciones
+  contiene solo pendientes. Se conservan los intercambios de clasificación en curso; los demás proyectos retienen tres trabajos.
+- ZIP classifier/Helix con una versión distinta de v5 se rechazan explícitamente. Las asignaciones
   ya persistidas siguen vigentes mientras sus huellas y catálogos sean válidos.
 - La clasificación parcial es reanudable incluso tras reiniciar NPS Lens, y sus
   asignaciones se pueden explorar y utilizar inmediatamente.
@@ -97,7 +97,7 @@ secuenciales y no exponen las claves internas de negocio.
 La taxonomía admite como máximo diez Palancas y cuatro Subpalancas por Palanca e
 incluye siempre `Sin clasificación temática / Información insuficiente` y
 `Sin clasificación temática / Tema no cubierto`. Estos límites se aplican al diseñador; Original y Manual conservan su catálogo.
-El clasificador devuelve una pareja principal y hasta dos parejas adicionales
+El clasificador devuelve una pareja principal y hasta una pareja adicional
 cuando existen temas independientes explícitos. Se conserva el orden del lote;
 se rechazan parejas desconocidas o repetidas. Los cálculos NPS utilizan la pareja
 principal y cada respuesta se cuenta una sola vez.

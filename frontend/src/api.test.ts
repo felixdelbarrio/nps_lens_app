@@ -68,10 +68,10 @@ describe("artifact downloads", () => {
   it.each(["SOURCE", "COMPLETED", "DISCOVERED"] as const)("saves and reveals the %s taxonomy in desktop", async mode => {
     const revealFile = vi.fn(async () => true);
     window.pywebview = {api:{reveal_file:revealFile}};
-    const fetcher = vi.fn(async () => new Response("excel",{headers:{"X-NPS-LENS-SAVED-PATH":`/tmp/taxonomia-${mode}.xlsx`}}));
+    const fetcher = vi.fn(async (_input: RequestInfo | URL) => new Response("excel",{headers:{"X-NPS-LENS-SAVED-PATH":`/tmp/taxonomia-${mode}.xlsx`}}));
     vi.stubGlobal("fetch",fetcher);
     expect(await downloadTaxonomy({service_origin:"Bank"},mode)).toBe(`/tmp/taxonomia-${mode}.xlsx`);
-    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining(`mode=${mode}`));
+    expect(String(fetcher.mock.calls[0][0])).toContain(`mode=${mode}`);
     expect(revealFile).toHaveBeenCalledWith(`/tmp/taxonomia-${mode}.xlsx`);
   });
 
