@@ -232,10 +232,11 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
 
     assert "const content = _newsletterContent_(insight, showEvolutionNps);" in newsletter
     assert (
-        "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps)" in newsletter
+        "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
+        in newsletter
     )
     assert (
-        "_newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps)"
+        "_newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
         in newsletter
     )
     for removed_heading in (

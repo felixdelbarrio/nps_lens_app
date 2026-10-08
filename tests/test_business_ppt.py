@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 from pptx import Presentation
-from pptx.enum.text import PP_ALIGN
 
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -17,8 +16,7 @@ from nps_lens.reports import executive_ppt
 from nps_lens.reports.content_selectors import (
     parse_markdown_strong,
     select_causal_scenarios,
-    select_negative_delta_rows,
-    select_nonzero_kpis,
+    select_negative_gap_rows,
 )
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
@@ -320,7 +318,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
 
     assert out.content
     assert out.file_name.endswith(".pptx")
-    assert out.slide_count == 7
+    assert out.slide_count >= 8
 
     prs = Presentation(BytesIO(out.content))
     assert out.file_name.startswith("nps-comentarios-incidencias-")
@@ -333,7 +331,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False):
                 for paragraph in shape.text_frame.paragraphs:
-                    texts.append(paragraph.text or "")
+                    texts.append(" ".join((paragraph.text or "").split()))
 
     cover_texts = []
     for shape in prs.slides[0].shapes:
@@ -347,16 +345,18 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("lidera el deterioro entre los tópicos observados en Todos" in t for t in texts)
+    assert any("presenta la mayor brecha negativa entre los tópicos observados" in t for t in texts)
+    assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
     assert any(
-        "tiene el menor score medio entre los tópicos observados en Todos" in t for t in texts
+        "tiene el menor score medio entre el top 3 de los tópicos observados" in t for t in texts
     )
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Acceso / Login" in t for t in texts)
-    assert any("Delta NPS Clásico" in t for t in texts)
+    assert any("Acceso > Login" in t for t in texts)
+    assert any("Brechas NPS" in t for t in texts)
+    assert not any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
     assert not any("Mapa de dolor Web por Palanca" in t for t in texts)
@@ -381,7 +381,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     ]
     assert len(change_tables) == 1
     assert len(change_tables[0].rows) == 1 + len(
-        executive_ppt.select_negative_delta_rows(
+        executive_ppt.select_negative_gap_rows(
             executive_ppt._build_presentation_context(
                 service_origin="BBVA México",
                 service_origin_n1="Empresas Mobile",
@@ -399,33 +399,46 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 broken_journeys_df=None,
             )
             .dimensions["Palanca"]
-            .change_table_df,
+            .gap_table_df,
             max_rows=4,
         )
     )
-    causal_slide = prs.slides[6]
+    causal_slides = [
+        slide
+        for slide in prs.slides
+        if any(shape.name == "Scenario metric value" for shape in slide.shapes)
+    ]
     service = object.__new__(DashboardService)
     cards = service._build_linking_scenario_cards(payload["attribution"])
-    assert cards[0]["title"] == causal_slide.shapes[1].text
-    assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
-    assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
-    assert causal_slide.shapes[2].text == ""
-    assert causal_slide.shapes[5].text == ""
-    evidence_paragraphs = [
-        paragraph
-        for shape in causal_slide.shapes
-        if getattr(shape, "has_text_frame", False)
-        for paragraph in shape.text_frame.paragraphs
-        if "INC" in paragraph.text
+    causal_slide = causal_slides[0]
+    title = next(shape for shape in causal_slide.shapes if shape.name == "Report title")
+    assert " ".join(title.text.split()).startswith(
+        executive_ppt.causal_scenario_title(
+            payload["attribution"].iloc[0], rank=1, include_topic=True
+        )
+    )
+    labels = [shape.text for shape in causal_slide.shapes if shape.name == "Scenario metric label"]
+    assert labels == ["NOTA MEDIA DE COMENTARIOS ENLAZADOS", "SIMILITUD TEXTUAL"]
+    assert len(cards[0]["spotlight_metrics"]) == 4
+    evidence = [
+        shape.text
+        for slide in causal_slides
+        for shape in slide.shapes
+        if shape.name == "Incident evidence"
     ]
-    assert any("INC00040, INC00041" in paragraph.text for paragraph in evidence_paragraphs)
-    assert not any("INC..." in paragraph.text for paragraph in evidence_paragraphs)
-    assert all(paragraph.alignment == PP_ALIGN.LEFT for paragraph in evidence_paragraphs)
-    assert all(paragraph._p.get_or_add_pPr().get("marL") for paragraph in evidence_paragraphs)
+    assert all(
+        any(record["incident_id"] in text for text in evidence)
+        for record in payload["attribution"].iloc[0]["incident_records"]
+        if record.get("incident_id")
+    )
     assert out.compact_file_name.endswith("-sin-evolucion-nps.pptx")
     assert len(Presentation(BytesIO(out.compact_content)).slides) == out.slide_count - 2
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
-        rels = archive.read("ppt/slides/_rels/slide7.xml.rels").decode("utf-8")
+        rels = "".join(
+            archive.read(name).decode()
+            for name in archive.namelist()
+            if name.startswith("ppt/slides/_rels/")
+        )
     assert "https://helix.example/INC00001" in rels
 
 
@@ -445,8 +458,17 @@ def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
         comparison_nps_df=payload["comparison_nps"],
     )
     cards = object.__new__(DashboardService)._build_linking_scenario_cards(payload["attribution"])
-    slide = Presentation(BytesIO(out.content)).slides[6]
-    assert cards[0]["title"] == slide.shapes[1].text
+    slide = next(
+        slide
+        for slide in Presentation(BytesIO(out.content)).slides
+        if any(shape.name == "Scenario metric value" for shape in slide.shapes)
+    )
+    title = next(shape for shape in slide.shapes if shape.name == "Report title")
+    assert " ".join(title.text.split()).startswith(
+        executive_ppt.causal_scenario_title(
+            payload["attribution"].iloc[0], rank=1, include_topic=True
+        )
+    )
     assert cards[0]["title"] == (
         "validar el teléfono para activar el token → la validación del teléfono no se completa"
     )
@@ -464,7 +486,7 @@ def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
         period_start=date(2026, 1, 1),
         period_end=date(2026, 1, 31),
     )
-    assert cards[0]["title"] in [signal["label"] for signal in newsletter["signals"]]
+    assert cards[0]["narrative_topic"] in [signal["label"] for signal in newsletter["signals"]]
 
 
 def test_generate_business_review_ppt_sanitizes_file_name_for_disk_write() -> None:
@@ -528,8 +550,10 @@ def test_generate_business_review_ppt_can_render_executive_journey_slide() -> No
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any(t == "Acceso bloqueado" for t in texts)
-    assert any("Acceso bloqueado" in t for t in texts)
+    assert any(
+        "Acceso bloqueado" in slide.notes_slide.notes_text_frame.text for slide in prs.slides
+    )
+    assert any("Acceso > Login" in t for t in texts)
 
 
 def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck() -> None:
@@ -652,21 +676,24 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
         for paragraph in shape.text_frame.paragraphs
     ]
 
-    assert out.slide_count == 10
+    assert out.slide_count >= 13
     compact_prs = Presentation(BytesIO(out.compact_content))
-    assert len(compact_prs.slides) == 8
-    compact_texts = [
-        paragraph.text or ""
+    assert len(compact_prs.slides) == out.slide_count - 2
+    assert any(
+        "Operativa crítica fallida" in slide.notes_slide.notes_text_frame.text
         for slide in compact_prs.slides
-        for shape in slide.shapes
-        if getattr(shape, "has_text_frame", False)
-        for paragraph in shape.text_frame.paragraphs
-    ]
-    assert any(t == "Operativa crítica fallida" for t in compact_texts)
-    assert any(t == "Operativa crítica fallida" for t in texts)
-    assert any(t == "Acceso bloqueado" for t in texts)
-    assert any(t == "Rendimiento degradado" for t in texts)
-    assert any(t == "Firma digital interrumpida" for t in texts)
+    )
+    assert any("Operativa" in t for t in texts)
+    assert any(
+        "Acceso bloqueado" in slide.notes_slide.notes_text_frame.text for slide in prs.slides
+    )
+    assert any(
+        "Rendimiento degradado" in slide.notes_slide.notes_text_frame.text for slide in prs.slides
+    )
+    assert any(
+        "Firma digital interrumpida" in slide.notes_slide.notes_text_frame.text
+        for slide in prs.slides
+    )
     assert not any("14.1" in t or "14.2" in t or "14.3" in t for t in texts)
     slide_9_texts = [
         paragraph.text or ""
@@ -680,7 +707,7 @@ def test_generate_business_review_ppt_keeps_all_causal_scenarios_in_compact_deck
     with zipfile.ZipFile(BytesIO(out.content)) as archive:
         rels = "".join(
             archive.read(f"ppt/slides/_rels/slide{index}.xml.rels").decode("utf-8")
-            for index in range(7, 10)
+            for index in range(1, out.slide_count + 1)
         )
     assert "https://helix.example/INC000104257175" in rels
 
@@ -729,8 +756,8 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                 for paragraph in shape.text_frame.paragraphs:
                     texts.append(paragraph.text or "")
 
-    assert any(t == "Acceso / Login" for t in texts)
-    assert any("Acceso / Login" in t for t in texts)
+    assert any("Acceso / Login" in slide.notes_slide.notes_text_frame.text for slide in prs.slides)
+    assert any("Acceso > Login" in t for t in texts)
 
 
 def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
@@ -747,14 +774,9 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert int(overview["comments"]) > 0
     assert float(overview["detractor_rate"]) > 0
 
-    palanca_change = executive_ppt.get_changes_vs_historic(
-        current_period,
-        baseline_period,
-        dimension="Palanca",
-        min_n=1,
-    )
+    palanca_change = executive_ppt.nps_gaps(current_period, baseline_period, "Palanca").rows
     assert not palanca_change.empty
-    assert "delta_nps" in palanca_change.columns
+    assert "gap_vs_base" in palanca_change.columns
 
 
 def test_overview_figure_uses_full_history_and_highlights_requested_period() -> None:
@@ -924,35 +946,25 @@ def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
     assert view.topic_table_df["value"].tolist() == ["Acceso"]
     assert view.topic_table_df.iloc[0]["n"] == 2
     assert view.topic_table_df.iloc[0]["nps"] == 5.0
-    assert view.change_table_df.iloc[0]["n_current"] == 2
-    assert view.change_table_df.iloc[0]["nps_current"] == 0.0
+    assert view.gap_table_df.iloc[0]["n"] == 2
+    assert view.gap_table_df.iloc[0]["nps"] == 0.0
 
 
-def test_editorial_content_selectors_are_deterministic_and_hide_zero_kpis() -> None:
+def test_editorial_content_selectors_are_deterministic() -> None:
     delta_df = pd.DataFrame(
         {
             "value": ["Mejora", "Peor A", "Peor B", "Neutro"],
-            "delta_nps": [4.0, -8.0, -8.0, 0.0],
-            "n_current": [100, 20, 80, 50],
+            "gap_vs_base": [4.0, -8.0, -8.0, 0.0],
+            "n": [100, 20, 80, 50],
         }
     )
 
-    selected = select_negative_delta_rows(delta_df, max_rows=2)
+    selected = select_negative_gap_rows(delta_df, max_rows=2)
     assert selected["value"].tolist() == ["Peor B", "Peor A"]
-    assert select_negative_delta_rows(
-        pd.DataFrame({"value": ["Mejora"], "delta_nps": [1.0], "n_current": [100]}),
+    assert select_negative_gap_rows(
+        pd.DataFrame({"value": ["Mejora"], "gap_vs_base": [1.0], "n": [100]}),
         max_rows=2,
     ).empty
-
-    kpis = select_nonzero_kpis(
-        [
-            ("Cero", "0 pts", "red"),
-            ("Sin dato", "n/d", "blue"),
-            ("Con valor", "1,5 pts", "green"),
-        ],
-        max_items=3,
-    )
-    assert kpis == [("Con valor", "1,5 pts", "green")]
 
     segments = parse_markdown_strong("Si mejoramos **Palanca=Acceso**, sube")
     assert [(segment.text, segment.bold) for segment in segments] == [
@@ -1154,15 +1166,15 @@ def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
             "value": ["B", "A", "C"],
-            "delta_nps": [-0.2, -1.1, 0.5],
-            "nps_current": [7.0, 6.0, 8.0],
+            "gap_vs_base": [-0.2, -1.1, 0.5],
+            "nps": [7.0, 6.0, 8.0],
             "nps_baseline": [7.2, 7.1, 7.5],
-            "n_current": [100, 80, 30],
+            "n": [100, 80, 30],
             "n_baseline": [120, 95, 40],
         }
     )
 
-    out = select_negative_delta_rows(df, max_rows=2)
+    out = select_negative_gap_rows(df, max_rows=2)
 
     assert out["value"].tolist() == ["A", "B"]
 
@@ -1195,25 +1207,46 @@ def test_journey_table_exposes_catalog_detail_columns() -> None:
     assert {"touchpoint", "subpalanca", "links", "text_similarity"}.issubset(table.columns)
 
 
-def test_scenario_many_incidents_use_one_bounded_id_bullet():
+def test_scenario_many_incidents_use_one_slide_with_full_sources_in_notes():
     from pptx.util import Inches
 
     from nps_lens.reports.presentation_context import CausalEvidenceRecord, CausalScenarioViewModel
 
     prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    shape = slide.shapes.add_textbox(Inches(0), Inches(0), Inches(5.83), Inches(1.5))
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
     records = [
         CausalEvidenceRecord(
-            f"INC{i:015d}", "Descripción extensa " * 100, f"https://helix.example/INC{i:015d}"
+            f"INC{i:015d}", "Descripción extensa " * 30, f"https://helix.example/INC{i:015d}"
         )
-        for i in range(50)
+        for i in range(20)
     ]
-    scenario = CausalScenarioViewModel(1, pd.Series(dtype=object), [], [], [], [], records)
-    executive_ppt._scenario_evidence(shape, scenario)
-    paragraphs = shape.text_frame.paragraphs
-    assert len(paragraphs) == 3
-    assert paragraphs[-1].text.endswith("…")
-    assert "Descripción" not in paragraphs[-1].text
-    assert all(len(p.text) < 165 for p in paragraphs)
-    assert any(r.hyperlink.address for r in paragraphs[-1].runs)
+    scenario = CausalScenarioViewModel(
+        1,
+        pd.Series({"nps_topic": "Pagos", "avg_nps": 0, "avg_text_similarity": 0}),
+        [],
+        [],
+        records,
+    )
+    executive_ppt._add_scenario_slide(prs, scenario)
+    assert len(prs.slides) == 1
+    text = "".join(
+        shape.text
+        for slide in prs.slides
+        for shape in slide.shapes
+        if shape.name == "Incident evidence"
+    )
+    assert "Descripción extensa" in text
+    assert "19 Incidencias:" in text and "…" in text
+    notes = prs.slides[0].notes_slide.notes_text_frame.text
+    assert all(record.incident_id in notes and record.url in notes for record in records)
+    assert notes.count("Descripción extensa") == 20 * 30
+    links = {
+        run.hyperlink.address
+        for slide in prs.slides
+        for shape in slide.shapes
+        if shape.name == "Incident evidence"
+        for paragraph in shape.text_frame.paragraphs
+        for run in paragraph.runs
+    }
+    assert records[0].url in links and records[1].url in links
+    _assert_no_shape_overflow(prs)

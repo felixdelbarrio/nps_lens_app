@@ -60,8 +60,8 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
       </article>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" proposal={data.proposed_discovered_taxonomy} proposalFingerprint={data.proposed_discovered_fingerprint} review={data.designer_review} context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
-        <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
+        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.single_zip_enabled ? discovery.classifier_single_zip_url : discovery.classifier_url} singleZip={discovery.single_zip_enabled} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
+        <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.single_zip_enabled ? discovery.helix_single_zip_url : discovery.helix_classifier_url} singleZip={discovery.single_zip_enabled} disabled={locked || !hasFramework} onChange={refresh} />
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}

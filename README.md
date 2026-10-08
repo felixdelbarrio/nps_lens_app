@@ -61,6 +61,13 @@ NPS↔Helix]
 - **Taxonomy Studio** utiliza tres proyectos GPT mediante archivos: Crea Taxonomía,
   Clasifica taxonomía y Helix Classifier. Sus URLs se editan en la aplicación y se
   guardan al salir del campo. Consulta [el flujo de la iteración 28](docs/iteration28.md).
+  En Configuración → ZIP único con progreso y reanudación puedes activar un paquete
+  por trabajo. Configura las dos rutas nuevas (vacías por defecto) y copia sus
+  instrucciones a los proyectos de comentarios e incidencias. ChatGPT entrega un
+  lote completo por turno y espera «Sí» para continuar; importa cada ZIP parcial.
+  Conserva el original y las entregas para reanudar en otro chat. Al exportar de
+  nuevo, NPS Lens incluye solo pendientes. Desactivado mantiene los ZIP numerados.
+  Los criterios, fingerprints y validaciones de importación son iguales en ambos modos.
 
 - **Python 3.12.14** (entorno corporativo)
 - `make` (macOS / Linux)
@@ -165,3 +172,7 @@ Si te aporta valor (o lo estás usando en producción), puedes apoyar el manteni
 ## Licencia
 
 Define la licencia del repo en `LICENSE` (si aplica). En entornos corporativos suele ser privada.
+
+### Identidad corporativa
+
+La App, la WebApp, el PPT y la newsletter comparten la identidad BBVA Banca de Empresas e Instituciones y la firma bIA (Banca Inteligente y Autónoma). Las definiciones y los estilos de la firma están en `src/nps_lens/design/brand.py`. Para regenerar los recursos, instala las dependencias de build y ejecuta `python scripts/prepare_brand.py`. El logo oficial de bIA se conserva en `frontend/public/assets/brand/bia.svg`, con sus colores, fondo y proporciones originales. El generador requiere las dependencias de frontend y Chromium de Playwright (`cd frontend && npm ci && npx playwright install chromium`) y produce un PNG de alta resolución para PPT y newsletter. Las fuentes web se sirven en WOFF2; el correo incluye el logo como imagen MIME inline, sin descargas externas.

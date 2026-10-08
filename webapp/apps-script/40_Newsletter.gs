@@ -69,7 +69,7 @@ function getNewsletterWorkspace() {
 
 function _newsletterSubject_(publication) {
   const monthNames = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  return 'NPS e incidencias relacionadas - ' + publication.ownerSupportCompany +
+  return BRAND.newsletter_prefix + ' NPS e incidencias relacionadas - ' + publication.ownerSupportCompany +
     ' - ' + publication.year + ' ' + (monthNames[publication.month] || publication.month) + ' - ' + publication.causalMethodLabel;
 }
 
@@ -120,27 +120,27 @@ function _newsletterContent_(insight, visible) {
   return visible ? insight : {headline:'',lead:'',scorecard:[]};
 }
 
-function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
+function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps, ownerSupportCompany) {
   const webUrl = ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey);
   const e = _newsletterEscape_;
   const content = _newsletterContent_(insight, showEvolutionNps);
   const scorecard = (content.scorecard || []).map(item => '<td class="metric-cell" width="20%" valign="top" style="padding:12px 9px;border-top:3px solid #85C8FF;background:#F7F8F8;overflow-wrap:anywhere"><small style="color:#52627A;text-transform:uppercase">' + e(item.label) + '</small><br><b style="font:700 23px Georgia,serif;color:#001391">' + e(item.value) + '</b><br><small style="color:#52627A">' + e(item.delta) + '</small></td>').join('');
   const metrics = scorecard ? '<table class="metric-table" role="presentation" width="100%" cellspacing="6"><tr>' + scorecard + '</tr></table>' : '';
   const quotes = (insight.quotes || []).slice(0,2).map(text => '<td class="quote-cell" width="50%" valign="top" style="padding:14px;background:#EAF3FA;border-left:3px solid #2DCCCD;font:italic 16px Georgia,serif;overflow-wrap:anywhere">“' + e(text) + '”</td>').join('');
-  const signals = (insight.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:#52627A">' + e(item.reason) + '</span></td></tr>').join('');
+  const signals = (insight.signals || []).map(item => '<tr><td style="padding:10px 0;border-bottom:1px solid #D3D8E0"><b style="color:#070E46">' + e(item.label) + '</b><br><span style="color:' + e(item.reason_color) + ';-webkit-text-fill-color:' + e(item.reason_color) + '">' + e(item.reason) + '</span></td></tr>').join('');
   const headline = content.headline ? '<h2 class="email-headline" style="font:700 31px Georgia,serif;color:#070E46;margin:10px 0">' + e(content.headline) + '</h2><p style="line-height:1.55">' + e(content.lead) + '</p>' : '';
   const reportButton = reportUrl ? '<a href="' + reportUrl + '" style="display:inline-block;background:#001391;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Ver análisis completo</a> ' : '';
-  const mobileCss = '<style>body{margin:0!important;padding:0!important;width:100%!important;background:#F4F6F8}td,th,p,h1,h2,div,a{overflow-wrap:anywhere;word-break:normal}img{max-width:100%;height:auto}@media only screen and (max-width:600px){.email-shell-padding{padding:0!important}.email-card{width:100%!important;max-width:100%!important}.email-hero{padding:24px 20px!important}.email-body{padding:24px 18px!important}.email-title{font-size:34px!important;line-height:1.05!important}.email-headline{font-size:27px!important;line-height:1.12!important}.metric-table,.metric-table tbody,.metric-table tr,.quote-table,.quote-table tbody,.quote-table tr{display:block!important;width:100%!important;box-sizing:border-box!important}.metric-table,.quote-table{border-spacing:0 8px!important}.metric-cell,.quote-cell{display:block!important;width:auto!important;margin:0 0 8px!important}.email-actions a{display:block!important;margin:8px 0!important;text-align:center!important}.email-body>table{max-width:100%!important}}</style>';
-  return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + mobileCss + '</head><body><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F4F6F8"><tr><td class="email-shell-padding" align="center" style="padding:24px 10px"><table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff"><tr><td class="email-hero" style="background:#070E46;color:#fff;padding:34px 38px"><small style="letter-spacing:1px">' + e(insight.brand) + '</small><h1 class="email-title" style="font:700 42px Georgia,serif;margin:22px 0 5px">' + e(insight.product) + '</h1><div>' + e(insight.promise) + '</div></td></tr><tr><td class="email-body" style="padding:32px 38px">' +
-    '<small style="color:#004481;text-transform:uppercase">Lectura de 30 segundos · ' + e(insight.period) + '</small>' + headline + metrics +
+  const mobileCss = '<style>' + BRAND.email_dark_css + 'body{margin:0!important;padding:0!important;width:100%!important;background:#F4F6F8}td,th,p,h1,h2,div,a{overflow-wrap:anywhere;word-break:normal}img{max-width:100%;height:auto}@media only screen and (max-width:600px){.email-shell-padding{padding:0!important}.email-card{width:100%!important;max-width:100%!important}.email-hero{padding:24px 20px!important}.email-body{padding:24px 18px!important}.email-title{font-size:34px!important;line-height:1.05!important}.email-headline{font-size:27px!important;line-height:1.12!important}.metric-table,.metric-table tbody,.metric-table tr,.quote-table,.quote-table tbody,.quote-table tr{display:block!important;width:100%!important;box-sizing:border-box!important}.metric-table,.quote-table{border-spacing:0 8px!important}.metric-cell,.quote-cell{display:block!important;width:auto!important;margin:0 0 8px!important}.email-actions a{display:block!important;margin:8px 0!important;text-align:center!important}.email-body>table{max-width:100%!important}}</style>';
+  return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + BRAND.email_light_meta + mobileCss + '</head><body class="nps-newsletter"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F4F6F8"><tr><td class="email-shell-padding" align="center" style="padding:24px 10px"><table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff"><tr><td class="email-hero" bgcolor="' + BRAND.email_hero_color + '" style="' + BRAND.email_hero_style + 'padding:34px 38px">' + BRAND.email_corporate_logo + BRAND.email_hero_text_open + '<h1 class="email-title" style="font:700 42px Georgia,serif;margin:22px 0 5px">' + e(insight.product) + '</h1><div>' + e(insight.promise) + '</div>' + BRAND.email_hero_text_close + '</td></tr><tr><td class="email-body" style="padding:32px 38px">' +
+    '<small style="color:#004481;text-transform:uppercase">' + e(ownerSupportCompany) + ' · ' + e(insight.period) + '</small>' + headline + metrics +
     '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>' + quotes + '</tr></table>' +
     '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">Señales a vigilar</h2><table role="presentation" width="100%">' + signals + '</table>' +
-    '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p></td></tr></table></td></tr></table></body></html>';
+    '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p>' + BRAND.email_signature + '</td></tr></table></td></tr></table></body></html>';
 }
 
-function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps) {
+function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps, ownerSupportCompany) {
   const content = _newsletterContent_(insight, showEvolutionNps);
-  const lines = [insight.brand, insight.product, insight.promise, insight.period];
+  const lines = [insight.brand, insight.product, insight.promise, ownerSupportCompany + " · " + insight.period, '', BRAND.initiative_credit + ' ' + BRAND.initiative + ' · ' + BRAND.initiative_name];
   if (content.headline) lines.push('', content.headline, content.lead);
   if ((content.scorecard || []).length) lines.push('', 'INDICADORES');
   (content.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
@@ -163,6 +163,7 @@ function _newsletterMimeText_(value) {
 function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
   const token = Utilities.getUuid().replace(/-/g, '');
   const boundary = 'nps_lens_' + token;
+  const related = boundary + '_related';
   const crlf = '\r\n';
   const mime = [
     'From: ' + _newsletterEncodedHeader_(NPS_LENS.newsletterSenderName) + ' <' + sender.effective + '>',
@@ -176,8 +177,16 @@ function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
     'Content-Type: multipart/alternative; boundary="' + boundary + '"', '',
     '--' + boundary, 'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: base64', '', _newsletterMimeText_(plain),
-    '--' + boundary, 'Content-Type: text/html; charset="UTF-8"',
+    '--' + boundary, 'Content-Type: multipart/related; boundary="' + related + '"', '',
+    '--' + related, 'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: base64', '', _newsletterMimeText_(html),
+    '--' + related, 'Content-Type: image/png',
+    'Content-ID: <bia-logo>', 'Content-Disposition: inline; filename="bia.png"',
+    'Content-Transfer-Encoding: base64', '', BRAND.initiative_logo.match(/.{1,76}/g).join(crlf),
+    '--' + related, 'Content-Type: image/png',
+    'Content-ID: <bbva-logo>', 'Content-Disposition: inline; filename="bbva.png"',
+    'Content-Transfer-Encoding: base64', '', BRAND.corporate_logo.match(/.{1,76}/g).join(crlf),
+    '--' + related + '--',
     '--' + boundary + '--', ''
   ].join(crlf);
   return Utilities.base64EncodeWebSafe(mime, Utilities.Charset.UTF_8).replace(/=+$/g, '');
@@ -192,8 +201,8 @@ function _sendNewsletterTo_(recipients, subject, publication) {
     ' no está aceptado para ' + (sender.executor || 'el propietario del despliegue') +
     ' (' + sender.verificationStatus + '). ' + sender.message);
   const insight = _publishedNewsletterInsight_(publication.scopeKey);
-  const html = _newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps);
-  const plain = _newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps);
+  const html = _newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany);
+  const plain = _newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany);
   const messageIds = recipients.map(recipient => {
     const raw = _newsletterMimeMessage_(recipient, subject, html, plain, sender);
     const accepted = Gmail.Users.Messages.send({raw}, 'me');
@@ -209,7 +218,7 @@ function testNewsletter() {
   _assertAdmin_(viewer);
   const publication = _selectedPublication_();
   if (!publication) throw new Error('Selecciona primero un ámbito.');
-  return _sendNewsletterTo_([viewer.email], '[PRUEBA] ' + _newsletterSubject_(publication), publication);
+  return _sendNewsletterTo_([viewer.email], _newsletterSubject_(publication) + ' [PRUEBA]', publication);
 }
 
 function sendNewsletter() {

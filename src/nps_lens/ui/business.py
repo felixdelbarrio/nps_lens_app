@@ -8,8 +8,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.drivers import grouped_driver_stats
-from nps_lens.analytics.signal_quality import actionable_rows
 from nps_lens.ui.population import POP_ALL
 
 
@@ -148,54 +146,6 @@ def slice_by_window(df: pd.DataFrame, w: PeriodWindow) -> pd.DataFrame:
     out = tmp.loc[mask].copy()
     out.attrs["period_window"] = w
     return out
-
-
-def driver_delta_table(
-    current_df: pd.DataFrame,
-    baseline_df: pd.DataFrame,
-    dimension: str,
-    score_col: str = "NPS",
-    min_n: int = 50,
-) -> pd.DataFrame:
-    """Compute delta NPS per driver value between two periods."""
-    if dimension not in current_df.columns or dimension not in baseline_df.columns:
-        return pd.DataFrame()
-    if score_col not in current_df.columns or score_col not in baseline_df.columns:
-        return pd.DataFrame()
-
-    cur_agg = grouped_driver_stats(
-        actionable_rows(current_df).dropna(subset=[dimension]),
-        dimension,
-        survey_score_col=score_col,
-    )[[dimension, "valid_n", "nps"]].rename(columns={"valid_n": "n_current", "nps": "nps_current"})
-    base_agg = grouped_driver_stats(
-        actionable_rows(baseline_df).dropna(subset=[dimension]),
-        dimension,
-        survey_score_col=score_col,
-    )[[dimension, "valid_n", "nps"]].rename(
-        columns={"valid_n": "n_baseline", "nps": "nps_baseline"}
-    )
-    if cur_agg.empty or base_agg.empty:
-        return pd.DataFrame()
-    merged = cur_agg.merge(base_agg, on=dimension, how="inner")
-    merged = merged.loc[
-        (merged["n_current"] >= int(min_n)) & (merged["n_baseline"] >= int(min_n))
-    ].copy()
-    if merged.empty:
-        return pd.DataFrame()
-
-    merged["delta_nps"] = merged["nps_current"] - merged["nps_baseline"]
-    merged["value"] = merged[dimension]
-    # Sort by deterioration first (most negative)
-    merged = merged.sort_values("delta_nps", ascending=True)
-
-    # Ensure float stability
-    merged["nps_current"] = merged["nps_current"].astype(float)
-    merged["nps_baseline"] = merged["nps_baseline"].astype(float)
-    merged["delta_nps"] = merged["delta_nps"].astype(float)
-    merged["n_current"] = merged["n_current"].astype(int)
-    merged["n_baseline"] = merged["n_baseline"].astype(int)
-    return merged[["value", "delta_nps", "nps_current", "nps_baseline", "n_current", "n_baseline"]]
 
 
 def safe_mean(series: pd.Series) -> float:

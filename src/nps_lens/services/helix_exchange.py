@@ -45,7 +45,7 @@ from nps_lens.services.taxonomy_exchange import (
     strict_json,
     validate_manifest,
     validate_payload,
-    write_numbered_zips,
+    write_classification_zips,
 )
 from nps_lens.services.taxonomy_prompts import (
     FALLBACK_LEVER,
@@ -462,6 +462,7 @@ class HelixExchange:
         inputs: dict[str, Any],
         *,
         reevaluate: bool = False,
+        single_zip: bool = False,
     ) -> dict[str, Any]:
         for mode in inputs["modes"]:
             self.taxonomy.guard_export(context, mode)
@@ -571,8 +572,14 @@ class HelixExchange:
             ],
         }
         shared: dict[str, Any] = {"taxonomies.json": catalogs}
-        result = write_numbered_zips(
-            self.downloads, "incidencias_helix", manifest, batches, shared, "incidents"
+        result = write_classification_zips(
+            self.downloads,
+            "incidencias_helix",
+            manifest,
+            batches,
+            shared,
+            "incidents",
+            single_zip=single_zip,
         )
         candidate_ids = {candidate["id"] for row in pending for candidate in row["candidates"]}
         job = {

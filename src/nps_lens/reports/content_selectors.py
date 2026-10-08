@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.signal_quality import actionable_rows
-from nps_lens.reports.coherence import validate_delta_rows
+from nps_lens.reports.narrative import text
 
 
 @dataclass(frozen=True)
@@ -18,12 +17,14 @@ class MarkdownSegment:
     bold: bool = False
 
 
-def causal_scenario_title(row: Any, *, rank: int) -> str:
-    task = str(row.get("affected_task") or "").strip()
-    symptom = str(row.get("observed_symptom") or "").strip()
+def causal_scenario_title(row: Any, *, rank: int, include_topic: bool) -> str:
+    task = text(row.get("affected_task"))
+    symptom = text(row.get("observed_symptom"))
+    topic = text(row.get("anchor_topic")) or text(row.get("nps_topic"))
     if task and symptom and task != "Tarea pendiente de validación":
-        return f"{task} → {symptom}"
-    return str(row.get("nps_topic") or f"Escenario de evidencia {rank}").replace(" > ", " / ")
+        case = f"{task} → {symptom}"
+        return f"{topic}: {case}" if include_topic and topic else case
+    return topic if include_topic and topic else f"Escenario de evidencia {rank}"
 
 
 def _series(df: pd.DataFrame, column: str, default: object = 0.0) -> pd.Series[Any]:
@@ -46,25 +47,22 @@ def select_text_clusters(text_topics_df: pd.DataFrame, *, max_clusters: int) -> 
     return work.sort_values(["n", "cluster_id"], ascending=[False, True]).head(max_clusters).copy()
 
 
-def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select real deteriorations only, strongest first, then highest current volume."""
+def select_negative_gap_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
+    """Select negative gaps without changing the dashboard topic population."""
 
     if delta_df is None or delta_df.empty:
         return pd.DataFrame(columns=getattr(delta_df, "columns", []))
-    validate_delta_rows(delta_df.to_dict("records"))
-    work = actionable_rows(delta_df)
-    work["delta_nps"] = _numeric_series(work, "delta_nps")
-    work["n_current"] = _numeric_series(work, "n_current").fillna(0.0)
-    work = work.dropna(subset=["delta_nps"])
+    work = delta_df.copy()
+    work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
+    work["n"] = _numeric_series(work, "n").fillna(0.0)
+    work = work.dropna(subset=["gap_vs_base"])
     if work.empty:
         return work
-    deteriorations = work[work["delta_nps"] < 0].copy()
+    deteriorations = work[work["gap_vs_base"] < 0].copy()
     if deteriorations.empty:
         return deteriorations
     return (
-        deteriorations.sort_values(
-            ["delta_nps", "n_current", "value"], ascending=[True, False, True]
-        )
+        deteriorations.sort_values(["gap_vs_base", "n", "value"], ascending=[True, False, True])
         .head(max_rows)
         .copy()
     )
@@ -111,22 +109,6 @@ def select_causal_scenarios(chain_df: pd.DataFrame, *, max_rows: int) -> pd.Data
     )
 
 
-def select_nonzero_kpis(
-    kpis: Iterable[tuple[str, object, str]], *, max_items: int
-) -> list[tuple[str, str, str]]:
-    """Keep only KPIs with a meaningful non-zero numeric value."""
-
-    selected: list[tuple[str, str, str]] = []
-    for label, raw_value, accent in kpis:
-        numeric = _extract_numeric(raw_value)
-        if numeric is None or abs(numeric) <= 1e-12:
-            continue
-        selected.append((str(label), str(raw_value), str(accent)))
-        if len(selected) >= max_items:
-            break
-    return selected
-
-
 def parse_markdown_strong(text: object) -> list[MarkdownSegment]:
     """Parse the small markdown subset used by business bullets: **bold**."""
 
@@ -149,18 +131,3 @@ def parse_markdown_strong(text: object) -> list[MarkdownSegment]:
 
 def strip_markdown_strong(text: object) -> str:
     return "".join(segment.text for segment in parse_markdown_strong(text))
-
-
-def _extract_numeric(value: object) -> float | None:
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        out = float(value)
-        return out if np.isfinite(out) else None
-    text = str(value or "").replace(",", ".")
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
-    if not match:
-        return None
-    try:
-        out = float(match.group(0))
-    except ValueError:
-        return None
-    return out if np.isfinite(out) else None

@@ -612,8 +612,6 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Incident ID__href",
         "Incident Summary",
         "Detractor Comment",
-        "Tasa Foco",
-        "Similitud textual",
         "Confianza semántica",
     ]
     identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
@@ -854,8 +852,26 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
     assert Path(report_response.headers["x-nps-lens-saved-path"]).exists()
 
     presentation = Presentation(BytesIO(report_response.content))
-    # Six base slides; scenario slides require accepted narrative evidence.
-    assert len(presentation.slides) == 6
+    # Observed topics paginate; unaccepted evidence never creates case sections.
+    topic_pages = [
+        slide
+        for slide in presentation.slides
+        if any(shape.name == "Topic heading" for shape in slide.shapes)
+    ]
+    assert topic_pages
+    assert len(presentation.slides) == 5 + len(topic_pages)
+    assert not any(
+        shape.name in {"Topic separator", "Scenario metric label"}
+        for slide in presentation.slides
+        for shape in slide.shapes
+    )
+    headings = [
+        shape.text
+        for slide in topic_pages
+        for shape in slide.shapes
+        if shape.name == "Topic heading"
+    ]
+    assert len(headings) == len(set(headings))
     assert not any("Journeys rotos" in text for text in _ppt_texts(report_response.content))
 
 
@@ -1038,12 +1054,37 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
         for shape in slide.shapes:
             if getattr(shape, "has_text_frame", False):
                 for paragraph in shape.text_frame.paragraphs:
-                    all_texts.append(paragraph.text or "")
+                    all_texts.append(" ".join((paragraph.text or "").split()))
 
     assert any(
-        "lidera el deterioro entre los tópicos observados en Todos" in text for text in all_texts
+        "presenta la mayor brecha negativa entre los tópicos observados" in text
+        for text in all_texts
     )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
+    dashboard = client.get(
+        "/api/dashboard/nps",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "score_channel": "Todos",
+            "gap_dimension": "Palanca",
+        },
+    )
+    assert dashboard.status_code == 200
+    gaps = dashboard.json()["gaps"]
+    gap_table = next(shape.table for shape in presentation.slides[4].shapes if shape.has_table)
+    expected = [row for row in gaps["table"] if row["gap_vs_base"] < 0][:4]
+    assert len(gap_table.rows) == len(expected) + 1
+    for ppt_row, app_row in zip(list(gap_table.rows)[1:], expected, strict=True):
+        assert ppt_row.cells[0].text == app_row["value"]
+        assert float(ppt_row.cells[1].text.replace(",", ".")) == pytest.approx(
+            app_row["gap_vs_base"], abs=0.0051
+        )
+        assert float(ppt_row.cells[3].text.replace(",", ".")) == pytest.approx(
+            gaps["base_nps"], abs=0.0051
+        )
 
 
 def test_views_share_canonical_evidence(tmp_path, monkeypatch):

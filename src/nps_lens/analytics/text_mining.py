@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from nps_lens.domain.topic_labels import topic_paths
+
 STOPWORDS_ES = {
     "de",
     "la",
@@ -113,8 +115,7 @@ def summarize_taxonomy(frame: pd.DataFrame, limit: int = 10) -> list[TopicCluste
     """Summarize the resolved lens without training or clustering on visual filters."""
     if frame.empty:
         return []
-    labels = frame.get("Subpalanca", pd.Series("", index=frame.index)).astype("string").fillna("")
-    labels = labels.mask(labels.eq(""), frame.get("Palanca", pd.Series("", index=frame.index)))
+    labels = topic_paths(frame)
     comments = (
         frame.get("Comment", frame.get("comment_txt", pd.Series("", index=frame.index)))
         .fillna("")

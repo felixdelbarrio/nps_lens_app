@@ -59,6 +59,9 @@ UI_PREF_ENV_KEYS = {
     "taxonomy_designer_url": "NPS_LENS_TAXONOMY_DESIGNER_URL",
     "taxonomy_classifier_url": "NPS_LENS_TAXONOMY_CLASSIFIER_URL",
     "helix_classifier_url": "NPS_LENS_HELIX_CLASSIFIER_URL",
+    "single_zip_enabled": "NPS_LENS_SINGLE_ZIP_ENABLED",
+    "classifier_single_zip_url": "NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL",
+    "helix_single_zip_url": "NPS_LENS_HELIX_SINGLE_ZIP_URL",
 }
 
 
@@ -396,6 +399,10 @@ def persist_ui_prefs(dotenv_path: Optional[Path], values: Mapping[str, object]) 
             value = normalize_helix_base_url(raw_value)
         elif str(name) == "report_dimension_analysis":
             value = normalize_report_dimension_analysis(raw_value)
+        elif str(name) == "single_zip_enabled":
+            value = "true" if raw_value else "false"
+        elif str(name) in {"classifier_single_zip_url", "helix_single_zip_url"}:
+            value = normalize_chatgpt_project_url(raw_value) if str(raw_value).strip() else ""
         elif str(name) in {
             "taxonomy_normalizer_url",
             "taxonomy_semantic_url",
@@ -484,6 +491,9 @@ class Settings:
     taxonomy_designer_url: str = DEFAULT_TAXONOMY_DESIGNER_URL
     taxonomy_classifier_url: str = DEFAULT_TAXONOMY_CLASSIFIER_URL
     helix_classifier_url: str = DEFAULT_HELIX_CLASSIFIER_URL
+    single_zip_enabled: bool = False
+    classifier_single_zip_url: str = ""
+    helix_single_zip_url: str = ""
 
     @staticmethod
     def from_env() -> "Settings":
@@ -650,6 +660,9 @@ class Settings:
             taxonomy_designer_url=taxonomy_designer_url,
             taxonomy_classifier_url=taxonomy_classifier_url,
             helix_classifier_url=helix_classifier_url,
+            single_zip_enabled=os.getenv("NPS_LENS_SINGLE_ZIP_ENABLED", "false").lower() == "true",
+            classifier_single_zip_url=os.getenv("NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL", "").strip(),
+            helix_single_zip_url=os.getenv("NPS_LENS_HELIX_SINGLE_ZIP_URL", "").strip(),
         )
 
     def service_origin_n2_options(self, service_origin: str, service_origin_n1: str) -> list[str]:

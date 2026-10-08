@@ -15,6 +15,7 @@ scikit-learn<1.6,>=1.3
 openpyxl<3.2,>=3.1
 
 [build]
+fonttools[woff]<5.0,>=4.0
 pywebview<6.0,>=5.1
 pyinstaller<7.0,>=6.0
 Pillow<12.0,>=10.0
