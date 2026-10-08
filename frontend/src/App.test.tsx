@@ -505,6 +505,42 @@ describe("App", () => {
     );
   }
 
+  it("keeps a concrete month when switching to a company without the previous month", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/dashboard/context") {
+        const month = url.searchParams.get("service_origin") === "BBVA Argentina" ? "08" : "09";
+        return new Response(JSON.stringify({
+          ...contextPayload,
+          service_origins: ["BBVA México", "BBVA Argentina"],
+          available_months_by_year: { Todos: ["Todos", month], "2026": ["Todos", month] }
+        }));
+      }
+      return fallback(input, init);
+    });
+    renderApp();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("09"));
+    const company = screen.getByRole("combobox", { name: "Owner Support Company" });
+    await waitFor(() => expect(company).toBeEnabled());
+    await user.selectOptions(company, "BBVA Argentina");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Mes" })).toHaveValue("08"));
+    const report = screen.getByTestId("generate-report-button");
+    await waitFor(() => expect(report).toBeEnabled());
+    await user.click(report);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/dashboard/report/pptx" &&
+        url.searchParams.get("service_origin") === "BBVA Argentina" && url.searchParams.get("pop_month") === "08";
+    })).toBe(true));
+    const month = screen.getByRole("combobox", { name: "Mes" });
+    await waitFor(() => expect(month).toBeEnabled());
+    await user.selectOptions(month, "Todos");
+    await waitFor(() => expect(month).toHaveValue("Todos"));
+  });
+
   it("renders restored navigation, filters, traceability and uploads", async () => {
     const user = userEvent.setup();
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;

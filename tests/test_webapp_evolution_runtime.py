@@ -26,10 +26,12 @@ const Utilities = {
   base64EncodeWebSafe:value=>Buffer.from(value).toString('base64url')
 };
 let delivered;
+const sentMessages=[];
 const Gmail = {Users:{Messages:{send:message=>{
   const mime=Buffer.from(message.raw,'base64url').toString();
   const subject=Buffer.from(mime.match(/Subject: =\?UTF-8\?B\?([^?]+)\?=/)[1],'base64').toString();
   assert.ok(subject.startsWith('[bIA]'));
+  sentMessages.push({subject,to:mime.match(/\r\nTo: ([^\r\n]+)/)[1]});
   assert.ok(mime.includes('Content-ID: <bia-logo>'));
   assert.ok(mime.includes('Content-Type: multipart/related;'));
   delivered=[...mime.matchAll(/Content-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/g)]
@@ -45,11 +47,17 @@ const Gmail = {Users:{Messages:{send:message=>{
         + source
         + r"""
 _newsletterSenderIdentity_=()=>({ready:true,effective:'sender@bbva.com'});
+_newsletterRecipients_=()=>[
+  {email:'first@bbva.com',active:true},
+  {email:'second@bbva.com',active:true},
+  {email:'inactive@bbva.com',active:false}
+];
 const insight={brand:'BBVA',product:'NPS Lens',promise:'Escucha del cliente',period:'Agosto',
   headline:'Titular con NPS',lead:'Balance de NPS del periodo',
   scorecard:[{label:'NPS clásico mensual',value:'17,42',delta:'-0,68'}],
   quotes:['La página es lenta'],signals:[{label:'Continuidad',reason:'Incidencias recurrentes'},{label:'Tema cliente',reason:'NPS -94,67; 94,67% detractores; 150 opiniones.'}]};
-publicationRowsCache=[{scopeKey:'edition',slidesFileId:'full',newsletterInsight:JSON.stringify(insight)}];
+publicationRowsCache=[{scopeKey:'edition',slidesFileId:'full',ownerSupportCompany:'México',
+  year:'2026',month:'10',causalMethodLabel:'LLM',newsletterInsight:JSON.stringify(insight)}];
 properties.set(_compactSlidesProperty_('edition'),'compact');
 const original=JSON.stringify(insight);
 for(const visible of [false,true,false]){
@@ -58,7 +66,17 @@ for(const visible of [false,true,false]){
   const report=visible?'full':'compact';
   assert.equal(saved.reportUrl,'https://docs.google.com/presentation/d/'+report+'/edit');
   const sent=testNewsletter();
+  assert.ok(sentMessages.at(-1).subject.endsWith(' [PRUEBA]'));
+  assert.equal(sentMessages.at(-1).to,'admin@bbva.com');
   assert.equal(sent.presentationUrl,saved.reportUrl);
+  const workspace=getNewsletterWorkspace();
+  assert.ok(workspace.subject.startsWith('[bIA]'));
+  assert.ok(!workspace.subject.includes('[PRUEBA]'));
+  const broadcast=sendNewsletter();
+  assert.equal(broadcast.sent,2);
+  assert.equal(broadcast.presentationUrl,saved.reportUrl);
+  assert.deepEqual(sentMessages.slice(-2).map(message=>message.to),['first@bbva.com','second@bbva.com']);
+  assert.ok(sentMessages.slice(-2).every(message=>message.subject===workspace.subject));
   assert.equal(delivered.length,2);
   for(const content of delivered){
     assert.equal(content.includes(insight.headline),visible);

@@ -44,6 +44,7 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
         for index, slide in enumerate(deck.slides):
             names = [shape.name for shape in slide.shapes]
             assert names.count("Report page number") == names.count("bIA") == 1
+            assert names.count(BRAND["name"]) == 1
             page = next(shape for shape in slide.shapes if shape.name == "Report page number")
             assert page.text == str(index + 1)
             footer = next(shape for shape in slide.shapes if shape.name == "Corporate scope footer")
@@ -52,15 +53,14 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
                 assert shape.left + shape.width <= deck.slide_width
                 assert shape.top + shape.height <= deck.slide_height
             if index:
-                callout = (
-                    slide.shapes[(3, 4, 3, 6, 7)[index - 1]]
-                    if content == branded_decks.content and index < 6
-                    else None
-                )
-                if callout is not None:
-                    assert callout.top + callout.height <= Inches(5.36)
-                    logo = next(shape for shape in slide.shapes if shape.name == "bIA")
-                    assert callout.top + callout.height <= logo.top
+                callout = next(shape for shape in slide.shapes if shape.name == "Report conclusion")
+                title = next(shape for shape in slide.shapes if shape.name == "Report title")
+                corporate = next(shape for shape in slide.shapes if shape.name == BRAND["name"])
+                logo = next(shape for shape in slide.shapes if shape.name == "bIA")
+                assert title.left + title.width < corporate.left
+                assert title.top == corporate.top
+                assert title.top + title.height <= Inches(1.30)
+                assert callout.top + callout.height <= logo.top
         for master in deck.slide_masters:
             for template in (master, *master.slide_layouts):
                 assert not any(
@@ -76,6 +76,11 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
                 archive.read(name) for name in archive.namelist() if name.startswith("ppt/media/")
             ]
         assert images.count((BRAND_ASSETS / "bia.png").read_bytes()) == 1
+    history = Presentation(BytesIO(branded_decks.content)).slides[1]
+    explanation = next(shape for shape in history.shapes if shape.name == "Historical explanation")
+    assert explanation.top + explanation.height <= Inches(4.90)
+    assert len(explanation.text_frame.paragraphs) == 3
+    assert "NPS clásico de la base histórica" in explanation.text
 
 
 def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):

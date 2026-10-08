@@ -2762,7 +2762,7 @@ class DashboardService:
                         [
                             {
                                 "label": link_confidence_label("llm"),
-                                "value": format_percentage(engine_quality(row)),
+                                "value": format_percentage(engine_quality(row.to_dict())),
                             }
                         ]
                         if row.get("causal_engine") == "llm"

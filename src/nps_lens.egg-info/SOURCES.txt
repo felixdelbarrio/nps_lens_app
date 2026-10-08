@@ -35,6 +35,7 @@ src/nps_lens/core/nps_math.py
 src/nps_lens/core/store.py
 src/nps_lens/core/telemetry.py
 src/nps_lens/design/__init__.py
+src/nps_lens/design/brand.py
 src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
@@ -48,6 +49,7 @@ src/nps_lens/domain/normalization.py
 src/nps_lens/domain/privacy.py
 src/nps_lens/domain/publication_scope.py
 src/nps_lens/domain/record_identity.py
+src/nps_lens/domain/topic_labels.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
@@ -104,12 +106,14 @@ tests/test_classification_framework.py
 tests/test_cli.py
 tests/test_column_aliases.py
 tests/test_config_env.py
+tests/test_corporate_brand.py
 tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
 tests/test_desktop_runtime.py
 tests/test_downloads.py
 tests/test_drivers.py
+tests/test_editorial_thread.py
 tests/test_evidence_highlights.py
 tests/test_executive_newsletter.py
 tests/test_helix_ingest_filtering.py
@@ -131,6 +135,7 @@ tests/test_iteration35_linking.py
 tests/test_iteration36_linking.py
 tests/test_iteration39_workflow.py
 tests/test_iteration40_horizon.py
+tests/test_linked_comment_scores.py
 tests/test_linking_precision.py
 tests/test_local_processes.py
 tests/test_normalization_registry.py

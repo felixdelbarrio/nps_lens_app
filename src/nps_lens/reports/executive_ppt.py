@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import BytesIO
 from threading import RLock
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
-from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
@@ -2750,11 +2750,18 @@ def _fill_template_deck(
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
-    cover.shapes[1].top = Inches(1.35)
-    cover.shapes[1].width = Inches(5.9)
-    cover.shapes[1].height = Inches(0.85)
-    for slide_index, title_index in ((1, 4), (2, 5), (3, 4), (4, 0), (5, 0)):
-        prs.slides[slide_index].shapes[title_index].height = Inches(0.78)
+    for slide_index, title_index, conclusion_index in (
+        (1, 4, 3),
+        (2, 5, 4),
+        (3, 4, 3),
+        (4, 0, 6),
+        (5, 0, 7),
+        (6, 1, 9),
+        (7, 1, 9),
+        (8, 1, 9),
+    ):
+        prs.slides[slide_index].shapes[title_index].name = "Report title"
+        prs.slides[slide_index].shapes[conclusion_index].name = "Report conclusion"
     _set_template_text(
         cover.shapes[0],
         "NPS : Comentarios\ne incidencias",
@@ -2790,10 +2797,6 @@ def _fill_template_deck(
     _set_template_text(
         comparison.shapes[4],
         f"NPS clásico del periodo · {actual_label}",
-        size=25,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
     )
     _set_template_text(
         comparison.shapes[2],
@@ -2834,10 +2837,6 @@ def _fill_template_deck(
     _set_template_text(
         history.shapes[5],
         f"NPS clásico diario y balance acumulado histórico ({context.overview.get('base_start') or _safe_date(context.period_start)} a {_safe_date(context.period_end)})",
-        size=22,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
     )
     _set_template_text(
         history.shapes[2],
@@ -2847,6 +2846,7 @@ def _fill_template_deck(
         color="FFFFFF",
         font="Source Serif 4",
     )
+    history.shapes[3].name = "Historical explanation"
     history.shapes[3].height = Inches(2.95)
     _set_template_messages(
         history.shapes[3],
@@ -2881,10 +2881,6 @@ def _fill_template_deck(
     _set_template_text(
         topics.shapes[4],
         f"Principales comentarios de los detractores del periodo ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}){channel_scope}",
-        size=22,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
     )
     topic_rows = [["Comentarios", "Tópico > problema", "Ejemplos"]]
     selected_topics = select_text_clusters(context.text_topics_df, max_clusters=5)
@@ -2940,10 +2936,6 @@ def _fill_template_deck(
             if len(change_rows) > 1
             else "Sin deterioros comparables frente a la base histórica"
         ),
-        size=21,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
     )
     change.shapes[4].height = Inches(0.78)
     _set_template_text(
@@ -3004,10 +2996,6 @@ def _fill_template_deck(
             if pain_rows
             else "Sin opiniones clasificadas para comparar tópicos"
         ),
-        size=25,
-        bold=True,
-        color=BBVA_COLORS["ink"],
-        font="Source Serif 4",
     )
     for column in range(4):
         row = pain_rows[column] if column < len(pain_rows) else None
@@ -3015,10 +3003,16 @@ def _fill_template_deck(
         volume_index = (14, 17, 20, 23)[column]
         score_index = (13, 16, 19, 22)[column]
         detractor_index = (6, 15, 18, 21)[column]
+        header = pain.shapes[header_index]
+        header.left -= Inches(0.05)
+        header.width = Inches(1.65)
+        header.height = Inches(0.48)
+        header.top = Inches(1.38)
+        label = str(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios")
         _set_template_text(
-            pain.shapes[header_index],
-            str(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios"),
-            size=11,
+            header,
+            label.replace("/", " / "),
+            size=10,
             bold=True,
             color=BBVA_COLORS["ink"],
             align=PP_ALIGN.CENTER,
@@ -3063,16 +3057,9 @@ def _fill_template_deck(
         title = causal_scenario_title(row, rank=offset + 1)
         title_shape = slide.shapes[1]
         full_title = title
-        title_shape.width = prs.slide_width - title_shape.left - Inches(0.35)
-        title_shape.height = Inches(0.78)
-        title_size = 22 if len(full_title) < 49 else 18 if len(full_title) < 65 else 16
         _set_template_text(
             title_shape,
             full_title,
-            size=title_size,
-            bold=True,
-            color=BBVA_COLORS["ink"],
-            font="Source Serif 4",
         )
         _set_template_text(
             slide.shapes[4],
@@ -3112,10 +3099,6 @@ def _fill_template_deck(
             font="Source Serif 4",
             align=PP_ALIGN.CENTER,
         )
-        slide.shapes[9].left = Inches(0.38)
-        slide.shapes[9].top = Inches(4.90)
-        slide.shapes[9].width = Inches(9.37)
-        slide.shapes[9].height = Inches(0.58)
         slide.shapes[9].fill.solid()
         slide.shapes[9].fill.fore_color.rgb = _rgb(BBVA_COLORS["sky"])
         _set_template_text(
@@ -3159,7 +3142,14 @@ def _fill_template_deck(
             second_quote.text_frame.margin_top = Inches(0.07)
             second_quote.text_frame.margin_bottom = Inches(0.05)
             quote_shapes.append(second_quote)
-        content_top = 1.08
+        if row.get("causal_engine") != "llm":
+            slide.shapes[5].fill.background()
+            slide.shapes[5].line.fill.background()
+        for metric_shape in (slide.shapes[2], slide.shapes[3], slide.shapes[4]):
+            metric_shape.top += Inches(0.16)
+        slide.shapes[8].top = Inches(1.35)
+        slide.shapes[8].height = Inches(3.34)
+        content_top = 1.35
         for index, quote_shape in enumerate(quote_shapes):
             _, comment_text, _ = comments[index] if index < len(comments) else ("", "", [])
             estimated_lines = max(1, min(3, int(np.ceil(max(len(comment_text), 1) / 82))))
@@ -3183,6 +3173,36 @@ def _fill_template_deck(
     _move_slide(prs, 2, 1)
 
 
+def _layout_report_text(
+    shape: Any, bounds: tuple[float, float, float, float], *, size: float
+) -> None:
+    """Fit editable headings and conclusions into their reserved bands before export."""
+    shape.left, shape.top, shape.width, shape.height = (Inches(value) for value in bounds)
+    lines = shape.text.splitlines()
+    while True:
+        text = "\n".join(
+            _wrap_text_to_width(line, column_width_in=bounds[2] - 0.20, font_size_pt=size)
+            for line in lines
+        )
+        if len(text.splitlines()) * size * 1.10 <= (bounds[3] - 0.05) * 72 or size <= 9:
+            break
+        size -= 0.5
+    _set_template_text(
+        shape,
+        text,
+        size=size,
+        bold=True,
+        color=BBVA_COLORS["ink"],
+        font="Source Serif 4",
+        align=PP_ALIGN.CENTER if shape.name == "Report conclusion" else PP_ALIGN.LEFT,
+    )
+    shape.text_frame.margin_left = shape.text_frame.margin_right = Inches(0.05)
+    shape.text_frame.vertical_anchor = MSO_ANCHOR.TOP
+    for paragraph in shape.text_frame.paragraphs:
+        paragraph.space_before = paragraph.space_after = Pt(0)
+        paragraph.line_spacing = 1.0
+
+
 def _apply_report_branding(prs: Presentation, context: PresentationContext) -> None:
     """Reserve one footer band, then sign every slide without covering evidence."""
     for master in prs.slide_masters:
@@ -3196,45 +3216,47 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
                     footer
                     or shape._element.xpath(".//a:fld[@type='slidenum']")
                     or shape.top >= Inches(5.30)
+                    or (shape.top < Inches(0.90) and shape.height < Inches(1.0))
                 ):
                     shape._element.getparent().remove(shape._element)
     cover = prs.slides[0]
-    banner = cover.shapes.add_shape(
-        MSO_AUTO_SHAPE_TYPE.RECTANGLE, 0, 0, prs.slide_width, Inches(1.13)
+    cover.background.fill.solid()
+    cover.background.fill.fore_color.rgb = _rgb(BBVA_COLORS["blue"])
+    cover.shapes[0].top, cover.shapes[0].height = Inches(1.95), Inches(1.30)
+    cover.shapes[0].text_frame.vertical_anchor = MSO_ANCHOR.TOP
+    scope = cover.shapes[1]
+    scope.left, scope.top, scope.width, scope.height = (
+        Inches(value) for value in (0.38, 3.33, 6.20, 1.05)
     )
-    banner.fill.solid()
-    banner.fill.fore_color.rgb = _rgb(BBVA_COLORS["ink"])
-    banner.line.fill.background()
-    logo = cover.shapes.add_picture(
-        str(BRAND_ASSETS / "bbva-bei.png"), Inches(0.38), Inches(0.16), height=Inches(0.82)
-    )
-    logo.name = BRAND["name"]
-    label = cover.shapes.add_textbox(Inches(6.65), Inches(0.40), Inches(2.95), Inches(0.32))
-    _set_template_text(
-        label,
-        "NPS Lens · " + BRAND["initiative"],
-        size=18,
-        bold=True,
-        color="FFFFFF",
-        font=BRAND["font"],
-        align=PP_ALIGN.RIGHT,
-    )
+    scope.text_frame.vertical_anchor = MSO_ANCHOR.TOP
     for index, slide in enumerate(prs.slides):
         footer_color = "FFFFFF" if index == 0 else BBVA_COLORS["ink"]
+        logo = slide.shapes.add_picture(
+            str(BRAND_ASSETS / ("bbva-bei-dark.png" if index else "bbva-bei.png")),
+            Inches(8.42 if index else 0.38),
+            Inches(0.24 if index else 0.25),
+            width=Inches(1.20 if index else 2.30),
+        )
+        logo.name = BRAND["name"]
+        logo._element.nvPicPr.cNvPr.set("descr", BRAND["name"])
         if index:
-            callout_index = (3, 4, 3, 6, 7)[index - 1] if index < 6 else 9
-            callout = slide.shapes[callout_index]
-            callout.top = Inches(4.80 if index >= 6 else 4.95)
-            callout.height = Inches(0.50 if index >= 6 else 0.38)
+            elements = {shape.name: shape for shape in slide.shapes}
+            _layout_report_text(elements["Report title"], (0.38, 0.24, 7.80, 0.92), size=22)
+            _layout_report_text(elements["Report conclusion"], (0.38, 4.91, 9.24, 0.39), size=10)
         wordmark = slide.shapes.add_picture(
             str(BRAND_ASSETS / "bia.png"),
-            Inches(0.38),
-            Inches(5.34),
-            width=Inches(0.45),
+            Inches(0.38 if index else 8.67),
+            Inches(5.34 if index else 0.25),
+            width=Inches(0.45 if index else 0.95),
         )
         wordmark.name = BRAND["initiative"]
         wordmark._element.nvPicPr.cNvPr.set("descr", BRAND["initiative_name"])
-        signature = slide.shapes.add_textbox(Inches(0.93), Inches(5.37), Inches(1.98), Inches(0.23))
+        signature = slide.shapes.add_textbox(
+            *(
+                Inches(value)
+                for value in ((0.93, 5.37, 1.98, 0.23) if index else (7.64, 0.91, 1.98, 0.28))
+            )
+        )
         signature.name = "bIA initiative credit"
         _set_template_text(
             signature,
@@ -3242,6 +3264,7 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
             size=6.8,
             color=footer_color,
             font=BRAND["font"],
+            align=PP_ALIGN.LEFT if index else PP_ALIGN.RIGHT,
         )
         footer = slide.shapes[0] if index >= 6 else slide.shapes.add_textbox(0, 0, 0, 0)
         footer.left, footer.top, footer.width, footer.height = (

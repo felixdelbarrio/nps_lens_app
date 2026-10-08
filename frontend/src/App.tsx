@@ -329,7 +329,7 @@ export function App() {
 
   useEffect(() => {
     if (!monthOptions.includes(popMonth)) {
-      setPopMonth(monthOptions.includes("Todos") ? "Todos" : getLatestAvailableMonth(monthOptions));
+      setPopMonth(getLatestAvailableMonth(monthOptions));
     }
   }, [monthOptions, popMonth]);
 

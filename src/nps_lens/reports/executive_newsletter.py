@@ -203,7 +203,7 @@ def build_executive_newsletter(
             (
                 item
                 for item in connections
-                if _normalized(item["anchor_topic"].split(" > ")[0])
+                if _normalized(str(item["anchor_topic"]).split(" > ")[0])
                 == _normalized(primary["label"])
             ),
             None,

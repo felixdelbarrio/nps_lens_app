@@ -8,6 +8,7 @@ from base64 import b64encode
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -24,6 +25,10 @@ def main():
     assets = ROOT / "frontend/public/assets/brand"
     BRAND_ASSETS.mkdir(parents=True, exist_ok=True)
     (BRAND_ASSETS / "bbva-bei.png").write_bytes((assets / "bbva-bei.png").read_bytes())
+    with Image.open(assets / "bbva-bei.png") as logo:
+        dark = Image.new("RGBA", logo.size, "#070e46")
+        dark.putalpha(logo.convert("RGBA").getchannel("A"))
+        dark.save(BRAND_ASSETS / "bbva-bei-dark.png", optimize=True)
     subprocess.run(
         [
             "node",

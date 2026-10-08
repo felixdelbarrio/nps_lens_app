@@ -446,7 +446,7 @@ def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
     )
     cards = object.__new__(DashboardService)._build_linking_scenario_cards(payload["attribution"])
     slide = Presentation(BytesIO(out.content)).slides[6]
-    assert cards[0]["title"] == slide.shapes[1].text
+    assert cards[0]["title"] == " ".join(slide.shapes[1].text.split())
     assert cards[0]["title"] == (
         f"{payload['attribution'].iloc[0]['nps_topic']}: validar el teléfono para activar el token → la validación del teléfono no se completa"
     )
