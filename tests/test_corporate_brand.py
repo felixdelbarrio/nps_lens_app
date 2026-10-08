@@ -52,6 +52,14 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
             for shape in slide.shapes:
                 assert shape.left + shape.width <= deck.slide_width
                 assert shape.top + shape.height <= deck.slide_height
+            if not index:
+                corporate = next(shape for shape in slide.shapes if shape.name == BRAND["name"])
+                initiative = next(shape for shape in slide.shapes if shape.name == "bIA")
+                title, scope = slide.shapes[0], slide.shapes[1]
+                assert corporate.left == Inches(0.38)
+                assert initiative.left > Inches(8)
+                assert corporate.top == initiative.top == Inches(0.25)
+                assert scope.top == title.top + title.height + Inches(0.08)
             if index:
                 callout = next(shape for shape in slide.shapes if shape.name == "Report conclusion")
                 title = next(shape for shape in slide.shapes if shape.name == "Report title")

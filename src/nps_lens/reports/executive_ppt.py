@@ -3142,6 +3142,9 @@ def _fill_template_deck(
             second_quote.text_frame.margin_top = Inches(0.07)
             second_quote.text_frame.margin_bottom = Inches(0.05)
             quote_shapes.append(second_quote)
+        for unused_quote in quote_shapes[len(comments) :]:
+            unused_quote._element.getparent().remove(unused_quote._element)
+        quote_shapes = quote_shapes[: len(comments)]
         if row.get("causal_engine") != "llm":
             slide.shapes[5].fill.background()
             slide.shapes[5].line.fill.background()
