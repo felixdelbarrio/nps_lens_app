@@ -64,6 +64,9 @@ def exported(path):
 def exchange_fixture(tmp_path, monkeypatch):
     # Settings.from_env() intentionally requires an explicit service-origin hierarchy.
     # Keep this shared fixture hermetic instead of relying on a developer/CI .env.
+    monkeypatch.setenv("NPS_LENS_SINGLE_ZIP_ENABLED", "false")
+    monkeypatch.setenv("NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL", "")
+    monkeypatch.setenv("NPS_LENS_HELIX_SINGLE_ZIP_URL", "")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "Bank")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"Bank":["Web"]}')
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "Bank")
@@ -638,4 +641,104 @@ def test_semantic_catalog_keeps_large_original_and_manual_category_sets(exchange
     assert exported_zip.status_code == 200, exported_zip.text
     assert (
         exported(exported_zip.json()["saved_path"])["manifest.json"]["taxonomy_mode"] == "COMPLETED"
+    )
+
+
+def test_single_zip_configuration_is_global_persistent_and_has_separate_routes(
+    exchange, monkeypatch
+):
+    _, _, _, client = exchange
+    env_keys = [
+        "NPS_LENS_SINGLE_ZIP_ENABLED",
+        "NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL",
+        "NPS_LENS_HELIX_SINGLE_ZIP_URL",
+    ]
+    for key in env_keys:
+        monkeypatch.delenv(key, raising=False)
+    original = client.get("/api/taxonomy/discovery").json()
+    assert original["single_zip_enabled"] is False
+    assert original["classifier_single_zip_url"] == original["helix_single_zip_url"] == ""
+    updated = client.put(
+        "/api/taxonomy/discovery",
+        json={
+            "single_zip_enabled": True,
+            "classifier_single_zip_url": "https://chatgpt.com/g/comments-single",
+            "helix_single_zip_url": "https://chatgpt.com/g/helix-single",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["classifier_url"] == original["classifier_url"]
+    settings = Settings.from_env()
+    assert settings.single_zip_enabled is True
+    assert settings.classifier_single_zip_url == "https://chatgpt.com/g/comments-single"
+    assert settings.helix_single_zip_url == "https://chatgpt.com/g/helix-single"
+    assert (
+        client.put(
+            "/api/taxonomy/discovery",
+            json={"classifier_single_zip_url": "https://example.com/g/test"},
+        ).status_code
+        == 400
+    )
+    cleared = client.put(
+        "/api/taxonomy/discovery",
+        json={"single_zip_enabled": False, "classifier_single_zip_url": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["classifier_single_zip_url"] == ""
+    assert cleared.json()["single_zip_enabled"] is False
+
+
+def test_api_classifier_export_uses_single_zip_preference(exchange):
+    _, _, frame, client = exchange
+    frame["Palanca"] = "Atención"
+    frame["Subpalanca"] = "Resolución"
+    params = {"service_origin": "Bank", "service_origin_n1": "Web"}
+    assert (
+        client.put("/api/taxonomy/discovery", json={"single_zip_enabled": True}).status_code == 200
+    )
+    response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["single_zip"] is True
+    assert len(payload["saved_paths"]) == 1
+    assert (
+        len(exported(payload["saved_paths"][0])["manifest.json"]["batches"]) == payload["batches"]
+    )
+
+
+def test_api_helix_export_uses_single_zip_preference_without_recalculating_analytics(
+    exchange, monkeypatch
+):
+    from unittest.mock import Mock
+
+    _, _, frame, client = exchange
+    frame["Palanca"] = "Atención"
+    frame["Subpalanca"] = "Resolución"
+    frame["Fecha"] = pd.Timestamp("2026-09-01")
+    dashboard = client.app.state.dashboard_service
+    monkeypatch.setattr(dashboard, "_load_nps_df", lambda ctx: frame)
+    monkeypatch.setattr(
+        dashboard,
+        "_load_helix_df",
+        lambda ctx: pd.DataFrame(
+            {
+                "Incident Number": [f"INC-{i}" for i in range(405)],
+                "Detailed Description": "Mismo texto",
+                "Submit Date": pd.Timestamp("2026-09-01"),
+            }
+        ),
+    )
+    clear = Mock()
+    monkeypatch.setattr(dashboard, "clear_caches", clear)
+    assert (
+        client.put("/api/taxonomy/discovery", json={"single_zip_enabled": True}).status_code == 200
+    )
+    clear.assert_not_called()
+    result = client.post("/api/taxonomy/helix/export", params={"service_origin": "Bank"})
+    assert result.status_code == 200, result.json()
+    assert result.json()["single_zip"] is True
+    assert len(result.json()["saved_paths"]) == 1
+    assert (
+        len(exported(result.json()["saved_paths"][0])["manifest.json"]["batches"])
+        == result.json()["batches"]
     )

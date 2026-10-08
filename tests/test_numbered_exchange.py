@@ -39,9 +39,11 @@ def numbered(request, exchange, monkeypatch):
     if kind == "helix":
         handler = HelixExchange(handler.taxonomy, handler.downloads)
 
-    def export():
+    def export(single_zip=False):
         return handler.export(
-            ctx, "classifier" if kind == "classifier" else handler.inputs(ctx, incidents, "SOURCE")
+            ctx,
+            "classifier" if kind == "classifier" else handler.inputs(ctx, incidents, "SOURCE"),
+            single_zip=single_zip,
         )
 
     def response(path):
@@ -158,6 +160,93 @@ def test_failed_series_write_leaves_no_partial_download_or_registered_job(number
     monkeypatch.setattr(taxonomy_exchange, "persist_download", fail_second)
     with pytest.raises(OSError, match="Disco lleno"):
         export()
+    assert list(handler.downloads.iterdir()) == []
+    table = "taxonomy_exchange" if kind == "classifier" else "helix_exchange"
+    with handler.repository._connect() as db:
+        assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_single_zip_partial_delivery_restart_and_mode_switch_preserve_semantics(numbered):
+    import zipfile
+
+    from nps_lens.services.taxonomy_exchange import read_zip
+    from nps_lens.services.taxonomy_prompts import PROJECT_INSTRUCTIONS
+
+    kind, _, export, response, receive, restart = numbered
+    numbered_export = export()
+    result = export(single_zip=True)
+    assert result["single_zip"] is True
+    assert len(result["saved_paths"]) == 1 and result["batches"] == 5
+    source = exported(result["saved_paths"][0])
+    before = exported(numbered_export["saved_paths"])
+    for name, payload in before.items():
+        if name == "manifest.json":
+            assert {k: v for k, v in payload.items() if k != "job_id"} == {
+                k: v for k, v in source[name].items() if k != "job_id"
+            }
+        else:
+            assert source[name] == payload
+    with zipfile.ZipFile(result["saved_paths"][0]) as archive:
+        assert (
+            archive.read("INSTRUCCIONES.txt").decode() == PROJECT_INSTRUCTIONS[f"{kind}_single_zip"]
+        )
+    complete = read_zip(response(result["saved_paths"][0]))
+    manifest = complete["manifest.json"]
+    for index in [4, 1, 0, 3, 2]:
+        restart()
+        key = f"results/{index + 1:06d}.json"
+        partial = zipped({"manifest.json": manifest, key: complete[key]})
+        status = receive(partial)
+        assert receive(partial) == status
+        if index == 4:
+            # Re-export after restart excludes finished rows, even when switching mode.
+            resumed = export(single_zip=True)
+            assert resumed["batches"] == 4
+            field = "comments" if kind == "classifier" else "incidents"
+            identity = "Comment" if kind == "classifier" else "id"
+            sent = {
+                row[identity]
+                for name, payload in exported(resumed["saved_paths"][0]).items()
+                if name.startswith(f"{field}/")
+                for row in payload[field]
+            }
+            assert not sent.intersection(
+                row[identity] for row in source[f"{field}/000005.json"][field]
+            )
+    progress = status["progress"] if kind == "classifier" else status
+    assert progress["received"] == 9 and progress["pending"] == 0
+    assert export(single_zip=True)["saved_paths"] == []
+    assert export()["saved_paths"] == []
+
+
+def test_single_zip_rejects_altered_partial_manifest_and_unknown_batch(numbered):
+    from nps_lens.services.taxonomy_exchange import read_zip
+
+    _, _, export, response, receive, _ = numbered
+    package = export(single_zip=True)
+    files = read_zip(response(package["saved_paths"][0]))
+    altered = copy.deepcopy(files["manifest.json"])
+    altered["batches"][0]["sha256"] = "altered"
+    with pytest.raises(ValueError, match="manifiesto"):
+        receive(
+            zipped({"manifest.json": altered, "results/000001.json": files["results/000001.json"]})
+        )
+    with pytest.raises(ValueError, match="desconocido|esperado"):
+        receive(
+            zipped(
+                {
+                    "manifest.json": files["manifest.json"],
+                    "results/999999.json": files["results/000001.json"],
+                }
+            )
+        )
+
+
+def test_single_zip_limit_failure_is_atomic(numbered, monkeypatch):
+    kind, handler, export, _, _, _ = numbered
+    monkeypatch.setattr("nps_lens.services.taxonomy_exchange.MAX_EXPANDED_BYTES", 1)
+    with pytest.raises(ValueError, match="límites"):
+        export(single_zip=True)
     assert list(handler.downloads.iterdir()) == []
     table = "taxonomy_exchange" if kind == "classifier" else "helix_exchange"
     with handler.repository._connect() as db:

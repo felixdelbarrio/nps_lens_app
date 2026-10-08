@@ -431,18 +431,11 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                     <article className="scenario-fact-sheet">
                       <h4>{linkedCountHeading(Number(activeCard.linked_comments ?? activeVocRecords.length), "comentario enlazado", "comentarios enlazados")}</h4>
                       <div className="evidence-pill-row">
-                        {activeVocRecords.length ? (
-                          activeVocRecords.slice(0, 6).map((record, index) => (
-                            <span
-                              className="evidence-pill"
-                              key={`${asString(record.comment_id, `VOC-${index + 1}`)}-${index}`}
-                            >
-                              {asString(record.comment_id, `VOC-${index + 1}`)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="secondary-copy">Sin comentarios visibles para este escenario.</span>
-                        )}
+                        {asRows(activeCard.score_distribution).map((bucket) => (
+                          <span className="evidence-pill" key={asString(bucket.score, "missing")}>
+                            {asString(bucket.label)}
+                          </span>
+                        ))}
                       </div>
                     </article>
                   </div>
@@ -452,7 +445,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
                   {spotlightMetrics.map((metric, index) => (
                     <article className="spotlight-metric" key={`spotlight-metric-${index}`}>
                       <span>{asString(metric.label)}</span>
-                      <strong>{displayValue(metric.value, asString(metric.label))}</strong>
+                      <strong>{asString(metric.value, "—")}</strong>
                     </article>
                   ))}
                 </div>

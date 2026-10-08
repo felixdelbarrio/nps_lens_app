@@ -14,6 +14,7 @@ from nps_lens.analytics.causal_evidence import (
     CausalEvidenceEvaluator,
     engine_quality,
     link_confidence_label,
+    linked_comment_metrics,
     scenario_impact_score,
 )
 from nps_lens.analytics.evidence_highlights import evidence_segments
@@ -162,6 +163,7 @@ CHAIN_COLUMNS = [
     "avg_text_similarity",
     "avg_semantic_confidence",
     "avg_nps",
+    "score_distribution",
     "focus_rate_high_incidence",
     "incident_records",
     "incident_examples",
@@ -991,12 +993,10 @@ def build_broken_journey_catalog(
         label = label.strip() or "Journey roto sin etiqueta"
         linked_pairs = int(len(grp[["incident_id", "nps_id"]].drop_duplicates()))
         linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
-        linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
+        score_metrics = linked_comment_metrics(grp)
+        linked_comments = score_metrics["linked_comments"]
         avg_text_similarity = _safe_float(grp["text_similarity"].mean(), default=0.0)
-        avg_nps = _safe_float(
-            pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
-            default=np.nan,
-        )
+        avg_nps = _safe_float(score_metrics["avg_score"], default=np.nan)
         keyword_text = ", ".join(_broken_journey_title_case(word) for word in keywords[:4])
         cluster_rows.append(
             {
@@ -1717,13 +1717,8 @@ def build_incident_attribution_chains(
             grp.get("incident_rate_per_100_responses", pd.Series([np.nan])).max(),
             default=np.nan,
         )
-        avg_nps = _safe_float(
-            pd.to_numeric(grp.drop_duplicates("nps_id")["nps_score"], errors="coerce").mean(),
-            default=np.nan,
-        )
         avg_text_similarity = _safe_float(grp["text_similarity"].mean(), default=0.0)
         linked_incidents = int(grp["incident_id"].astype(str).str.strip().nunique())
-        linked_comments = int(grp["nps_id"].astype(str).str.strip().nunique())
         incidents_total = _safe_float(
             grp.get("incidents", pd.Series([linked_incidents])).max(),
             default=float(linked_incidents),
@@ -1747,6 +1742,8 @@ def build_incident_attribution_chains(
                 int(grp["causal_window_days"].iloc[0]) if "causal_window_days" in grp else 90
             )
         ).evaluate_scenario(grp)
+        avg_nps = _safe_float(evidence["avg_score"], default=np.nan)
+        linked_comments = evidence["linked_comments"]
         engine = (
             "llm" if "causal_engine" in grp and grp["causal_engine"].eq("llm").all() else "rules"
         )

@@ -89,3 +89,22 @@ it("uses server confidence labels without changing the existing table payload", 
   expect(screen.getByText("90,0%")).toBeInTheDocument();
   expect(table[0]["Similitud textual"]).toBe("90%");
 });
+
+it("shows the complete server score distribution instead of IDs or sample counts", () => {
+  const cards = payload.scenarios?.cards as Array<Record<string, unknown>>;
+  const linking = { ...payload, scenarios: { cards: [{
+    ...cards[0], linked_comments: 4,
+    score_distribution: [
+      { score: 0, count: 3, label: "Score 0 : 3 comentarios" },
+      { score: 1, count: 1, label: "Score 1 : 1 comentario" }
+    ],
+    comment_records: [{ comment_id: "private-id", nps: "0", comment: "No puedo acceder" }],
+    spotlight_metrics: [{label:"NOTA MEDIA DE COMENTARIOS ENLAZADOS",value:"0,25"}]
+  }] } };
+  render(<LinkingWorkspace linking={linking} tab="scenarios" onTabChange={() => {}} />);
+  const overview = screen.getByRole("heading", {name:"4 comentarios enlazados"}).closest("article")!;
+  expect(within(overview).getByText("Score 0 : 3 comentarios")).toBeInTheDocument();
+  expect(within(overview).getByText("Score 1 : 1 comentario")).toBeInTheDocument();
+  expect(within(overview).queryByText("private-id")).not.toBeInTheDocument();
+  expect(screen.getByText("0,25")).toBeInTheDocument();
+});

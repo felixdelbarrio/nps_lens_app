@@ -13,6 +13,7 @@ import pandas as pd
 
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, temporal_mask
 from nps_lens.analytics.signal_quality import is_reserve_category
+from nps_lens.core.nps_math import valid_nps_scores
 
 EVIDENCE_COPY = {
     "SIN_EVIDENCIA": ("Sin evidencia", "No hay vínculo defendible."),
@@ -45,6 +46,41 @@ def number(value: Any, default: float = 0.0) -> float:
         return result if math.isfinite(result) else default
     except (TypeError, ValueError):
         return default
+
+
+def linked_comment_metrics(links: pd.DataFrame) -> dict[str, Any]:
+    """Count each response once; frequency-weight scores across the entire scenario."""
+    unique = links[["nps_id", "nps_score"]].drop_duplicates("nps_id")
+    scores = valid_nps_scores(unique["nps_score"])
+    counts = scores.dropna().astype(int).value_counts(sort=False).sort_index()
+    scored = int(counts.sum())
+    distribution = [
+        {
+            "score": int(score),
+            "count": int(count),
+            "label": f"Score {score} : {count} {'comentario' if count == 1 else 'comentarios'}",
+        }
+        for score, count in counts.items()
+    ]
+    missing = len(unique) - scored
+    if missing:
+        distribution.append(
+            {
+                "score": None,
+                "count": missing,
+                "label": f"Sin score : {missing} {'comentario' if missing == 1 else 'comentarios'}",
+            }
+        )
+    return {
+        "linked_comments": len(unique),
+        "score_distribution": distribution,
+        "avg_score": (
+            sum(int(score) * int(count) for score, count in counts.items()) / scored
+            if scored
+            else None
+        ),
+        "detractor_rate": int(counts.loc[counts.index <= 6].sum()) / scored if scored else 0.0,
+    }
 
 
 def engine_quality(row: Mapping[str, Any]) -> float:
@@ -164,18 +200,8 @@ class CausalEvidenceEvaluator:
 
     def evaluate_scenario(self, links: pd.DataFrame) -> dict[str, Any]:
         pairs = links.drop_duplicates(["nps_id", "incident_id"])
-        unique = pairs.drop_duplicates("nps_id")
-        scores = (
-            pd.to_numeric(unique["nps_score"], errors="coerce")
-            .where(lambda s: s.between(0, 10))
-            .dropna()
-        )
-        metrics = {
-            "linked_comments": len(unique),
-            "linked_incidents": pairs.incident_id.nunique(),
-            "avg_score": float(scores.mean()) if len(scores) else None,
-            "detractor_rate": float(scores.le(6).mean()) if len(scores) else 0.0,
-        }
+        score_metrics = linked_comment_metrics(pairs)
+        metrics = {**score_metrics, "linked_incidents": pairs.incident_id.nunique()}
         evaluated = [self.evaluate({**row, **metrics}) for row in pairs.to_dict("records")]
         # A heterogeneous scenario cannot inherit its strongest pair's assertion.
         strength = {
@@ -191,8 +217,7 @@ class CausalEvidenceEvaluator:
             else self.evaluate({})
         )
         evidence["warnings"] = list(dict.fromkeys(w for e in evaluated for w in e["warnings"]))
-        evidence["detractor_rate"] = metrics["detractor_rate"]
-        evidence["avg_score"] = metrics["avg_score"]
+        evidence.update(score_metrics)
         evidence["quote_coverage"] = sum(
             all(
                 isinstance(r.get(key), str) and bool(r[key].strip())

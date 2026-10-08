@@ -61,6 +61,13 @@ NPS↔Helix]
 - **Taxonomy Studio** utiliza tres proyectos GPT mediante archivos: Crea Taxonomía,
   Clasifica taxonomía y Helix Classifier. Sus URLs se editan en la aplicación y se
   guardan al salir del campo. Consulta [el flujo de la iteración 28](docs/iteration28.md).
+  En Configuración → ZIP único con progreso y reanudación puedes activar un paquete
+  por trabajo. Configura las dos rutas nuevas (vacías por defecto) y copia sus
+  instrucciones a los proyectos de comentarios e incidencias. ChatGPT entrega un
+  lote completo por turno y espera «Sí» para continuar; importa cada ZIP parcial.
+  Conserva el original y las entregas para reanudar en otro chat. Al exportar de
+  nuevo, NPS Lens incluye solo pendientes. Desactivado mantiene los ZIP numerados.
+  Los criterios, fingerprints y validaciones de importación son iguales en ambos modos.
 
 - **Python 3.12.14** (entorno corporativo)
 - `make` (macOS / Linux)

@@ -186,6 +186,10 @@ class TaxonomySettingsRequest(BaseModel):
 
 
 class TaxonomyDiscoverySettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    single_zip_enabled: Optional[bool] = None
+    classifier_single_zip_url: Optional[str] = None
+    helix_single_zip_url: Optional[str] = None
     normalizer_url: Optional[str] = None
     semantic_url: Optional[str] = None
     designer_url: Optional[str] = None

@@ -157,6 +157,7 @@ tests/test_ui_business_periods.py
 tests/test_ui_charts.py
 tests/test_ui_population.py
 tests/test_upload_service.py
+tests/test_webapp_evolution_runtime.py
 tests/test_webapp_linking_diagnostics.py
 tests/test_webapp_parity.py
 tests/test_webapp_publication.py
