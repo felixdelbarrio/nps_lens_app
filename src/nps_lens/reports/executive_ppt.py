@@ -1913,7 +1913,12 @@ def _build_dimension_view_model(
     topic_source = current_source_period if not current_source_period.empty else selected_raw
     topic_keys = topics_observed_in_channel(topic_source, dimension, topic_channel)
     selected_raw = restrict_to_topics(selected_raw, dimension, topic_keys)
-    gaps = nps_gaps(current_source_period, baseline_source_period, dimension, channel=topic_channel)
+    gaps = nps_gaps(
+        gap_population.current if gap_population else current_source_period,
+        gap_population.baseline if gap_population else baseline_source_period,
+        dimension,
+        channel=topic_channel,
+    )
     current_source_period = restrict_to_topics(current_source_period, dimension, topic_keys)
     gap_table = select_negative_gap_rows(gaps.rows, max_rows=EDITORIAL_LIMITS.max_change_rows)
     gap_figure = _build_gap_figure(gaps.rows, panel_height_in=2.58)
