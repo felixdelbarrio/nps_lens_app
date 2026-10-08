@@ -10,6 +10,7 @@ from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.channel_topic_scope import restrict_to_topics, topics_observed_in_channel
 from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
+from nps_lens.design.brand import BRAND
 from nps_lens.domain.comment_text import is_nonspecific_content
 from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.reports.coherence import validate_metric_payload
@@ -225,7 +226,9 @@ def build_executive_newsletter(
         )
 
     return {
-        "brand": "BBVA BANCA DE EMPRESAS E INSTITUCIONES",
+        "brand": BRAND["name"],
+        "initiative": BRAND["initiative"],
+        "initiative_name": BRAND["initiative_name"],
         "product": "NPS Lens",
         "promise": "La voz del cliente conectada con la operación",
         "period": _period_label(period_start, period_end),

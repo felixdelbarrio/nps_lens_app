@@ -1,3 +1,5 @@
+import { BRAND } from "./brand";
+import "./brand.css";
 import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
@@ -1720,11 +1722,15 @@ export function App() {
       <main className="app-shell">
         <aside className="app-sidebar">
           <div className="brand-card">
-            <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
+            <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt={BRAND.name} />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
               Banca de Empresas e Instituciones · NPS e incidencias relacionadas.
             </p>
+            <div className="initiative-signature">
+              <img src="/assets/brand/bia-light.svg" alt={BRAND.initiative} />
+              <div><span>{BRAND.initiative_credit}</span><strong>{BRAND.initiative_name}</strong></div>
+            </div>
           </div>
 
           {renderServiceContainer()}

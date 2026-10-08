@@ -8,7 +8,7 @@ def test_saved_visibility_controls_newsletter_content_and_presentation():
     root = Path("webapp/apps-script")
     source = "\n".join(
         (root / name).read_text()
-        for name in ("10_Publication.gs", "30_Administration.gs", "40_Newsletter.gs")
+        for name in ("00_Brand.gs", "10_Publication.gs", "30_Administration.gs", "40_Newsletter.gs")
     )
     script = (
         r"""
@@ -28,6 +28,8 @@ const Utilities = {
 let delivered;
 const Gmail = {Users:{Messages:{send:message=>{
   const mime=Buffer.from(message.raw,'base64url').toString();
+  const subject=Buffer.from(mime.match(/Subject: =\?UTF-8\?B\?([^?]+)\?=/)[1],'base64').toString();
+  assert.ok(subject.startsWith('[bIA]'));
   delivered=[...mime.matchAll(/Content-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/g)]
     .map(match=>Buffer.from(match[1],'base64').toString());
   return {id:'accepted'};
@@ -60,6 +62,8 @@ for(const visible of [false,true,false]){
       assert.ok(content.includes(signal.label));
       assert.ok(content.includes(signal.reason));
     }
+    assert.ok(content.includes('bIA'));
+    assert.ok(content.includes('Banca Inteligente y Autónoma'));
     assert.ok(content.includes('La página es lenta'));
     assert.ok(content.includes('Incidencias recurrentes'));
     assert.ok(content.includes(saved.reportUrl));

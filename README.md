@@ -172,3 +172,7 @@ Si te aporta valor (o lo estás usando en producción), puedes apoyar el manteni
 ## Licencia
 
 Define la licencia del repo en `LICENSE` (si aplica). En entornos corporativos suele ser privada.
+
+### Identidad corporativa
+
+La App, la WebApp, el PPT y la newsletter comparten la identidad BBVA Banca de Empresas e Instituciones y la firma bIA (Banca Inteligente y Autónoma). Las definiciones y los estilos de la firma están en `src/nps_lens/design/brand.py`. Para regenerar los recursos, instala las dependencias de build y ejecuta `python scripts/prepare_brand.py`. Las fuentes web se sirven en WOFF2; el PPT conserva el dibujo de la firma sin depender de las fuentes instaladas en el equipo receptor.

@@ -1,6 +1,6 @@
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Book.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Book.woff2") format("woff2");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
@@ -8,7 +8,7 @@
 
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Medium.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Medium.woff2") format("woff2");
   font-style: normal;
   font-weight: 500;
   font-display: swap;
@@ -16,7 +16,7 @@
 
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Bold.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Bold.woff2") format("woff2");
   font-style: normal;
   font-weight: 700;
   font-display: swap;
@@ -351,6 +351,7 @@ textarea:focus-visible {
 
 .brand-card::after {
   content: "";
+  opacity: .18;
   position: absolute;
   inset: auto -36px -44px auto;
   width: 132px;

@@ -33,3 +33,5 @@ Las páginas de Datos priorizan la identidad y el estado `match_status` de NPS, 
 El método publicado sigue siendo inmutable: las nuevas ediciones usan la preferencia local (por defecto `broken_journeys`), y `executive_journeys` continúa disponible cuando se publica expresamente. No se reclasifican las ediciones existentes.
 
 Para aplicar los cambios en Google Apps Script, actualizar `App.html` y volver a desplegar. Para incorporar los datos corregidos y su trazabilidad, generar e importar un ZIP nuevo desde la aplicación local; actualizar el HTML no reprocesa snapshots antiguos. El contrato aditivo sigue siendo `5.0`.
+
+La identidad corporativa y la firma bIA se definen en `src/nps_lens/design/brand.py`. `python scripts/prepare_brand.py` genera las fuentes WOFF2, las firmas, `BrandIdentity.html`, `00_Brand.gs` y los recursos de frontend desde esa fuente común (dependencias de build). Al actualizar la WebApp, incluye también estos archivos generados. El asunto de todos los envíos, incluidas las pruebas, comienza por `[bIA]`.

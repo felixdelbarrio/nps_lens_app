@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from nps_lens.design.brand import BRAND, EMAIL_SIGNATURE
 from nps_lens.domain.privacy import redact_public_payload
 
 MAX_PUBLICATION_BYTES = 30 * 1024 * 1024
@@ -166,7 +167,7 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <td class="email-shell-padding" align="center" style="padding:24px 10px">
 <table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff">
 <tr><td class="email-hero" style="background:#071b9c;color:#fff;padding:34px 38px">
-<div style="font-size:11px;letter-spacing:1px">{esc(model.get("brand") or "BBVA Banca de Empresas e Instituciones")}</div>
+<div style="font-size:11px;letter-spacing:1px">{esc(model.get("brand") or BRAND["name"])}</div>
 <h1 class="email-title" style="margin:22px 0 5px;font:700 42px Georgia,serif">{esc(model.get("product") or "NPS Lens")}</h1>
 <div>{esc(model.get("promise") or "La voz del cliente conectada con la operación")}</div></td></tr>
 <tr><td class="email-body" style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">Lectura de 30 segundos · {esc(model.get("period") or "Periodo actualizado")}</div>
@@ -177,7 +178,7 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">Señales a vigilar</h2><table role="presentation" width="100%">{signals_html}</table>
 <p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #d3d8e0">
 <a href="{report_href}" title="Abrir presentación ejecutiva" style="display:inline-block;background:#001391;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Ver análisis completo</a>
-<a href="WEBAPP_URL" style="display:inline-block;background:#004481;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Explorar NPS Lens</a></p></td></tr>
+<a href="WEBAPP_URL" style="display:inline-block;background:#004481;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Explorar NPS Lens</a></p>{EMAIL_SIGNATURE}</td></tr>
 </table></td></tr></table></body></html>""".encode(
         "utf-8"
     )

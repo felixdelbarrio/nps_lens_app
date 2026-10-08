@@ -69,7 +69,7 @@ function getNewsletterWorkspace() {
 
 function _newsletterSubject_(publication) {
   const monthNames = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
-  return 'NPS e incidencias relacionadas - ' + publication.ownerSupportCompany +
+  return BRAND.newsletter_prefix + ' NPS e incidencias relacionadas - ' + publication.ownerSupportCompany +
     ' - ' + publication.year + ' ' + (monthNames[publication.month] || publication.month) + ' - ' + publication.causalMethodLabel;
 }
 
@@ -135,12 +135,12 @@ function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps) {
     '<small style="color:#004481;text-transform:uppercase">Lectura de 30 segundos · ' + e(insight.period) + '</small>' + headline + metrics +
     '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>' + quotes + '</tr></table>' +
     '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">Señales a vigilar</h2><table role="presentation" width="100%">' + signals + '</table>' +
-    '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p></td></tr></table></td></tr></table></body></html>';
+    '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p>' + BRAND.email_signature + '</td></tr></table></td></tr></table></body></html>';
 }
 
 function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps) {
   const content = _newsletterContent_(insight, showEvolutionNps);
-  const lines = [insight.brand, insight.product, insight.promise, insight.period];
+  const lines = [insight.brand, insight.product, insight.promise, insight.period, '', BRAND.initiative_credit + ' ' + BRAND.initiative + ' · ' + BRAND.initiative_name];
   if (content.headline) lines.push('', content.headline, content.lead);
   if ((content.scorecard || []).length) lines.push('', 'INDICADORES');
   (content.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
@@ -209,7 +209,7 @@ function testNewsletter() {
   _assertAdmin_(viewer);
   const publication = _selectedPublication_();
   if (!publication) throw new Error('Selecciona primero un ámbito.');
-  return _sendNewsletterTo_([viewer.email], '[PRUEBA] ' + _newsletterSubject_(publication), publication);
+  return _sendNewsletterTo_([viewer.email], _newsletterSubject_(publication) + ' [PRUEBA]', publication);
 }
 
 function sendNewsletter() {

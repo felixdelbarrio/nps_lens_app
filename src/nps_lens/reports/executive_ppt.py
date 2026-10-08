@@ -37,6 +37,7 @@ from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
 from nps_lens.analytics.text_mining import summarize_taxonomy
 from nps_lens.core.nps_math import valid_nps_scores
+from nps_lens.design.brand import BRAND, BRAND_ASSETS
 from nps_lens.design.tokens import (
     DesignTokens,
     bbva_typography_tokens,
@@ -3073,19 +3074,6 @@ def _fill_template_deck(
             color=BBVA_COLORS["ink"],
             font="Source Serif 4",
         )
-        slide.shapes[0].left = Inches(0.38)
-        slide.shapes[0].top = Inches(5.47)
-        slide.shapes[0].width = Inches(9.37)
-        slide.shapes[0].height = Inches(0.15)
-        slide.shapes[0].text_frame.margin_top = 0
-        slide.shapes[0].text_frame.margin_bottom = 0
-        _set_template_text(
-            slide.shapes[0],
-            f"VoC: {context.period_label} · Canal: {context.causal.channel} · {7 + offset}",
-            size=8,
-            color=BBVA_COLORS["ink"],
-            align=PP_ALIGN.RIGHT,
-        )
         _set_template_text(
             slide.shapes[4],
             "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
@@ -3195,6 +3183,95 @@ def _fill_template_deck(
     _move_slide(prs, 2, 1)
 
 
+def _apply_report_branding(prs: Presentation, context: PresentationContext) -> None:
+    """Reserve one footer band, then sign every slide without covering evidence."""
+    for master in prs.slide_masters:
+        for template in (master, *master.slide_layouts):
+            for shape in list(template.shapes):
+                footer = any(
+                    placeholder.get("type") in {"sldNum", "ftr", "dt"}
+                    for placeholder in shape._element.xpath(".//p:ph")
+                )
+                if (
+                    footer
+                    or shape._element.xpath(".//a:fld[@type='slidenum']")
+                    or shape.top >= Inches(5.30)
+                ):
+                    shape._element.getparent().remove(shape._element)
+    cover = prs.slides[0]
+    banner = cover.shapes.add_shape(
+        MSO_AUTO_SHAPE_TYPE.RECTANGLE, 0, 0, prs.slide_width, Inches(1.13)
+    )
+    banner.fill.solid()
+    banner.fill.fore_color.rgb = _rgb(BBVA_COLORS["ink"])
+    banner.line.fill.background()
+    logo = cover.shapes.add_picture(
+        str(BRAND_ASSETS / "bbva-bei.png"), Inches(0.38), Inches(0.16), height=Inches(0.82)
+    )
+    logo.name = BRAND["name"]
+    label = cover.shapes.add_textbox(Inches(6.65), Inches(0.40), Inches(2.95), Inches(0.32))
+    _set_template_text(
+        label,
+        "NPS Lens · " + BRAND["initiative"],
+        size=18,
+        bold=True,
+        color="FFFFFF",
+        font=BRAND["font"],
+        align=PP_ALIGN.RIGHT,
+    )
+    for index, slide in enumerate(prs.slides):
+        footer_color = "FFFFFF" if index == 0 else BBVA_COLORS["ink"]
+        if index:
+            callout_index = (3, 4, 3, 6, 7)[index - 1] if index < 6 else 9
+            callout = slide.shapes[callout_index]
+            callout.top = Inches(4.80 if index >= 6 else 4.95)
+            callout.height = Inches(0.50 if index >= 6 else 0.38)
+        wordmark = slide.shapes.add_picture(
+            str(BRAND_ASSETS / ("bia-dark.png" if index else "bia-light.png")),
+            Inches(0.38),
+            Inches(5.41),
+            width=Inches(0.43),
+        )
+        wordmark.name = BRAND["initiative"]
+        wordmark._element.nvPicPr.cNvPr.set("descr", BRAND["initiative_name"])
+        signature = slide.shapes.add_textbox(Inches(0.93), Inches(5.37), Inches(1.98), Inches(0.23))
+        signature.name = "bIA initiative credit"
+        _set_template_text(
+            signature,
+            BRAND["initiative_credit"] + "\n" + BRAND["initiative_name"],
+            size=6.8,
+            color=footer_color,
+            font=BRAND["font"],
+        )
+        footer = slide.shapes[0] if index >= 6 else slide.shapes.add_textbox(0, 0, 0, 0)
+        footer.left, footer.top, footer.width, footer.height = (
+            Inches(value) for value in (3.12, 5.36, 5.70, 0.25)
+        )
+        footer.name = "Corporate scope footer"
+        _set_template_text(
+            footer,
+            BRAND["name"]
+            + "\nVoC: "
+            + context.period_label
+            + " · Canal: "
+            + context.causal.channel,
+            size=6.3,
+            color=footer_color,
+            font=BRAND["font"],
+            align=PP_ALIGN.RIGHT,
+        )
+        page = slide.shapes.add_textbox(Inches(9.10), Inches(5.38), Inches(0.52), Inches(0.20))
+        page.name = "Report page number"
+        _set_template_text(
+            page,
+            str(index + 1),
+            size=7.5,
+            color=footer_color,
+            font=BRAND["font"],
+            align=PP_ALIGN.RIGHT,
+        )
+
+
 def generate_business_review_ppt(
     *,
     service_origin: str,
@@ -3228,10 +3305,10 @@ def generate_business_review_ppt(
     if not REPORT_TEMPLATE.exists():
         raise FileNotFoundError(f"No se encuentra la plantilla ejecutiva: {REPORT_TEMPLATE}")
     prs = Presentation(str(REPORT_TEMPLATE))
-    prs.core_properties.author = "NPS Lens"
+    prs.core_properties.author = BRAND["name"] + " · " + BRAND["initiative"]
     prs.core_properties.last_modified_by = "NPS Lens"
     prs.core_properties.subject = "NPS Lens · comentarios e incidencias"
-    prs.core_properties.keywords = f"BBVA,NPS,incidencias,{REPORT_DESIGN_VERSION}"
+    prs.core_properties.keywords = f"BBVA,bIA,NPS,incidencias,{REPORT_DESIGN_VERSION}"
     prs.core_properties.comments = f"NPS Lens report design: {REPORT_DESIGN_VERSION}"
 
     context = _build_presentation_context(
@@ -3260,6 +3337,8 @@ def generate_business_review_ppt(
         include_causal_section=include_causal_section,
         linking_diagnostics=linking_diagnostics,
     )
+
+    _apply_report_branding(prs, context)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
     file_name = (
@@ -3301,6 +3380,9 @@ def generate_business_review_ppt(
     for slide_index in (2, 1):
         if len(compact_prs.slides) > slide_index:
             _remove_slide(compact_prs, slide_index)
+    for index, slide in enumerate(compact_prs.slides, start=1):
+        page = next(shape for shape in slide.shapes if shape.name == "Report page number")
+        page.text_frame.paragraphs[0].runs[0].text = str(index)
     compact_buff = BytesIO()
     compact_prs.save(compact_buff)
     compact_file_name = file_name.replace(".pptx", "-sin-evolucion-nps.pptx")

@@ -1,0 +1,96 @@
+"""Branding stays readable, single-sourced and outside the analytical content."""
+
+import json
+import subprocess
+from datetime import date
+from io import BytesIO
+from pathlib import Path
+from zipfile import ZipFile
+
+import pytest
+from pptx import Presentation
+from pptx.util import Inches
+from test_business_ppt import _sample_payload
+
+from nps_lens.design.brand import BRAND, BRAND_ASSETS, EMAIL_SIGNATURE
+from nps_lens.platform.publication import _newsletter
+from nps_lens.platform.webapp_preview import build_preview, load_publication
+from nps_lens.reports.executive_ppt import generate_business_review_ppt
+
+
+@pytest.fixture(scope="module")
+def branded_decks():
+    payload = _sample_payload()
+    result = generate_business_review_ppt(
+        service_origin="México",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        focus_name="detractores",
+        attribution_df=payload["attribution"],
+        selected_nps_df=payload["selected_nps"],
+        comparison_nps_df=payload["comparison_nps"],
+    )
+    return result
+
+
+def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(branded_decks):
+    for content in (branded_decks.content, branded_decks.compact_content):
+        deck = Presentation(BytesIO(content))
+        assert BRAND["name"] in deck.core_properties.author
+        for index, slide in enumerate(deck.slides):
+            names = [shape.name for shape in slide.shapes]
+            assert names.count("Report page number") == names.count("bIA") == 1
+            page = next(shape for shape in slide.shapes if shape.name == "Report page number")
+            assert page.text == str(index + 1)
+            footer = next(shape for shape in slide.shapes if shape.name == "Corporate scope footer")
+            assert BRAND["name"] in footer.text and "VoC:" in footer.text
+            for shape in slide.shapes:
+                assert shape.left + shape.width <= deck.slide_width
+                assert shape.top + shape.height <= deck.slide_height
+            if index:
+                callout = (
+                    slide.shapes[(3, 4, 3, 6, 7)[index - 1]]
+                    if content == branded_decks.content and index < 6
+                    else None
+                )
+                if callout is not None:
+                    assert callout.top + callout.height <= Inches(5.36)
+        for master in deck.slide_masters:
+            for template in (master, *master.slide_layouts):
+                assert not any(
+                    shape._element.xpath(".//a:fld[@type='slidenum']") for shape in template.shapes
+                )
+                assert not any(
+                    ph.get("type") == "sldNum"
+                    for shape in template.shapes
+                    for ph in shape._element.xpath(".//p:ph")
+                )
+        with ZipFile(BytesIO(content)) as archive:
+            images = [
+                archive.read(name) for name in archive.namelist() if name.startswith("ppt/media/")
+            ]
+        assert images.count((BRAND_ASSETS / "bia-dark.png").read_bytes()) == 1
+        assert images.count((BRAND_ASSETS / "bia-light.png").read_bytes()) == 1
+
+
+def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
+    preview = build_preview(
+        Path("webapp/apps-script"), tmp_path, load_publication(None)
+    ).read_text()
+    assert "<?= BRAND." not in preview
+    assert BRAND["initiative_name"] in preview
+    assert 'format("woff2")' in preview
+    for weight in ("Book", "Medium", "Bold"):
+        font = Path(f"frontend/public/assets/fonts/bbva/BentonSansBBVA-{weight}.woff2")
+        assert font.read_bytes().startswith(b"wOF2")
+    html = _newsletter({"newsletter": {"brand": BRAND["name"]}}, "report.pptx").decode()
+    assert EMAIL_SIGNATURE in html
+    script = Path("webapp/apps-script/00_Brand.gs").read_text()
+    script += "\nprocess.stdout.write(JSON.stringify(BRAND));"
+    generated = json.loads(
+        subprocess.run(["node", "-e", script], capture_output=True, check=True, text=True).stdout
+    )
+    assert generated["newsletter_prefix"] == "[bIA]"
+    assert generated["email_signature"] == EMAIL_SIGNATURE

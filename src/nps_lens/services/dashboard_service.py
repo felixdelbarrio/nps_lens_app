@@ -68,6 +68,7 @@ from nps_lens.core.nps_math import (
     grouped_focus_rates,
 )
 from nps_lens.core.store import DatasetContext, HelixIncidentStore
+from nps_lens.design.brand import BRAND
 from nps_lens.design.tokens import DesignTokens
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
@@ -2390,7 +2391,7 @@ class DashboardService:
                 "schema_version": PUBLICATION_SCHEMA_VERSION,
                 "generated_at": generated_at,
                 "brand": {
-                    "name": "BBVA Banca de Empresas e Instituciones",
+                    **BRAND,
                     "design_system": "BBVA Experience",
                     "design_tokens": DesignTokens.default().colors_light,
                 },
