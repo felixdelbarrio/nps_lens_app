@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   downloadExecutiveReport,
   downloadTelemetry,
+  downloadTaxonomy,
   downloadWebPublication
 } from "./api";
 
@@ -63,6 +64,16 @@ describe("artifact downloads", () => {
       expect(click).toHaveBeenCalledOnce();
     }
   );
+
+  it.each(["SOURCE", "COMPLETED", "DISCOVERED"] as const)("saves and reveals the %s taxonomy in desktop", async mode => {
+    const revealFile = vi.fn(async () => true);
+    window.pywebview = {api:{reveal_file:revealFile}};
+    const fetcher = vi.fn(async (_input: RequestInfo | URL) => new Response("excel",{headers:{"X-NPS-LENS-SAVED-PATH":`/tmp/taxonomia-${mode}.xlsx`}}));
+    vi.stubGlobal("fetch",fetcher);
+    expect(await downloadTaxonomy({service_origin:"Bank"},mode)).toBe(`/tmp/taxonomia-${mode}.xlsx`);
+    expect(String(fetcher.mock.calls[0][0])).toContain(`mode=${mode}`);
+    expect(revealFile).toHaveBeenCalledWith(`/tmp/taxonomia-${mode}.xlsx`);
+  });
 
   it("uses the file persisted by the desktop API without creating a browser download", async () => {
     const revealFile = vi.fn(async () => true);

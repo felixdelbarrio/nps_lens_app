@@ -5,6 +5,8 @@ process.env.FORCE_COLOR = "0";
 
 export default defineConfig({
   testDir: "./tests",
+  // The tests share one database and global preferences.
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:4100",
     headless: true

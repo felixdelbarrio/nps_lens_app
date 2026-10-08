@@ -5,7 +5,7 @@ import { taxonomyRequest, taxonomyUrl, type TaxonomyContext, type TaxonomyProjec
 
 import { PROJECT_NAMES } from "../utils/taxonomy";
 
-export function TaxonomyProjectInstructions({ role, context }: { role: keyof typeof PROJECT_NAMES; context: TaxonomyContext }) {
+export function TaxonomyProjectInstructions({ role, context, singleZip = false }: { role: keyof typeof PROJECT_NAMES; context: TaxonomyContext; singleZip?: boolean }) {
   const { data, error, mutate } = useSWR(
     taxonomyUrl("/discovery/instructions", context),
     () => taxonomyRequest<Instructions>("/discovery/instructions", context),
@@ -14,12 +14,13 @@ export function TaxonomyProjectInstructions({ role, context }: { role: keyof typ
   const [expanded, setExpanded] = useState(false);
   const [message, setMessage] = useState("");
   const title = PROJECT_NAMES[role];
+  const instructionRole = singleZip && (role === "classifier" || role === "helix") ? `${role}_single_zip` as const : role;
 
   async function copy() {
     if (!data) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(data[role]);
+      await navigator.clipboard.writeText(data[instructionRole]);
       setMessage("Instrucciones copiadas. Pégalas en las instrucciones del proyecto.");
     } catch {
       setExpanded(true);
@@ -34,8 +35,8 @@ export function TaxonomyProjectInstructions({ role, context }: { role: keyof typ
     {error ? <p role="alert">No se pudieron cargar las instrucciones. <button type="button" onClick={() => void mutate()}>Reintentar</button></p> : null}
     {data ? <details className="taxonomy-details" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
       <summary>{`Ver instrucciones de ${title}`}</summary>
-      <p className="field-hint">Versión {data.versions[role]} · El batch utiliza estas mismas reglas.</p>
-      <textarea aria-label={`Instrucciones de ${title}`} readOnly rows={12} value={data[role]} onFocus={event => event.currentTarget.select()} />
+      <p className="field-hint">Versión {data.versions[instructionRole]} · El batch utiliza estas mismas reglas.</p>
+      <textarea aria-label={`Instrucciones de ${title}`} readOnly rows={12} value={data[instructionRole]} onFocus={event => event.currentTarget.select()} />
     </details> : null}
     {message ? <p role="status">{message}</p> : null}
   </div>;

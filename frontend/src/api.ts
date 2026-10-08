@@ -701,6 +701,10 @@ export function downloadWebPublication(
   );
 }
 
+export function downloadTaxonomy(context: TaxonomyContext, mode: TaxonomyMode, proposal = false) {
+  return downloadArtifact("/api/taxonomy/export", { ...context, mode, ...(proposal ? { proposal: "true" } : {}) }, `taxonomia-${mode.toLowerCase()}.xlsx`);
+}
+
 export function downloadTelemetry() {
   return downloadArtifact("/api/telemetry/export", {}, "nps-lens-telemetria.json");
 }
@@ -738,13 +742,20 @@ export type TaxonomyStatus = {
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
-  versions: Record<"normalizer" | "designer" | "classifier" | "helix", string>;
+  versions: Record<"normalizer" | "designer" | "classifier" | "helix" | "semantic" | "classifier_single_zip" | "helix_single_zip", string>;
+  semantic: string;
   normalizer: string;
   designer: string;
   classifier: string;
   helix: string;
+  classifier_single_zip: string;
+  helix_single_zip: string;
 };
 export type TaxonomyDiscoverySettings = {
+  single_zip_enabled: boolean;
+  classifier_single_zip_url: string;
+  helix_single_zip_url: string;
+  semantic_url: string;
   normalizer_url: string;
   designer_url: string;
   classifier_url: string;
@@ -756,3 +767,5 @@ export function taxonomyUrl(path: string, context: TaxonomyContext) {
 export async function taxonomyRequest<T>(path: string, context: TaxonomyContext, init?: RequestInit): Promise<T> {
   return parseResponse<T>(await fetch(taxonomyUrl(path, context), init));
 }
+
+export const isDiscoverySettingsKey = (key: unknown) => typeof key === "string" && key.startsWith("/api/taxonomy/discovery?");

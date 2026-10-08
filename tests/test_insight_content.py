@@ -8,6 +8,7 @@ from nps_lens.analytics.signal_quality import actionable_rows, is_reserve_catego
 from nps_lens.domain.comment_text import useful_comment_mask
 from nps_lens.reports import executive_ppt
 from nps_lens.reports.executive_newsletter import _focus_rows
+from nps_lens.reports.narrative import experience_topics
 from nps_lens.services.analytics.kpis_service import compute_score_kpis
 from nps_lens.services.dashboard_service import DashboardService
 
@@ -87,16 +88,19 @@ def test_generic_topics_remain_in_nps_and_gaps_but_never_lead_editorial_rankings
     assert {row.value for row in gaps} == {"Genérico", "Sin comentarios", "Token", "Ayuda eficaz"}
     assert sum(row.valid_n for row in gaps) == 14
     insights = executive_ppt._period_overview(frame)
-    assert insights["friction"]["topic"] == "Token"
-    assert insights["strength"]["topic"] == "Ayuda eficaz"
+    assert insights["friction"]["topic"] == "Acceso > Token"
+    assert insights["strength"]["topic"] == "Atención > Ayuda eficaz"
     assert signal_quality(frame)["insufficient_comments"] == 12
-    assert {row["label"] for row in _focus_rows(frame, topic_channel="Todos")} == {
+    assert {row["label"] for row in _focus_rows(experience_topics(frame))} == {
         "Acceso",
         "Atención",
     }
     service = DashboardService.__new__(DashboardService)
     clusters = service._topics_df(frame)
-    assert {term for terms in clusters.top_terms for term in terms} == {"Token", "Ayuda eficaz"}
+    assert {term for terms in clusters.top_terms for term in terms} == {
+        "Acceso > Token",
+        "Atención > Ayuda eficaz",
+    }
 
 
 def test_no_meaningful_topic_produces_an_explicit_empty_insight():

@@ -1,3 +1,5 @@
+import { BRAND } from "./brand";
+import "./brand.css";
 import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import useSWR from "swr";
@@ -327,7 +329,7 @@ export function App() {
 
   useEffect(() => {
     if (!monthOptions.includes(popMonth)) {
-      setPopMonth(monthOptions.includes("Todos") ? "Todos" : getLatestAvailableMonth(monthOptions));
+      setPopMonth(getLatestAvailableMonth(monthOptions));
     }
   }, [monthOptions, popMonth]);
 
@@ -1026,9 +1028,8 @@ export function App() {
     }
 
     const topicRows = (dashboard?.overview.topics_table || []).map((row) => ({
-      Cluster: row.cluster_id ?? "",
-      n: row.n ?? "",
-      "Términos": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
+      Comentarios: row.n ?? "",
+      "Tópico > problema": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
       Ejemplos: Array.isArray(row.examples) ? row.examples.join(" · ") : row.examples ?? ""
     }));
 
@@ -1721,11 +1722,15 @@ export function App() {
       <main className="app-shell">
         <aside className="app-sidebar">
           <div className="brand-card">
-            <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt="BBVA Banca de Empresas e Instituciones" />
+            <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt={BRAND.name} />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
               Banca de Empresas e Instituciones · NPS e incidencias relacionadas.
             </p>
+            <div className="initiative-signature">
+              <img src="/assets/brand/bia.svg" alt={BRAND.initiative} />
+              <div><span>{BRAND.initiative_credit}</span><strong>{BRAND.initiative_name}</strong></div>
+            </div>
           </div>
 
           {renderServiceContainer()}

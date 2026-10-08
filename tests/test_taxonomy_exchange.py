@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 from dataclasses import replace
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -63,6 +64,9 @@ def exported(path):
 def exchange_fixture(tmp_path, monkeypatch):
     # Settings.from_env() intentionally requires an explicit service-origin hierarchy.
     # Keep this shared fixture hermetic instead of relying on a developer/CI .env.
+    monkeypatch.setenv("NPS_LENS_SINGLE_ZIP_ENABLED", "false")
+    monkeypatch.setenv("NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL", "")
+    monkeypatch.setenv("NPS_LENS_HELIX_SINGLE_ZIP_URL", "")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_BUUG", "Bank")
     monkeypatch.setenv("NPS_LENS_SERVICE_ORIGIN_N1", '{"Bank":["Web"]}')
     monkeypatch.setenv("NPS_LENS_DEFAULT_SERVICE_ORIGIN", "Bank")
@@ -536,3 +540,205 @@ def test_proposal_requires_activation_and_late_classifier_keeps_new_active_versi
     assert state["active"] == "DISCOVERED"
     assert "DISCOVERED" not in state.get("artifacts", {})
     assert taxonomy_fingerprint(handler.taxonomy.catalog(context, "DISCOVERED")) == new_fingerprint
+
+
+def semantic_response(handler, context, mode="SOURCE"):
+    request = exported(handler.export(context, "semantic", semantic_mode=mode)["saved_path"])
+    return {
+        "manifest.json": request["manifest.json"],
+        "criteria.json": {
+            "criteria": {
+                key: f"Usar ante un problema de {pair['sublever']}; excluir consultas resueltas."
+                for key, pair in request["taxonomy.json"]["categories"].items()
+            },
+            "review": {
+                "quotes": ["No resuelven mi problema. á漢字 0"],
+                "reason": "Fronteras contrastadas con síntomas explícitos del corpus.",
+            },
+        },
+    }
+
+
+def test_semantic_catalog_roundtrip_preserves_modes_history_and_snapshot(exchange):
+    handler, ctx, frame, client = exchange
+    frame["Palanca"], frame["Subpalanca"] = "Atención", "Resolución"
+    original = handler.taxonomy.catalog(ctx, "SOURCE")
+    old_fingerprint = taxonomy_fingerprint(original)
+    classified = exported(handler.export(ctx, "classifier")["saved_paths"])
+    handler.import_response(
+        ctx, classifier_zip(classifier_files(classified["manifest.json"], classified)), "classifier"
+    )
+    assert len(handler.assignments(ctx, frame, "SOURCE")) == len(frame)
+    response = semantic_response(handler, ctx)
+    result = handler.import_response(ctx, zipped(response), "semantic")
+    assert result["pending"] == 0 and result["received"] == 1
+    assert result["taxonomy_fingerprint"] != old_fingerprint
+    assert handler.assignments(ctx, frame, "SOURCE") == {}
+    assert handler.taxonomy.classification_artifact(ctx, "SOURCE", fingerprint=old_fingerprint)
+    assert handler.taxonomy.state(ctx)["active"] == "SOURCE"
+    state = handler.taxonomy.state(ctx)
+    for engine in ("rules", "llm", "rules"):
+        state["comment_engine"] = engine
+        handler.taxonomy.save_state(ctx, state)
+        assert (
+            taxonomy_fingerprint(handler.taxonomy.catalog(ctx, "SOURCE"))
+            == result["taxonomy_fingerprint"]
+        )
+    new = exported(handler.export(ctx, "classifier")["saved_paths"])
+    assert (
+        new["taxonomy.json"]["categories"]["c001"]["criterion"]
+        == response["criteria.json"]["criteria"]["c001"]
+    )
+    handler.import_response(
+        ctx, classifier_zip(classifier_files(new["manifest.json"], new)), "classifier"
+    )
+    enriched = handler.taxonomy.catalog(ctx, "SOURCE")
+    handler.taxonomy.save_manual(ctx, original["taxonomy"], template="SOURCE")
+    assert handler.taxonomy.catalog(ctx, "COMPLETED") == enriched
+    assert len(handler.assignments(ctx, frame, "COMPLETED")) == len(frame)
+    assert len(handler.assignments(ctx, frame, "SOURCE")) == len(frame)
+    snapshot = handler.taxonomy.snapshot(ctx)
+    handler.taxonomy.restore(ctx, snapshot)
+    assert handler.taxonomy.catalog(ctx, "SOURCE") == enriched
+    download = client.get(
+        "/api/taxonomy/export", params={"service_origin": "Bank", "mode": "SOURCE"}
+    )
+    assert download.status_code == 200
+    assert Path(download.headers["x-nps-lens-saved-path"]).read_bytes() == download.content
+    sheet = load_workbook(io.BytesIO(download.content)).active
+    assert sheet.cell(2, 3).value == response["criteria.json"]["criteria"]["c001"]
+
+
+def test_semantic_import_is_atomic_and_rejects_changed_catalog(exchange):
+    handler, ctx, frame, _ = exchange
+    frame["Palanca"], frame["Subpalanca"] = "Atención", "Resolución"
+    response = semantic_response(handler, ctx)
+    before = handler.taxonomy.state(ctx)
+    response["criteria.json"]["criteria"]["inventada"] = "No permitida"
+    with pytest.raises(ValueError, match="exactamente"):
+        handler.import_response(ctx, zipped(response), "semantic")
+    assert handler.taxonomy.state(ctx) == before
+    del response["criteria.json"]["criteria"]["inventada"]
+    frame.loc[0, "Subpalanca"] = "Nueva categoría"
+    with pytest.raises(ValueError, match="taxonomía ha cambiado"):
+        handler.import_response(ctx, zipped(response), "semantic")
+    assert handler.taxonomy.state(ctx) == before
+
+
+def test_semantic_catalog_keeps_large_original_and_manual_category_sets(exchange):
+    handler, ctx, frame, client = exchange
+    frame["Palanca"] = [f"Palanca {i // 10}" for i in range(len(frame))]
+    frame["Subpalanca"] = [f"Subpalanca {i}" for i in range(len(frame))]
+    base = handler.taxonomy.catalog(ctx, "SOURCE")
+    response = semantic_response(handler, ctx)
+    result = handler.import_response(ctx, zipped(response), "semantic")
+    assert result["received"] == 405
+    assert result["levers"] == 41
+    handler.taxonomy.save_manual(ctx, base["taxonomy"], template="SOURCE")
+    assert handler.taxonomy.catalog(ctx, "COMPLETED") == handler.taxonomy.catalog(ctx, "SOURCE")
+    params = {"service_origin": "Bank", "mode": "COMPLETED"}
+    exported_zip = client.post("/api/taxonomy/discovery/semantic/export", params=params)
+    assert exported_zip.status_code == 200, exported_zip.text
+    assert (
+        exported(exported_zip.json()["saved_path"])["manifest.json"]["taxonomy_mode"] == "COMPLETED"
+    )
+
+
+def test_single_zip_configuration_is_global_persistent_and_has_separate_routes(
+    exchange, monkeypatch
+):
+    _, _, _, client = exchange
+    env_keys = [
+        "NPS_LENS_SINGLE_ZIP_ENABLED",
+        "NPS_LENS_CLASSIFIER_SINGLE_ZIP_URL",
+        "NPS_LENS_HELIX_SINGLE_ZIP_URL",
+    ]
+    for key in env_keys:
+        monkeypatch.delenv(key, raising=False)
+    original = client.get("/api/taxonomy/discovery").json()
+    assert original["single_zip_enabled"] is False
+    assert original["classifier_single_zip_url"] == original["helix_single_zip_url"] == ""
+    updated = client.put(
+        "/api/taxonomy/discovery",
+        json={
+            "single_zip_enabled": True,
+            "classifier_single_zip_url": "https://chatgpt.com/g/comments-single",
+            "helix_single_zip_url": "https://chatgpt.com/g/helix-single",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["classifier_url"] == original["classifier_url"]
+    settings = Settings.from_env()
+    assert settings.single_zip_enabled is True
+    assert settings.classifier_single_zip_url == "https://chatgpt.com/g/comments-single"
+    assert settings.helix_single_zip_url == "https://chatgpt.com/g/helix-single"
+    assert (
+        client.put(
+            "/api/taxonomy/discovery",
+            json={"classifier_single_zip_url": "https://example.com/g/test"},
+        ).status_code
+        == 400
+    )
+    cleared = client.put(
+        "/api/taxonomy/discovery",
+        json={"single_zip_enabled": False, "classifier_single_zip_url": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["classifier_single_zip_url"] == ""
+    assert cleared.json()["single_zip_enabled"] is False
+
+
+def test_api_classifier_export_uses_single_zip_preference(exchange):
+    _, _, frame, client = exchange
+    frame["Palanca"] = "Atención"
+    frame["Subpalanca"] = "Resolución"
+    params = {"service_origin": "Bank", "service_origin_n1": "Web"}
+    assert (
+        client.put("/api/taxonomy/discovery", json={"single_zip_enabled": True}).status_code == 200
+    )
+    response = client.post("/api/taxonomy/discovery/classifier/export", params=params)
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["single_zip"] is True
+    assert len(payload["saved_paths"]) == 1
+    assert (
+        len(exported(payload["saved_paths"][0])["manifest.json"]["batches"]) == payload["batches"]
+    )
+
+
+def test_api_helix_export_uses_single_zip_preference_without_recalculating_analytics(
+    exchange, monkeypatch
+):
+    from unittest.mock import Mock
+
+    _, _, frame, client = exchange
+    frame["Palanca"] = "Atención"
+    frame["Subpalanca"] = "Resolución"
+    frame["Fecha"] = pd.Timestamp("2026-09-01")
+    dashboard = client.app.state.dashboard_service
+    monkeypatch.setattr(dashboard, "_load_nps_df", lambda ctx: frame)
+    monkeypatch.setattr(
+        dashboard,
+        "_load_helix_df",
+        lambda ctx: pd.DataFrame(
+            {
+                "Incident Number": [f"INC-{i}" for i in range(405)],
+                "Detailed Description": "Mismo texto",
+                "Submit Date": pd.Timestamp("2026-09-01"),
+            }
+        ),
+    )
+    clear = Mock()
+    monkeypatch.setattr(dashboard, "clear_caches", clear)
+    assert (
+        client.put("/api/taxonomy/discovery", json={"single_zip_enabled": True}).status_code == 200
+    )
+    clear.assert_not_called()
+    result = client.post("/api/taxonomy/helix/export", params={"service_origin": "Bank"})
+    assert result.status_code == 200, result.json()
+    assert result.json()["single_zip"] is True
+    assert len(result.json()["saved_paths"]) == 1
+    assert (
+        len(exported(result.json()["saved_paths"][0])["manifest.json"]["batches"])
+        == result.json()["batches"]
+    )

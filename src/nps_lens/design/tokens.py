@@ -380,3 +380,12 @@ def executive_report_palette(tokens: DesignTokens, mode: str = "light") -> dict[
         "sand": "F7F8F8",
         "navy": "000519",
     }
+
+
+def nps_balance_color(tokens: DesignTokens, mode: str, value: object) -> str:
+    """Use the sign of classic NPS; zero and unavailable values remain neutral."""
+    score = _coerce_float(value)
+    p = palette(tokens, mode)
+    if score is None or score == 0:
+        return p["color.primary.text.primary"]
+    return p["color.primary.bg.alert" if score < 0 else "color.primary.bg.success"]

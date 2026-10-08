@@ -36,14 +36,15 @@ from nps_lens.services.classification_protocol import (
     taxonomy_fingerprint,
 )
 from nps_lens.services.taxonomy_discovery import (
+    SemanticCriteriaResponse,
     TaxonomyDesignResponse,
     TaxonomyValidator,
 )
 from nps_lens.services.taxonomy_prompts import (
     COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
-    DESIGNER_INSTRUCTIONS_VERSION,
     FALLBACK_LEVER,
     FALLBACK_SUBLEVERS,
+    INSTRUCTIONS_VERSIONS,
     PROJECT_INSTRUCTIONS,
 )
 from nps_lens.services.taxonomy_service import TaxonomyService, context_key
@@ -271,8 +272,8 @@ def read_zip(content: bytes) -> dict[str, Any]:
 
 
 def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """One bounded ZIP contract for all three projects; JSON is validated inside it."""
-    if stage not in ("designer", "classifier", "helix", "normalizer"):
+    """Bounded ZIP contracts; each project validates its own JSON payload."""
+    if stage not in ("designer", "classifier", "helix", "normalizer", "semantic"):
         raise ValueError("Proyecto desconocido.")
     files = read_zip(content)
     manifest = files.pop("manifest.json", None)
@@ -280,6 +281,7 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
         "classifier": CLASSIFIER_SCHEMA,
         "helix": HELIX_SCHEMA,
         "normalizer": "nps-lens-normalization/2",
+        "semantic": "nps-lens-semantics/1",
     }.get(stage, "nps-lens-taxonomy/4")
     if (
         not isinstance(manifest, dict)
@@ -293,15 +295,18 @@ def read_response(content: bytes, stage: str) -> tuple[dict[str, Any], dict[str,
         raise ValueError(
             f"manifest.json incompatible con el proyecto seleccionado; se requiere {schema}. Exporta un nuevo ZIP."
         )
+    response_files = {
+        "designer": "taxonomy.json",
+        "normalizer": "equivalences.json",
+        "semantic": "criteria.json",
+    }
     valid = (
-        set(files) == {"taxonomy.json" if stage == "designer" else "equivalences.json"}
-        if stage in ("designer", "normalizer")
+        set(files) == {response_files[stage]}
+        if stage in response_files
         else bool(files) and all(re.fullmatch(r"results/[0-9]{6}\.json", name) for name in files)
     )
     if not valid:
-        expected = {"designer": "taxonomy.json", "normalizer": "equivalences.json"}.get(
-            stage, "results/NNNNNN.json"
-        )
+        expected = response_files.get(stage, "results/NNNNNN.json")
         raise ValueError(
             f"El ZIP de respuesta debe contener únicamente manifest.json y {expected}."
         )
@@ -323,16 +328,21 @@ def validate_manifest(manifest: dict[str, Any], expected: dict[str, Any]) -> set
     return ids
 
 
-def write_numbered_zips(
+def write_classification_zips(
     downloads: Path,
     label: str,
     manifest: dict[str, Any],
     batches: dict[str, list[dict[str, Any]]],
     shared: dict[str, Any],
     field: str,
+    *,
+    single_zip: bool = False,
 ) -> dict[str, Any]:
-    """Publish a complete folder atomically, compressing shared evidence only once."""
-    instructions = PROJECT_INSTRUCTIONS[manifest["stage"]].encode()
+    """Publish atomically; stream a single package or reuse compressed shared evidence."""
+    role = manifest["stage"] + ("_single_zip" if single_zip else "")
+    instructions = PROJECT_INSTRUCTIONS[role].encode()
+    if single_zip:
+        return _write_single_zip(downloads, label, manifest, batches, shared, field, instructions)
     expanded = len(instructions)
     if len(shared) + 3 > MAX_MEMBERS:
         raise ValueError("Demasiados ficheros para un intercambio ZIP.")
@@ -379,6 +389,52 @@ def write_numbered_zips(
             paths.append(str(directory / name))
         Path(temporary).rename(directory)
     return {"saved_paths": paths, "saved_directory": str(directory), "batches": len(paths)}
+
+
+def _write_single_zip(
+    downloads: Path,
+    label: str,
+    manifest: dict[str, Any],
+    batches: dict[str, list[dict[str, Any]]],
+    shared: dict[str, Any],
+    field: str,
+    instructions: bytes,
+) -> dict[str, Any]:
+    if len(batches) + len(shared) + 2 > MAX_MEMBERS:
+        raise ValueError("Demasiados ficheros para un intercambio ZIP.")
+    directory = downloads / f"{label}-{datetime.now():%Y%m%d-%H%M%S}-{manifest['job_id']}"
+    downloads.mkdir(parents=True, exist_ok=True)
+    name = f"{label}_completo.zip"
+    with tempfile.TemporaryDirectory(prefix=".nps-lens-", dir=downloads) as temporary:
+        path = Path(temporary) / name
+        expanded = 0
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+
+            def write(member: str, raw: bytes) -> None:
+                nonlocal expanded
+                expanded += len(raw)
+                if len(raw) > MAX_MEMBER_BYTES or expanded > MAX_EXPANDED_BYTES:
+                    raise ValueError(
+                        "El corpus supera los límites del intercambio ZIP; reduce el dataset."
+                    )
+                archive.writestr(member, raw)
+
+            write("INSTRUCCIONES.txt", instructions)
+            write("manifest.json", encode(manifest))
+            for member, payload in shared.items():
+                write(member, encode(payload))
+            for batch in manifest["batches"]:
+                key = batch["id"]
+                write(f"{field}/{key}.json", encode({field: batches[key]}))
+        if path.stat().st_size > MAX_ZIP_BYTES:
+            raise ValueError("El ZIP de entrada supera 32 MiB.")
+        Path(temporary).rename(directory)
+    return {
+        "saved_paths": [str(directory / name)],
+        "saved_directory": str(directory),
+        "batches": len(batches),
+        "single_zip": True,
+    }
 
 
 class TaxonomyExchange:
@@ -461,7 +517,10 @@ class TaxonomyExchange:
                 if stage == "classifier"
                 else {}
             ),
-            "schema_version": CLASSIFIER_SCHEMA if stage == "classifier" else "nps-lens-taxonomy/4",
+            "schema_version": {
+                "classifier": CLASSIFIER_SCHEMA,
+                "semantic": "nps-lens-semantics/1",
+            }.get(stage, "nps-lens-taxonomy/4"),
             "job_id": job["id"],
             "instructions_version": job["instructions_version"],
             "stage": stage,
@@ -469,11 +528,13 @@ class TaxonomyExchange:
             "taxonomy_mode": job["mode"],
             "manual_revision": job["manual_revision"],
             "taxonomy_fingerprint": (
-                taxonomy_fingerprint(job["taxonomy"]) if stage == "classifier" else None
+                taxonomy_fingerprint(job["taxonomy"])
+                if stage in ("classifier", "semantic")
+                else None
             ),
             "taxonomy_sha256": (
                 digest({"categories": category_catalog(job["taxonomy"])})
-                if stage == "classifier"
+                if stage in ("classifier", "semantic")
                 else None
             ),
             "batches": [
@@ -569,6 +630,11 @@ class TaxonomyExchange:
             "received": received,
             "pending": len(frame) - received,
             "multiple": sum(bool(row["secondary_classifications"]) for row in assignments.values()),
+            "semantic": {
+                candidate: self.taxonomy.semantic_status(context, candidate)
+                for candidate in ("SOURCE", "COMPLETED")
+                if candidate == "SOURCE" or state.get("artifacts", {}).get(candidate)
+            },
             "designer": {
                 "total": len(full_frame),
                 "received": designed,
@@ -601,8 +667,10 @@ class TaxonomyExchange:
         out.attrs["taxonomy_mode"] = mode
         return out
 
-    def export(self, context: UploadContext, stage: str, **scope: Any) -> dict[str, Any]:
-        if stage not in ("designer", "classifier"):
+    def export(
+        self, context: UploadContext, stage: str, *, single_zip: bool = False, **scope: Any
+    ) -> dict[str, Any]:
+        if stage not in ("designer", "classifier", "semantic"):
             raise ValueError("Proyecto desconocido.")
         pending = stage == "classifier"
         frame = self._frame(context)
@@ -612,8 +680,18 @@ class TaxonomyExchange:
             frame, horizon = required_comments(full_frame, **scope)
         horizon_keys = frame["_business_key"].tolist() if pending else []
         state = self.taxonomy.state(context)
-        mode = self.taxonomy.state(context)["active"] if pending else "DISCOVERED"
-        taxonomy = self.taxonomy.catalog(context, mode) if pending else None
+        mode = state["active"] if pending else "DISCOVERED"
+        if stage == "semantic":
+            mode = scope.pop("semantic_mode", state["active"])
+        if stage == "semantic" and mode not in ("SOURCE", "COMPLETED"):
+            raise ValueError("Selecciona la taxonomía original o manual para definir criterios.")
+        taxonomy = (
+            self.taxonomy.catalog(context, mode, semantic=stage != "semantic")
+            if stage != "designer"
+            else None
+        )
+        if stage == "semantic" and (not taxonomy or not taxonomy["taxonomy"]):
+            raise ValueError("No hay categorías para definir criterios.")
         revision = state.get("artifacts", {}).get("COMPLETED", "") if mode == "COMPLETED" else ""
         groups: dict[str, list[str]] = {}
         if pending:
@@ -709,23 +787,22 @@ class TaxonomyExchange:
             "manual_revision": revision,
             "batches": batches,
             "taxonomy": taxonomy,
-            "stage": "classifier" if pending else "designer",
+            "stage": stage,
             "instructions_version": (
-                COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
-                if pending
-                else DESIGNER_INSTRUCTIONS_VERSION
+                COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION if pending else INSTRUCTIONS_VERSIONS[stage]
             ),
         }
         if not pending:
             self._save(context, job)
             return self._write(job)
-        result = write_numbered_zips(
+        result = write_classification_zips(
             self.downloads,
             "comentarios",
             self._manifest(job, "classifier"),
             batches,
             {"taxonomy.json": {"categories": categories}},
             "comments",
+            single_zip=single_zip,
         )
         self._save(context, job)
         return {**result, "job_id": job["id"], "stage": "classifier"}
@@ -736,6 +813,13 @@ class TaxonomyExchange:
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             archive.writestr("manifest.json", encode(self._manifest(job, stage)))
             archive.writestr("INSTRUCCIONES.txt", PROJECT_INSTRUCTIONS[stage])
+            if stage == "semantic":
+                catalog_bytes = encode({"categories": category_catalog(job["taxonomy"])})
+                if len(catalog_bytes) > MAX_MEMBER_BYTES:
+                    raise ValueError(
+                        "El catálogo supera 2 MiB; reduce la taxonomía antes de exportar."
+                    )
+                archive.writestr("taxonomy.json", catalog_bytes)
             for key, rows in job["batches"].items():
                 archive.writestr(f"comments/{key}.json", encode({"comments": rows}))
         content = output.getvalue()
@@ -753,6 +837,52 @@ class TaxonomyExchange:
     def import_response(self, context: UploadContext, content: bytes, stage: str) -> dict[str, Any]:
         manifest, files = read_response(content, stage)
         frame = self._frame(context)
+        if stage == "semantic":
+            job = self._load(context, manifest["job_id"])
+            mode = job["mode"]
+            if manifest != self._manifest(job, stage) or job["corpus"] != self._corpus(
+                context, frame
+            ):
+                raise ValueError("El manifiesto o el corpus ha cambiado; exporta de nuevo.")
+            base = self.taxonomy.catalog(context, mode, semantic=False)
+            if taxonomy_fingerprint(base) != taxonomy_fingerprint(job["taxonomy"]):
+                raise ValueError("La taxonomía ha cambiado; exporta de nuevo.")
+            semantic_response = validate_payload(
+                SemanticCriteriaResponse, files["criteria.json"], "criteria.json"
+            )
+            categories = category_catalog(base)
+            if set(semantic_response.criteria) != set(categories):
+                raise ValueError(
+                    "Los criterios deben conservar exactamente todas las categorías exportadas."
+                )
+            comments = frame["Comment"].fillna("").astype(str).tolist()
+            if any(text.strip() for text in comments) and not semantic_response.review.quotes:
+                raise ValueError("La revisión requiere evidencia del corpus.")
+            quotes = _ground_designer_quotes(semantic_response.review.quotes, comments)
+            branches: dict[str, list[dict[str, str]]] = {}
+            for key, category in categories.items():
+                branches.setdefault(category["lever"], []).append(
+                    {"name": category["sublever"], "criterion": semantic_response.criteria[key]}
+                )
+            enriched = {
+                "taxonomy": [
+                    {"lever": lever, "sublevers": subs} for lever, subs in branches.items()
+                ]
+            }
+            state = self.taxonomy.state(context)
+            state.setdefault("semantic_catalogs", {}).setdefault(mode, {})[
+                taxonomy_fingerprint(base)
+            ] = {
+                "taxonomy": enriched,
+                "review": {**semantic_response.review.model_dump(), "quotes": quotes},
+            }
+            self.taxonomy.save_state(context, state)
+            self._clear_caches()
+            return {
+                "stage": stage,
+                "imported": True,
+                **self.taxonomy.semantic_status(context, mode),
+            }
         if stage == "designer":
             if manifest.get("corpus_sha256") != self._corpus(context, frame):
                 raise ValueError(

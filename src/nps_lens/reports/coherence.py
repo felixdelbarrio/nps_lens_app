@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Hashable, Iterable, Mapping
+from typing import Any, Mapping
 
 
 class ReportCoherenceError(ValueError):
@@ -88,15 +88,3 @@ def validate_metric_payload(payload: Any) -> None:
         for value in payload.values():
             if isinstance(value, (dict, list)):
                 validate_metric_payload(value)
-
-
-def validate_delta_rows(rows: Iterable[Mapping[Hashable, Any]]) -> None:
-    for row in rows:
-        if all(key in row for key in ("delta_nps", "nps_current", "nps_baseline")):
-            current, baseline = row["nps_current"], row["nps_baseline"]
-            expected = (
-                float(current) - float(baseline)
-                if current is not None and baseline is not None
-                else None
-            )
-            assert_metric_equal(row["delta_nps"], expected, "Delta NPS por tema")

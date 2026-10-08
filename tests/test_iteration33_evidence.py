@@ -35,7 +35,7 @@ from nps_lens.reports.coherence import (
     validate_classification_context,
     validate_metric_payload,
 )
-from nps_lens.reports.content_selectors import select_causal_scenarios, select_negative_delta_rows
+from nps_lens.reports.content_selectors import select_causal_scenarios, select_negative_gap_rows
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 from nps_lens.services.dashboard_service import DashboardService
@@ -132,12 +132,15 @@ def test_reserves_never_lead_insights_but_remain_in_quality_and_kpis():
     delta = pd.DataFrame(
         {
             "value": ["Información insuficiente", "Token"],
-            "delta_nps": [-100, -20],
-            "n_current": [100, 5],
+            "gap_vs_base": [-100, -20],
+            "n": [100, 5],
         }
     )
-    assert select_negative_delta_rows(delta, max_rows=10).value.tolist() == ["Token"]
-    assert executive_ppt._period_overview(frame)["friction"]["topic"] == "Token"
+    assert select_negative_gap_rows(delta, max_rows=10).value.tolist() == [
+        "Información insuficiente",
+        "Token",
+    ]
+    assert executive_ppt._period_overview(frame)["friction"]["topic"] == "Acceso > Token"
 
 
 def test_ranking_prioritizes_unique_incidents_before_semantic_quality():

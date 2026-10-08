@@ -10,9 +10,10 @@ from test_iteration28_taxonomy_helix import helix_response
 from test_taxonomy_exchange import classifier_files, classifier_zip, designer_zip, exported, zipped
 from test_taxonomy_exchange import exchange_fixture as exchange_fixture
 
+from nps_lens.analytics.nps_gaps import nps_gaps
 from nps_lens.services.analysis_horizon import analysis_horizon
 from nps_lens.services.taxonomy_exchange import TaxonomyExchange
-from nps_lens.ui.business import default_windows, driver_delta_table, slice_by_window
+from nps_lens.ui.business import default_windows, slice_by_window
 
 SEPTEMBER = dict(pop_year="2026", pop_month="09", max_days_apart=90)
 OCTOBER = {**SEPTEMBER, "pop_month": "10"}
@@ -83,16 +84,13 @@ def test_comments_incremental_preserve_outside_horizon_and_late_job(exchange, mo
     # Current deltas see exactly the same classified rows as the equivalent full corpus.
     classified = handler.apply(ctx, frame, mode)
     current, baseline = default_windows(frame, pop_year="2026", pop_month="09")
-    incremental = driver_delta_table(
+    incremental = nps_gaps(
         slice_by_window(classified, current),
         slice_by_window(classified, baseline),
         "Palanca",
-        min_n=1,
     )
-    full = driver_delta_table(
-        slice_by_window(frame, current), slice_by_window(frame, baseline), "Palanca", min_n=1
-    )
-    pd.testing.assert_frame_equal(incremental, full)
+    full = nps_gaps(slice_by_window(frame, current), slice_by_window(frame, baseline), "Palanca")
+    pd.testing.assert_frame_equal(incremental.rows, full.rows)
 
 
 def test_helix_horizon_reuses_categories_and_imports_after_month_change(helix, monkeypatch):

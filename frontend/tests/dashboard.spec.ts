@@ -24,13 +24,15 @@ function fixtureExcel(name: string) {
 const marchFixture = fixtureExcel("NPS Térmico Senda - 03Marzo.xlsx");
 const marchFixtureSuffix = /03Marzo\.xlsx/;
 
-function responseZip(input: string, output: string, stage: "designer" | "classifier") {
+function responseZip(input: string, output: string, stage: "designer" | "classifier" | "semantic") {
   const script = `
 import json, sys, zipfile
 source, target, stage = sys.argv[1:]
 with zipfile.ZipFile(source) as archive:
     manifest = json.loads(archive.read("manifest.json"))
     comments = {name: json.loads(archive.read(name)) for name in archive.namelist() if name.startswith("comments/")}
+    if stage in ("classifier", "semantic"):
+        categories = json.loads(archive.read("taxonomy.json"))["categories"]
     if stage == "classifier":
         assert manifest["schema_version"] == "nps-lens-comments/5"
         categories = json.loads(archive.read("taxonomy.json"))["categories"]
@@ -46,6 +48,9 @@ with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
     if stage == "designer":
         taxonomy["review"] = {"quotes": [row["Comment"] for value in comments.values() for row in value["comments"] if row["Comment"].strip()][:1], "reason": "Fronteras contrastadas con la narrativa del corpus."}
         archive.writestr("taxonomy.json", json.dumps(taxonomy, ensure_ascii=False))
+    elif stage == "semantic":
+        result = {"criteria": {key: "Usar para " + pair["sublever"] + "; excluir temas distintos." for key, pair in categories.items()}, "review": {"quotes": [row["Comment"] for value in comments.values() for row in value["comments"] if row["Comment"].strip()][:1], "reason": "Fronteras contrastadas con la narrativa del corpus."}}
+        archive.writestr("criteria.json", json.dumps(result, ensure_ascii=False))
     else:
         for name, payload in comments.items():
             result = {"classifications": [{"id": row["id"], "primary": primary, "secondary": []} for row in payload["comments"]]}
@@ -102,6 +107,27 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("button", { name: /Taxonomy Studio/i }).click();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await expect(page.getByText("Normalización · tabla de equivalencias")).toHaveCount(0);
+  const semantic = page.locator("article").filter({has:page.getByRole("heading", {name:"Crear similitud semántica",exact:true})});
+  await expect(semantic).toBeVisible();
+  await expect(semantic.getByLabel("URL · Crear similitud semántica")).toHaveValue("https://chatgpt.com/g/g-p-6ac743802efc81a4a705074f9fd2644b");
+  await semantic.getByRole("button", {name:"Exportar comentarios y taxonomía para crear criterios"}).click();
+  const semanticInput = await exportedPath(page, "Crear similitud semántica");
+  const semanticOutput = path.join(path.dirname(semanticInput), "semantic-response.zip");
+  responseZip(semanticInput, semanticOutput, "semantic");
+  const [semanticImport] = await Promise.all([
+    page.waitForResponse(response => response.url().includes("/discovery/semantic/import")),
+    semantic.getByLabel("Importar ZIP de criterios semánticos").setInputFiles(semanticOutput),
+  ]);
+  expect(semanticImport.ok(), await semanticImport.text()).toBeTruthy();
+  await expect(semantic.getByText(/Criterios semánticos importados/)).toBeVisible();
+  await expect(semantic.getByText("0 pendientes")).toBeVisible();
+  await page.getByText("Explorar Taxonomía Original", {exact:true}).click();
+  await expect(page.locator(".taxonomy-table")).toBeVisible();
+  await page.screenshot({path:"test-results/taxonomy-original.png",fullPage:true});
+  const originalDownload = page.waitForEvent("download");
+  await page.getByRole("link", {name:"Descargar taxonomía en Excel"}).click();
+  expect((await originalDownload).suggestedFilename()).toBe("taxonomia-source.xlsx");
+
   await page.getByRole("tab",{name:"Análisis con LLM"}).click();
   await expect(page.getByRole("heading", {name:"Clasifica incidencias",exact:true})).toBeVisible();
   await expect(page.getByRole("heading", {name:"Vinculación Helix ↔ VoC",exact:true})).toHaveCount(0);
@@ -166,6 +192,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(classifierUpload).toBeEnabled({ timeout: 45000 });
   await expect(page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
+  await page.getByText("Comparar taxonomías", {exact:true}).click();
+  await page.getByText("Ver comparación", {exact:true}).click();
+  await expect(page.locator(".taxonomy-comparison .taxonomy-table")).toBeVisible();
+  await page.screenshot({path:"test-results/taxonomy-comparison.png",fullPage:true});
+
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
@@ -176,7 +207,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
-  await page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true}).click();
-  await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled();
+  await expect(page.getByRole("heading", {name:"Datos acumulados hasta Marzo 2026",exact:true})).toBeVisible({timeout:180000});
+  await expect(page.getByTestId("operational-state")).toHaveText("OPERATIVO", {timeout:180000});
+  const evidenceTab = page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true});
+  await evidenceTab.click();
+  await expect(evidenceTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled({timeout:45000});
 
 });

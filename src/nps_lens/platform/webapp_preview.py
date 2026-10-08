@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
 from typing import cast
 from zipfile import ZipFile
+
+from nps_lens.design.brand import BRAND
 
 INCLUDE_RE = re.compile(r"<\?!=\s*include\(['\"]([^'\"]+)['\"]\)\s*\?>")
 
@@ -90,6 +93,8 @@ def build_preview(
     index = index.replace(
         "<?!= viewerJson ?>", json.dumps(viewer, ensure_ascii=False, separators=(",", ":"))
     )
+    for key, value in BRAND.items():
+        index = index.replace(f"<?= BRAND.{key} ?>", html.escape(value))
     index = index.replace("<?= adminBodyClass ?>", "is-admin")
     index = index.replace("<?= accessRole ?>", "admin")
     index = index.replace("<?= appVersion ?>", "local")

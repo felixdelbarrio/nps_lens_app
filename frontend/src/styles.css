@@ -1,6 +1,6 @@
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Book.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Book.woff2") format("woff2");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
@@ -8,7 +8,7 @@
 
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Medium.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Medium.woff2") format("woff2");
   font-style: normal;
   font-weight: 500;
   font-display: swap;
@@ -16,7 +16,7 @@
 
 @font-face {
   font-family: "Benton Sans BBVA";
-  src: url("/assets/fonts/bbva/BentonSansBBVA-Bold.ttf") format("truetype");
+  src: url("/assets/fonts/bbva/BentonSansBBVA-Bold.woff2") format("woff2");
   font-style: normal;
   font-weight: 700;
   font-display: swap;
@@ -261,6 +261,7 @@ img {
   display: block;
 }
 
+a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -350,6 +351,7 @@ textarea:focus-visible {
 
 .brand-card::after {
   content: "";
+  opacity: .18;
   position: absolute;
   inset: auto -36px -44px auto;
   width: 132px;
@@ -822,6 +824,14 @@ input::placeholder {
   border: 1px solid transparent;
 }
 
+a.primary-button,
+a.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .danger-button {
   border-color: var(--color-negative, #b92f2f);
   color: var(--color-negative, #b92f2f);
@@ -849,6 +859,7 @@ input::placeholder {
 
 .primary-button:disabled,
 .secondary-button:disabled,
+.secondary-button[aria-disabled="true"],
 .icon-button:disabled,
 .nav-tabs button:disabled,
 .primary-nav-item:disabled,
@@ -1708,8 +1719,17 @@ input:disabled {
 .taxonomy-cards article { display: flex; flex-direction: column; gap: .6rem; }
 .taxonomy-cards .inline-actions { flex-wrap: wrap; margin-top: auto; }
 .taxonomy-exploration { min-width: 0; display: grid; gap: 1rem; }
-.taxonomy-exploration .table-scroll { overflow: auto; max-height: 65vh; }
-.taxonomy-exploration td { vertical-align: top; min-width: 7rem; }
+.taxonomy-table-shell { max-height: 55vh; }
+.taxonomy-table { min-width: 760px; }
+.taxonomy-table th { position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+.taxonomy-table td { max-width: 24rem; overflow-wrap: anywhere; }
+.taxonomy-table .numeric { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.taxonomy-table tbody tr:nth-child(even) { background: var(--color-surface-subtle); }
+.taxonomy-table td p { margin: .5rem 0; }
+.taxonomy-comparison > summary { cursor: pointer; font-weight: 700; }
+.taxonomy-comparison > .field-grid { margin-top: 1rem; }
+.taxonomy-download { min-width: 0; }
+.taxonomy-download p { overflow-wrap: anywhere; }
 
 .switch-field {
   display: flex;

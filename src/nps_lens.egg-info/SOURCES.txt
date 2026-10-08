@@ -22,6 +22,7 @@ src/nps_lens/analytics/incident_attribution.py
 src/nps_lens/analytics/incident_rationale.py
 src/nps_lens/analytics/linking_diagnostics.py
 src/nps_lens/analytics/linking_policy.py
+src/nps_lens/analytics/nps_gaps.py
 src/nps_lens/analytics/nps_helix_link.py
 src/nps_lens/analytics/signal_quality.py
 src/nps_lens/analytics/taxonomy.py
@@ -35,10 +36,12 @@ src/nps_lens/core/nps_math.py
 src/nps_lens/core/store.py
 src/nps_lens/core/telemetry.py
 src/nps_lens/design/__init__.py
+src/nps_lens/design/brand.py
 src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
 src/nps_lens/domain/causal_methods.py
 src/nps_lens/domain/column_aliases.py
+src/nps_lens/domain/comment_scores.py
 src/nps_lens/domain/comment_text.py
 src/nps_lens/domain/helix.py
 src/nps_lens/domain/helix_links.py
@@ -48,6 +51,7 @@ src/nps_lens/domain/normalization.py
 src/nps_lens/domain/privacy.py
 src/nps_lens/domain/publication_scope.py
 src/nps_lens/domain/record_identity.py
+src/nps_lens/domain/topic_labels.py
 src/nps_lens/ingest/__init__.py
 src/nps_lens/ingest/base.py
 src/nps_lens/ingest/features.py
@@ -64,8 +68,10 @@ src/nps_lens/reports/chart_renderer.py
 src/nps_lens/reports/coherence.py
 src/nps_lens/reports/content_selectors.py
 src/nps_lens/reports/editorial_tokens.py
+src/nps_lens/reports/evidence_layout.py
 src/nps_lens/reports/executive_newsletter.py
 src/nps_lens/reports/executive_ppt.py
+src/nps_lens/reports/narrative.py
 src/nps_lens/reports/presentation_context.py
 src/nps_lens/reports/taxonomy_excel.py
 src/nps_lens/repositories/__init__.py
@@ -91,7 +97,6 @@ src/nps_lens/testing/fixtures.py
 src/nps_lens/ui/__init__.py
 src/nps_lens/ui/business.py
 src/nps_lens/ui/charts.py
-src/nps_lens/ui/historic_changes.py
 src/nps_lens/ui/narratives.py
 src/nps_lens/ui/plotly_theme.py
 src/nps_lens/ui/population.py
@@ -104,12 +109,14 @@ tests/test_classification_framework.py
 tests/test_cli.py
 tests/test_column_aliases.py
 tests/test_config_env.py
+tests/test_corporate_brand.py
 tests/test_dashboard_cache.py
 tests/test_dashboard_serialization.py
 tests/test_design_tokens.py
 tests/test_desktop_runtime.py
 tests/test_downloads.py
 tests/test_drivers.py
+tests/test_editorial_thread.py
 tests/test_evidence_highlights.py
 tests/test_executive_newsletter.py
 tests/test_helix_ingest_filtering.py
@@ -131,8 +138,10 @@ tests/test_iteration35_linking.py
 tests/test_iteration36_linking.py
 tests/test_iteration39_workflow.py
 tests/test_iteration40_horizon.py
+tests/test_linked_comment_scores.py
 tests/test_linking_precision.py
 tests/test_local_processes.py
+tests/test_narrative_sequence.py
 tests/test_normalization_registry.py
 tests/test_nps_helix_linking.py
 tests/test_nps_math.py
@@ -157,6 +166,7 @@ tests/test_ui_business_periods.py
 tests/test_ui_charts.py
 tests/test_ui_population.py
 tests/test_upload_service.py
+tests/test_webapp_evolution_runtime.py
 tests/test_webapp_linking_diagnostics.py
 tests/test_webapp_parity.py
 tests/test_webapp_publication.py

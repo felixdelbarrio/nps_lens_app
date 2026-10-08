@@ -13,6 +13,7 @@ import { EquivalenceMaintenance } from "./EquivalenceMaintenance";
 import { SnapshotSettings } from "./TaxonomyStudio";
 import type { TaxonomyContext } from "../api";
 import { TelemetryPanel } from "./TelemetryPanel";
+import { SingleZipSettings } from "./SingleZipSettings";
 import { ColumnAliasMaintenance } from "./ColumnAliasMaintenance";
 
 export type SettingsTab = "appearance" | "ingestion" | "column-aliases" | "advanced" | "maintenance" | "equivalences" | "telemetry" | "snapshots";
@@ -196,6 +197,8 @@ export function SettingsSheet({
                   </label>
                 </div>
               </article>
+
+              {localTaxonomy ? <SingleZipSettings context={taxonomyContext} disabled={actionsDisabled} /> : null}
 
               <article className="settings-subsection">
                 <div className="settings-subsection-copy">

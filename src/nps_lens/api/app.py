@@ -719,12 +719,30 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         suffix = "-propuesta" if proposal else ""
+        file_name = f"taxonomia-{mode.lower()}{suffix}.xlsx"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{file_name}"',
+            "Cache-Control": "no-store",
+        }
+        current = cast(Settings, request.app.state.settings)
+        if current.auth_mode == "local":
+            try:
+                saved = persist_download(
+                    content,
+                    file_name,
+                    Path(
+                        safe_normalize_downloads_path(
+                            current.ui_defaults()["downloads_path"], current.default_downloads_path
+                        )
+                    ),
+                )
+                headers["X-NPS-LENS-SAVED-PATH"] = str(saved)
+            except OSError as exc:
+                raise HTTPException(500, str(exc)) from exc
         return Response(
             content,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f'attachment; filename="taxonomia-{mode.lower()}{suffix}.xlsx"'
-            },
+            headers=headers,
         )
 
     @app.get("/api/taxonomy/compare")
@@ -763,10 +781,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         require_local_taxonomy(request)
         current = cast(Settings, request.app.state.settings)
         return {
+            "semantic_url": current.taxonomy_semantic_url,
             "designer_url": current.taxonomy_designer_url,
             "classifier_url": current.taxonomy_classifier_url,
             "helix_classifier_url": current.helix_classifier_url,
             "normalizer_url": current.taxonomy_normalizer_url,
+            "single_zip_enabled": current.single_zip_enabled,
+            "classifier_single_zip_url": current.classifier_single_zip_url,
+            "helix_single_zip_url": current.helix_single_zip_url,
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -780,17 +802,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         current = cast(Settings, request.app.state.settings)
         try:
             fields = {
+                "semantic_url": "taxonomy_semantic_url",
                 "designer_url": "taxonomy_designer_url",
                 "classifier_url": "taxonomy_classifier_url",
                 "helix_classifier_url": "helix_classifier_url",
                 "normalizer_url": "taxonomy_normalizer_url",
+                "single_zip_enabled": "single_zip_enabled",
+                "classifier_single_zip_url": "classifier_single_zip_url",
+                "helix_single_zip_url": "helix_single_zip_url",
             }
             values = {
-                fields[key]: normalize_chatgpt_project_url(value)
+                fields[key]: (
+                    value
+                    if key == "single_zip_enabled"
+                    else (
+                        ""
+                        if key.endswith("single_zip_url") and not str(value).strip()
+                        else normalize_chatgpt_project_url(value)
+                    )
+                )
                 for key, value in payload.model_dump(exclude_none=True).items()
             }
             persist_ui_prefs(current.dotenv_path, values)
-            refresh_settings(request)
+            refresh_settings(request, invalidate_analytics=False)
             return taxonomy_discovery_settings(request, dashboard_layer)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -819,7 +853,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         context, dashboard_layer._load_helix_df(context)
                     )
                 try:
-                    return handler.export(context, stage, **engine_scope(request))
+                    scope = engine_scope(request)
+                    if stage == "semantic":
+                        scope["semantic_mode"] = request.query_params.get(
+                            "mode", handler.taxonomy.state(context)["active"]
+                        )
+                    return handler.export(
+                        context,
+                        stage,
+                        single_zip=cast(Settings, request.app.state.settings).single_zip_enabled,
+                        **scope,
+                    )
                 finally:
                     if stage == "classifier":
                         dashboard_layer.clear_caches()
@@ -953,6 +997,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     context,
                     inputs,
                     reevaluate=request.query_params.get("reevaluate") == "true",
+                    single_zip=cast(Settings, request.app.state.settings).single_zip_enabled,
                 )
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc

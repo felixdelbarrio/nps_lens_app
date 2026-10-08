@@ -13,6 +13,8 @@ import pandas as pd
 
 from nps_lens.analytics.linking_policy import LINK_MAX_DAYS_APART, temporal_mask
 from nps_lens.analytics.signal_quality import is_reserve_category
+from nps_lens.core.nps_math import valid_nps_scores
+from nps_lens.domain.comment_scores import score_group_label
 
 EVIDENCE_COPY = {
     "SIN_EVIDENCIA": ("Sin evidencia", "No hay vínculo defendible."),
@@ -47,12 +49,50 @@ def number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def engine_quality(row: Mapping[str, Any]) -> float:
+def linked_comment_metrics(links: pd.DataFrame) -> dict[str, Any]:
+    """Count each response once; frequency-weight scores across the entire scenario."""
+    unique = links[["nps_id", "nps_score"]].drop_duplicates("nps_id")
+    scores = valid_nps_scores(unique["nps_score"])
+    counts = scores.dropna().astype(int).value_counts(sort=False).sort_index()
+    scored = int(counts.sum())
+    distribution = [
+        {
+            "score": int(score),
+            "count": int(count),
+            "label": score_group_label(float(score), int(count)),
+        }
+        for score, count in counts.items()
+    ]
+    missing = len(unique) - scored
+    if missing:
+        distribution.append(
+            {
+                "score": None,
+                "count": missing,
+                "label": score_group_label(None, missing),
+            }
+        )
+    return {
+        "linked_comments": len(unique),
+        "score_distribution": distribution,
+        "avg_score": (
+            sum(int(score) * int(count) for score, count in counts.items()) / scored
+            if scored
+            else None
+        ),
+        "detractor_rate": int(counts.loc[counts.index <= 6].sum()) / scored if scored else 0.0,
+    }
+
+
+def engine_quality(row: Mapping[Any, Any]) -> float | None:
     """Select the engine's own score, without treating confidence as cosine similarity."""
     column = (
-        "avg_semantic_confidence" if row.get("causal_engine") == "llm" else "avg_text_similarity"
+        "avg_semantic_confidence"
+        if str(row.get("causal_engine")) == "llm"
+        else "avg_text_similarity"
     )
-    return number(row.get(column))
+    value = number(row.get(column), float("nan"))
+    return value if math.isfinite(value) and 0 <= value <= 1 else None
 
 
 def scenario_impact_score(row: Mapping[str, Any]) -> float:
@@ -62,7 +102,7 @@ def scenario_impact_score(row: Mapping[str, Any]) -> float:
         return -1000.0
     comments = max(0, number(row.get("linked_comments")))
     incidents = max(0, number(row.get("linked_incidents")))
-    confidence = min(1, max(0, engine_quality(row)))
+    confidence = min(1, max(0, number(engine_quality(row))))
     score = min(10, max(0, number(row.get("avg_nps", row.get("avg_score")), 10)))
     detractors = min(1, max(0, number(row.get("detractor_rate"))))
     # Bounded contributions keep a large, vague cluster from dominating strong evidence.
@@ -164,18 +204,8 @@ class CausalEvidenceEvaluator:
 
     def evaluate_scenario(self, links: pd.DataFrame) -> dict[str, Any]:
         pairs = links.drop_duplicates(["nps_id", "incident_id"])
-        unique = pairs.drop_duplicates("nps_id")
-        scores = (
-            pd.to_numeric(unique["nps_score"], errors="coerce")
-            .where(lambda s: s.between(0, 10))
-            .dropna()
-        )
-        metrics = {
-            "linked_comments": len(unique),
-            "linked_incidents": pairs.incident_id.nunique(),
-            "avg_score": float(scores.mean()) if len(scores) else None,
-            "detractor_rate": float(scores.le(6).mean()) if len(scores) else 0.0,
-        }
+        score_metrics = linked_comment_metrics(pairs)
+        metrics = {**score_metrics, "linked_incidents": pairs.incident_id.nunique()}
         evaluated = [self.evaluate({**row, **metrics}) for row in pairs.to_dict("records")]
         # A heterogeneous scenario cannot inherit its strongest pair's assertion.
         strength = {
@@ -191,8 +221,7 @@ class CausalEvidenceEvaluator:
             else self.evaluate({})
         )
         evidence["warnings"] = list(dict.fromkeys(w for e in evaluated for w in e["warnings"]))
-        evidence["detractor_rate"] = metrics["detractor_rate"]
-        evidence["avg_score"] = metrics["avg_score"]
+        evidence.update(score_metrics)
         evidence["quote_coverage"] = sum(
             all(
                 isinstance(r.get(key), str) and bool(r[key].strip())
