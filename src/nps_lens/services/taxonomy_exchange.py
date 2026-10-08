@@ -762,7 +762,9 @@ class TaxonomyExchange:
             if stage == "semantic":
                 catalog_bytes = encode({"categories": category_catalog(job["taxonomy"])})
                 if len(catalog_bytes) > MAX_MEMBER_BYTES:
-                    raise ValueError("El catálogo supera 2 MiB; reduce la taxonomía antes de exportar.")
+                    raise ValueError(
+                        "El catálogo supera 2 MiB; reduce la taxonomía antes de exportar."
+                    )
                 archive.writestr("taxonomy.json", catalog_bytes)
             for key, rows in job["batches"].items():
                 archive.writestr(f"comments/{key}.json", encode({"comments": rows}))

@@ -92,7 +92,9 @@ def test_manual_uses_discovered_skeleton_without_origin(exchange):
     assert handler.taxonomy.manual_draft(context) == TAXONOMY
     handler.taxonomy.save_manual(context, TAXONOMY["taxonomy"])
     assert handler.taxonomy.resolve(context, mode="COMPLETED").Palanca.eq("Atención").all()
-    assert handler.taxonomy.catalog(context, "COMPLETED") == handler.taxonomy.catalog(context, "DISCOVERED")
+    assert handler.taxonomy.catalog(context, "COMPLETED") == handler.taxonomy.catalog(
+        context, "DISCOVERED"
+    )
     assert len(handler.assignments(context, handler.taxonomy.source(context), "COMPLETED")) == 405
 
 
