@@ -348,7 +348,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("lidera el deterioro entre los tópicos observados" in t for t in texts)
     assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any("tiene el menor score medio entre los tópicos observados" in t for t in texts)
+    assert any("tiene el menor score medio entre el top 3 de los tópicos observados" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)

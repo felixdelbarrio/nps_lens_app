@@ -17,7 +17,7 @@ class EvidenceLayout:
     title_font: float = 20
     conclusion_top: float = 4.91
     conclusion_height: float = 0.39
-    topics_per_page: int = 4
+    max_summary_topics: int = 4
     label_font: float = 10
     kpi_font: float = 30
 

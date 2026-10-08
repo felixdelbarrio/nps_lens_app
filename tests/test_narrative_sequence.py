@@ -240,6 +240,44 @@ assert.ok(state.scenarioIndex>=0&&state.scenarioIndex<cards.length);
     subprocess.run(["node"], input=script, check=True, capture_output=True, text=True)
 
 
+def test_ppt_has_one_top_four_overview_and_keeps_evidence_outside_that_top():
+    frame = pd.DataFrame(
+        {
+            "Palanca": [f"Topic {i}" for i in range(6)],
+            "Subpalanca": ["Fallo"] * 6,
+            "Comment": ["No puedo completar la operación"] * 6,
+            "NPS": list(range(6)),
+            "Fecha": ["2026-08-01"] * 6,
+        }
+    )
+    chains = cases().iloc[:2].copy()
+    chains["anchor_topic"] = ["Topic 4 > Fallo", "Topic 5 > Fallo"]
+    chains["nps_topic"] = chains.anchor_topic
+    report = generate_business_review_ppt(
+        service_origin="Fixture",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        focus_name="Todos",
+        selected_nps_df=frame,
+        comparison_nps_df=frame,
+        attribution_df=chains,
+    )
+    deck = Presentation(BytesIO(report.compact_content))
+    overview = [s for s in deck.slides if any(sh.name == "Topic heading" for sh in s.shapes)]
+    assert len(overview) == 1
+    assert [sh.text for sh in overview[0].shapes if sh.name == "Topic heading"] == [
+        f"Topic {i}" for i in range(4)
+    ]
+    title = next(sh.text for sh in overview[0].shapes if sh.name == "Report title")
+    assert "top 4 de los tópicos" in title and "(1/" not in title
+    assert [sh.text for s in deck.slides for sh in s.shapes if sh.name == "Topic separator"] == [
+        "VoC : Topic 4",
+        "VoC : Topic 5",
+    ]
+
+
 def test_quotes_do_not_silently_replace_a_duplicate_second_topic_with_a_third():
     rows = cases()
     rows.at[0, "comment_records"] = [

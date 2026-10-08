@@ -2577,7 +2577,7 @@ def _report_conclusion(slide: Any, text: str) -> None:
     )
 
 
-def _add_topic_overviews(
+def _add_topic_overview(
     prs: Presentation,
     context: PresentationContext,
     topics: pd.DataFrame,
@@ -2585,68 +2585,61 @@ def _add_topic_overviews(
     metric_scope: str,
 ) -> None:
     layout = EVIDENCE_LAYOUT
-    rows = topics.to_dict("records")
-    pages = [
-        rows[index : index + layout.topics_per_page]
-        for index in range(0, len(rows), layout.topics_per_page)
-    ] or [[]]
+    rows = topics.head(layout.max_summary_topics).to_dict("records")
     leader = str(rows[0]["value"]) if rows else ""
-    for page, records in enumerate(pages, start=1):
-        slide = _report_slide(prs)
-        title = (
-            f"{leader} tiene el menor score medio entre los tópicos observados{channel_scope}"
-            if rows
-            else "Sin opiniones clasificadas para comparar tópicos"
-        )
-        if len(pages) > 1:
-            title += f" ({page}/{len(pages)})"
+    slide = _report_slide(prs)
+    title = (
+        f"{leader} tiene el menor score medio entre el top {len(rows)} de los tópicos observados{channel_scope}"
+        if rows
+        else "Sin opiniones clasificadas para comparar tópicos"
+    )
+    _report_text(
+        slide,
+        "Report title",
+        title,
+        (layout.margin, 0.24, 7.8, 0.92),
+        size=layout.title_font,
+        bold=True,
+        serif=True,
+    )
+    labels = ("Volumen de\nopiniones", "Score de\nexperiencia", "Peso de\ndetractores")
+    for index, label in enumerate(labels):
         _report_text(
             slide,
-            "Report title",
-            title,
-            (layout.margin, 0.24, 7.8, 0.92),
-            size=layout.title_font,
+            f"Overview row {index}",
+            label,
+            (0.58, 2.0 + index * 0.86, 1.28, 0.60),
+            size=11,
             bold=True,
-            serif=True,
         )
-        labels = ("Volumen de\nopiniones", "Score de\nexperiencia", "Peso de\ndetractores")
-        for index, label in enumerate(labels):
-            _report_text(
-                slide,
-                f"Overview row {index}",
-                label,
-                (0.58, 2.0 + index * 0.86, 1.28, 0.60),
-                size=11,
-                bold=True,
+    for index, row in enumerate(rows):
+        x = 2.05 + index * 1.80
+        _report_text(
+            slide,
+            "Topic heading",
+            _wrap_text_to_width(row["value"], column_width_in=1.63, font_size_pt=10),
+            (x, layout.body_top, 1.63, 0.58),
+            size=10,
+            bold=True,
+            align=PP_ALIGN.CENTER,
+        )
+        for offset, (label, value) in enumerate(
+            (
+                ("Opiniones totales", _fmt_count_or_nd(row["n"])),
+                ("Score total", _fmt_num_or_nd(row["nps"], decimals=1)),
+                ("Detractores del periodo", _fmt_pct_or_nd(row["detractor_rate"])),
             )
-        for index, row in enumerate(records):
-            x = 2.05 + index * 1.80
+        ):
+            top = 1.98 + offset * 0.86
+            _report_panel(slide, "Overview metric panel", (x, top, 1.63, 0.75), "FFFFFF")
             _report_text(
                 slide,
-                "Topic heading",
-                _wrap_text_to_width(row["value"], column_width_in=1.63, font_size_pt=10),
-                (x, layout.body_top, 1.63, 0.58),
+                "Overview metric",
+                f"{label}:\n{value}",
+                (x + 0.15, top + 0.15, 1.33, 0.52),
                 size=10,
-                bold=True,
-                align=PP_ALIGN.CENTER,
             )
-            for offset, (label, value) in enumerate(
-                (
-                    ("Opiniones totales", _fmt_count_or_nd(row["n"])),
-                    ("Score total", _fmt_num_or_nd(row["nps"], decimals=1)),
-                    ("Detractores del periodo", _fmt_pct_or_nd(row["detractor_rate"])),
-                )
-            ):
-                top = 1.98 + offset * 0.86
-                _report_panel(slide, "Overview metric panel", (x, top, 1.63, 0.75), "FFFFFF")
-                _report_text(
-                    slide,
-                    "Overview metric",
-                    f"{label}:\n{value}",
-                    (x + 0.15, top + 0.15, 1.33, 0.52),
-                    size=10,
-                )
-        _report_conclusion(slide, f"Periodo {context.current_label} · {metric_scope}")
+    _report_conclusion(slide, f"Periodo {context.current_label} · {metric_scope}")
 
 
 def _add_topic_separator(prs: Presentation, topic: str) -> None:
@@ -3067,7 +3060,7 @@ def _fill_template_deck(
 
     while len(prs.slides) > 5:
         _remove_slide(prs, len(prs.slides) - 1)
-    _add_topic_overviews(
+    _add_topic_overview(
         prs, context, context.dimensions["Palanca"].topic_table_df, channel_scope, metric_scope
     )
     if include_causal_section:
