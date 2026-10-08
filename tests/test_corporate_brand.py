@@ -119,7 +119,9 @@ def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
     )
     assert generated["newsletter_prefix"] == "[bIA]"
     assert generated["email_corporate_logo"] == email_corporate_logo("cid:bbva-logo")
-    assert b64decode(generated["corporate_logo"]) == (BRAND_ASSETS / "bbva-bei.png").read_bytes()
+    assert (
+        b64decode(generated["corporate_logo"]) == (BRAND_ASSETS / "bbva-bei-email.png").read_bytes()
+    )
     assert generated["email_signature"] == email_signature("cid:bia-logo")
     assert b64decode(generated["initiative_logo"]) == (BRAND_ASSETS / "bia-email.png").read_bytes()
     with Image.open(BRAND_ASSETS / "bia-email.png") as logo:
@@ -139,3 +141,39 @@ def test_initiative_logo_has_no_white_plate_in_any_browser_surface():
     assert "background:#fff" not in SIGNATURE_CSS
     assert Path("frontend/src/brand.css").read_text().strip().endswith(SIGNATURE_CSS.strip())
     assert SIGNATURE_CSS.strip() in Path("webapp/apps-script/BrandIdentity.html").read_text()
+
+
+def test_newsletter_dark_mode_protection_is_shared_and_uses_corporate_token():
+    from nps_lens.design.brand import (
+        EMAIL_DARK_CSS,
+        EMAIL_HERO_COLOR,
+        EMAIL_HERO_STYLE,
+        EMAIL_HERO_TEXT_OPEN,
+        EMAIL_LIGHT_META,
+    )
+    from nps_lens.design.tokens import DesignTokens, palette
+
+    assert (
+        palette(DesignTokens.default(), "light")["color.primary.text.primary"] == EMAIL_HERO_COLOR
+    )
+    html = _newsletter({"newsletter": {}}, "report.pptx").decode()
+    for shared in (EMAIL_DARK_CSS, EMAIL_HERO_STYLE, EMAIL_HERO_TEXT_OPEN, EMAIL_LIGHT_META):
+        assert shared in html
+    assert 'class="nps-newsletter"' in html
+    assert f'bgcolor="{EMAIL_HERO_COLOR}"' in html
+    assert "mix-blend-mode:screen" in html and "mix-blend-mode:difference" in html
+    assert "background-image:linear-gradient" in EMAIL_HERO_STYLE
+    script = Path("webapp/apps-script/00_Brand.gs").read_text()
+    generated = json.loads(
+        subprocess.run(
+            ["node"],
+            input=script + "\nprocess.stdout.write(JSON.stringify(BRAND));",
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    )
+    assert generated["email_dark_css"] == EMAIL_DARK_CSS
+    assert generated["email_hero_style"] == EMAIL_HERO_STYLE
+    assert generated["email_hero_text_open"] == EMAIL_HERO_TEXT_OPEN
+    assert generated["email_light_meta"] == EMAIL_LIGHT_META

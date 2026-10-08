@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import date
 
 import pandas as pd
+import pytest
 
+from nps_lens.design.tokens import DesignTokens, nps_balance_color, palette
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.services.analytics.kpis_service import build_period_kpis
 
@@ -72,6 +74,23 @@ def test_newsletter_uses_monthly_kpis_and_keeps_only_the_short_editorial_model()
     assert result["scorecard"][1]["value"] == "-33,33"
     assert result["quotes"] == ["no funciona"]
     assert result["signals"][0]["label"] == "Funcionamiento continuo"
+    colors = palette(DesignTokens.default(), "light")
+    assert result["signals"][0]["reason_color"] == colors["color.primary.bg.alert"]
+    assert result["signals"][1]["reason_color"] == colors["color.primary.bg.success"]
     assert "insights" not in result
     assert "focus" not in result
     assert "connections" not in result
+
+
+@pytest.mark.parametrize(
+    "nps,token",
+    [
+        (-90.32, "color.primary.bg.alert"),
+        (29.17, "color.primary.bg.success"),
+        (0, "color.primary.text.primary"),
+        (None, "color.primary.text.primary"),
+    ],
+)
+def test_newsletter_metric_color_follows_classic_nps_sign(nps, token):
+    tokens = DesignTokens.default()
+    assert nps_balance_color(tokens, "light", nps) == palette(tokens, "light")[token]

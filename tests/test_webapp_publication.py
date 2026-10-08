@@ -109,10 +109,7 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "function exportActivityReport" not in activity
     assert "function getNewsletterSettings" not in newsletter
     assert "function getNewsletterWorkspace" in newsletter
-    assert (
-        "_reportUrl_(publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
-        in newsletter
-    )
+    assert "_reportUrl_(publication.scopeKey, showEvolutionNps)" in newsletter
     assert "_presentationEntryUrl_" not in publication
     assert "function _compactSlidesProperty_(scopeKey)" in publication
     assert "report_without_evolution" in publication

@@ -2,6 +2,7 @@
 
 from base64 import b64encode
 
+from nps_lens.design.tokens import DesignTokens, palette
 from nps_lens.platform.resources import resource_root
 
 BRAND = {
@@ -49,5 +50,28 @@ def email_corporate_logo(image_src: str) -> str:
 
 
 EMAIL_CORPORATE_LOGO = email_corporate_logo(
-    "data:image/png;base64," + b64encode((BRAND_ASSETS / "bbva-bei.png").read_bytes()).decode()
+    "data:image/png;base64,"
+    + b64encode((BRAND_ASSETS / "bbva-bei-email.png").read_bytes()).decode()
 )
+
+
+# Gmail iOS preserves gradients but may invert solid backgrounds and white text.
+# Black in the two Gmail-only blend layers is a compositing operand, not a brand color.
+_EMAIL_PALETTE = palette(DesignTokens.default(), "light")
+EMAIL_HERO_COLOR = _EMAIL_PALETTE["color.primary.text.primary"]
+EMAIL_HERO_STYLE = (
+    f"background-color:{EMAIL_HERO_COLOR};"
+    f"background-image:linear-gradient({EMAIL_HERO_COLOR},{EMAIL_HERO_COLOR});"
+    "color:#ffffff;"
+)
+EMAIL_DARK_CSS = """
+:root{color-scheme:light only;supported-color-schemes:light}
+u + .nps-newsletter .gmail-blend-screen{background:#000;mix-blend-mode:screen}
+u + .nps-newsletter .gmail-blend-difference{background:#000;mix-blend-mode:difference}
+"""
+EMAIL_LIGHT_META = (
+    '<meta name="color-scheme" content="light only">'
+    '<meta name="supported-color-schemes" content="light">'
+)
+EMAIL_HERO_TEXT_OPEN = '<div class="gmail-blend-screen"><div class="gmail-blend-difference">'
+EMAIL_HERO_TEXT_CLOSE = "</div></div>"
