@@ -1751,7 +1751,6 @@ class DashboardService:
         core = cast(dict[str, object], analysis["core"])
         overall_daily = cast(pd.DataFrame, core["overall_daily"])
         overall_weekly = cast(pd.DataFrame, core["overall_weekly"])
-        by_topic_weekly = cast(pd.DataFrame, core["by_topic_weekly"])
         links_df = cast(pd.DataFrame, core["links_df"])
         mode_payload = cast(dict[str, object], analysis["mode_payload"])
         causal_topic_map_df = cast(pd.DataFrame, mode_payload["causal_topic_map_df"])
@@ -1843,19 +1842,6 @@ class DashboardService:
                 ascending=[True, False],
             ).drop(columns="__topic_order")
 
-        metrics_source = _filter_frame_by_topic_values(by_topic_weekly, affected_topics)
-        if not evidence_sorted_df.empty and not metrics_source.empty:
-            topic_metrics = (
-                metrics_source.groupby("nps_topic", observed=True)
-                .agg(Respuestas=("responses", "sum"), focus_count=("focus_count", "sum"))
-                .reset_index()
-            )
-            topic_metrics["Tasa foco"] = topic_metrics["focus_count"] / topic_metrics[
-                "Respuestas"
-            ].replace({0: np.nan})
-            evidence_sorted_df = evidence_sorted_df.merge(
-                topic_metrics.drop(columns="focus_count"), on="nps_topic", how="left"
-            )
         # Preserve evidence for every affected topic instead of allowing the
         # first topic to consume the whole static-snapshot row budget.
         evidence_visible_df = (
@@ -1870,12 +1856,12 @@ class DashboardService:
                 "incident_id__href",
                 "incident_summary",
                 "detractor_comment",
-                "Tasa foco",
-                "text_similarity",
                 "semantic_confidence",
             ]
         )
-        evidence_visible_df["Tasa foco"] = evidence_visible_df["Tasa foco"].map(format_percentage)
+        evidence_visible_df["semantic_confidence"] = evidence_visible_df["semantic_confidence"].map(
+            format_percentage
+        )
         evidence_visible_df = evidence_visible_df.rename(
             columns={
                 "nps_topic": "NPS Topic",
@@ -1883,8 +1869,6 @@ class DashboardService:
                 "incident_id__href": "Incident ID__href",
                 "incident_summary": "Incident Summary",
                 "detractor_comment": "Detractor Comment",
-                "Tasa foco": "Tasa Foco",
-                "text_similarity": "Similitud textual",
                 "semantic_confidence": "Confianza semántica",
             }
         )
@@ -1983,6 +1967,7 @@ class DashboardService:
                     "title": "Evidencias",
                     "subtitle": "Comentarios e incidencias vinculados para los 10 tópicos afectados con mayor evidencia.",
                     "rows": evidence_rows,
+                    "columns": list(evidence_visible_df.columns),
                     "empty_state": str(
                         cast(dict[str, object], analysis["diagnostics"])["evaluation_message"]
                     ),
@@ -2010,6 +1995,7 @@ class DashboardService:
                 ),
                 "table_title": method_spec.table_title,
                 "table": self._serialize_rows(entity_summary_df),
+                "columns": list(entity_summary_df.columns),
                 "column_labels": {
                     "Calidad del vínculo": link_confidence_label(
                         str(analysis.get("causal_engine", "rules"))
@@ -2685,14 +2671,18 @@ class DashboardService:
             "linked_incidents",
             "linked_comments",
             "linked_pairs",
-            "Calidad del vínculo",
             "avg_nps",
+            "Calidad del vínculo",
         ]
         if source == TOUCHPOINT_SOURCE_BROKEN_JOURNEYS:
             columns = [column for column in columns if column not in {"nps_topic", "touchpoint"}]
-        summary["Calidad del vínculo"] = summary.apply(engine_quality, axis=1).map(
-            format_percentage
-        )
+        if _series_or_default(summary, "causal_engine").eq("llm").any():
+            summary["Calidad del vínculo"] = summary.apply(
+                lambda row: engine_quality(row) if row.get("causal_engine") == "llm" else np.nan,
+                axis=1,
+            ).map(format_percentage)
+        else:
+            columns.remove("Calidad del vínculo")
         return summary[columns].rename(
             columns={
                 "nps_topic": entity_name,
@@ -2766,11 +2756,17 @@ class DashboardService:
                             "label": "Incidencias relacionadas",
                             "value": str(int(row.get("linked_incidents", 0) or 0)),
                         },
-                        {
-                            "label": link_confidence_label(str(row.get("causal_engine", "rules"))),
-                            "value": format_percentage(engine_quality(row.to_dict())),
-                        },
-                    ],
+                    ]
+                    + (
+                        [
+                            {
+                                "label": link_confidence_label("llm"),
+                                "value": format_percentage(engine_quality(row)),
+                            }
+                        ]
+                        if row.get("causal_engine") == "llm"
+                        else []
+                    ),
                     "flow_steps": [
                         str(row.get("affected_task") or "Tarea pendiente de validación"),
                         str(row.get("observed_symptom") or title),

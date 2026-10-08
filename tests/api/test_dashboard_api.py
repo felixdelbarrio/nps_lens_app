@@ -612,8 +612,6 @@ def test_dashboard_supports_helix_upload_and_contextual_table(tmp_path: Path) ->
         "Incident ID__href",
         "Incident Summary",
         "Detractor Comment",
-        "Tasa Foco",
-        "Similitud textual",
         "Confianza semántica",
     ]
     identity = linking_payload["scenarios"]["cards"][0]["identity_rows"]
@@ -1040,9 +1038,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(paragraph.text or "")
 
-    assert any(
-        "lidera el deterioro entre los tópicos observados en Todos" in text for text in all_texts
-    )
+    assert any("lidera el deterioro entre los tópicos observados" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
 
 

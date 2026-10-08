@@ -12,6 +12,8 @@ El HTML inicial solo contiene el contexto de acceso. El shell analítico y las t
 
 Las acciones de **Newsletter**, **Importar** y **Configuración** solo se muestran al administrador. Newsletter mantiene una audiencia independiente por Owner Support Company, con destinatarios activos e inactivos, y permite un envío de prueba al administrador conectado. Configuración reúne la descarga de telemetría y el análisis de adopción sobre un único registro de actividad por lotes, sin almacenar filtros ni datos de cliente.
 
+La narrativa conserva la jerarquía `Tópico > problema` desde los comentarios hasta los casos `Tópico > problema: tarea → síntoma`. Los rankings mantienen el nivel de palanca o subpalanca seleccionado. Las tablas publican su orden de columnas explícitamente: la confianza semántica aparece al final y en porcentaje; la tasa foco y la similitud textual no se muestran. La newsletter solo conecta el foco principal con evidencia del mismo tópico. Estas etiquetas son de presentación y no modifican fingerprints, clasificación ni cruces.
+
 El snapshot Web fija el canal `Web`. El enlace de presentación de la newsletter es estable y resuelve en cada acceso la variante definida por el control global **Evolución NPS**.
 
 El contrato de publicación `5.0` identifica cada edición exclusivamente por Owner Support Company, periodo y método causal. Incluye las pantallas ya calculadas y una sola página

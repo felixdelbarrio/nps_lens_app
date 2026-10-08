@@ -270,6 +270,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             <RecordTable
               emptyMessage={asString(situationEvidence.empty_state, "No hay evidencias disponibles.")}
               rows={visibleEvidence}
+              columns={situationEvidence.columns as string[]}
             />
           </section>
         </div>
@@ -316,6 +317,7 @@ export function LinkingWorkspace({ linking, tab, onTabChange }: LinkingWorkspace
             <RecordTable
               emptyMessage={asString(entitySummary.empty_state, "No hay detalle de evidencia disponible.")}
               rows={visibleJourneys}
+              columns={(entitySummary.columns as string[] | undefined)?.map(key => asString(entityColumnLabels[key], key))}
             />
           </section>
         </div>

@@ -108,3 +108,21 @@ it("shows the complete server score distribution instead of IDs or sample counts
   expect(within(overview).queryByText("private-id")).not.toBeInTheDocument();
   expect(screen.getByText("0,25")).toBeInTheDocument();
 });
+
+it("uses the published evidence column order with semantic confidence last", () => {
+  const columns = ["Detractor Comment", "Incident ID", "Incident Summary", "NPS Topic", "Confianza semántica"];
+  const linking = {
+    ...payload,
+    situation: {
+      evidence: {
+        columns,
+        rows: [{ "Confianza semántica": "90%", "Detractor Comment": "No puedo acceder", "Incident ID": "INC1", "Incident Summary": "Error", "NPS Topic": "Acceso > Token" }]
+      }
+    }
+  } as unknown as LinkingPayload;
+  render(<LinkingWorkspace linking={linking} tab="situation" onTabChange={() => {}} />);
+  expect(screen.getAllByRole("columnheader").map(header => header.textContent)).toEqual(columns);
+  expect(screen.getByText("90,0%")).toBeInTheDocument();
+  expect(screen.queryByText("Tasa Foco")).not.toBeInTheDocument();
+  expect(screen.queryByText("Similitud textual")).not.toBeInTheDocument();
+});

@@ -225,10 +225,9 @@ def explain_topics(topics_df: pd.DataFrame, max_items: int = 5) -> list[str]:
     out: list[str] = []
     d = topics_df.sort_values("n", ascending=False).head(max_items)
     for _, r in d.iterrows():
-        cid = int(r.get("cluster_id", -1))
         n = int(r.get("n", 0))
         terms = list(r.get("top_terms", []))[:5]
-        out.append(f"Tema **#{cid}** (n={n}): suele mencionar *{', '.join(terms)}*.")
+        out.append(f"**{', '.join(terms)}**: {format_volume(n)} comentarios.")
     return out
 
 

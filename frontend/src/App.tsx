@@ -1026,9 +1026,8 @@ export function App() {
     }
 
     const topicRows = (dashboard?.overview.topics_table || []).map((row) => ({
-      Cluster: row.cluster_id ?? "",
-      n: row.n ?? "",
-      "Términos": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
+      Comentarios: row.n ?? "",
+      "Tópico > problema": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
       Ejemplos: Array.isArray(row.examples) ? row.examples.join(" · ") : row.examples ?? ""
     }));
 

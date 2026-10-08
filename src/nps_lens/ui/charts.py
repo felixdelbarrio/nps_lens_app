@@ -960,13 +960,15 @@ def chart_causal_entity_bar(
 
     plot_df = tmp.iloc[::-1].copy()
     plot_df["entity_label"] = plot_df["entity_label"].astype(str)
-    plot_df["confidence_pct"] = plot_df.apply(engine_quality, axis=1) * 100.0
+    semantic = "causal_engine" in plot_df and plot_df["causal_engine"].eq("llm").all()
+    if semantic:
+        plot_df["confidence_pct"] = plot_df.apply(engine_quality, axis=1) * 100.0
     fig = px.bar(
         plot_df,
         x="linked_pairs",
         y="entity_label",
         orientation="h",
-        color="confidence_pct",
+        color="confidence_pct" if semantic else None,
         color_continuous_scale=_colorscale_rgy(theme),
         text="linked_pairs",
         hover_data={
@@ -975,7 +977,7 @@ def chart_causal_entity_bar(
             "subpalanca": True,
             "anchor_topic": True,
             "avg_nps": ":.2f",
-            "confidence_pct": ":.1f",
+            **({"confidence_pct": ":.1f"} if semantic else {}),
         },
     )
     fig.update_traces(textposition="outside")
@@ -984,8 +986,7 @@ def chart_causal_entity_bar(
         yaxis_title=entity_label,
         coloraxis=dict(
             colorbar=dict(
-                title=link_confidence_label(str(tmp.iloc[0].get("causal_engine", "rules")))
-                + " (%)",
+                title=link_confidence_label("llm") + " (%)",
                 tickfont=dict(size=10),
             )
         ),
@@ -1185,8 +1186,7 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
 
     def _topic_label(row: pd.Series) -> str:
         terms = list(row["top_terms"])[:3]
-        cid = int(row["cluster_id"])
-        return f"#{cid}: {', '.join(terms)}"
+        return ", ".join(terms)
 
     d["label"] = d.apply(_topic_label, axis=1)
     plot_df = d.iloc[::-1].copy()

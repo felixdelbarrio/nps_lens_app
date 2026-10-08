@@ -347,15 +347,14 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("lidera el deterioro entre los tópicos observados en Todos" in t for t in texts)
+    assert any("lidera el deterioro entre los tópicos observados" in t for t in texts)
+    assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
-    assert any(
-        "tiene el menor score medio entre los tópicos observados en Todos" in t for t in texts
-    )
+    assert any("tiene el menor score medio entre los tópicos observados" in t for t in texts)
     assert not any("Dónde duele en la Web · Subpalanca" in t for t in texts)
     assert not any("oportunidades combinan impacto potencial" in t for t in texts)
     assert not any("Oportunidades priorizadas · Subpalanca" in t for t in texts)
-    assert any("Acceso / Login" in t for t in texts)
+    assert any("Acceso > Login" in t for t in texts)
     assert any("Delta NPS Clásico" in t for t in texts)
     assert not any("Lectura ejecutiva" in t for t in texts)
     assert not any("Criterio de recorte" in t for t in texts)
@@ -408,7 +407,8 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     cards = service._build_linking_scenario_cards(payload["attribution"])
     assert cards[0]["title"] == causal_slide.shapes[1].text
     assert causal_slide.shapes[4].text == "NOTA MEDIA DE COMENTARIOS ENLAZADOS"
-    assert causal_slide.shapes[7].text == "SIMILITUD TEXTUAL"
+    assert causal_slide.shapes[7].text == ""
+    assert len(cards[0]["spotlight_metrics"]) == 3
     assert causal_slide.shapes[2].text == ""
     assert causal_slide.shapes[5].text == ""
     evidence_paragraphs = [
@@ -448,7 +448,7 @@ def test_webapp_ppt_and_newsletter_share_operational_scenario_titles() -> None:
     slide = Presentation(BytesIO(out.content)).slides[6]
     assert cards[0]["title"] == slide.shapes[1].text
     assert cards[0]["title"] == (
-        "validar el teléfono para activar el token → la validación del teléfono no se completa"
+        f"{payload['attribution'].iloc[0]['nps_topic']}: validar el teléfono para activar el token → la validación del teléfono no se completa"
     )
     newsletter = build_executive_newsletter(
         current_df=payload["selected_nps"],
@@ -730,7 +730,7 @@ def test_generate_business_review_ppt_can_render_broken_journey_story() -> None:
                     texts.append(paragraph.text or "")
 
     assert any(t == "Acceso / Login" for t in texts)
-    assert any("Acceso / Login" in t for t in texts)
+    assert any("Acceso > Login" in t for t in texts)
 
 
 def test_ppt_analytics_helpers_build_dynamic_tables() -> None:

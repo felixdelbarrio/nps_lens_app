@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from nps_lens.analytics.causal_evidence import link_confidence_label, scenario_impact_score
+from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.channel_topic_scope import restrict_to_topics, topics_observed_in_channel
 from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
@@ -116,12 +116,12 @@ def _connections(linking: dict[str, object]) -> list[dict[str, object]]:
         connections.append(
             {
                 "topic": topic,
+                "anchor_topic": str(card.get("anchor_topic") or card.get("nps_topic") or ""),
                 "semantic_links": int(_number(card.get("linked_pairs")) or 0),
                 "evidence_reason": card.get(
                     "evidence_reason",
                     "Evidencia semántica compatible; requiere validación operativa.",
                 ),
-                "confidence_label": link_confidence_label(str(card.get("causal_engine", "rules"))),
                 "comments": [
                     redact_operational_snippet(str(item.get("comment") or "")).strip()
                     for item in comments
@@ -192,18 +192,25 @@ def build_executive_newsletter(
             signals.append(
                 {
                     "label": label,
-                    "reason": f"{connection['semantic_links']} vínculos. {connection['confidence_label']}. {connection['evidence_reason']}",
+                    "reason": f"{connection['semantic_links']} vínculos. {connection['evidence_reason']}",
                 }
             )
 
     if primary:
         headline = f"El principal foco de fricción está en {str(primary['label']).casefold()}"
+        related = next(
+            (
+                item
+                for item in connections
+                if _normalized(item["anchor_topic"].split(" > ")[0])
+                == _normalized(primary["label"])
+            ),
+            None,
+        )
         reason = (
-            connections[0]["evidence_reason"]
-            if connections
-            else _dict(linking.get("diagnostics")).get(
-                "evaluation_message", "Vínculos no evaluados"
-            )
+            f"Caso relacionado: {related['topic']}. {related['evidence_reason']}"
+            if related
+            else "Los casos enlazados se presentan por tópico; requieren validación operativa."
         )
         lead = (
             f"La lectura del periodo sitúa {primary['label']} en el centro de la señal: "

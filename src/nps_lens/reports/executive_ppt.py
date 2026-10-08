@@ -44,6 +44,7 @@ from nps_lens.design.tokens import (
 )
 from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
+from nps_lens.domain.topic_labels import topic_paths
 from nps_lens.platform.resources import resource_root
 from nps_lens.reports.chart_renderer import render_png
 from nps_lens.reports.coherence import (
@@ -461,6 +462,8 @@ def _period_overview(
     driver_source = actionable_rows(restrict_to_topics(current_nps_df, driver_col, topic_keys))
     if driver_col not in driver_source.columns:
         driver_col = "Palanca"
+    if driver_col == "Subpalanca":
+        driver_source = driver_source.assign(Subpalanca=topic_paths(driver_source))
     friction: dict[str, object] = {}
     strength: dict[str, object] = {}
     if driver_col in driver_source.columns and "NPS" in driver_source.columns:
@@ -569,7 +572,7 @@ def _text_topics_table(current_nps_df: pd.DataFrame, *, top_k: int = 10) -> pd.D
         .copy()
     )
     d["label"] = d.apply(
-        lambda row: f"#{int(row['cluster_id'])}: {', '.join(list(row['top_terms'])[:3])}",
+        lambda row: ", ".join(list(row["top_terms"])[:3]),
         axis=1,
     )
     d["top_terms_txt"] = d["top_terms"].apply(
@@ -917,12 +920,12 @@ def _build_journey_summary_figure(
     fig.update_coloraxes(
         colorbar=dict(
             title=dict(
-                text=link_confidence_label(str(plot_df.iloc[0].get("causal_engine", "rules"))),
+                text=link_confidence_label("llm") + " (%)",
                 side="right",
                 font=dict(size=15),
             ),
             tickmode="array",
-            tickvals=[0, 1, 2, 3, 4],
+            tickvals=[0, 25, 50, 75, 100],
             tickfont=dict(size=14),
             len=0.82,
             y=0.5,
@@ -1975,18 +1978,11 @@ def _build_dimension_view_model(
 
 def _build_causal_scenarios(
     chains: pd.DataFrame,
-    *,
-    focus_name: str,
 ) -> list[CausalScenarioViewModel]:
     scenarios: list[CausalScenarioViewModel] = []
     selected = select_causal_scenarios(chains, max_rows=len(chains))
     for idx, (_, row) in enumerate(selected.iterrows(), start=1):
         raw_kpis = [
-            (
-                f"% {focus_name} en incidencia alta",
-                _fmt_pct_or_nd(row.get("focus_rate_high_incidence", np.nan)),
-                BBVA_COLORS["red"],
-            ),
             (
                 "NOTA MEDIA DE COMENTARIOS ENLAZADOS",
                 _fmt_num_or_nd(row.get("avg_nps", np.nan)),
@@ -1997,12 +1993,17 @@ def _build_causal_scenarios(
                 str(int(_safe_int(row.get("linked_pairs", 0), default=0))),
                 BBVA_COLORS["sky"],
             ),
-            (
-                link_confidence_label(str(row.get("causal_engine", "rules"))),
-                _fmt_pct_or_nd(engine_quality(row), decimals=0),
-                BBVA_COLORS["blue"],
-            ),
-        ]
+        ] + (
+            [
+                (
+                    link_confidence_label("llm"),
+                    _fmt_pct_or_nd(engine_quality(row), decimals=0),
+                    BBVA_COLORS["blue"],
+                )
+            ]
+            if row.get("causal_engine") == "llm"
+            else []
+        )
         incident_lines = [
             _clean_evidence_excerpt(line, max_len=130)
             for line in _chain_list(row.get("incident_examples"))[
@@ -2250,7 +2251,7 @@ def _build_presentation_context(
             entity_summary_df=causal_entity_summary,
             broken_journeys_df=broken_journeys_df,
         ),
-        scenarios=_build_causal_scenarios(chains, focus_name=focus_name),
+        scenarios=_build_causal_scenarios(chains),
     )
     return PresentationContext(
         service_origin=service_origin,
@@ -2379,8 +2380,14 @@ def _set_template_messages(shape: object, messages: list[str], *, size: float) -
 def _set_template_table(table: object, rows: list[list[str]]) -> None:
     while len(table.rows) < len(rows):
         table._tbl.append(deepcopy(table._tbl.tr_lst[-1]))
+    layout = _build_wrapped_table_layout(
+        rows,
+        column_widths=[column.width / Inches(1) for column in table.columns],
+        font_size_pt=8.2,
+        min_row_height=0.40,
+    )
     for row_index, table_row in enumerate(table.rows):
-        table_row.height = Inches(0.42 if row_index == 0 else 0.40)
+        table_row.height = Inches(layout.row_heights[row_index])
         values = rows[row_index] if row_index < len(rows) else []
         for column_index, cell in enumerate(table_row.cells):
             cell.text = str(values[column_index]) if column_index < len(values) else ""
@@ -2737,7 +2744,8 @@ def _fill_template_deck(
     actual_label = str(period.get("actual_label") or context.period_label)
     base_label = str(period.get("base_label") or "Sin base histórica")
     historic_label = context.baseline_label
-    metric_scope = f"Tópicos observados en {topic_channel}; métricas con todas sus opiniones."
+    channel_scope = "" if topic_channel == "Todos" else f" en {topic_channel}"
+    metric_scope = f"Tópicos observados{channel_scope}; métricas con todas sus opiniones."
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
@@ -2871,20 +2879,20 @@ def _fill_template_deck(
     topics = prs.slides[3]
     _set_template_text(
         topics.shapes[4],
-        f"Principales comentarios de los detractores del periodo ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}) en el canal {topic_channel}",
+        f"Principales comentarios de los detractores del periodo ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}){channel_scope}",
         size=22,
         bold=True,
         color=BBVA_COLORS["ink"],
         font="Source Serif 4",
     )
-    topic_rows = [["Comentarios", "Top terms", "Ejemplos"]]
+    topic_rows = [["Comentarios", "Tópico > problema", "Ejemplos"]]
     selected_topics = select_text_clusters(context.text_topics_df, max_clusters=5)
     for row in selected_topics.itertuples():
         examples = [str(value) for value in list(getattr(row, "examples", []))[:3]]
         topic_rows.append(
             [
                 _fmt_count_or_nd(getattr(row, "n", 0)),
-                _clip(getattr(row, "top_terms_txt", ""), 62),
+                str(getattr(row, "top_terms_txt", "")),
                 _clip(" · ".join(examples) if examples else "Sin comentarios", 210),
             ]
         )
@@ -2898,7 +2906,7 @@ def _fill_template_deck(
     _set_template_text(
         topics.shapes[3],
         (
-            f"La escucha detractora del canal {topic_channel} concentra su señal principal en {leader}."
+            f"Los comentarios detractores{channel_scope} se concentran en {leader}."
             if leader
             else "No hay comentarios detractores útiles para identificar temas."
         ),
@@ -2910,11 +2918,11 @@ def _fill_template_deck(
     )
 
     change = prs.slides[4]
-    change_rows = [["Valor", "Delta NPS Clásico", "NPS actual", "NPS base", "n actual", "n base"]]
+    change_rows = [["Tópico", "Delta NPS Clásico", "NPS actual", "NPS base", "n actual", "n base"]]
     for row in view.change_table_df.head(4).itertuples():
         change_rows.append(
             [
-                _clip(row.value, 23),
+                str(row.value),
                 _fmt_signed_or_nd(row.delta_nps),
                 _fmt_num_or_nd(row.nps_current),
                 _fmt_num_or_nd(row.nps_baseline),
@@ -2927,7 +2935,7 @@ def _fill_template_deck(
     _set_template_text(
         change.shapes[0],
         (
-            f"{worst_name} lidera el deterioro entre los tópicos observados en {topic_channel}"
+            f"{worst_name} lidera el deterioro entre los tópicos observados{channel_scope}"
             if len(change_rows) > 1
             else "Sin deterioros comparables frente a la base histórica"
         ),
@@ -2939,7 +2947,7 @@ def _fill_template_deck(
     change.shapes[4].height = Inches(0.78)
     _set_template_text(
         change.shapes[4],
-        f"Qué ha cambiado en {dimension}\nActual {context.current_label} · base {historic_label}\n{metric_scope}",
+        f"Comparación de tópicos\nActual {context.current_label}\nBase {historic_label}",
         size=11,
         bold=True,
         color="FFFFFF",
@@ -2991,7 +2999,7 @@ def _fill_template_deck(
     _set_template_text(
         pain.shapes[0],
         (
-            f"{leader_name} tiene el menor score medio entre los tópicos observados en {topic_channel}"
+            f"{leader_name} tiene el menor score medio entre los tópicos observados{channel_scope}"
             if pain_rows
             else "Sin opiniones clasificadas para comparar tópicos"
         ),
@@ -3008,7 +3016,7 @@ def _fill_template_deck(
         detractor_index = (6, 15, 18, 21)[column]
         _set_template_text(
             pain.shapes[header_index],
-            _clip(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios", 28),
+            str(getattr(row, "value", "Sin comentarios") if row else "Sin comentarios"),
             size=11,
             bold=True,
             color=BBVA_COLORS["ink"],
@@ -3097,7 +3105,7 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[7],
-            link_confidence_label(str(row.get("causal_engine", "rules"))),
+            link_confidence_label("llm") if row.get("causal_engine") == "llm" else "",
             size=12,
             bold=False,
             color=BBVA_COLORS["blue"],
@@ -3105,7 +3113,11 @@ def _fill_template_deck(
         )
         _set_template_text(
             slide.shapes[6],
-            _fmt_pct_or_nd(engine_quality(row), decimals=0),
+            (
+                _fmt_pct_or_nd(engine_quality(row), decimals=0)
+                if row.get("causal_engine") == "llm"
+                else ""
+            ),
             size=30,
             bold=True,
             color=BBVA_COLORS["ink"],
