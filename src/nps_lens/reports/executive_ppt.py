@@ -651,6 +651,9 @@ def _build_gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Option
     row_count = min(12, len(gap_df))
     rendered_labels = [str(value) for value in list(getattr(fig.data[0], "y", []))]
     label_count = len(rendered_labels) or row_count
+    positions = {label: index for index, label in enumerate(rendered_labels)}
+    for trace in fig.data:
+        trace.y = [positions[str(label)] for label in trace.y]
     max_len = max((len(label.replace("<br>", " ")) for label in rendered_labels), default=0)
     left_margin = 250 if max_len >= 26 else 225 if max_len >= 18 else 205
     y_font_size = 10 if label_count >= 11 else 11 if label_count >= 9 else 12
@@ -664,6 +667,7 @@ def _build_gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Option
     fig.update_yaxes(
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
         automargin=False,
+        type="linear",
         tickmode="array",
         tickvals=list(range(label_count)),
         ticktext=rendered_labels,
@@ -1490,7 +1494,13 @@ def _pillow_render_xy(
         )
         if trace is None:
             return None
-        categories = [str(value).replace("<br>", " ") for value in list(getattr(trace, "y", []))]
+        axis_labels = dict(
+            zip(fig.layout.yaxis.tickvals or [], fig.layout.yaxis.ticktext or [], strict=False)
+        )
+        categories = [
+            str(axis_labels.get(value, value)).replace("<br>", " ")
+            for value in list(getattr(trace, "y", []))
+        ]
         values = pd.to_numeric(pd.Series(list(getattr(trace, "x", []))), errors="coerce").fillna(
             0.0
         )

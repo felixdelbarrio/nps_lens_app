@@ -78,3 +78,27 @@ def test_valid_zero_baseline_is_not_treated_as_missing():
     result = nps_gaps(current, baseline, "Palanca")
     assert result.base_nps == 0 and result.base_n == 2
     assert result.rows.gap_vs_base.tolist() == [-100]
+
+
+def test_gap_population_is_used_without_replacing_full_period_topic_metrics():
+    history = pd.DataFrame(
+        {
+            "Fecha": pd.to_datetime(["2026-01-01", "2026-08-01"]),
+            "NPS": [10, 0],
+            "Palanca": ["Mixed CASE", "Mixed CASE"],
+            "Canal": ["Web", "Web"],
+        }
+    )
+    population = select_gap_population(history, pop_year="2026", pop_month="Todos")
+    result = _build_dimension_view_model(
+        dimension="Palanca",
+        selected_raw=history,
+        current_source_period=history,
+        baseline_source_period=pd.DataFrame(),
+        topic_channel="Todos",
+        gap_population=population,
+    )
+    assert result.base_nps == 100
+    assert result.gap_table_df.iloc[0]["value"] == "Mixed CASE"
+    assert result.gap_table_df.iloc[0]["gap_vs_base"] == -200
+    assert result.topic_table_df.iloc[0]["n"] == 2
