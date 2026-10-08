@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("single ZIP configuration keeps separate routes, prompts and persists after reload", async ({ page }, testInfo) => {
+test("single ZIP configuration keeps separate routes, prompts and persists after reload", async ({ page, request }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
+  const reset = await request.put("/api/taxonomy/discovery", {data:{single_zip_enabled:false,classifier_single_zip_url:"",helix_single_zip_url:""}});
+  expect(reset.ok()).toBeTruthy();
   await page.goto("/");
   await page.getByRole("button", { name: /Abrir configuración global/i }).click();
   const dialog = page.getByRole("dialog");
@@ -26,9 +28,9 @@ test("single ZIP configuration keeps separate routes, prompts and persists after
   const originalHelix = await helix.inputValue();
   async function changeMode(enabled: boolean) {
     await page.getByRole("button", { name: /Abrir configuración global/i }).click();
-    await toggle.setChecked(enabled);
-    await expect(toggle).toBeEnabled();
+    await toggle.click();
     await expect(toggle).toBeChecked({checked:enabled});
+    await expect(toggle).toBeEnabled();
     await page.getByRole("button", { name: /Cerrar configuración/i }).click();
   }
   await changeMode(true);
