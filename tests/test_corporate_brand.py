@@ -14,7 +14,15 @@ from pptx import Presentation
 from pptx.util import Inches
 from test_business_ppt import _sample_payload
 
-from nps_lens.design.brand import BRAND, BRAND_ASSETS, EMAIL_SIGNATURE, email_signature
+from nps_lens.design.brand import (
+    BRAND,
+    BRAND_ASSETS,
+    EMAIL_CORPORATE_LOGO,
+    EMAIL_SIGNATURE,
+    SIGNATURE_CSS,
+    email_corporate_logo,
+    email_signature,
+)
 from nps_lens.platform.publication import _newsletter
 from nps_lens.platform.webapp_preview import build_preview, load_publication
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
@@ -103,17 +111,31 @@ def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
         assert font.read_bytes().startswith(b"wOF2")
     html = _newsletter({"newsletter": {"brand": BRAND["name"]}}, "report.pptx").decode()
     assert EMAIL_SIGNATURE in html
+    assert EMAIL_CORPORATE_LOGO in html
     script = Path("webapp/apps-script/00_Brand.gs").read_text()
     script += "\nprocess.stdout.write(JSON.stringify(BRAND));"
     generated = json.loads(
         subprocess.run(["node"], input=script, capture_output=True, check=True, text=True).stdout
     )
     assert generated["newsletter_prefix"] == "[bIA]"
+    assert generated["email_corporate_logo"] == email_corporate_logo("cid:bbva-logo")
+    assert b64decode(generated["corporate_logo"]) == (BRAND_ASSETS / "bbva-bei.png").read_bytes()
     assert generated["email_signature"] == email_signature("cid:bia-logo")
     assert b64decode(generated["initiative_logo"]) == (BRAND_ASSETS / "bia-email.png").read_bytes()
     with Image.open(BRAND_ASSETS / "bia-email.png") as logo:
         assert logo.size == (144, 88)
+        assert logo.mode == "RGBA" and logo.getpixel((0, 0))[3] == 0
     with Image.open(BRAND_ASSETS / "bia.png") as logo:
         assert logo.size == (852, 520)
+        assert logo.mode == "RGBA" and logo.getpixel((0, 0))[3] == 0
     assert 'viewBox="0 0 213 130"' in Path("frontend/public/assets/brand/bia.svg").read_text()
     assert "data:image/png;base64," in EMAIL_SIGNATURE
+
+
+def test_initiative_logo_has_no_white_plate_in_any_browser_surface():
+    svg = Path("frontend/public/assets/brand/bia.svg").read_text()
+    assert '<rect width="213" height="130" fill="white"' not in svg
+    assert "background-color:#fff" not in SIGNATURE_CSS
+    assert "background:#fff" not in SIGNATURE_CSS
+    assert Path("frontend/src/brand.css").read_text().strip().endswith(SIGNATURE_CSS.strip())
+    assert SIGNATURE_CSS.strip() in Path("webapp/apps-script/BrandIdentity.html").read_text()

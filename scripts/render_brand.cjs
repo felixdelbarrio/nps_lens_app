@@ -6,7 +6,7 @@ const { readFileSync } = require('node:fs');
   try {
     const page = await browser.newPage({ viewport: { width: 213, height: 130 }, deviceScaleFactor: 4 });
     await page.setContent('<style>body{margin:0}</style>' + readFileSync(process.argv[2], 'utf8'));
-    await page.locator('svg').screenshot({ path: process.argv[3] });
+    await page.locator('svg').screenshot({ path: process.argv[3], omitBackground: true });
   } finally {
     await browser.close();
   }

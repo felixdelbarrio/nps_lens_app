@@ -109,7 +109,10 @@ def test_telemetry_driven_optimizations_avoid_redundant_drive_and_sheet_reads() 
     assert "function exportActivityReport" not in activity
     assert "function getNewsletterSettings" not in newsletter
     assert "function getNewsletterWorkspace" in newsletter
-    assert "_reportUrl_(publication.scopeKey, showEvolutionNps)" in newsletter
+    assert (
+        "_reportUrl_(publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
+        in newsletter
+    )
     assert "_presentationEntryUrl_" not in publication
     assert "function _compactSlidesProperty_(scopeKey)" in publication
     assert "report_without_evolution" in publication
@@ -232,10 +235,11 @@ def test_newsletter_is_short_and_uses_the_evolution_toggle_for_its_headline() ->
 
     assert "const content = _newsletterContent_(insight, showEvolutionNps);" in newsletter
     assert (
-        "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps)" in newsletter
+        "_newsletterHtml_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
+        in newsletter
     )
     assert (
-        "_newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps)"
+        "_newsletterPlain_(insight, reportUrl, publication.scopeKey, showEvolutionNps, publication.ownerSupportCompany)"
         in newsletter
     )
     for removed_heading in (

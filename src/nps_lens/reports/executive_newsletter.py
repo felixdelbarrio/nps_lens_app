@@ -8,6 +8,7 @@ import pandas as pd
 
 from nps_lens.analytics.signal_quality import signal_quality
 from nps_lens.design.brand import BRAND
+from nps_lens.design.tokens import DesignTokens, nps_balance_color
 from nps_lens.domain.comment_text import is_nonspecific_content
 from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.reports.coherence import validate_metric_payload
@@ -64,11 +65,13 @@ def _period_label(period_start: date, period_end: date) -> str:
 
 
 def _focus_rows(topics: pd.DataFrame) -> list[dict[str, object]]:
+    tokens = DesignTokens.default()
     return [
         {
             "label": row["value"],
             "score": row["score"],
             "nps": format_metric(row.get("nps")),
+            "reason_color": nps_balance_color(tokens, "light", row.get("nps")),
             "detractors": format_percentage(row.get("detractor_rate")),
             "opinions": format_volume(row.get("n")),
         }
@@ -162,6 +165,7 @@ def build_executive_newsletter(
     signals = [
         {
             "label": row["label"],
+            "reason_color": row["reason_color"],
             "reason": f"Score medio {format_metric(row['score'])}; NPS {row['nps']}; {row['detractors']} detractores; {row['opinions']} opiniones.",
         }
         for row in focus

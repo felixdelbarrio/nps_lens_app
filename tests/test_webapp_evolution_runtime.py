@@ -36,11 +36,16 @@ const Gmail = {Users:{Messages:{send:message=>{
   assert.ok(mime.includes('Content-Type: multipart/related;'));
   delivered=[...mime.matchAll(/Content-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/g)]
     .map(match=>Buffer.from(match[1],'base64'));
-  assert.equal(delivered.length,3);
+  assert.equal(delivered.length,4);
+  assert.ok(mime.includes("Content-ID: <bbva-logo>"));
+  assert.equal(delivered[3].toString("base64"), BRAND.corporate_logo);
   assert.ok(delivered[2].subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
   assert.equal(delivered[2].toString('base64'), BRAND.initiative_logo);
   delivered=delivered.slice(0,2).map(value=>value.toString());
   assert.ok(delivered[1].includes('src="cid:bia-logo"'));
+  assert.ok(delivered[1].includes('src="cid:bbva-logo"'));
+  assert.ok(delivered[1].includes("México · Agosto"));
+  assert.ok(!delivered[1].includes("Lectura de 30 segundos"));
   return {id:'accepted'};
 }}}};
 """
@@ -55,7 +60,7 @@ _newsletterRecipients_=()=>[
 const insight={brand:'BBVA',product:'NPS Lens',promise:'Escucha del cliente',period:'Agosto',
   headline:'Titular con NPS',lead:'Balance de NPS del periodo',
   scorecard:[{label:'NPS clásico mensual',value:'17,42',delta:'-0,68'}],
-  quotes:['La página es lenta'],signals:[{label:'Continuidad',reason:'Incidencias recurrentes'},{label:'Tema cliente',reason:'NPS -94,67; 94,67% detractores; 150 opiniones.'}]};
+  quotes:['La página es lenta'],signals:[{label:'Continuidad',reason:'Incidencias recurrentes',reason_color:'#c30a0a'},{label:'Tema cliente',reason:'NPS -94,67; 94,67% detractores; 150 opiniones.',reason_color:'#c30a0a'}]};
 publicationRowsCache=[{scopeKey:'edition',slidesFileId:'full',ownerSupportCompany:'México',
   year:'2026',month:'10',causalMethodLabel:'LLM',newsletterInsight:JSON.stringify(insight)}];
 properties.set(_compactSlidesProperty_('edition'),'compact');

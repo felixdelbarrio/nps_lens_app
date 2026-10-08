@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from nps_lens.design.brand import BRAND, EMAIL_SIGNATURE
+from nps_lens.design.brand import EMAIL_CORPORATE_LOGO, EMAIL_SIGNATURE
 from nps_lens.domain.privacy import redact_public_payload
 
 MAX_PUBLICATION_BYTES = 30 * 1024 * 1024
@@ -146,9 +146,11 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
         for quote in quotes[:2]
     )
     signals_html = "".join(
-        f'<tr><td style="padding:10px 0;border-bottom:1px solid #d3d8e0"><b style="color:#070e46">{esc(item.get("label"))}</b><br><span style="color:#52627a">{esc(item.get("reason"))}</span></td></tr>'
+        f'<tr><td style="padding:10px 0;border-bottom:1px solid #d3d8e0"><b style="color:#070e46">{esc(item.get("label"))}</b><br><span style="color:{esc(item.get("reason_color"))}">{esc(item.get("reason"))}</span></td></tr>'
         for item in signals
     )
+    filters = publication.get("filters")
+    owner = filters.get("service_origin", "") if isinstance(filters, dict) else ""
     report_href = html.escape(report_name, quote=True)
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -167,10 +169,10 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <td class="email-shell-padding" align="center" style="padding:24px 10px">
 <table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff">
 <tr><td class="email-hero" style="background:#071b9c;color:#fff;padding:34px 38px">
-<div style="font-size:11px;letter-spacing:1px">{esc(model.get("brand") or BRAND["name"])}</div>
+{EMAIL_CORPORATE_LOGO}
 <h1 class="email-title" style="margin:22px 0 5px;font:700 42px Georgia,serif">{esc(model.get("product") or "NPS Lens")}</h1>
 <div>{esc(model.get("promise") or "La voz del cliente conectada con la operación")}</div></td></tr>
-<tr><td class="email-body" style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">Lectura de 30 segundos · {esc(model.get("period") or "Periodo actualizado")}</div>
+<tr><td class="email-body" style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">{esc(owner)} · {esc(model.get("period") or "Periodo actualizado")}</div>
 <h2 class="email-headline" style="margin:10px 0 0;font:700 31px Georgia,serif;line-height:1.12;color:#070e46">{esc(model.get("headline") or "La señal del cliente, conectada con la operación")}</h2>
 <p style="font-size:16px;line-height:1.55;color:#30375f">{esc(model.get("lead") or "Consulta la edición actualizada y su presentación ejecutiva.")}</p>
 <table class="metric-table" role="presentation" width="100%" cellspacing="6" style="margin:14px 0 22px"><tr>{metrics}</tr></table>

@@ -33,9 +33,21 @@ EMAIL_SIGNATURE = email_signature(
 
 SIGNATURE_CSS = """
 .initiative-signature{display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.18);position:relative;z-index:1}
-.initiative-signature img,.bia-logo{display:block;flex:0 0 64px;width:64px;height:39px;object-fit:contain;border-radius:5px;background-color:#fff}
-.bia-logo{background:#fff var(--asset-bia-logo) center/contain no-repeat}
+.initiative-signature img,.bia-logo{display:block;flex:0 0 64px;width:64px;height:39px;object-fit:contain;}
+.bia-logo{background:var(--asset-bia-logo) center/contain no-repeat}
 .initiative-signature div{display:grid;gap:3px;min-width:0}
 .initiative-signature div>span{font:400 10px/1.4 var(--font-ui);letter-spacing:.08em;color:#a6c9eb}
 .initiative-signature strong{font:500 12px/1.45 var(--font-ui);color:#fff}
 """
+
+
+def email_corporate_logo(image_src: str) -> str:
+    return (
+        f'<img src="{image_src}" width="230" height="81" alt="{BRAND["name"]}" '
+        'style="display:block;width:230px;height:81px;max-width:100%;border:0">'
+    )
+
+
+EMAIL_CORPORATE_LOGO = email_corporate_logo(
+    "data:image/png;base64," + b64encode((BRAND_ASSETS / "bbva-bei.png").read_bytes()).decode()
+)
