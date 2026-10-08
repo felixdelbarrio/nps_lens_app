@@ -208,6 +208,6 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
   await page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true}).click();
-  await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toHaveCount(0);
+  await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled({timeout:45000});
 
 });
