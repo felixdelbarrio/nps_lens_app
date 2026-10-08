@@ -345,7 +345,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     assert any("acumulado histórico" in t for t in texts)
     assert any("El peso detractor pasa" in t for t in texts)
     assert any("A 31 de Enero de 2026 alcanza" in t for t in texts)
-    assert any("lidera el deterioro entre los tópicos observados" in t for t in texts)
+    assert any("presenta la mayor brecha negativa entre los tópicos observados" in t for t in texts)
     assert not any("entre los tópicos observados en Todos" in t for t in texts)
     assert not any("Qué ha cambiado en Subpalanca" in t for t in texts)
     assert any(
