@@ -2762,7 +2762,7 @@ def _add_scenario_pages(prs: Presentation, scenario: CausalScenarioViewModel) ->
             ("NOTA MEDIA DE COMENTARIOS ENLAZADOS", _fmt_num_or_nd(row.get("avg_nps"))),
             (
                 link_confidence_label(str(row.get("causal_engine") or "rules")),
-                _fmt_pct_or_nd(engine_quality(row.to_dict()), decimals=0),
+                format_percentage(engine_quality(row.to_dict())),
             ),
         )
         for index, (label, value) in enumerate(metrics):
@@ -3132,6 +3132,11 @@ def _layout_report_text(
 
 def _apply_report_branding(prs: Presentation, context: PresentationContext) -> None:
     """Reserve one footer band, then sign every slide without covering evidence."""
+    artwork = {
+        "light": BytesIO((BRAND_ASSETS / "bbva-bei.png").read_bytes()),
+        "dark": BytesIO((BRAND_ASSETS / "bbva-bei-dark.png").read_bytes()),
+        "initiative": BytesIO((BRAND_ASSETS / "bia.png").read_bytes()),
+    }
     for master in prs.slide_masters:
         for template in (master, *master.slide_layouts):
             for shape in list(template.shapes):
@@ -3161,7 +3166,7 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
         dark_slide = index == 0 or separator
         footer_color = "FFFFFF" if dark_slide else BBVA_COLORS["ink"]
         logo = slide.shapes.add_picture(
-            str(BRAND_ASSETS / ("bbva-bei.png" if dark_slide else "bbva-bei-dark.png")),
+            artwork["light" if dark_slide else "dark"],
             Inches(0.38 if dark_slide else 8.42),
             Inches(0.25 if dark_slide else 0.24),
             width=Inches(2.30 if dark_slide else 1.20),
@@ -3173,7 +3178,7 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
             _layout_report_text(elements["Report title"], (0.38, 0.24, 7.80, 0.92), size=22)
             _layout_report_text(elements["Report conclusion"], (0.38, 4.91, 9.24, 0.39), size=10)
         wordmark = slide.shapes.add_picture(
-            str(BRAND_ASSETS / "bia.png"),
+            artwork["initiative"],
             Inches(8.67 if dark_slide else 0.38),
             Inches(0.25 if dark_slide else 5.34),
             width=Inches(0.95 if dark_slide else 0.45),
