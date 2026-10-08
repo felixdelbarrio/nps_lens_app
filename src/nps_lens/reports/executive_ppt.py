@@ -2567,6 +2567,8 @@ def _report_panel(
     shape.line.fill.background()
     shape.adjustments[0] = 0.06
     shape._element.spPr.append(OxmlElement("a:effectLst"))
+    for effect in shape._element.xpath("./p:style/a:effectRef"):
+        effect.set("idx", "0")
     return shape
 
 

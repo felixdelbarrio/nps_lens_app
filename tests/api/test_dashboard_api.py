@@ -852,8 +852,26 @@ def test_dashboard_report_endpoint_returns_a_valid_powerpoint(tmp_path: Path) ->
     assert Path(report_response.headers["x-nps-lens-saved-path"]).exists()
 
     presentation = Presentation(BytesIO(report_response.content))
-    # Six base slides; scenario slides require accepted narrative evidence.
-    assert len(presentation.slides) == 6
+    # Observed topics paginate; unaccepted evidence never creates case sections.
+    topic_pages = [
+        slide
+        for slide in presentation.slides
+        if any(shape.name == "Topic heading" for shape in slide.shapes)
+    ]
+    assert topic_pages
+    assert len(presentation.slides) == 5 + len(topic_pages)
+    assert not any(
+        shape.name in {"Topic separator", "Scenario metric label"}
+        for slide in presentation.slides
+        for shape in slide.shapes
+    )
+    headings = [
+        shape.text
+        for slide in topic_pages
+        for shape in slide.shapes
+        if shape.name == "Topic heading"
+    ]
+    assert len(headings) == len(set(headings))
     assert not any("Journeys rotos" in text for text in _ppt_texts(report_response.content))
 
 

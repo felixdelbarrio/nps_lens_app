@@ -58,7 +58,9 @@ def test_newsletter_uses_monthly_kpis_and_keeps_only_the_short_editorial_model()
     )
 
     assert result["period"] == "1–20 julio 2026"
-    assert result["headline"] == "El principal foco de fricción está en funcionamiento continuo"
+    assert (
+        result["headline"] == "El menor score medio de experiencia está en funcionamiento continuo"
+    )
     assert [item["label"] for item in result["scorecard"]] == [
         "Comentarios",
         "NPS clásico mensual",
