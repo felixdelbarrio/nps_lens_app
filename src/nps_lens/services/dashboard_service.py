@@ -2626,6 +2626,8 @@ class DashboardService:
             card = self._serialize_rows(
                 pd.DataFrame([row.drop(labels=["evidence_pairs"], errors="ignore")])
             )[0]
+            distribution = card.get("score_distribution")
+            buckets = distribution if isinstance(distribution, list) else []
             card.update(
                 {
                     "identity_rows": [
@@ -2645,7 +2647,7 @@ class DashboardService:
                             **bucket,
                             "label": score_group_label(bucket["score"], int(bucket["count"])),
                         }
-                        for bucket in (card.get("score_distribution") or [])
+                        for bucket in buckets
                     ],
                     "statement": (
                         f"Se observan {int(row.get('linked_pairs', 0) or 0)} vínculos semánticos entre "
