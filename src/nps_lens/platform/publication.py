@@ -266,8 +266,6 @@ def build_publication_archive(
         compact_report_name=compact_report_name,
         compact_report_content=compact_report_content,
     )
-    if len(content) > max_bytes:
-        raise ValueError("La publicación estática supera el límite absoluto permitido.")
     if isinstance(manifest, dict):
         manifest["size_bytes"] = len(content)
         content = _archive(
@@ -277,6 +275,8 @@ def build_publication_archive(
             compact_report_name=compact_report_name,
             compact_report_content=compact_report_content,
         )
+    if len(content) > max_bytes:
+        raise ValueError("La publicación estática supera el límite absoluto permitido.")
     return PublicationArtifact(
         file_name=file_name,
         content=content,

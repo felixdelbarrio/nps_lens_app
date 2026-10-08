@@ -28,7 +28,7 @@ def email_signature(image_src: str) -> str:
 
 
 EMAIL_SIGNATURE = email_signature(
-    "data:image/png;base64," + b64encode((BRAND_ASSETS / "bia.png").read_bytes()).decode()
+    "data:image/png;base64," + b64encode((BRAND_ASSETS / "bia-email.png").read_bytes()).decode()
 )
 
 SIGNATURE_CSS = """

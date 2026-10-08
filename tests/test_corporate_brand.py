@@ -106,11 +106,13 @@ def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
     script = Path("webapp/apps-script/00_Brand.gs").read_text()
     script += "\nprocess.stdout.write(JSON.stringify(BRAND));"
     generated = json.loads(
-        subprocess.run(["node", "-e", script], capture_output=True, check=True, text=True).stdout
+        subprocess.run(["node"], input=script, capture_output=True, check=True, text=True).stdout
     )
     assert generated["newsletter_prefix"] == "[bIA]"
     assert generated["email_signature"] == email_signature("cid:bia-logo")
-    assert b64decode(generated["initiative_logo"]) == (BRAND_ASSETS / "bia.png").read_bytes()
+    assert b64decode(generated["initiative_logo"]) == (BRAND_ASSETS / "bia-email.png").read_bytes()
+    with Image.open(BRAND_ASSETS / "bia-email.png") as logo:
+        assert logo.size == (144, 88)
     with Image.open(BRAND_ASSETS / "bia.png") as logo:
         assert logo.size == (852, 520)
     assert 'viewBox="0 0 213 130"' in Path("frontend/public/assets/brand/bia.svg").read_text()

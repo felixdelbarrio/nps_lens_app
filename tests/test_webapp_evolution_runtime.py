@@ -100,4 +100,4 @@ for(const visible of [false,true,false]){
 assert.equal(JSON.stringify(insight),original);
 """
     )
-    subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    subprocess.run(["node"], input=script, check=True, capture_output=True, text=True)
