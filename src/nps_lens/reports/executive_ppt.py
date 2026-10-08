@@ -33,6 +33,7 @@ from nps_lens.analytics.drivers import grouped_driver_stats
 from nps_lens.analytics.incident_attribution import (
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
 )
+from nps_lens.analytics.nps_gaps import GapPopulation, nps_gaps, select_gap_population
 from nps_lens.analytics.nps_helix_link import build_nps_topic
 from nps_lens.analytics.signal_quality import actionable_rows, signal_quality
 from nps_lens.analytics.text_mining import summarize_taxonomy
@@ -56,7 +57,7 @@ from nps_lens.reports.coherence import (
 from nps_lens.reports.content_selectors import (
     causal_scenario_title,
     select_causal_scenarios,
-    select_negative_delta_rows,
+    select_negative_gap_rows,
     select_text_clusters,
 )
 from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
@@ -87,9 +88,8 @@ from nps_lens.ui.charts import (
     _compact_axis_label,
     chart_causal_entity_bar,
     chart_daily_nps_committee_stack,
-    chart_driver_delta,
+    chart_driver_bar,
 )
-from nps_lens.ui.historic_changes import get_changes_vs_historic
 from nps_lens.ui.population import POP_ALL
 from nps_lens.ui.theme import get_theme
 
@@ -643,27 +643,12 @@ def _build_overview_figure(
     return fig
 
 
-def _build_driver_delta_figure(
-    delta_df: pd.DataFrame, *, panel_height_in: float, max_rows: int = 12
-) -> Optional[go.Figure]:
-    """Render the historic-change chart from the shared Insights dataset only.
-
-    The PPT layer receives the single-source dataset used by Insights and does
-    not recompute deltas, counts, ranking or top-N. The only work here is visual
-    normalization for the committee 16:9 deck. Labels are never rewritten after
-    ``chart_driver_delta`` creates the figure; mutating Plotly categorical y
-    values after construction can create duplicate categories in PowerPoint
-    exports.
-    """
-
-    if delta_df.empty:
+def _build_gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Optional[go.Figure]:
+    """Style the same globally referenced gap rows used by the dashboard."""
+    if gap_df.empty:
         return None
-
-    row_count = max(1, min(int(max_rows), len(delta_df)))
-    fig = chart_driver_delta(delta_df, get_theme("light"), top_k=row_count)
-    if fig is None:
-        return None
-
+    fig = chart_driver_bar(gap_df, get_theme("light"))
+    row_count = min(12, len(gap_df))
     rendered_labels = [str(value) for value in list(getattr(fig.data[0], "y", []))]
     label_count = len(rendered_labels) or row_count
     max_len = max((len(label.replace("<br>", " ")) for label in rendered_labels), default=0)
@@ -674,6 +659,7 @@ def _build_driver_delta_figure(
         text=None,
         textposition="none",
         cliponaxis=True,
+        selector=dict(type="bar"),
     )
     fig.update_yaxes(
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
@@ -681,7 +667,7 @@ def _build_driver_delta_figure(
         title_text="",
     )
     fig.update_xaxes(
-        title_text="Delta NPS Clásico (actual - base)",
+        title_text="Brecha NPS clásico vs base global (pts)",
         tickfont=dict(size=10, family=BBVA_FONT_BODY),
         title_font=dict(size=11, family=BBVA_FONT_MEDIUM),
         nticks=5,
@@ -1918,30 +1904,21 @@ def _build_dimension_view_model(
     current_source_period: pd.DataFrame,
     baseline_source_period: pd.DataFrame,
     topic_channel: str,
+    gap_population: GapPopulation | None = None,
 ) -> DimensionViewModel:
     topic_source = current_source_period if not current_source_period.empty else selected_raw
     topic_keys = topics_observed_in_channel(topic_source, dimension, topic_channel)
     selected_raw = restrict_to_topics(selected_raw, dimension, topic_keys)
+    gaps = nps_gaps(current_source_period, baseline_source_period, dimension, channel=topic_channel)
     current_source_period = restrict_to_topics(current_source_period, dimension, topic_keys)
-    baseline_source_period = restrict_to_topics(baseline_source_period, dimension, topic_keys)
-    delta_df = get_changes_vs_historic(
-        current_source_period,
-        baseline_source_period,
-        dimension=dimension,
-        min_n=EDITORIAL_LIMITS.min_change_rows_n,
-    )
-    change_table = select_negative_delta_rows(
-        delta_df,
-        max_rows=EDITORIAL_LIMITS.max_change_rows,
-    )
-    change_figure = _build_driver_delta_figure(
-        delta_df,
-        panel_height_in=2.58,
-    )
+    gap_table = select_negative_gap_rows(gaps.rows, max_rows=EDITORIAL_LIMITS.max_change_rows)
+    gap_figure = _build_gap_figure(gaps.rows, panel_height_in=2.58)
     metric_source = current_source_period if not current_source_period.empty else selected_raw
     return DimensionViewModel(
-        change_table_df=change_table,
-        change_figure=change_figure,
+        gap_table_df=gap_table,
+        base_nps=gaps.base_nps,
+        base_n=gaps.base_n,
+        gap_figure=gap_figure,
         topic_table_df=_build_topic_dimension_table(metric_source, dimension=dimension),
     )
 
@@ -1995,6 +1972,7 @@ def _build_presentation_context(
     broken_journeys_df: Optional[pd.DataFrame],
     period_kpis: Optional[dict[str, object]] = None,
     evidence_channel: Optional[str] = None,
+    gap_population: GapPopulation | None = None,
 ) -> PresentationContext:
     if period_start > period_end:
         raise ReportCoherenceError("El inicio del periodo no puede ser posterior a su fin.")
@@ -2131,6 +2109,9 @@ def _build_presentation_context(
     text_topics = _text_topics_table(
         actionable_rows(detractor_raw), top_k=EDITORIAL_LIMITS.max_text_chart_clusters
     )
+    gap_population = gap_population or select_gap_population(
+        kpi_history_df, pop_year=str(period_end.year), pop_month=str(period_end.month)
+    )
     dimensions = {
         "Palanca": _build_dimension_view_model(
             dimension="Palanca",
@@ -2138,6 +2119,7 @@ def _build_presentation_context(
             current_source_period=current_source_period,
             baseline_source_period=baseline_source_period,
             topic_channel=topic_channel,
+            gap_population=gap_population,
         ),
         "Subpalanca": _build_dimension_view_model(
             dimension="Subpalanca",
@@ -2145,6 +2127,7 @@ def _build_presentation_context(
             current_source_period=current_source_period,
             baseline_source_period=baseline_source_period,
             topic_channel=topic_channel,
+            gap_population=gap_population,
         ),
     }
 
@@ -2204,6 +2187,16 @@ def _build_presentation_context(
         ),
         text_topics_df=text_topics,
         current_label=f"{_safe_date(period_start)} -> {_safe_date(period_end)}",
+        gap_current_label=(
+            f"{_safe_date(gap_population.current_window.start)} -> {_safe_date(gap_population.current_window.end)}"
+            if gap_population.current_window
+            else "Sin periodo"
+        ),
+        gap_baseline_label=(
+            f"{_safe_date(gap_population.base_window.start)} -> {_safe_date(gap_population.base_window.end)}"
+            if gap_population.base_window
+            else "Sin base histórica"
+        ),
         baseline_label=(
             f"{_safe_date(baseline_period['date'].min())} -> {_safe_date(baseline_period['date'].max())}"
             if not baseline_period.empty
@@ -3038,32 +3031,38 @@ def _fill_template_deck(
     )
 
     change = prs.slides[4]
-    change_rows = [["Tópico", "Delta NPS Clásico", "NPS actual", "NPS base", "n actual", "n base"]]
-    for row in view.change_table_df.head(4).itertuples():
+    change_rows = [
+        ["Tópico", "Brecha NPS", "NPS tópico", "NPS base global", "n tópico", "n base global"]
+    ]
+    for row in view.gap_table_df.head(4).itertuples():
         change_rows.append(
             [
                 str(row.value),
-                _fmt_signed_or_nd(row.delta_nps),
-                _fmt_num_or_nd(row.nps_current),
-                _fmt_num_or_nd(row.nps_baseline),
-                _fmt_count_or_nd(row.n_current),
-                _fmt_count_or_nd(row.n_baseline),
+                _fmt_signed_or_nd(row.gap_vs_base),
+                _fmt_num_or_nd(row.nps),
+                _fmt_num_or_nd(view.base_nps),
+                _fmt_count_or_nd(row.n),
+                _fmt_count_or_nd(view.base_n),
             ]
         )
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
-    worst_name = str(view.change_table_df.iloc[0]["value"]) if len(change_rows) > 1 else ""
+    worst_name = str(view.gap_table_df.iloc[0]["value"]) if len(change_rows) > 1 else ""
     _set_template_text(
         change.shapes[0],
         (
-            f"{worst_name} lidera el deterioro entre los tópicos observados{channel_scope}"
+            f"{worst_name} presenta la mayor brecha negativa entre los tópicos observados{channel_scope}"
             if len(change_rows) > 1
-            else "Sin deterioros comparables frente a la base histórica"
+            else "Sin brechas negativas frente a la base histórica global"
         ),
+    )
+    _set_template_text(
+        change.shapes[2],
+        "Brechas NPS\nNPS del tópico frente al NPS global de la base histórica",
     )
     change.shapes[4].height = Inches(0.78)
     _set_template_text(
         change.shapes[4],
-        f"Comparación de tópicos\nActual {context.current_label}\nBase {historic_label}",
+        f"Brechas vs base global\nActual {context.gap_current_label}\nBase {context.gap_baseline_label}",
         size=11,
         bold=True,
         color="FFFFFF",
@@ -3072,9 +3071,9 @@ def _fill_template_deck(
     _set_template_text(
         change.shapes[6],
         (
-            f"{worst_name} presenta la mayor caída del NPS clásico ({worst[1]} puntos)."
+            f"{worst_name} presenta la mayor brecha frente al NPS clásico global de la base ({worst[1]} puntos)."
             if len(change_rows) > 1
-            else "No hay caídas del NPS clásico con datos comparables en ambos periodos."
+            else "No hay tópicos con un NPS clásico inferior a la base histórica global."
         ),
         size=11,
         bold=True,
@@ -3085,7 +3084,7 @@ def _fill_template_deck(
     _replace_template_picture(
         change,
         8,
-        view.change_figure,
+        view.gap_figure,
         empty_note=f"Sin base suficiente para comparar {dimension.lower()}.",
     )
     change.shapes[7].top = Inches(2.18)
@@ -3266,6 +3265,7 @@ def generate_business_review_ppt(
     linking_diagnostics: Optional[dict[str, object]] = None,
     report_context: Optional[dict[str, object]] = None,
     evidence_channel: Optional[str] = None,
+    gap_population: GapPopulation | None = None,
 ) -> BusinessPptResult:
     """Build the single BBVA thermal-causality deck for the selected period."""
     if attribution_df is not None and not attribution_df.empty:
@@ -3300,6 +3300,7 @@ def generate_business_review_ppt(
         broken_journeys_df=broken_journeys_df,
         period_kpis=period_kpis,
         evidence_channel=evidence_channel,
+        gap_population=gap_population,
     )
 
     _fill_template_deck(

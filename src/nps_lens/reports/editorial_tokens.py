@@ -8,7 +8,6 @@ class EditorialContentLimits:
     """Centralized limits for committee-grade slide density."""
 
     max_text_chart_clusters: int = 10
-    min_change_rows_n: int = 1
     max_change_rows: int = 4
     max_journey_rows: int = 6
     max_voc_evidence: int = 3

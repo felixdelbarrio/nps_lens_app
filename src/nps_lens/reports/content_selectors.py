@@ -8,7 +8,6 @@ import pandas as pd
 
 from nps_lens.analytics.causal_evidence import scenario_impact_score
 from nps_lens.analytics.signal_quality import actionable_rows
-from nps_lens.reports.coherence import validate_delta_rows
 from nps_lens.reports.narrative import text
 
 
@@ -48,25 +47,22 @@ def select_text_clusters(text_topics_df: pd.DataFrame, *, max_clusters: int) -> 
     return work.sort_values(["n", "cluster_id"], ascending=[False, True]).head(max_clusters).copy()
 
 
-def select_negative_delta_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
-    """Select real deteriorations only, strongest first, then highest current volume."""
+def select_negative_gap_rows(delta_df: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
+    """Select negative gaps without changing the dashboard topic population."""
 
     if delta_df is None or delta_df.empty:
         return pd.DataFrame(columns=getattr(delta_df, "columns", []))
-    validate_delta_rows(delta_df.to_dict("records"))
-    work = actionable_rows(delta_df)
-    work["delta_nps"] = _numeric_series(work, "delta_nps")
-    work["n_current"] = _numeric_series(work, "n_current").fillna(0.0)
-    work = work.dropna(subset=["delta_nps"])
+    work = delta_df.copy()
+    work["gap_vs_base"] = _numeric_series(work, "gap_vs_base")
+    work["n"] = _numeric_series(work, "n").fillna(0.0)
+    work = work.dropna(subset=["gap_vs_base"])
     if work.empty:
         return work
-    deteriorations = work[work["delta_nps"] < 0].copy()
+    deteriorations = work[work["gap_vs_base"] < 0].copy()
     if deteriorations.empty:
         return deteriorations
     return (
-        deteriorations.sort_values(
-            ["delta_nps", "n_current", "value"], ascending=[True, False, True]
-        )
+        deteriorations.sort_values(["gap_vs_base", "n", "value"], ascending=[True, False, True])
         .head(max_rows)
         .copy()
     )

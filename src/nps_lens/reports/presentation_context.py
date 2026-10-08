@@ -18,8 +18,10 @@ class CausalEvidenceRecord:
 
 @dataclass(frozen=True)
 class DimensionViewModel:
-    change_table_df: pd.DataFrame
-    change_figure: Optional[go.Figure]
+    gap_table_df: pd.DataFrame
+    base_nps: float | None
+    base_n: int
+    gap_figure: Optional[go.Figure]
     topic_table_df: pd.DataFrame
 
 
@@ -60,6 +62,8 @@ class PresentationContext:
     overview_figure: Optional[go.Figure]
     text_topics_df: pd.DataFrame
     current_label: str
+    gap_current_label: str
+    gap_baseline_label: str
     baseline_label: str
     dimensions: dict[str, DimensionViewModel]
     causal: CausalViewModel

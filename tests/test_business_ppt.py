@@ -16,7 +16,7 @@ from nps_lens.reports import executive_ppt
 from nps_lens.reports.content_selectors import (
     parse_markdown_strong,
     select_causal_scenarios,
-    select_negative_delta_rows,
+    select_negative_gap_rows,
 )
 from nps_lens.reports.executive_newsletter import build_executive_newsletter
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
@@ -380,7 +380,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
     ]
     assert len(change_tables) == 1
     assert len(change_tables[0].rows) == 1 + len(
-        executive_ppt.select_negative_delta_rows(
+        executive_ppt.select_negative_gap_rows(
             executive_ppt._build_presentation_context(
                 service_origin="BBVA México",
                 service_origin_n1="Empresas Mobile",
@@ -398,7 +398,7 @@ def test_generate_business_review_ppt_builds_new_story() -> None:
                 broken_journeys_df=None,
             )
             .dimensions["Palanca"]
-            .change_table_df,
+            .gap_table_df,
             max_rows=4,
         )
     )
@@ -773,14 +773,9 @@ def test_ppt_analytics_helpers_build_dynamic_tables() -> None:
     assert int(overview["comments"]) > 0
     assert float(overview["detractor_rate"]) > 0
 
-    palanca_change = executive_ppt.get_changes_vs_historic(
-        current_period,
-        baseline_period,
-        dimension="Palanca",
-        min_n=1,
-    )
+    palanca_change = executive_ppt.nps_gaps(current_period, baseline_period, "Palanca").rows
     assert not palanca_change.empty
-    assert "delta_nps" in palanca_change.columns
+    assert "gap_vs_base" in palanca_change.columns
 
 
 def test_overview_figure_uses_full_history_and_highlights_requested_period() -> None:
@@ -950,23 +945,23 @@ def test_ppt_channel_selects_topics_but_metrics_use_all_channels() -> None:
     assert view.topic_table_df["value"].tolist() == ["Acceso"]
     assert view.topic_table_df.iloc[0]["n"] == 2
     assert view.topic_table_df.iloc[0]["nps"] == 5.0
-    assert view.change_table_df.iloc[0]["n_current"] == 2
-    assert view.change_table_df.iloc[0]["nps_current"] == 0.0
+    assert view.gap_table_df.iloc[0]["n"] == 2
+    assert view.gap_table_df.iloc[0]["nps"] == 0.0
 
 
 def test_editorial_content_selectors_are_deterministic() -> None:
     delta_df = pd.DataFrame(
         {
             "value": ["Mejora", "Peor A", "Peor B", "Neutro"],
-            "delta_nps": [4.0, -8.0, -8.0, 0.0],
-            "n_current": [100, 20, 80, 50],
+            "gap_vs_base": [4.0, -8.0, -8.0, 0.0],
+            "n": [100, 20, 80, 50],
         }
     )
 
-    selected = select_negative_delta_rows(delta_df, max_rows=2)
+    selected = select_negative_gap_rows(delta_df, max_rows=2)
     assert selected["value"].tolist() == ["Peor B", "Peor A"]
-    assert select_negative_delta_rows(
-        pd.DataFrame({"value": ["Mejora"], "delta_nps": [1.0], "n_current": [100]}),
+    assert select_negative_gap_rows(
+        pd.DataFrame({"value": ["Mejora"], "gap_vs_base": [1.0], "n": [100]}),
         max_rows=2,
     ).empty
 
@@ -1170,15 +1165,15 @@ def test_change_story_keeps_four_negative_rows() -> None:
     df = pd.DataFrame(
         {
             "value": ["B", "A", "C"],
-            "delta_nps": [-0.2, -1.1, 0.5],
-            "nps_current": [7.0, 6.0, 8.0],
+            "gap_vs_base": [-0.2, -1.1, 0.5],
+            "nps": [7.0, 6.0, 8.0],
             "nps_baseline": [7.2, 7.1, 7.5],
-            "n_current": [100, 80, 30],
+            "n": [100, 80, 30],
             "n_baseline": [120, 95, 40],
         }
     )
 
-    out = select_negative_delta_rows(df, max_rows=2)
+    out = select_negative_gap_rows(df, max_rows=2)
 
     assert out["value"].tolist() == ["A", "B"]
 

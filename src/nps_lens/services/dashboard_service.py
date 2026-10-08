@@ -16,11 +16,6 @@ import numpy as np
 import pandas as pd
 
 from nps_lens.analytics.causal_evidence import EVIDENCE_COPY, engine_quality, link_confidence_label
-from nps_lens.analytics.channel_topic_scope import (
-    restrict_to_topics,
-    topics_observed_in_channel,
-)
-from nps_lens.analytics.drivers import compute_nps_from_scores, driver_table
 from nps_lens.analytics.helix_operational_metrics import (
     HelixOperationalBenchmark,
     build_helix_operational_benchmark,
@@ -49,6 +44,7 @@ from nps_lens.analytics.linking_policy import (
     LINK_TOP_K_PER_INCIDENT,
     evaluation_diagnostic,
 )
+from nps_lens.analytics.nps_gaps import nps_gaps, select_gap_population
 from nps_lens.analytics.nps_helix_link import (
     annotate_incident_link_quality,
     build_incident_display_text,
@@ -122,7 +118,6 @@ from nps_lens.ui.business import (
     PeriodWindow,
     default_windows,
     selected_month_label,
-    slice_by_window,
 )
 from nps_lens.ui.charts import (
     chart_causal_entity_bar,
@@ -1014,22 +1009,8 @@ class DashboardService:
         topics_bullets = explain_topics(topics_df, max_items=5)
         topics_bullets += [quality["message"], *quality["warnings"]]
 
-        gap_current_window, gap_base_window = default_windows(
-            scope_history_df,
-            pop_year=pop_year,
-            pop_month=pop_month,
-        )
-        gap_population = (
-            slice_by_window(scope_history_df, gap_current_window)
-            if gap_current_window is not None
-            else scope_history_df.iloc[:0]
-        )
-        topic_keys = topics_observed_in_channel(gap_population, gap_dimension, resolved_channel)
-        gap_current_df = restrict_to_topics(gap_population, gap_dimension, topic_keys)
-        gap_base_df = (
-            slice_by_window(scope_history_df, gap_base_window)
-            if gap_base_window is not None
-            else scope_history_df.iloc[:0]
+        gap_population = select_gap_population(
+            scope_history_df, pop_year=pop_year, pop_month=pop_month
         )
         nps_explanation_bullets = daily_nps_explanation(period_scope)
 
@@ -1084,11 +1065,12 @@ class DashboardService:
                 ),
             },
             "gaps": self._build_gap_payload(
-                gap_current_df,
-                gap_base_df,
+                gap_population.current,
+                gap_population.baseline,
                 gap_dimension,
                 theme,
-                base_window=gap_base_window,
+                base_window=gap_population.base_window,
+                channel=resolved_channel,
             ),
             "controls": {
                 "dimensions": _DEFAULT_DIMENSIONS,
@@ -1108,9 +1090,10 @@ class DashboardService:
         theme: Theme,
         *,
         base_window: PeriodWindow | None = None,
+        channel: str = "Todos",
     ) -> dict[str, object]:
-        base_value = compute_nps_from_scores(base_df["NPS"]) if not base_df.empty else float("nan")
-        base_nps = float(base_value) if np.isfinite(base_value) else None
+        gaps = nps_gaps(current_df, base_df, dimension, channel=channel)
+        base_nps = gaps.base_nps
         base_label = selected_month_label(df=base_df).replace(
             "periodo seleccionado", "sin histórico"
         )
@@ -1130,15 +1113,7 @@ class DashboardService:
             if not base_dates.empty
             else {"start": None, "end": None}
         )
-        stats = pd.DataFrame(
-            [item.__dict__ for item in driver_table(current_df, dimension, base_nps=base_nps)]
-            if base_nps is not None
-            else []
-        )
-        if not stats.empty:
-            stats = stats.sort_values(["gap_vs_base", "n"], ascending=[True, False]).reset_index(
-                drop=True
-            )
+        stats = gaps.rows
         return {
             "dimension": dimension,
             "base_nps": base_nps,
@@ -1178,37 +1153,19 @@ class DashboardService:
 
         topics: dict[str, dict[str, object]] = {}
         gaps: dict[str, dict[str, object]] = {}
-        gap_current_window, gap_base_window = default_windows(
-            history_df,
-            pop_year=pop_year,
-            pop_month=pop_month,
-        )
-        metric_current = (
-            slice_by_window(history_df, gap_current_window)
-            if gap_current_window is not None
-            else history_df.iloc[:0]
-        )
-        metric_base = (
-            slice_by_window(history_df, gap_base_window)
-            if gap_base_window is not None
-            else history_df.iloc[:0]
-        )
+        gap_population = select_gap_population(history_df, pop_year=pop_year, pop_month=pop_month)
         for channel in channels:
             channel_history = self._apply_score_channel_filter(history_df, channel)
             topics[channel] = {}
             gaps[channel] = {}
             for dimension in dimensions:
-                topic_keys = topics_observed_in_channel(
-                    metric_current,
-                    dimension,
-                    channel,
-                )
                 gaps[channel][dimension] = self._build_gap_payload(
-                    restrict_to_topics(metric_current, dimension, topic_keys),
-                    metric_base,
+                    gap_population.current,
+                    gap_population.baseline,
                     dimension,
                     theme,
-                    base_window=gap_base_window,
+                    base_window=gap_population.base_window,
+                    channel=channel,
                 )
             for group in groups:
                 analysis_history = filter_by_nps_group(channel_history, group)
@@ -2145,6 +2102,9 @@ class DashboardService:
             linking_diagnostics=cast(dict[str, object], causal["diagnostics"]),
             report_context=report_context,
             evidence_channel=str(causal.get("resolved_channel") or topic_channel),
+            gap_population=select_gap_population(
+                scope_history_df, pop_year=pop_year, pop_month=pop_month
+            ),
         )
         saved_path = self._persist_artifact(report.content, report.file_name)
         return BusinessPptResult(
