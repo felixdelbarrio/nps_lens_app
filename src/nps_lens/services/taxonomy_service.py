@@ -26,7 +26,7 @@ from nps_lens.analytics.taxonomy import (
 from nps_lens.domain.models import UploadContext
 from nps_lens.domain.normalization import EquivalenceRegistry, semantic_series
 from nps_lens.repositories.sqlite_repository import SqliteNpsRepository
-from nps_lens.services.classification_protocol import digest, taxonomy_fingerprint
+from nps_lens.services.classification_protocol import category_catalog, digest, taxonomy_fingerprint
 from nps_lens.services.taxonomy_discovery import TaxonomyResponse
 from nps_lens.services.taxonomy_prompts import COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION
 from nps_lens.settings import persist_ui_prefs
@@ -43,6 +43,26 @@ def original_labels(frame: pd.DataFrame) -> pd.DataFrame:
     for column, source in SOURCE_COLUMNS.items():
         out[column] = labels(frame, source if source in frame else column)
     return out
+
+
+def normalized_label_catalog(
+    catalog: dict[str, Any], registry: EquivalenceRegistry
+) -> dict[str, Any]:
+    pairs = pd.DataFrame(
+        [
+            (branch["lever"], sub if isinstance(sub, str) else sub["name"])
+            for branch in catalog["taxonomy"]
+            for sub in branch["sublevers"]
+        ],
+        columns=["Palanca", "Subpalanca"],
+    )
+    pairs = registry.apply("nps", pairs).drop_duplicates()
+    return {
+        "taxonomy": [
+            {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
+            for lever, group in pairs.groupby("Palanca", sort=True)
+        ]
+    }
 
 
 class TaxonomyResolver:
@@ -361,11 +381,15 @@ class TaxonomyService:
         return resolved
 
     def catalog(
-        self, context: UploadContext, mode: str, *, normalized: bool = True
+        self, context: UploadContext, mode: str, *, normalized: bool = True, semantic: bool = True
     ) -> dict[str, Any]:
         if mode not in MODES:
             raise ValueError("Taxonomía desconocida.")
         state = self.state(context)
+        if normalized and state.get("restored"):
+            frozen = state["restored"]["taxonomies"].get(mode, {}).get("taxonomy")
+            if frozen:
+                return cast(dict[str, Any], frozen)
         item = self.artifact(state.get("artifacts", {}).get(mode, ""))
         if mode == "DISCOVERED" and state.get("discovered_taxonomy"):
             catalog = state["discovered_taxonomy"]
@@ -395,22 +419,33 @@ class TaxonomyService:
                     "La taxonomía diseñada no contiene criterion; regenera con el diseñador actual."
                 ) from exc
         if normalized and mode in ("SOURCE", "COMPLETED"):
-            pairs = pd.DataFrame(
-                [
-                    (branch["lever"], sub)
-                    for branch in catalog["taxonomy"]
-                    for sub in branch["sublevers"]
-                ],
-                columns=["Palanca", "Subpalanca"],
+            catalog = normalized_label_catalog(catalog, self.registry(context))
+        if semantic and normalized and mode in ("SOURCE", "COMPLETED"):
+            enrichment = (
+                state.get("semantic_catalogs", {}).get(mode, {}).get(taxonomy_fingerprint(catalog))
             )
-            pairs = self.registry(context).apply("nps", pairs).drop_duplicates()
-            catalog = {
-                "taxonomy": [
-                    {"lever": lever, "sublevers": sorted(group.Subpalanca.tolist())}
-                    for lever, group in pairs.groupby("Palanca", sort=True)
-                ]
-            }
+            if enrichment:
+                catalog = enrichment["taxonomy"]
         return cast(dict[str, Any], catalog)
+
+    def semantic_status(self, context: UploadContext, mode: str) -> dict[str, Any]:
+        base = self.catalog(context, mode, semantic=False)
+        entry = (
+            self.state(context)
+            .get("semantic_catalogs", {})
+            .get(mode, {})
+            .get(taxonomy_fingerprint(base), {})
+        )
+        total = sum(len(branch["sublevers"]) for branch in base["taxonomy"])
+        return {
+            "total": total,
+            "received": total if entry else 0,
+            "pending": 0 if entry else total,
+            "levers": len(base["taxonomy"]),
+            "sublevers": total,
+            "taxonomy_fingerprint": taxonomy_fingerprint(entry.get("taxonomy", base)),
+            "review": entry.get("review"),
+        }
 
     def manual_draft(self, context: UploadContext, template: str = "CURRENT") -> dict[str, Any]:
         state = self.state(context)
@@ -576,6 +611,34 @@ class TaxonomyService:
             "nodes": [],
             "equivalences": {},
         }
+        inherited_catalog = self.catalog(context, base_mode) if base_mode != "NONE" else None
+        inherited_assignments = {}
+        if inherited_catalog:
+            from nps_lens.services.taxonomy_exchange import TaxonomyExchange
+
+            expected = {
+                (row["lever"], row["sublever"])
+                for row in category_catalog(inherited_catalog).values()
+            }
+            normalized_manual = normalized_label_catalog(taxonomy, registry)
+            manual_pairs = {
+                (category["lever"], category["sublever"])
+                for category in category_catalog(normalized_manual).values()
+            }
+            if expected == manual_pairs:
+                if any(
+                    isinstance(sub, dict)
+                    for branch in inherited_catalog["taxonomy"]
+                    for sub in branch["sublevers"]
+                ):
+                    state.setdefault("semantic_catalogs", {}).setdefault("COMPLETED", {})[
+                        taxonomy_fingerprint(normalized_manual)
+                    ] = {
+                        "taxonomy": inherited_catalog,
+                    }
+                inherited_assignments = TaxonomyExchange(self, Path(".")).assignments(
+                    context, frame, base_mode
+                )
         state.setdefault("artifacts", {})["COMPLETED"] = sig
         with self.repository._connect() as db:
             db.execute(
@@ -588,6 +651,22 @@ class TaxonomyService:
             )
         self._cache.clear()
         self._state_cache.clear()
+        if inherited_assignments:
+            exchange = TaxonomyExchange(self, Path("."))
+            with self.repository._connect() as db:
+                exchange._persist_assignments(
+                    db,
+                    context,
+                    frame,
+                    {
+                        "mode": "COMPLETED",
+                        "taxonomy": inherited_catalog,
+                        "manual_revision": sig,
+                        "instructions_version": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,
+                    },
+                    inherited_assignments,
+                )
+            exchange._clear_caches()
         return taxonomy
 
     def guard_export(self, context: UploadContext, mode: str) -> None:
@@ -764,7 +843,12 @@ class TaxonomyService:
         item = self.available(context, self.source(context), self.registry(context)).get(mode) or {}
         nodes = {(n["parent"], n["label"]): n for n in item.get("nodes", [])}
         rows = summary.iloc[offset : offset + min(limit, 100)].to_dict("records")
+        criteria = {
+            (category["lever"], category["sublever"]): category["criterion"]
+            for category in category_catalog(self.catalog(context, mode)).values()
+        }
         for row in rows:
+            row["criterion"] = criteria.get((row["Palanca"], row["Subpalanca"]), "")
             row["examples"] = nodes.get((row["Palanca"], row["Subpalanca"]), {}).get("examples", [])
             row["provenance"] = mode
         # Heuristics are reported as review suggestions, not errors.
@@ -858,6 +942,7 @@ class TaxonomyService:
             item = dict(available[mode] or {})
             item.update(
                 {
+                    "taxonomy": self.catalog(context, mode),
                     "classification_signature": resolved.attrs["classification_signature"],
                     "keys": frame["_business_key"].tolist(),
                     "lever": labels(resolved, "Palanca").tolist(),

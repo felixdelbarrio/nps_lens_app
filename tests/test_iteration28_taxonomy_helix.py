@@ -92,6 +92,8 @@ def test_manual_uses_discovered_skeleton_without_origin(exchange):
     assert handler.taxonomy.manual_draft(context) == TAXONOMY
     handler.taxonomy.save_manual(context, TAXONOMY["taxonomy"])
     assert handler.taxonomy.resolve(context, mode="COMPLETED").Palanca.eq("Atención").all()
+    assert handler.taxonomy.catalog(context, "COMPLETED") == handler.taxonomy.catalog(context, "DISCOVERED")
+    assert len(handler.assignments(context, handler.taxonomy.source(context), "COMPLETED")) == 405
 
 
 @pytest.fixture(name="helix")
@@ -505,3 +507,27 @@ def test_partial_imports_accumulate_across_jobs_after_restart(exchange):
         assert handler.taxonomy.resolve(ctx, mode="DISCOVERED").Palanca.ne("").sum() == received
         handler = TaxonomyExchange(handler.taxonomy, handler.downloads)
         assert handler.progress(ctx)["received"] == received
+
+
+def test_semantic_criteria_change_helix_scope_without_erasing_prior_results(helix):
+    from test_taxonomy_exchange import semantic_response
+
+    from nps_lens.services.classification_protocol import taxonomy_fingerprint
+
+    handler, ctx, frame, incidents, _ = helix
+    old_inputs = handler.inputs(ctx, incidents, "SOURCE")
+    request = exported(handler.export(ctx, old_inputs)["saved_paths"])
+    handler.import_response(ctx, old_inputs, zipped(helix_response(request, "no-candidate")))
+    before = handler.status(ctx, old_inputs)
+    assert before["received"] == len(incidents)
+    comments = TaxonomyExchange(handler.taxonomy, handler.downloads)
+    response = semantic_response(comments, ctx)
+    response["criteria.json"]["review"]["quotes"] = [frame.Comment.iloc[0]]
+    result = comments.import_response(ctx, zipped(response), "semantic")
+    new_inputs = handler.inputs(ctx, incidents, "SOURCE")
+    assert (
+        taxonomy_fingerprint(new_inputs["taxonomies"]["SOURCE"]) == result["taxonomy_fingerprint"]
+    )
+    assert new_inputs["classification_scopes"] != old_inputs["classification_scopes"]
+    assert handler.status(ctx, new_inputs)["received"] == 0
+    assert handler.status(ctx, old_inputs)["received"] == len(incidents)

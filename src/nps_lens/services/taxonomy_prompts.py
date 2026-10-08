@@ -200,7 +200,34 @@ ZIP con exactamente manifest.json y equivalences.json:
 No incluyas datos originales. La razón debe justificar sustitución en ambas direcciones.
 """
 
+SEMANTIC_INSTRUCTIONS = """CREAR SIMILITUD SEMÁNTICA · nps-lens-semantics/1
+ENTRADA
+Lee manifest.json, taxonomy.json (categories: ID -> lever/sublever/criterion) y todos
+los comments/NNNNNN.json. Valida taxonomy_sha256. Los IDs son opacos.
+
+OBJETIVO
+Define criterios semánticos para la taxonomía original o manual existente, a partir
+del significado de sus etiquetas y de la evidencia del corpus. Conserva TODAS las
+Palancas, Subpalancas e IDs, incluso las categorías sin ejemplos. No crees, elimines,
+renombres, fusiones ni reclasifiques categorías ni comentarios. No apliques límites
+de tamaño del descubrimiento de taxonomía.
+Cada criterio (1–500 caracteres) define cuándo usar la categoría y su frontera frente
+a categorías próximas: tarea, síntoma explícito, inclusiones y exclusiones. Distingue
+negación, consulta, petición, fallo y resolución; no infieras causas por sentimiento.
+Audita ambigüedades con contraejemplos. Si el corpus no sustenta una frontera, usa el
+significado literal de la etiqueta y explica esa limitación en review.reason. No
+inventes evidencia. La similitud semántica no demuestra causalidad ni vínculos.
+
+SALIDA
+ZIP con exactamente manifest.json (sin cambios) y criteria.json:
+{"criteria":{"c001":"Criterio y frontera de uso"},
+"review":{"quotes":["cita literal del corpus"],"reason":"Fronteras y limitaciones"}}.
+criteria debe contener exactamente todos los IDs de taxonomy.json, una vez cada uno.
+No devuelvas categorías, clasificaciones, puntuaciones ni archivos adicionales.
+"""
+
 PROJECT_INSTRUCTIONS = {
+    "semantic": SEMANTIC_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
     "normalizer": NORMALIZER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
     "designer": DESIGNER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
     "classifier": CLASSIFIER_INSTRUCTIONS + SAFE_IO + SEMANTIC_CRITERIA,
@@ -230,6 +257,7 @@ DESIGNER_INSTRUCTIONS_VERSION = instructions_version("designer")
 COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION = instructions_version("classifier")
 HELIX_INSTRUCTIONS_VERSION = instructions_version("helix")
 INSTRUCTIONS_VERSIONS = {
+    "semantic": instructions_version("semantic"),
     "normalizer": NORMALIZER_INSTRUCTIONS_VERSION,
     "designer": DESIGNER_INSTRUCTIONS_VERSION,
     "classifier": COMMENT_CLASSIFIER_INSTRUCTIONS_VERSION,

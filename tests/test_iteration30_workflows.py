@@ -103,7 +103,8 @@ def test_comment_classifications_are_independent_multi_topic_and_scoped(exchange
     )
     handler.taxonomy.save_manual(ctx, handler.taxonomy.manual_draft(ctx)["taxonomy"])
     handler.taxonomy.configure(ctx, {"active": "COMPLETED"})
-    assert handler.progress(ctx)["received"] == 0
+    assert handler.progress(ctx)["received"] == 200
+    assert handler.progress(ctx)["multiple"] == 200
     handler.taxonomy.configure(ctx, {"active": "SOURCE"})
     assert handler.progress(ctx)["received"] == 200
 

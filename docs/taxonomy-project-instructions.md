@@ -3,7 +3,8 @@
 Las plantillas oficiales están en `src/nps_lens/services/taxonomy_prompts.py` y
 Taxonomy Studio permite copiarlas debajo de las URLs. Deben sustituir por completo
 las instrucciones anteriores de **Crear Taxonomía**, **Clasifica comentarios** y **Clasifica incidencias**.
-**Unifica conceptos** se configura exclusivamente en Configuración → Unificar conceptos,
+**Crear similitud semántica** se configura en Análisis estático, debajo de Manual y
+antes de Comparar taxonomías. **Unifica conceptos** se configura exclusivamente en Configuración → Unificar conceptos,
 heredando la compañía seleccionada.
 
 ## Flujo vigente
@@ -37,6 +38,26 @@ heredando la compañía seleccionada.
 NPS Lens no abre ni controla Chrome, no almacena una sesión de ChatGPT y no pide
 permisos de administración de aplicaciones en macOS. Los ZIP contienen comentarios
 originales: solo deben subirse a un espacio corporativo autorizado.
+
+## Criterios para Original y Manual
+
+Crear similitud semántica utiliza el proyecto
+https://chatgpt.com/g/g-p-6ac743802efc81a4a705074f9fd2644b y sus propias instrucciones
+versionadas. Se elige Original o Manual sin cambiar el marco de clasificación activo.
+La entrada incluye el corpus y `taxonomy.json.categories`; la respuesta contiene
+exactamente `manifest.json` y `criteria.json` con `criteria` (ID → criterio) y `review`.
+La importación valida corpus, catálogo, IDs completos, criterios y citas antes de
+modificar el estado. No aplica los límites de tamaño del descubrimiento ni permite
+renombrar, añadir o eliminar categorías.
+
+Los criterios quedan asociados al fingerprint del catálogo base. Comentarios e
+incidencias comparten el nuevo fingerprint semántico y sus pendientes se recalculan.
+Las clasificaciones anteriores permanecen almacenadas bajo su fingerprint; cambiar
+entre reglas y LLM no las elimina. Crear una Manual con exactamente las mismas
+categorías conserva los criterios y copia las clasificaciones de comentarios LLM
+válidas. Si se modifica el catálogo, conserva el historial y exige reclasificación.
+Los snapshots congelan también los criterios. El Excel incluye los criterios usados
+por la clasificación y se guarda en la carpeta configurada en la app local.
 
 ## Contrato
 

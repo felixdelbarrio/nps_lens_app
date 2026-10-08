@@ -187,6 +187,7 @@ class TaxonomySettingsRequest(BaseModel):
 
 class TaxonomyDiscoverySettingsRequest(BaseModel):
     normalizer_url: Optional[str] = None
+    semantic_url: Optional[str] = None
     designer_url: Optional[str] = None
     classifier_url: Optional[str] = None
     helix_classifier_url: Optional[str] = None
