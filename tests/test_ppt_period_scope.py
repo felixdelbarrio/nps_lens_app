@@ -120,7 +120,8 @@ def test_multimonth_deck_has_no_monthly_or_fabricated_deterioration_claim(monkey
     )
     assert "mensual" not in texts.lower()
     assert "del mes" not in texts.lower()
-    assert "NPS del tópico frente al NPS global de la base histórica" in texts
+    assert "NPS clásico del tópico − NPS global histórico (puntos)" in texts
+    assert "Todos los grupos NPS" in texts
     assert "2026-03-01 -> 2026-03-18" in texts
     assert "Sin deterioro presenta" not in texts
     assert "fuera del periodo" not in texts

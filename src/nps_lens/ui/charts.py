@@ -16,6 +16,7 @@ from nps_lens.design.tokens import (
     plotly_nps_score_scale,
     plotly_risk_scale,
 )
+from nps_lens.domain.analysis_labels import gap_metric_label
 from nps_lens.reports.content_selectors import select_causal_scenarios
 from nps_lens.ui.plotly_theme import apply_plotly_theme
 from nps_lens.ui.theme import Theme
@@ -790,6 +791,7 @@ def chart_driver_bar(
     """
     if driver_df.empty:
         return None
+    gap_label = gap_metric_label(base_label)
     th = chart_theme(theme)
     import plotly.express as px  # lazy import for faster cold-start
 
@@ -819,13 +821,13 @@ def chart_driver_bar(
             "%{y}<br>"
             "n: %{customdata[0]}<br>"
             "NPS Clásico: %{customdata[1]:.2f}<br>"
-            f"Brecha vs Base [{base_label}]: %{{customdata[2]:.2f}} pts<br>"
+            f"{gap_label}: %{{customdata[2]:.2f}}<br>"
             "Esta palanca presenta un NPS %{customdata[3]:.2f} puntos "
             "%{customdata[4]}.<extra></extra>"
         ),
     )
     fig.update_layout(
-        xaxis_title=f"Brecha vs Base [{base_label}] (pts)",
+        xaxis_title=gap_label,
         yaxis_title="",
         showlegend=False,
     )
@@ -846,7 +848,7 @@ def chart_driver_bar(
             text=["0 pts"] * len(zero_rows),
             textposition="middle right",
             textfont={"color": theme.text},
-            hovertemplate=f"%{{y}}<br>Brecha vs Base [{base_label}]: 0 pts<extra></extra>",
+            hovertemplate=f"%{{y}}<br>{gap_label}: 0<extra></extra>",
             showlegend=False,
         )
     if len(zero_rows) == len(plot_df):
@@ -1201,7 +1203,9 @@ def chart_topic_bars(topics_df: pd.DataFrame, theme: Theme, top_k: int = 10):
             )
         ]
     )
-    fig.update_layout(xaxis_title="Volumen (n comentarios)", yaxis_title="", showlegend=False)
+    fig.update_layout(
+        xaxis_title="Comentarios del grupo seleccionado (n)", yaxis_title="", showlegend=False
+    )
     fig.update_yaxes(categoryorder="array", categoryarray=plot_df["label"].tolist())
     _layout_common(fig, th, height=360)
     return apply_plotly_template(fig, theme)

@@ -9,6 +9,7 @@ import pandas as pd
 from nps_lens.analytics.signal_quality import signal_quality
 from nps_lens.design.brand import BRAND
 from nps_lens.design.tokens import DesignTokens, nps_balance_color
+from nps_lens.domain.analysis_labels import SIGNALS_TITLE, TOPIC_METRIC_BASIS
 from nps_lens.domain.comment_text import is_nonspecific_content
 from nps_lens.domain.privacy import redact_operational_snippet
 from nps_lens.reports.coherence import validate_metric_payload
@@ -212,4 +213,6 @@ def build_executive_newsletter(
         "scorecard": scorecard,
         "quotes": quotes,
         "signals": signals,
+        "signals_basis": TOPIC_METRIC_BASIS,
+        "signals_title": SIGNALS_TITLE,
     }

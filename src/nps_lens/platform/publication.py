@@ -192,7 +192,9 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <p style="font-size:16px;line-height:1.55;color:#30375f">{esc(model.get("lead") or "Consulta la edición actualizada y su presentación ejecutiva.")}</p>
 <table class="metric-table" role="presentation" width="100%" cellspacing="6" style="margin:14px 0 22px"><tr>{metrics}</tr></table>
 <h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 12px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>{quotes_html}</tr></table>
-<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">Señales a vigilar</h2><table role="presentation" width="100%">{signals_html}</table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">{esc(model.get("signals_title"))}</h2>
+<p style="font-size:12px;line-height:1.5;color:#52627a">{esc(model.get("signals_basis"))}</p>
+<table role="presentation" width="100%">{signals_html}</table>
 <p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #d3d8e0">
 <a href="{report_href}" title="Abrir presentación ejecutiva" style="display:inline-block;background:#001391;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Ver análisis completo</a>
 <a href="WEBAPP_URL" style="display:inline-block;background:#004481;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Explorar NPS Lens</a></p>{EMAIL_SIGNATURE}</td></tr>

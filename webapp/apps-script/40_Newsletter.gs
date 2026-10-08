@@ -137,7 +137,7 @@ function _newsletterHtml_(insight, reportUrl, scopeKey, showEvolutionNps, ownerS
   return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + BRAND.email_light_meta + mobileCss + '</head><body class="nps-newsletter"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#F4F6F8"><tr><td class="email-shell-padding" align="center" style="padding:24px 10px"><table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff"><tr><td class="email-hero" bgcolor="' + BRAND.email_hero_color + '" style="' + BRAND.email_hero_style + 'padding:34px 38px">' + BRAND.email_hero_text_open + BRAND.email_corporate_heading + '<h1 class="email-title" style="font:700 42px Georgia,serif;margin:22px 0 5px">' + e(insight.product) + '</h1><div>' + e(insight.promise) + '</div>' + BRAND.email_hero_text_close + '</td></tr><tr><td class="email-body" style="padding:32px 38px">' +
     '<small style="color:#004481;text-transform:uppercase">' + e(ownerSupportCompany) + ' · ' + e(insight.period) + '</small>' + headline + metrics +
     '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>' + quotes + '</tr></table>' +
-    '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">Señales a vigilar</h2><table role="presentation" width="100%">' + signals + '</table>' +
+    '<h2 style="font:700 26px Georgia,serif;color:#070E46;margin-top:30px">' + e(insight.signals_title) + '</h2><p style="font-size:12px;line-height:1.5;color:#52627A">' + e(insight.signals_basis) + '</p><table role="presentation" width="100%">' + signals + '</table>' +
     '<p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #D3D8E0">' + reportButton + '<a href="' + webUrl + '" style="display:inline-block;background:#004481;color:#fff;padding:13px 18px;text-decoration:none;font-weight:bold">Explorar NPS Lens</a></p>' + BRAND.email_signature + '</td></tr></table></td></tr></table></body></html>';
 }
 
@@ -148,7 +148,7 @@ function _newsletterPlain_(insight, reportUrl, scopeKey, showEvolutionNps, owner
   if ((content.scorecard || []).length) lines.push('', 'INDICADORES');
   (content.scorecard || []).forEach(item => lines.push(item.label + ': ' + item.value + (item.delta ? ' (' + item.delta + ')' : '')));
   lines.push('', 'LA VOZ DEL CLIENTE'); (insight.quotes || []).slice(0,2).forEach(text => lines.push('• “' + text + '”'));
-  lines.push('', 'SEÑALES A VIGILAR'); (insight.signals || []).forEach(item => lines.push('• ' + item.label + (item.reason ? ': ' + item.reason : '')));
+  lines.push('', insight.signals_title, insight.signals_basis); (insight.signals || []).forEach(item => lines.push('• ' + item.label + (item.reason ? ': ' + item.reason : '')));
   if (reportUrl) lines.push('Ver análisis completo: ' + reportUrl);
   lines.push('Explorar NPS Lens: ' + ScriptApp.getService().getUrl() + '?source=newsletter&scope=' + encodeURIComponent(scopeKey));
   return lines.filter(value => value !== null && value !== undefined).join('\n');

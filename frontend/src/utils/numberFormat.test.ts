@@ -17,6 +17,13 @@ describe("numberFormat", () => {
     expect(formatDisplayValue(0.5795254182580882, "focus_rate_high_incidence")).toBe("58,0%");
     expect(formatDisplayValue(0.1524, "average_focus_rate")).toBe("15,2%");
     expect(formatDisplayValue(0.22, "% promotores")).toBe("22,0%");
+    expect(formatDisplayValue(0.64, "% comentarios detractores")).toBe("64,0%");
+  });
+
+  it.each([64, 40, 35])("renders %i detractor comments as a count", (value) => {
+    expect(formatDisplayValue(value, "Comentarios · detractores")).toBe(String(value));
+    expect(formatDisplayValue(String(value), "Comentarios · detractores")).toBe(String(value));
+    expect(formatDisplayValue(value, "Detractores (n)")).toBe(String(value));
   });
 
   it("does not mistake non-percent metrics for percentages", () => {

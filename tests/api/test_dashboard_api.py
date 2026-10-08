@@ -286,6 +286,9 @@ def test_dashboard_context_nps_and_dataset_views_are_restored(tmp_path: Path) ->
         )
         assert 0 <= gap["detractors"] <= gap["valid_n"] <= gap["n"]
     assert dashboard_payload["context_label"]
+    assert "todos los grupos NPS" in dashboard_payload["overview"]["topic_scope"]["title"]
+    assert "tópico > problema" in dashboard_payload["overview"]["topic_scope"]["subtitle"]
+    assert "NPS clásico global de la base histórica" in dashboard_payload["gaps"]["subtitle"]
     assert dashboard_payload["kpis"]["samples"] > 0
     assert dashboard_payload["kpis"]["neutral_rate"] is not None
     assert "Canal: Todos" in dashboard_payload["context_pills"]
@@ -1056,10 +1059,7 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(" ".join((paragraph.text or "").split()))
 
-    assert any(
-        "presenta la mayor brecha negativa entre los tópicos observados" in text
-        for text in all_texts
-    )
+    assert any("mayor brecha NPS negativa frente a la base global" in text for text in all_texts)
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
     dashboard = client.get(
         "/api/dashboard/nps",
