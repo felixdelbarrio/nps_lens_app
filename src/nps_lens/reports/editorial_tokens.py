@@ -11,7 +11,6 @@ class EditorialContentLimits:
     min_change_rows_n: int = 1
     max_change_rows: int = 4
     max_journey_rows: int = 6
-    max_helix_evidence: int = 4
     max_voc_evidence: int = 3
 
 

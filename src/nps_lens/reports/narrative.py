@@ -81,6 +81,9 @@ def ordered_scenarios(chains: pd.DataFrame, topics: pd.DataFrame) -> pd.DataFram
     keys = []
     for row in records:
         name = topic_name(row)
+        average = score(row.get("avg_nps"))
+        if average is not None and not 0 <= average <= 10:
+            average = None
         identity = text(row.get("scenario_id")) or text(row.get("chain_id"))
         if not identity:
             comments = row.get("comment_records")
@@ -101,7 +104,7 @@ def ordered_scenarios(chains: pd.DataFrame, topics: pd.DataFrame) -> pd.DataFram
             (
                 ranks.get(normalized(name), len(ranks)),
                 normalized(name),
-                score(row.get("avg_nps")),
+                average,
                 -(score(row.get("linked_comments")) or 0),
                 normalized(row.get("nps_topic")),
                 identity,

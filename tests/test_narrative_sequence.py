@@ -87,6 +87,17 @@ def test_ties_use_volume_then_normalized_name_and_stable_identity():
     assert ordered_scenarios(rows, topics).scenario_id.tolist() == ["a", "b", "c"]
 
 
+def test_invalid_scenario_average_sorts_after_valid_zero():
+    rows = cases().iloc[:3].copy()
+    rows.loc[:, "anchor_topic"] = "Operativa > Fallo"
+    rows.loc[:, "avg_nps"] = [99, 0, -1]
+    assert ordered_scenarios(rows, experience_topics(opinions())).scenario_id.tolist() == [
+        "b",
+        "a",
+        "c",
+    ]
+
+
 def test_groups_count_unique_comments_sort_scores_and_preserve_zero_and_missing():
     records = [
         {"comment_id": "a", "nps": 3, "comment": "No puedo operar"},

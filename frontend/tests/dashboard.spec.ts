@@ -207,7 +207,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("tab", { name: "Evolución NPS", exact:true })).toBeVisible();
-  await page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true}).click();
+  await expect(page.getByRole("heading", {name:"Datos acumulados hasta Marzo 2026",exact:true})).toBeVisible({timeout:180000});
+  await expect(page.getByTestId("operational-state")).toHaveText("OPERATIVO", {timeout:180000});
+  const evidenceTab = page.getByRole("tab",{name:"Evidencia Helix ↔ VoC",exact:true});
+  await evidenceTab.click();
+  await expect(evidenceTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled({timeout:45000});
 
 });

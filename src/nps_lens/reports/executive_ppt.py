@@ -220,18 +220,6 @@ def _wrap_label(
     return joiner.join(lines)
 
 
-def _clean_evidence_excerpt(text: object, *, max_len: int = 128) -> str:
-    clean = " ".join(redact_operational_snippet(str(text or "")).split())
-    if not clean:
-        return ""
-    for marker in ["Síntoma:", "Sintoma:", "Descripcion:", "Descripción:"]:
-        if marker in clean:
-            clean = clean.split(marker, 1)[1].strip()
-            break
-    clean = re.sub(r"^(ACOTAMIENTO IRD|Acotamiento IRD)\s*", "", clean)
-    return _clip(clean, max_len)
-
-
 def _slug(value: object, *, max_len: int = 42) -> str:
     raw = str(value or "").strip().lower()
     if not raw:
@@ -1977,20 +1965,12 @@ def _build_causal_scenarios(
             )
             for record in helix_records
         ]
-        helix_lines = [
-            _clean_evidence_excerpt(
-                f"{record.get('incident_id', '')}: {record.get('summary', '')}", max_len=145
-            )
-            for record in helix_records[: EDITORIAL_LIMITS.max_helix_evidence]
-        ]
-        if not helix_lines:
-            helix_lines = incident_lines
         scenarios.append(
             CausalScenarioViewModel(
                 index=idx,
                 row=row,
                 comment_lines=comment_lines,
-                helix_evidence_lines=helix_lines,
+                helix_evidence_lines=incident_lines,
                 helix_evidence_records=helix_evidence_records,
             )
         )
@@ -2567,8 +2547,8 @@ def _report_panel(
     shape.line.fill.background()
     shape.adjustments[0] = 0.06
     shape._element.spPr.append(OxmlElement("a:effectLst"))
-    for effect in shape._element.xpath("./p:style/a:effectRef"):
-        effect.set("idx", "0")
+    for style in shape._element.xpath("./p:style"):
+        shape._element.remove(style)
     return shape
 
 
