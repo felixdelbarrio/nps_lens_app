@@ -39,6 +39,7 @@ src/nps_lens/design/__init__.py
 src/nps_lens/design/brand.py
 src/nps_lens/design/tokens.py
 src/nps_lens/domain/__init__.py
+src/nps_lens/domain/analysis_labels.py
 src/nps_lens/domain/causal_methods.py
 src/nps_lens/domain/column_aliases.py
 src/nps_lens/domain/comment_scores.py
@@ -101,6 +102,7 @@ src/nps_lens/ui/narratives.py
 src/nps_lens/ui/plotly_theme.py
 src/nps_lens/ui/population.py
 src/nps_lens/ui/theme.py
+tests/test_analysis_labels.py
 tests/test_business_ppt.py
 tests/test_causal_identity_regressions.py
 tests/test_channel_topic_scope.py
