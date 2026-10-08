@@ -2689,7 +2689,9 @@ def _evidence_slide_blocks(
             value, column_width_in=width, font_size_pt=layout.body_font
         ).splitlines() or [""]
 
-    def fit(block: tuple[str, str, str, object, str], budget: float):
+    def fit(
+        block: tuple[str, str, str, object, str], budget: float
+    ) -> tuple[str, str, str, object, str, float]:
         kind, label, text, segments, url = block
         label_lines = len(wrap(label))
         available = max(1, int((budget - 2 * layout.padding + 1e-9) / line_height) - label_lines)

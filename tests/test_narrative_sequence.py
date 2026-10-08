@@ -367,3 +367,50 @@ def test_null_comment_records_and_unknown_topic_do_not_become_zero():
     assert result.narrative_topic.tolist() == ["Acceso"]
     assert result.avg_nps.isna().all()
     assert comment_groups([{"comment_id": "x", "nps": 2.5, "comment": "Error"}])[0]["score"] is None
+
+
+@pytest.mark.parametrize("incident_count", [3, 40])
+def test_ppt_case_is_one_slide_with_detailed_first_incident_and_overflow_ids(incident_count):
+    from nps_lens.reports.evidence_layout import EVIDENCE_LAYOUT
+
+    rows = cases().iloc[:1].copy()
+    records = [
+        {
+            "incident_id": f"INC000104{i:06d}",
+            "summary": "La aplicación queda conectando y no permite realizar la operación " * 4,
+            "url": f"https://helix.example/{i}",
+        }
+        for i in range(incident_count)
+    ]
+    rows.at[0, "incident_records"] = records
+    report = generate_business_review_ppt(
+        service_origin="Fixture",
+        service_origin_n1="",
+        service_origin_n2="",
+        period_start=date(2026, 8, 1),
+        period_end=date(2026, 8, 31),
+        focus_name="Todos",
+        selected_nps_df=opinions(),
+        comparison_nps_df=opinions(),
+        attribution_df=rows,
+    )
+    deck = Presentation(BytesIO(report.compact_content))
+    slides = [s for s in deck.slides if any(sh.name == "Incident evidence" for sh in s.shapes)]
+    assert len(slides) == 1
+    slide = slides[0]
+    title = next(sh.text for sh in slide.shapes if sh.name == "Report title")
+    assert "(1/" not in title
+    cells = [sh for sh in slide.shapes if sh.name == "Incident evidence"]
+    assert records[0]["incident_id"] in cells[0].text
+    assert "La aplicación queda conectando" in cells[0].text
+    assert f"{incident_count - 1} Incidencias:" in cells[-1].text
+    assert f"[{records[1]['incident_id']}]" in cells[-1].text
+    assert ("…" in cells[-1].text) == (incident_count == 40)
+    assert all((sh.top + sh.height) / 914400 <= EVIDENCE_LAYOUT.body_bottom + 0.001 for sh in cells)
+    for record in records:
+        assert record["incident_id"] in slide.notes_slide.notes_text_frame.text
+    assert any(
+        run.hyperlink.address == records[0]["url"]
+        for paragraph in cells[0].text_frame.paragraphs
+        for run in paragraph.runs
+    )
