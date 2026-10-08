@@ -154,3 +154,29 @@ it("passes the changing analysis scope to classification while keeping designer 
   rerender(<SWRConfig><TaxonomyStudio context={context} classificationContext={{...scope,pop_month:"10"}} onChange={async()=>{}} /></SWRConfig>);
   await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes("/helix?") && new URL(url,"http://localhost").searchParams.get("pop_month") === "10")).toBe(true));
 });
+
+it("places semantic criteria after manual taxonomy and refreshes the selected catalog", async () => {
+  const semantic = {SOURCE:{total:4,received:0,pending:4,levers:2,sublevers:4,taxonomy_fingerprint:"original"},COMPLETED:{total:2,received:0,pending:2,levers:1,sublevers:2,taxonomy_fingerprint:"manual"}};
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/semantic/export")) return Response.json({saved_path:"/Downloads/criteria.zip"});
+    if (url.includes("/semantic/import")) { Object.assign(semantic.COMPLETED,{received:2,pending:0,taxonomy_fingerprint:"enriched"}); return Response.json({imported:true}); }
+    if (url.includes("/progress")) return Response.json({semantic});
+    if (url.includes("/instructions")) return Response.json({versions:{semantic:"v1"},semantic:"Conserva todas las categorías"});
+    if (url.includes("/discovery")) return Response.json({semantic_url:"https://chatgpt.com/g/g-p-6ac743802efc81a4a705074f9fd2644b"});
+    if (url.includes("/manual")) return Response.json({taxonomy:[],templates:["NONE"],exists:false});
+    return Response.json(status());
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  render(<SWRConfig value={{provider:()=>new Map()}}><TaxonomyStudio context={context} onChange={async()=>{}} /></SWRConfig>);
+  const heading = await screen.findByRole("heading",{name:"Crear similitud semántica"});
+  expect(screen.getByRole("heading",{name:"Taxonomía Manual"}).compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(heading.compareDocumentPosition(screen.getByText("Comparar taxonomías")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await user.selectOptions(screen.getByLabelText("Taxonomía para crear criterios"),"COMPLETED");
+  await user.click(screen.getByRole("button",{name:"Exportar comentarios y taxonomía para crear criterios"}));
+  expect(await screen.findByText("ZIP guardado en /Downloads/criteria.zip")).toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("mode=COMPLETED"),expect.objectContaining({method:"POST"}));
+  await user.upload(screen.getByLabelText("Importar ZIP de criterios semánticos"),new File(["zip"],"response.zip",{type:"application/zip"}));
+  expect(await screen.findByText("enriched")).toBeInTheDocument();
+  expect(screen.getByText("0 pendientes")).toBeInTheDocument();
+});

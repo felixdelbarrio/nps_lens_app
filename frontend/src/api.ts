@@ -701,6 +701,10 @@ export function downloadWebPublication(
   );
 }
 
+export function downloadTaxonomy(context: TaxonomyContext, mode: TaxonomyMode, proposal = false) {
+  return downloadArtifact("/api/taxonomy/export", { ...context, mode, ...(proposal ? { proposal: "true" } : {}) }, `taxonomia-${mode.toLowerCase()}.xlsx`);
+}
+
 export function downloadTelemetry() {
   return downloadArtifact("/api/telemetry/export", {}, "nps-lens-telemetria.json");
 }
@@ -738,13 +742,15 @@ export type TaxonomyStatus = {
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
-  versions: Record<"normalizer" | "designer" | "classifier" | "helix", string>;
+  versions: Record<"normalizer" | "designer" | "classifier" | "helix" | "semantic", string>;
+  semantic: string;
   normalizer: string;
   designer: string;
   classifier: string;
   helix: string;
 };
 export type TaxonomyDiscoverySettings = {
+  semantic_url: string;
   normalizer_url: string;
   designer_url: string;
   classifier_url: string;

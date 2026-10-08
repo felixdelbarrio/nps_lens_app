@@ -67,6 +67,13 @@ class TaxonomyReview(_StrictModel):
     ]
 
 
+class SemanticCriteriaResponse(_StrictModel):
+    criteria: dict[
+        str, Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    ]
+    review: TaxonomyReview
+
+
 class TaxonomyDesignResponse(TaxonomyResponse):
     review: TaxonomyReview
 
