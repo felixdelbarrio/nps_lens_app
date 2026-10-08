@@ -61,7 +61,7 @@ from nps_lens.reports.content_selectors import (
     select_text_clusters,
 )
 from nps_lens.reports.editorial_tokens import EDITORIAL_LIMITS
-from nps_lens.reports.evidence_layout import EVIDENCE_LAYOUT
+from nps_lens.reports.evidence_layout import EVIDENCE_LAYOUT, wrap_evidence_text
 from nps_lens.reports.narrative import (
     comment_groups,
     experience_topics,
@@ -2694,20 +2694,21 @@ def _evidence_slide_blocks(
     """Fit one case, reserving a detailed incident and an overflow ID cell."""
     layout = EVIDENCE_LAYOUT
     line_height = layout.body_font / 72 * 1.20
-    width = layout.content_width - 2 * layout.padding
 
-    def wrap(value: str) -> list[str]:
-        return _wrap_text_to_width(
-            value, column_width_in=width, font_size_pt=layout.body_font
-        ).splitlines() or [""]
+    wrapped: dict[str, list[str]] = {}
+
+    def lines_for(value: str) -> list[str]:
+        if value not in wrapped:
+            wrapped[value] = wrap_evidence_text(value)
+        return wrapped[value]
 
     def fit(
         block: tuple[str, str, str, object, str], budget: float
     ) -> tuple[str, str, str, object, str, float]:
         kind, label, text, segments, url = block
-        label_lines = len(wrap(label))
+        label_lines = len(lines_for(label))
         available = max(1, int((budget - 2 * layout.padding + 1e-9) / line_height) - label_lines)
-        lines = wrap(text)
+        lines = lines_for(text)
         visible = lines[:available]
         if len(lines) > available:
             visible[-1] = visible[-1].rstrip(".,; ") + "…"
@@ -2855,11 +2856,20 @@ def _add_scenario_slide(prs: Presentation, scenario: CausalScenarioViewModel) ->
         for r in (row.get("comment_records") or [])
         if isinstance(r, dict)
     )
+    comment_notes = "\n".join(
+        f"{record.get('comment_id', '')}: {record.get('comment', '')}"
+        for record in (row.get("comment_records") or [])
+        if isinstance(record, dict)
+    )
     incident_notes = "\n".join(
         f"{record.incident_id}: {record.summary} {record.url}"
         for record in scenario.helix_evidence_records
     )
-    slide.notes_slide.notes_text_frame.text = f"Escenario: {title}\nAgrupación de origen: {row.get('nps_topic', '')}\nComentarios: {ids}\n{row.get('chain_story', '')}\n{reason}\nIncidencias completas:\n{incident_notes}"
+    slide.notes_slide.notes_text_frame.text = (
+        f"Escenario: {title}\nAgrupación de origen: {row.get('nps_topic', '')}\n"
+        f"Comentarios: {ids}\n{row.get('chain_story', '')}\n{reason}\n"
+        f"Comentarios completos:\n{comment_notes}\nIncidencias completas:\n{incident_notes}"
+    )
 
 
 def _fill_template_deck(

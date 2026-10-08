@@ -414,3 +414,38 @@ def test_ppt_case_is_one_slide_with_detailed_first_incident_and_overflow_ids(inc
         for paragraph in cells[0].text_frame.paragraphs
         for run in paragraph.runs
     )
+
+
+def test_long_uppercase_comment_uses_ellipsis_and_keeps_full_text_in_notes():
+    from pptx.util import Inches
+
+    from nps_lens.reports.executive_ppt import _add_scenario_slide
+    from nps_lens.reports.presentation_context import CausalEvidenceRecord, CausalScenarioViewModel
+
+    full = "CUANDO SALGO DE UNA CUENTA EMPRESA ME SIGUE MOSTRANDO LOS DATOS ANTERIORES " * 40
+    scenario = CausalScenarioViewModel(
+        1,
+        pd.Series(
+            {
+                "nps_topic": "Acceso > Contexto de empresa",
+                "avg_nps": 3,
+                "comment_records": [{"comment_id": "long", "nps": 3, "comment": full}],
+            }
+        ),
+        [],
+        [],
+        [
+            CausalEvidenceRecord("INC1", "Muestra otra empresa"),
+            CausalEvidenceRecord("INC2", "Datos anteriores"),
+        ],
+    )
+    deck = Presentation()
+    deck.slide_width, deck.slide_height = Inches(10), Inches(5.625)
+    _add_scenario_slide(deck, scenario)
+    slide = deck.slides[0]
+    comment = next(sh for sh in slide.shapes if sh.name == "Comment evidence")
+    assert comment.text.endswith("…")
+    assert full in slide.notes_slide.notes_text_frame.text
+    panels = [sh for sh in slide.shapes if sh.name in ("Comment panel", "Incident panel")]
+    assert all(a.top + a.height < b.top for a, b in zip(panels, panels[1:], strict=False))
+    assert len(deck.slides) == 1
