@@ -3227,10 +3227,10 @@ def _apply_report_branding(prs: Presentation, context: PresentationContext) -> N
             callout.top = Inches(4.80 if index >= 6 else 4.95)
             callout.height = Inches(0.50 if index >= 6 else 0.38)
         wordmark = slide.shapes.add_picture(
-            str(BRAND_ASSETS / ("bia-dark.png" if index else "bia-light.png")),
+            str(BRAND_ASSETS / "bia.png"),
             Inches(0.38),
-            Inches(5.41),
-            width=Inches(0.43),
+            Inches(5.34),
+            width=Inches(0.45),
         )
         wordmark.name = BRAND["initiative"]
         wordmark._element.nvPicPr.cNvPr.set("descr", BRAND["initiative_name"])

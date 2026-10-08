@@ -30,8 +30,15 @@ const Gmail = {Users:{Messages:{send:message=>{
   const mime=Buffer.from(message.raw,'base64url').toString();
   const subject=Buffer.from(mime.match(/Subject: =\?UTF-8\?B\?([^?]+)\?=/)[1],'base64').toString();
   assert.ok(subject.startsWith('[bIA]'));
+  assert.ok(mime.includes('Content-ID: <bia-logo>'));
+  assert.ok(mime.includes('Content-Type: multipart/related;'));
   delivered=[...mime.matchAll(/Content-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/g)]
-    .map(match=>Buffer.from(match[1],'base64').toString());
+    .map(match=>Buffer.from(match[1],'base64'));
+  assert.equal(delivered.length,3);
+  assert.ok(delivered[2].subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
+  assert.equal(delivered[2].toString('base64'), BRAND.initiative_logo);
+  delivered=delivered.slice(0,2).map(value=>value.toString());
+  assert.ok(delivered[1].includes('src="cid:bia-logo"'));
   return {id:'accepted'};
 }}}};
 """

@@ -1728,7 +1728,7 @@ export function App() {
               Banca de Empresas e Instituciones · NPS e incidencias relacionadas.
             </p>
             <div className="initiative-signature">
-              <img src="/assets/brand/bia-light.svg" alt={BRAND.initiative} />
+              <img src="/assets/brand/bia.svg" alt={BRAND.initiative} />
               <div><span>{BRAND.initiative_credit}</span><strong>{BRAND.initiative_name}</strong></div>
             </div>
           </div>

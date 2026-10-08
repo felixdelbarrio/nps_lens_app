@@ -163,6 +163,7 @@ function _newsletterMimeText_(value) {
 function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
   const token = Utilities.getUuid().replace(/-/g, '');
   const boundary = 'nps_lens_' + token;
+  const related = boundary + '_related';
   const crlf = '\r\n';
   const mime = [
     'From: ' + _newsletterEncodedHeader_(NPS_LENS.newsletterSenderName) + ' <' + sender.effective + '>',
@@ -176,8 +177,13 @@ function _newsletterMimeMessage_(recipient, subject, html, plain, sender) {
     'Content-Type: multipart/alternative; boundary="' + boundary + '"', '',
     '--' + boundary, 'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: base64', '', _newsletterMimeText_(plain),
-    '--' + boundary, 'Content-Type: text/html; charset="UTF-8"',
+    '--' + boundary, 'Content-Type: multipart/related; boundary="' + related + '"', '',
+    '--' + related, 'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: base64', '', _newsletterMimeText_(html),
+    '--' + related, 'Content-Type: image/png',
+    'Content-ID: <bia-logo>', 'Content-Disposition: inline; filename="bia.png"',
+    'Content-Transfer-Encoding: base64', '', BRAND.initiative_logo.match(/.{1,76}/g).join(crlf),
+    '--' + related + '--',
     '--' + boundary + '--', ''
   ].join(crlf);
   return Utilities.base64EncodeWebSafe(mime, Utilities.Charset.UTF_8).replace(/=+$/g, '');

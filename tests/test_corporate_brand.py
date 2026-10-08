@@ -2,17 +2,19 @@
 
 import json
 import subprocess
+from base64 import b64decode
 from datetime import date
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches
 from test_business_ppt import _sample_payload
 
-from nps_lens.design.brand import BRAND, BRAND_ASSETS, EMAIL_SIGNATURE
+from nps_lens.design.brand import BRAND, BRAND_ASSETS, EMAIL_SIGNATURE, email_signature
 from nps_lens.platform.publication import _newsletter
 from nps_lens.platform.webapp_preview import build_preview, load_publication
 from nps_lens.reports.executive_ppt import generate_business_review_ppt
@@ -57,6 +59,8 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
                 )
                 if callout is not None:
                     assert callout.top + callout.height <= Inches(5.36)
+                    logo = next(shape for shape in slide.shapes if shape.name == "bIA")
+                    assert callout.top + callout.height <= logo.top
         for master in deck.slide_masters:
             for template in (master, *master.slide_layouts):
                 assert not any(
@@ -71,8 +75,7 @@ def test_branding_signs_every_slide_with_unique_numbering_and_reuses_artwork(bra
             images = [
                 archive.read(name) for name in archive.namelist() if name.startswith("ppt/media/")
             ]
-        assert images.count((BRAND_ASSETS / "bia-dark.png").read_bytes()) == 1
-        assert images.count((BRAND_ASSETS / "bia-light.png").read_bytes()) == 1
+        assert images.count((BRAND_ASSETS / "bia.png").read_bytes()) == 1
 
 
 def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
@@ -93,4 +96,9 @@ def test_newsletter_and_browser_assets_share_the_signature_and_font(tmp_path):
         subprocess.run(["node", "-e", script], capture_output=True, check=True, text=True).stdout
     )
     assert generated["newsletter_prefix"] == "[bIA]"
-    assert generated["email_signature"] == EMAIL_SIGNATURE
+    assert generated["email_signature"] == email_signature("cid:bia-logo")
+    assert b64decode(generated["initiative_logo"]) == (BRAND_ASSETS / "bia.png").read_bytes()
+    with Image.open(BRAND_ASSETS / "bia.png") as logo:
+        assert logo.size == (852, 520)
+    assert 'viewBox="0 0 213 130"' in Path("frontend/public/assets/brand/bia.svg").read_text()
+    assert "data:image/png;base64," in EMAIL_SIGNATURE
