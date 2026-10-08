@@ -1056,8 +1056,35 @@ def test_dashboard_report_endpoint_respects_selected_period_and_baseline_history
                 for paragraph in shape.text_frame.paragraphs:
                     all_texts.append(" ".join((paragraph.text or "").split()))
 
-    assert any("lidera el deterioro entre los tópicos observados" in text for text in all_texts)
+    assert any(
+        "presenta la mayor brecha negativa entre los tópicos observados" in text
+        for text in all_texts
+    )
     assert not any("Qué ha cambiado en Subpalanca" in text for text in all_texts)
+    dashboard = client.get(
+        "/api/dashboard/nps",
+        params={
+            "service_origin": "BBVA México",
+            "service_origin_n1": "Senda",
+            "pop_year": "2026",
+            "pop_month": "03",
+            "score_channel": "Todos",
+            "gap_dimension": "Palanca",
+        },
+    )
+    assert dashboard.status_code == 200
+    gaps = dashboard.json()["gaps"]
+    gap_table = next(shape.table for shape in presentation.slides[4].shapes if shape.has_table)
+    expected = [row for row in gaps["table"] if row["gap_vs_base"] < 0][:4]
+    assert len(gap_table.rows) == len(expected) + 1
+    for ppt_row, app_row in zip(list(gap_table.rows)[1:], expected, strict=True):
+        assert ppt_row.cells[0].text == app_row["value"]
+        assert float(ppt_row.cells[1].text.replace(",", ".")) == pytest.approx(
+            app_row["gap_vs_base"], abs=0.0051
+        )
+        assert float(ppt_row.cells[3].text.replace(",", ".")) == pytest.approx(
+            gaps["base_nps"], abs=0.0051
+        )
 
 
 def test_views_share_canonical_evidence(tmp_path, monkeypatch):

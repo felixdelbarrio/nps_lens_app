@@ -665,7 +665,9 @@ def _build_gap_figure(gap_df: pd.DataFrame, *, panel_height_in: float) -> Option
         tickfont=dict(size=y_font_size, family=BBVA_FONT_MEDIUM),
         automargin=False,
         tickmode="array",
-        tickvals=rendered_labels,
+        tickvals=list(range(label_count)),
+        ticktext=rendered_labels,
+        nticks=label_count,
         title_text="",
     )
     fig.update_xaxes(
