@@ -41,7 +41,7 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
   const available = data.taxonomies.filter(item => item.available && item.selectable !== false);
   const activeMode = data.active;
   const hasFramework = available.some(item => item.mode === activeMode);
-  const exchangeKey = `${taxonomyUrl("", classificationContext)}:${activeMode}`;
+  const exchangeKey = `${taxonomyUrl("", classificationContext)}:${activeMode}:${discovery?.single_zip_enabled ?? false}`;
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
       <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><p>Se aplica a Insights, comentarios, incidencias y presentaciones. La selección se guarda por compañía; cada taxonomía conserva sus resultados LLM.</p><label>Marco de clasificación<select value={hasFramework ? activeMode : ""} disabled={locked || !available.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{active:e.target.value})))}><option value="" disabled>No hay una taxonomía seleccionada</option>{available.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>

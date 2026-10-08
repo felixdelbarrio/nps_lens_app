@@ -8,7 +8,7 @@ from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from nps_lens.design.brand import (
-    EMAIL_CORPORATE_LOGO,
+    EMAIL_CORPORATE_HEADING,
     EMAIL_DARK_CSS,
     EMAIL_HERO_COLOR,
     EMAIL_HERO_STYLE,
@@ -143,6 +143,8 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
     scorecard = [item for item in model.get("scorecard", []) if isinstance(item, dict)]
     quotes = [str(item) for item in model.get("quotes", []) if str(item).strip()]
     signals = [item for item in model.get("signals", []) if isinstance(item, dict)]
+    if any(not item.get("reason_color") for item in signals):
+        raise ValueError("Regenera la publicación: faltan los colores NPS de la newsletter.")
     metrics = "".join(
         '<td class="metric-cell" width="20%" valign="top" style="padding:12px 10px;border-top:3px solid #85c8ff;background:#f7f8f8;overflow-wrap:anywhere">'
         f'<div style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#52627a">{esc(item.get("label"))}</div>'
@@ -181,8 +183,8 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <td class="email-shell-padding" align="center" style="padding:24px 10px">
 <table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff">
 <tr><td class="email-hero" bgcolor="{EMAIL_HERO_COLOR}" style="{EMAIL_HERO_STYLE}padding:34px 38px">
-{EMAIL_CORPORATE_LOGO}
 {EMAIL_HERO_TEXT_OPEN}
+{EMAIL_CORPORATE_HEADING}
 <h1 class="email-title" style="margin:22px 0 5px;font:700 42px Georgia,serif">{esc(model.get("product") or "NPS Lens")}</h1>
 <div>{esc(model.get("promise") or "La voz del cliente conectada con la operación")}</div>{EMAIL_HERO_TEXT_CLOSE}</td></tr>
 <tr><td class="email-body" style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">{esc(owner)} · {esc(model.get("period") or "Periodo actualizado")}</div>

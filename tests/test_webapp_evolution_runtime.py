@@ -36,14 +36,13 @@ const Gmail = {Users:{Messages:{send:message=>{
   assert.ok(mime.includes('Content-Type: multipart/related;'));
   delivered=[...mime.matchAll(/Content-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/g)]
     .map(match=>Buffer.from(match[1],'base64'));
-  assert.equal(delivered.length,4);
-  assert.ok(mime.includes("Content-ID: <bbva-logo>"));
-  assert.equal(delivered[3].toString("base64"), BRAND.corporate_logo);
+  assert.equal(delivered.length,3);
+  assert.ok(!mime.includes("Content-ID: <bbva-logo>"));
   assert.ok(delivered[2].subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
   assert.equal(delivered[2].toString('base64'), BRAND.initiative_logo);
   delivered=delivered.slice(0,2).map(value=>value.toString());
   assert.ok(delivered[1].includes('src="cid:bia-logo"'));
-  assert.ok(delivered[1].includes('src="cid:bbva-logo"'));
+  assert.ok(delivered[1].includes(BRAND.email_corporate_heading));
   assert.ok(delivered[1].includes("México · Agosto"));
   assert.ok(delivered[1].includes(BRAND.email_hero_style));
   assert.ok(delivered[1].includes(BRAND.email_light_meta));
@@ -114,6 +113,7 @@ for(const visible of [false,true,false]){
   assert.equal(delivered[1].includes('<table class="metric-table"'),visible);
 }
 assert.equal(JSON.stringify(insight),original);
+assert.throws(()=>_newsletterHtml_({...insight,signals:[{label:"Tema",reason:"NPS -90"}]},"report","edition",true,"México"),/Regenera la publicación/);
 """
     )
     subprocess.run(["node"], input=script, check=True, capture_output=True, text=True)
