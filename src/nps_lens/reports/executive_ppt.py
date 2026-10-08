@@ -44,6 +44,7 @@ from nps_lens.design.tokens import (
     bbva_typography_tokens,
     executive_report_palette,
 )
+from nps_lens.domain.analysis_labels import TOPIC_METRIC_CAPTION, negative_gap_headline
 from nps_lens.domain.causal_methods import get_causal_method_spec
 from nps_lens.domain.privacy import redact_operational_snippet, redact_public_payload
 from nps_lens.domain.topic_labels import topic_paths
@@ -2601,7 +2602,7 @@ def _add_topic_overview(
     leader = str(rows[0]["value"]) if rows else ""
     slide = _report_slide(prs)
     title = (
-        f"{leader} tiene el menor score medio entre el top {len(rows)} de los tópicos observados{channel_scope}"
+        f"{leader}: menor score medio (0–10) · Top {len(rows)} tópicos · todos los grupos NPS{channel_scope}"
         if rows
         else "Sin opiniones clasificadas para comparar tópicos"
     )
@@ -2637,9 +2638,9 @@ def _add_topic_overview(
         )
         for offset, (label, value) in enumerate(
             (
-                ("Opiniones totales", _fmt_count_or_nd(row["n"])),
-                ("Score total", _fmt_num_or_nd(row["nps"], decimals=1)),
-                ("Detractores del periodo", _fmt_pct_or_nd(row["detractor_rate"])),
+                ("Opiniones (todos)", _fmt_count_or_nd(row["n"])),
+                ("Score medio (0–10)", _fmt_num_or_nd(row["nps"], decimals=1)),
+                ("Detractores (%)", _fmt_pct_or_nd(row["detractor_rate"])),
             )
         ):
             top = 1.98 + offset * 0.86
@@ -2891,7 +2892,7 @@ def _fill_template_deck(
     base_label = str(period.get("base_label") or "Sin base histórica")
     historic_label = context.baseline_label
     channel_scope = "" if topic_channel == "Todos" else f" en {topic_channel}"
-    metric_scope = f"Tópicos observados{channel_scope}; métricas con todas sus opiniones."
+    metric_scope = TOPIC_METRIC_CAPTION
     method = get_causal_method_spec(context.causal.touchpoint_source)
 
     cover = prs.slides[0]
@@ -3025,9 +3026,9 @@ def _fill_template_deck(
     topics = prs.slides[3]
     _set_template_text(
         topics.shapes[4],
-        f"Principales comentarios de los detractores del periodo ({_safe_date(context.period_start)} a {_safe_date(context.period_end)}){channel_scope}",
+        f"Top 5 problemas · detractores · tópico > problema · {_safe_date(context.period_start)} a {_safe_date(context.period_end)}{channel_scope}",
     )
-    topic_rows = [["Comentarios", "Tópico > problema", "Ejemplos"]]
+    topic_rows = [["Detractores (n)", "Tópico > problema", "Ejemplos"]]
     selected_topics = select_text_clusters(context.text_topics_df, max_clusters=5)
     for row in selected_topics.itertuples():
         examples = [str(value) for value in list(getattr(row, "examples", []))[:3]]
@@ -3075,18 +3076,17 @@ def _fill_template_deck(
             ]
         )
     worst = change_rows[1] if len(change_rows) > 1 else ["Sin deterioro", "n/d"]
-    worst_name = str(view.gap_table_df.iloc[0]["value"]) if len(change_rows) > 1 else ""
     _set_template_text(
         change.shapes[0],
         (
-            f"{worst_name} presenta la mayor brecha negativa entre los tópicos observados{channel_scope}"
+            negative_gap_headline(view.gap_table_df) + channel_scope
             if len(change_rows) > 1
             else "Sin brechas negativas frente a la base histórica global"
         ),
     )
     _set_template_text(
         change.shapes[2],
-        "Brechas NPS\nNPS del tópico frente al NPS global de la base histórica",
+        "NPS clásico del tópico − NPS global histórico (puntos)\nTodos los grupos NPS",
         size=11,
         bold=True,
         color="FFFFFF",
@@ -3105,7 +3105,7 @@ def _fill_template_deck(
     _set_template_text(
         change.shapes[6],
         (
-            f"{worst_name} presenta la mayor brecha frente al NPS clásico global de la base ({worst[1]} puntos)."
+            f"{negative_gap_headline(view.gap_table_df)} ({worst[1]} puntos)."
             if len(change_rows) > 1
             else "No hay tópicos con un NPS clásico inferior a la base histórica global."
         ),

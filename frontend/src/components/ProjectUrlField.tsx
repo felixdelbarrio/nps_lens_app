@@ -7,7 +7,7 @@ export function ProjectUrlField({ context, field, label, url, disabled }: { cont
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const { mutate } = useSWRConfig();
-  useEffect(() => setValue(url), [url]);
+  useEffect(() => { setValue(url); setMessage(""); }, [url, field]);
   async function save() {
     if (value === url) return;
     setSaving(true); setMessage("");

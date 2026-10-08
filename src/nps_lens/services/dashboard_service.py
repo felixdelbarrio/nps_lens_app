@@ -64,6 +64,7 @@ from nps_lens.core.nps_math import (
 from nps_lens.core.store import DatasetContext, HelixIncidentStore
 from nps_lens.design.brand import BRAND
 from nps_lens.design.tokens import DesignTokens
+from nps_lens.domain.analysis_labels import GAP_METRIC_BASIS, gap_metric_label, problem_scope_labels
 from nps_lens.domain.causal_methods import (
     TOUCHPOINT_SOURCE_BBVA_SOURCE_N2,
     TOUCHPOINT_SOURCE_BROKEN_JOURNEYS,
@@ -1035,6 +1036,7 @@ class DashboardService:
                 ),
                 "topics_figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                 "topics_table": self._serialize_rows(topics_df),
+                "topic_scope": problem_scope_labels(resolved_group),
                 "daily_volume_figure": self._serialize_figure(
                     chart_daily_volume(scope_current_df, theme, metrics=scope_daily_metrics)
                 ),
@@ -1119,11 +1121,9 @@ class DashboardService:
             "base_nps": base_nps,
             "base_label": base_label,
             "base_range": base_range,
-            "gap_column_label": f"Brecha vs Base [{base_label}]",
+            "gap_column_label": gap_metric_label(base_label),
             "title": "Brechas NPS",
-            "subtitle": (
-                "El canal selecciona tópicos; sus NPS y la base usan todas las opiniones."
-            ),
+            "subtitle": GAP_METRIC_BASIS,
             "figure": self._serialize_figure(chart_driver_bar(stats, theme, base_label=base_label)),
             "table": self._serialize_rows(stats.head(30)),
             "has_data": not stats.empty,
@@ -1176,6 +1176,7 @@ class DashboardService:
                         ["n", "cluster_id"], ascending=[False, True]
                     ).reset_index(drop=True)
                 topics[channel][group] = {
+                    "scope": problem_scope_labels(group),
                     "figure": self._serialize_figure(chart_topic_bars(topics_df, theme)),
                     "rows": self._serialize_rows(topics_df),
                     "insights": explain_topics(topics_df, max_items=5)

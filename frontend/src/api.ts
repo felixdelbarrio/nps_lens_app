@@ -125,6 +125,7 @@ export type DashboardPayload = {
     period_aggregates_figure?: PlotlyFigureSpec | null;
     topics_figure?: PlotlyFigureSpec | null;
     topics_table?: Array<Record<string, unknown>>;
+    topic_scope?: { title: string; subtitle: string; count_label: string };
     daily_volume_figure?: PlotlyFigureSpec | null;
     daily_volume_mix_figure?: PlotlyFigureSpec | null;
     daily_mix_figure?: PlotlyFigureSpec | null;

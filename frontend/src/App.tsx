@@ -1,4 +1,5 @@
 import { BRAND } from "./brand";
+import biaLogo from "./assets/brand/bia.svg";
 import "./brand.css";
 import { ClassificationEngineControl } from "./components/ClassificationEngineControl";
 import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1028,13 +1029,17 @@ export function App() {
     }
 
     const topicRows = (dashboard?.overview.topics_table || []).map((row) => ({
-      Comentarios: row.n ?? "",
+      [dashboard?.overview.topic_scope?.count_label || "Comentarios (grupo seleccionado)"]: row.n ?? "",
       "Tópico > problema": Array.isArray(row.top_terms) ? row.top_terms.join(", ") : row.top_terms ?? "",
       Ejemplos: Array.isArray(row.examples) ? row.examples.join(" · ") : row.examples ?? ""
     }));
 
     return (
       <section className="surface-card stack-panel">
+        <div className="section-heading">
+          <h2>{dashboard?.overview.topic_scope?.title}</h2>
+          <p>{dashboard?.overview.topic_scope?.subtitle}</p>
+        </div>
         <PlotFigure
           emptyMessage="No hay texto suficiente para extraer temas."
           figure={dashboard?.overview.topics_figure}
@@ -1119,7 +1124,7 @@ export function App() {
                 <h2>{gapTitle}</h2>
                 <p>{gapSubtitle}</p>
                 <p className="metric-note">
-                  NPS clásico base: {formatNumber(dashboard?.gaps.base_nps)}
+                  NPS clásico global de la base histórica: {formatNumber(dashboard?.gaps.base_nps)}
                   {dashboard?.gaps.base_range?.start && dashboard?.gaps.base_range?.end
                     ? ` (${formatDateLabel(dashboard.gaps.base_range.start)} - ${formatDateLabel(dashboard.gaps.base_range.end)})`
                     : ""}
@@ -1725,10 +1730,10 @@ export function App() {
             <img className="brand-logo" src="/assets/brand/bbva-bei.png" alt={BRAND.name} />
             <h1>NPS Lens</h1>
             <p className="secondary-copy">
-              Banca de Empresas e Instituciones · NPS e incidencias relacionadas.
+              NPS e incidencias relacionadas.
             </p>
             <div className="initiative-signature">
-              <img src="/assets/brand/bia.svg" alt={BRAND.initiative} />
+              <img src={biaLogo} alt={BRAND.initiative} />
               <div><span>{BRAND.initiative_credit}</span><strong>{BRAND.initiative_name}</strong></div>
             </div>
           </div>

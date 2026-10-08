@@ -8,7 +8,7 @@ from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from nps_lens.design.brand import (
-    EMAIL_CORPORATE_LOGO,
+    EMAIL_CORPORATE_HEADING,
     EMAIL_DARK_CSS,
     EMAIL_HERO_COLOR,
     EMAIL_HERO_STYLE,
@@ -143,6 +143,8 @@ def _newsletter(publication: dict[str, object], report_name: str) -> bytes:
     scorecard = [item for item in model.get("scorecard", []) if isinstance(item, dict)]
     quotes = [str(item) for item in model.get("quotes", []) if str(item).strip()]
     signals = [item for item in model.get("signals", []) if isinstance(item, dict)]
+    if any(not item.get("reason_color") for item in signals):
+        raise ValueError("Regenera la publicación: faltan los colores NPS de la newsletter.")
     metrics = "".join(
         '<td class="metric-cell" width="20%" valign="top" style="padding:12px 10px;border-top:3px solid #85c8ff;background:#f7f8f8;overflow-wrap:anywhere">'
         f'<div style="font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#52627a">{esc(item.get("label"))}</div>'
@@ -181,8 +183,8 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <td class="email-shell-padding" align="center" style="padding:24px 10px">
 <table class="email-card" role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:#fff">
 <tr><td class="email-hero" bgcolor="{EMAIL_HERO_COLOR}" style="{EMAIL_HERO_STYLE}padding:34px 38px">
-{EMAIL_CORPORATE_LOGO}
 {EMAIL_HERO_TEXT_OPEN}
+{EMAIL_CORPORATE_HEADING}
 <h1 class="email-title" style="margin:22px 0 5px;font:700 42px Georgia,serif">{esc(model.get("product") or "NPS Lens")}</h1>
 <div>{esc(model.get("promise") or "La voz del cliente conectada con la operación")}</div>{EMAIL_HERO_TEXT_CLOSE}</td></tr>
 <tr><td class="email-body" style="padding:32px 38px 20px"><div style="font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#004481">{esc(owner)} · {esc(model.get("period") or "Periodo actualizado")}</div>
@@ -190,7 +192,9 @@ td,th,p,h1,h2,div,a{{overflow-wrap:anywhere;word-break:normal}}img{{max-width:10
 <p style="font-size:16px;line-height:1.55;color:#30375f">{esc(model.get("lead") or "Consulta la edición actualizada y su presentación ejecutiva.")}</p>
 <table class="metric-table" role="presentation" width="100%" cellspacing="6" style="margin:14px 0 22px"><tr>{metrics}</tr></table>
 <h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 12px">La voz del cliente</h2><table class="quote-table" role="presentation" width="100%" cellspacing="8"><tr>{quotes_html}</tr></table>
-<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">Señales a vigilar</h2><table role="presentation" width="100%">{signals_html}</table>
+<h2 style="font:700 26px Georgia,serif;color:#070e46;margin:30px 0 4px">{esc(model.get("signals_title"))}</h2>
+<p style="font-size:12px;line-height:1.5;color:#52627a">{esc(model.get("signals_basis"))}</p>
+<table role="presentation" width="100%">{signals_html}</table>
 <p class="email-actions" style="margin-top:30px;padding-top:22px;border-top:1px solid #d3d8e0">
 <a href="{report_href}" title="Abrir presentación ejecutiva" style="display:inline-block;background:#001391;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Ver análisis completo</a>
 <a href="WEBAPP_URL" style="display:inline-block;background:#004481;color:#fff;text-decoration:none;padding:14px 20px;font-weight:700">Explorar NPS Lens</a></p>{EMAIL_SIGNATURE}</td></tr>
