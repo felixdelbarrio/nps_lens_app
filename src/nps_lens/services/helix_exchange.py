@@ -462,7 +462,6 @@ class HelixExchange:
         inputs: dict[str, Any],
         *,
         reevaluate: bool = False,
-        single_zip: bool = False,
     ) -> dict[str, Any]:
         for mode in inputs["modes"]:
             self.taxonomy.guard_export(context, mode)
@@ -579,7 +578,6 @@ class HelixExchange:
             batches,
             shared,
             "incidents",
-            single_zip=single_zip,
         )
         candidate_ids = {candidate["id"] for row in pending for candidate in row["candidates"]}
         job = {
