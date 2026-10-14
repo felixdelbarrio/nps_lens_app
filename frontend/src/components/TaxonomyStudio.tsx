@@ -41,7 +41,7 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
   const available = data.taxonomies.filter(item => item.available && item.selectable !== false);
   const activeMode = data.active;
   const hasFramework = available.some(item => item.mode === activeMode);
-  const exchangeKey = `${taxonomyUrl("", classificationContext)}:${activeMode}:${discovery?.single_zip_enabled ?? false}`;
+  const exchangeKey = `${taxonomyUrl("", classificationContext)}:${activeMode}`;
   return <section className="surface-card taxonomy-studio">
     <div className="panel-heading"><div><p className="eyebrow">Análisis local · mismo corpus</p><h2>Taxonomy Studio</h2><p>{formatVolume(data.detection.rows)} respuestas</p></div></div>
       <section className="taxonomy-lens"><p className="eyebrow">Marco de clasificación</p><p>Se aplica a Insights, comentarios, incidencias y presentaciones. La selección se guarda por compañía; cada taxonomía conserva sus resultados LLM.</p><label>Marco de clasificación<select value={hasFramework ? activeMode : ""} disabled={locked || !available.length} onChange={e => void action(() => taxonomyRequest("/settings",context,jsonRequest("PUT",{active:e.target.value})))}><option value="" disabled>No hay una taxonomía seleccionada</option>{available.map(item => <option key={item.mode} value={item.mode}>{NAMES[item.mode]}</option>)}</select></label></section>
@@ -60,8 +60,8 @@ export function TaxonomyStudio({ context, classificationContext = context, onCha
       </article>
       {data.discovery_local_available && discovery && !data.restored ? <>
         <TaxonomyProject role="designer" proposal={data.proposed_discovered_taxonomy} proposalFingerprint={data.proposed_discovered_fingerprint} review={data.designer_review} context={context} url={discovery.designer_url} disabled={locked} canExport={data.detection.rows > 0} onChange={refresh} />
-        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.single_zip_enabled ? discovery.classifier_single_zip_url : discovery.classifier_url} singleZip={discovery.single_zip_enabled} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
-        <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.single_zip_enabled ? discovery.helix_single_zip_url : discovery.helix_classifier_url} singleZip={discovery.single_zip_enabled} disabled={locked || !hasFramework} onChange={refresh} />
+        <TaxonomyProject key={`classifier:${exchangeKey}`} role="classifier" context={classificationContext} url={discovery.classifier_url} disabled={locked || !hasFramework} canExport={hasFramework} onChange={refresh} />
+        <HelixClassifier key={`helix:${exchangeKey}`} context={classificationContext} mode={activeMode} url={discovery.helix_classifier_url} disabled={locked || !hasFramework} onChange={refresh} />
       </> : <p>Los intercambios LLM están disponibles en el dataset local.</p>}
       {available.some(item => item.mode === "DISCOVERED") ? <TaxonomyExplorer context={context} mode="DISCOVERED" /> : null}
     </div>}

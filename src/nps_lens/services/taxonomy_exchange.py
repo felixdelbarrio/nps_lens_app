@@ -335,14 +335,9 @@ def write_classification_zips(
     batches: dict[str, list[dict[str, Any]]],
     shared: dict[str, Any],
     field: str,
-    *,
-    single_zip: bool = False,
 ) -> dict[str, Any]:
-    """Publish atomically; stream a single package or reuse compressed shared evidence."""
-    role = manifest["stage"] + ("_single_zip" if single_zip else "")
-    instructions = PROJECT_INSTRUCTIONS[role].encode()
-    if single_zip:
-        return _write_single_zip(downloads, label, manifest, batches, shared, field, instructions)
+    """Publish numbered ZIPs atomically, reusing compressed shared evidence."""
+    instructions = PROJECT_INSTRUCTIONS[manifest["stage"]].encode()
     expanded = len(instructions)
     if len(shared) + 3 > MAX_MEMBERS:
         raise ValueError("Demasiados ficheros para un intercambio ZIP.")
@@ -389,52 +384,6 @@ def write_classification_zips(
             paths.append(str(directory / name))
         Path(temporary).rename(directory)
     return {"saved_paths": paths, "saved_directory": str(directory), "batches": len(paths)}
-
-
-def _write_single_zip(
-    downloads: Path,
-    label: str,
-    manifest: dict[str, Any],
-    batches: dict[str, list[dict[str, Any]]],
-    shared: dict[str, Any],
-    field: str,
-    instructions: bytes,
-) -> dict[str, Any]:
-    if len(batches) + len(shared) + 2 > MAX_MEMBERS:
-        raise ValueError("Demasiados ficheros para un intercambio ZIP.")
-    directory = downloads / f"{label}-{datetime.now():%Y%m%d-%H%M%S}-{manifest['job_id']}"
-    downloads.mkdir(parents=True, exist_ok=True)
-    name = f"{label}_completo.zip"
-    with tempfile.TemporaryDirectory(prefix=".nps-lens-", dir=downloads) as temporary:
-        path = Path(temporary) / name
-        expanded = 0
-        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-
-            def write(member: str, raw: bytes) -> None:
-                nonlocal expanded
-                expanded += len(raw)
-                if len(raw) > MAX_MEMBER_BYTES or expanded > MAX_EXPANDED_BYTES:
-                    raise ValueError(
-                        "El corpus supera los límites del intercambio ZIP; reduce el dataset."
-                    )
-                archive.writestr(member, raw)
-
-            write("INSTRUCCIONES.txt", instructions)
-            write("manifest.json", encode(manifest))
-            for member, payload in shared.items():
-                write(member, encode(payload))
-            for batch in manifest["batches"]:
-                key = batch["id"]
-                write(f"{field}/{key}.json", encode({field: batches[key]}))
-        if path.stat().st_size > MAX_ZIP_BYTES:
-            raise ValueError("El ZIP de entrada supera 32 MiB.")
-        Path(temporary).rename(directory)
-    return {
-        "saved_paths": [str(directory / name)],
-        "saved_directory": str(directory),
-        "batches": len(batches),
-        "single_zip": True,
-    }
 
 
 class TaxonomyExchange:
@@ -667,9 +616,7 @@ class TaxonomyExchange:
         out.attrs["taxonomy_mode"] = mode
         return out
 
-    def export(
-        self, context: UploadContext, stage: str, *, single_zip: bool = False, **scope: Any
-    ) -> dict[str, Any]:
+    def export(self, context: UploadContext, stage: str, **scope: Any) -> dict[str, Any]:
         if stage not in ("designer", "classifier", "semantic"):
             raise ValueError("Proyecto desconocido.")
         pending = stage == "classifier"
@@ -802,7 +749,6 @@ class TaxonomyExchange:
             batches,
             {"taxonomy.json": {"categories": categories}},
             "comments",
-            single_zip=single_zip,
         )
         self._save(context, job)
         return {**result, "job_id": job["id"], "stage": "classifier"}

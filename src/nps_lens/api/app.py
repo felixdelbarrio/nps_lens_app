@@ -786,9 +786,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "classifier_url": current.taxonomy_classifier_url,
             "helix_classifier_url": current.helix_classifier_url,
             "normalizer_url": current.taxonomy_normalizer_url,
-            "single_zip_enabled": current.single_zip_enabled,
-            "classifier_single_zip_url": current.classifier_single_zip_url,
-            "helix_single_zip_url": current.helix_single_zip_url,
         }
 
     @app.put("/api/taxonomy/discovery")
@@ -807,20 +804,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "classifier_url": "taxonomy_classifier_url",
                 "helix_classifier_url": "helix_classifier_url",
                 "normalizer_url": "taxonomy_normalizer_url",
-                "single_zip_enabled": "single_zip_enabled",
-                "classifier_single_zip_url": "classifier_single_zip_url",
-                "helix_single_zip_url": "helix_single_zip_url",
             }
             values = {
-                fields[key]: (
-                    value
-                    if key == "single_zip_enabled"
-                    else (
-                        ""
-                        if key.endswith("single_zip_url") and not str(value).strip()
-                        else normalize_chatgpt_project_url(value)
-                    )
-                )
+                fields[key]: normalize_chatgpt_project_url(value)
                 for key, value in payload.model_dump(exclude_none=True).items()
             }
             persist_ui_prefs(current.dotenv_path, values)
@@ -861,7 +847,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     return handler.export(
                         context,
                         stage,
-                        single_zip=cast(Settings, request.app.state.settings).single_zip_enabled,
                         **scope,
                     )
                 finally:
@@ -997,7 +982,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     context,
                     inputs,
                     reevaluate=request.query_params.get("reevaluate") == "true",
-                    single_zip=cast(Settings, request.app.state.settings).single_zip_enabled,
                 )
         except (ValueError, OSError) as exc:
             raise HTTPException(400, str(exc)) from exc

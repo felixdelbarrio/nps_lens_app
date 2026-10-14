@@ -42,6 +42,13 @@ function SettingsHarness() {
   />;
 }
 
+it("places downloads and report settings consecutively", () => {
+  render(<SettingsHarness />);
+  const headings = screen.getAllByRole("heading", { level: 4 }).map(heading => heading.textContent);
+  expect(headings.indexOf("Descargas")).toBeGreaterThanOrEqual(0);
+  expect(headings.indexOf("Reporte")).toBe(headings.indexOf("Descargas") + 1);
+});
+
 it("shows fixed score rules separately from editable equivalences", async () => {
   const user = userEvent.setup();
   render(<SettingsHarness />);
