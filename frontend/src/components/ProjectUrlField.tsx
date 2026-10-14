@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSWRConfig } from "swr";
 import { isDiscoverySettingsKey, taxonomyRequest, type TaxonomyContext, type TaxonomyDiscoverySettings } from "../api";
 
-export function ProjectUrlField({ context, field, label, url, disabled }: { context: TaxonomyContext; field: Exclude<keyof TaxonomyDiscoverySettings, "single_zip_enabled">; label: string; url: string; disabled: boolean }) {
+export function ProjectUrlField({ context, field, label, url, disabled }: { context: TaxonomyContext; field: keyof TaxonomyDiscoverySettings; label: string; url: string; disabled: boolean }) {
   const [value, setValue] = useState(url);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);

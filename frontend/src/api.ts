@@ -743,19 +743,14 @@ export type TaxonomyStatus = {
   taxonomies: Array<{ mode: TaxonomyMode; available: boolean; selectable?: boolean; stale?: boolean; levers?: number; sublevers?: number; coverage?: number; equivalence_groups?: number; created_at?: string }>;
 };
 export type TaxonomyProjectInstructions = {
-  versions: Record<"normalizer" | "designer" | "classifier" | "helix" | "semantic" | "classifier_single_zip" | "helix_single_zip", string>;
+  versions: Record<"normalizer" | "designer" | "classifier" | "helix" | "semantic", string>;
   semantic: string;
   normalizer: string;
   designer: string;
   classifier: string;
   helix: string;
-  classifier_single_zip: string;
-  helix_single_zip: string;
 };
 export type TaxonomyDiscoverySettings = {
-  single_zip_enabled: boolean;
-  classifier_single_zip_url: string;
-  helix_single_zip_url: string;
   semantic_url: string;
   normalizer_url: string;
   designer_url: string;
