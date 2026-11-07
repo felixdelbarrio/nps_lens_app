@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright 1.59.1 Chromium supported runner
 
     steps:
       - uses: actions/checkout@v6
