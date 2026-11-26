@@ -3,7 +3,7 @@
 ---
 
 ## Estándares
-- Python: **3.12.14**
+- Python: **3.13.x**
 - Formato: `black`
 - Lint: `ruff`
 - Tipado: `mypy` (strict, con exclusiones pragmáticas para UI/Pandas-heavy)
@@ -20,12 +20,10 @@
 6) PR pequeño y trazable
 
 ---
-
 ## Estilo de código
 - Sin retrocompatibilidad silenciosa: si el pipeline cambia, **fail-fast** con mensaje claro.
 - Evitar lógica de negocio en UI: centralizar filtros, KPIs, payloads y URLs Helix en `DashboardService` y helpers de dominio.
 - Añadir docs cuando se añadan módulos/capacidades.
-
 ## Reglas de dominio vigentes
 - `Owner Support Company` es el único contexto transversal; N1/N2 son atributos Helix para atribución opcional a Canal.
 - `PERIOD CONTAINER` gobierna `pop_year` y `pop_month` para toda la app.
