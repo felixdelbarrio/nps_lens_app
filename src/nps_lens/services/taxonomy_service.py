@@ -892,9 +892,7 @@ class TaxonomyService:
                 how="inner",
             )
         )
-        counts = cast(
-            "pd.Series[int]", pairs.groupby(list(pairs.columns), observed=True).size()
-        ).reset_index(name="volume")
+        counts = pairs.groupby(list(pairs.columns), observed=True).size().reset_index(name="volume")
         counts["share"] = counts.volume / counts.groupby(
             ["from_lever", "from_sublever"]
         ).volume.transform("sum")

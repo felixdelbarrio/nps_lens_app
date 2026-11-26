@@ -3301,7 +3301,7 @@ class DashboardService:
             parsed = pd.to_datetime(candidate, errors="coerce", utc=True)
             if pd.isna(parsed):
                 continue
-            return cast(pd.Timestamp, parsed).isoformat().replace("+00:00", "Z")
+            return parsed.isoformat().replace("+00:00", "Z")
         return None
 
     def _persist_upload_file(
