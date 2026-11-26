@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 function fixtureExcel(name: string) {
   const fixturesDir = path.resolve(__dirname, "../../tests/fixtures/excel");
   const expected = name.normalize("NFD");
@@ -66,7 +67,6 @@ async function exportedPath(page: import("@playwright/test").Page, title: string
   if (!match) throw new Error(`No se encontró la ruta del ZIP en: ${message}`);
   return match[1];
 }
-
 test("uploads a schema-drift file and shows cumulative results", async ({ page }) => {
   test.setTimeout(600000);
 
@@ -76,12 +76,11 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
       name: /NPS Lens/i
     })
   ).toBeVisible();
-
   await expect(page.getByTestId("upload-input")).toBeVisible();
+
   await page.getByRole("button", { name: /Ingesta/i }).click();
   await page.getByTestId("upload-input").setInputFiles(marchFixture);
   await page.getByRole("button", { name: "Importar / actualizar NPS" }).click();
-
   await expect(page.getByTestId("uploads-table")).toContainText(marchFixtureSuffix, {
     timeout: 180000
   });
@@ -121,6 +120,7 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   expect(semanticImport.ok(), await semanticImport.text()).toBeTruthy();
   await expect(semantic.getByText(/Criterios semánticos importados/)).toBeVisible();
   await expect(semantic.getByText("0 pendientes")).toBeVisible();
+
   await page.getByText("Explorar Taxonomía Original", {exact:true}).click();
   await expect(page.locator(".taxonomy-table")).toBeVisible();
   await page.screenshot({path:"test-results/taxonomy-original.png",fullPage:true});
@@ -152,11 +152,12 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await page.getByRole("button", { name: "Aceptar taxonomía DISCOVERED" }).click();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("SOURCE");
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
-  await expect(page.getByLabel("Clasificación de comentarios")).toHaveValue("llm", {timeout: 30000});
-  await expect(page.getByLabel("Clasificación de comentarios").locator('option[value="rules"]')).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Clasificación de comentarios", exact: true })).toHaveValue("llm", {timeout: 30000});
+  await expect(page.getByRole("combobox", { name: "Clasificación de comentarios", exact: true }).locator('option[value="rules"]')).toHaveCount(0);
   await page.getByText("Explorar Descubierta por LLM", {exact:true}).click();
   await expect(page.getByText("Clasifica comentarios con esta taxonomía para ver volumen, NPS y ejemplos.")).toBeVisible();
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
+
   let exportCount = 0;
   page.on("request", request => {
     if (request.url().includes("/discovery/classifier/export") && request.method() === "POST") exportCount++;
@@ -192,17 +193,17 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await expect(classifierUpload).toBeEnabled({ timeout: 45000 });
   await expect(page.getByRole("button", { name: "Descargar todos los ZIP de comentarios pendientes" })).toBeDisabled();
   await expect(page.getByText("Explorar Descubierta por LLM", {exact:true})).toBeVisible();
+
   await page.getByText("Comparar taxonomías", {exact:true}).click();
   await page.getByText("Ver comparación", {exact:true}).click();
   await expect(page.locator(".taxonomy-comparison .taxonomy-table")).toBeVisible();
   await page.screenshot({path:"test-results/taxonomy-comparison.png",fullPage:true});
-
   await page.getByLabel("Marco de clasificación").selectOption("DISCOVERED");
   await expect(page.getByLabel("Marco de clasificación")).toHaveValue("DISCOVERED");
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.getByRole("button", { name: /Insights/i }).click();
   await page.getByRole("tab", { name: "Comentarios", exact: true }).click();
-  await expect(page.getByLabel("Clasificación de comentarios")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Clasificación de comentarios", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Método de vinculación")).toHaveCount(0);
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
   await page.reload();
@@ -213,5 +214,4 @@ test("uploads a schema-drift file and shows cumulative results", async ({ page }
   await evidenceTab.click();
   await expect(evidenceTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("analysis-filters").getByRole("switch", {name:"Vinculación con LLM"})).toBeDisabled({timeout:45000});
-
 });

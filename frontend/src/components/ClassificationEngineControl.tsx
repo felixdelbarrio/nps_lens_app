@@ -26,7 +26,7 @@ export function ClassificationEngineControl({kind, context, disabled, onChange}:
         <span>LLM semántico</span>
       </label>
       <p className="field-hint">TF-IDF compara texto y aplica reglas. LLM utiliza los vínculos evaluados en Clasifica incidencias.</p>
-    </> : <label>Clasificación de comentarios<select value={llmRequired ? "llm" : data?.selected_engine || "rules"} disabled={locked || llmRequired} onChange={e => void change(e.target.value)}>
+    </> : <label>Clasificación de comentarios<select aria-label="Clasificación de comentarios" value={llmRequired ? "llm" : data?.selected_engine || "rules"} disabled={locked || llmRequired} onChange={e => void change(e.target.value)}>
       {!llmRequired && data?.base_available ? <option value="rules">Clasificación base</option> : null}
       <option value="llm" disabled={!data?.ready}>Clasificación LLM</option>
     </select></label>}

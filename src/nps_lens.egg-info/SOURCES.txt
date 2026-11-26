@@ -163,6 +163,7 @@ tests/test_snapshot_telemetry.py
 tests/test_store_parquet_resilience.py
 tests/test_taxonomy_engine.py
 tests/test_taxonomy_exchange.py
+tests/test_taxonomy_pending_ingestion.py
 tests/test_text_mining.py
 tests/test_ui_business_periods.py
 tests/test_ui_charts.py
