@@ -2,6 +2,7 @@
 # Python / Virtualenv
 # -----------------------------
 .venv/
+.venv-*/
 __pycache__/
 *.py[cod]
 *.pyd
@@ -30,7 +31,6 @@ build/
 .eggs/
 pip-wheel-metadata/
 .wheels/
-
 # -----------------------------
 # Environment / secrets
 # -----------------------------
@@ -66,7 +66,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
-
 # -----------------------------
 # Local datasets / caches (do not commit)
 # -----------------------------
@@ -85,7 +84,6 @@ data/*
 # -----------------------------
 knowledge/*.json
 knowledge/*.jsonl
-
 # -----------------------------
 # Generated reports / outputs
 # (keep examples committed)
@@ -101,7 +99,6 @@ logs/
 tmp/
 temp/
 tmp_audit_store/
-
 # -----------------------------
 # Frontend generated artifacts
 # -----------------------------

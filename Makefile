@@ -8,12 +8,11 @@ VENV_BIN = $(VENV)/Scripts
 BIN_EXT := .exe
 PLAYWRIGHT := $(FRONTEND_DIR)/node_modules/.bin/playwright.cmd
 else
-PYTHON ?= python3.12
+PYTHON ?= python3.13
 VENV_BIN = $(VENV)/bin
 BIN_EXT :=
 PLAYWRIGHT = $(FRONTEND_DIR)/node_modules/.bin/playwright
 endif
-
 FRONTEND_DIR ?= frontend
 DESKTOP_SCRIPT ?= src/nps_lens/desktop.py
 ICON_SOURCE ?= assets/logo.png
@@ -32,7 +31,6 @@ else
 ICON_RUNTIME ?= $(ICON_PNG)
 endif
 endif
-
 MACOS_BUNDLE_ID ?= com.npslens.app
 MACOS_CODESIGN_IDENTITY ?=
 MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
@@ -40,7 +38,6 @@ MACOS_ENTITLEMENTS ?= packaging/macos/entitlements.plist
 ROOT := $(CURDIR)
 APP_PORT ?= 8617
 WEBAPP_PORT ?= 8625
-
 # Frontend Playwright browser cache (E2E).
 PLAYWRIGHT_BROWSERS_PATH ?= $(ROOT)/$(FRONTEND_DIR)/.playwright-browsers
 
@@ -53,9 +50,7 @@ MYPY = $(VENV_BIN)/mypy$(BIN_EXT)
 PYTEST = $(VENV_BIN)/pytest$(BIN_EXT)
 NPM = npm --prefix $(FRONTEND_DIR)
 PYTHON_FORMAT_PATHS ?= src tests scripts
-
 .PHONY: default venv python-dev python-build setup frontend-install frontend-build frontend-test frontend-e2e build run kill webapp WebApp lint typecheck test ci clean
-
 default:
 	@echo ""
 	@echo "Comandos disponibles:"
@@ -70,46 +65,44 @@ default:
 	@printf "  %-18s %s\n" "ci" "Ejecuta lint backend + frontend + E2E"
 	@printf "  %-18s %s\n" "clean" "Limpia caches, builds y node_modules"
 	@echo ""
-
 venv:
-	@test -x "$(PY)" || $(PYTHON) -m venv $(VENV)
+	@test -x "$(PY)" || "$(PYTHON)" -m venv "$(VENV)"
+	@"$(PY)" -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 13) else 'ERROR: NPS Lens requires Python 3.13. Use a new VENV or run make setup.')"
 	$(PY) -m pip install -U pip
 
 python-dev:
-	$(MAKE) venv
+	"$(MAKE)" venv
 	$(PIP) install -e ".[dev]"
 
 python-build:
-	$(MAKE) venv
+	"$(MAKE)" venv
 	$(PIP) install -e ".[build]"
 
 setup:
-	$(MAKE) clean
+	"$(MAKE)" clean
 	rm -rf $(VENV)
-	$(MAKE) venv
+	"$(MAKE)" venv
 	$(PIP) install -e ".[dev,build]"
-	$(MAKE) frontend-install
+	"$(MAKE)" frontend-install
 
 frontend-install:
 	$(NPM) install
 
 frontend-build:
-	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
+	@test -d "$(FRONTEND_DIR)/node_modules" || "$(MAKE)" frontend-install
 	$(NPM) run build
-
 frontend-test:
-	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
+	@test -d "$(FRONTEND_DIR)/node_modules" || "$(MAKE)" frontend-install
 	$(NPM) run test
 
 frontend-e2e:
-	@test -d "$(FRONTEND_DIR)/node_modules" || $(MAKE) frontend-install
-	@test -x "$(PLAYWRIGHT)" || $(MAKE) frontend-install
+	@test -d "$(FRONTEND_DIR)/node_modules" || "$(MAKE)" frontend-install
+	@test -x "$(PLAYWRIGHT)" || "$(MAKE)" frontend-install
 	cd $(FRONTEND_DIR) && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npx playwright install chromium
-	PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" $(NPM) run e2e
-
+	NPS_LENS_E2E_PYTHON="$(abspath $(PY))" PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" $(NPM) run e2e
 build:
-	$(MAKE) python-build
-	$(MAKE) frontend-build
+	"$(MAKE)" python-build
+	"$(MAKE)" frontend-build
 	find build/pyinstaller -name '.DS_Store' -delete 2>/dev/null || true
 	rm -rf build/pyinstaller dist || true
 	rm -rf $(ICON_DIR)
@@ -212,10 +205,9 @@ build:
 		echo "Unsupported OS for local build: $$uname_s"; \
 		exit 1; \
 	fi
-
 run:
-	$(MAKE) python-build
-	$(MAKE) frontend-build
+	"$(MAKE)" python-build
+	"$(MAKE)" frontend-build
 	rm -rf $(ICON_DIR)
 	$(PY) scripts/prepare_icons.py --input $(ICON_SOURCE) --out-dir $(ICON_DIR)
 	NPS_LENS_PORT="$(APP_PORT)" \
@@ -225,33 +217,31 @@ run:
 
 kill:
 	@$(PYTHON) scripts/local_processes.py --root "$(ROOT)" --ports "$(APP_PORT)" 5173 "$(WEBAPP_PORT)"
-
 webapp: kill
-	@test -x "$(PY)" || $(MAKE) venv
+	@test -x "$(PY)" || "$(MAKE)" venv
 	@$(PY) scripts/serve_webapp.py --port "$(WEBAPP_PORT)"
 
 WebApp: webapp
 
 lint:
-	@test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
+	@test -x "$(RUFF)" && test -x "$(BLACK)" || "$(MAKE)" python-dev
 	$(RUFF) check --no-fix .
 	$(BLACK) --check $(PYTHON_FORMAT_PATHS)
 
 typecheck:
-	@test -x "$(MYPY)" || $(MAKE) python-dev
+	@test -x "$(MYPY)" || "$(MAKE)" python-dev
 	$(MYPY)
 
 test:
-	@test -x "$(PYTEST)" || $(MAKE) python-dev
+	@test -x "$(PYTEST)" || "$(MAKE)" python-dev
 	$(PYTEST) --override-ini addopts="" -q --cov=src/nps_lens --cov-report=term-missing --cov-fail-under=80
-
 ci:
-	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" || $(MAKE) python-dev
+	@test -x "$(PY)" && test -x "$(RUFF)" && test -x "$(BLACK)" || "$(MAKE)" python-dev
 	$(RUFF) check --no-fix .
 	$(BLACK) --check $(PYTHON_FORMAT_PATHS)
-	$(MAKE) frontend-test
-	$(MAKE) frontend-build
-	$(MAKE) frontend-e2e
+	"$(MAKE)" frontend-test
+	"$(MAKE)" frontend-build
+	"$(MAKE)" frontend-e2e
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist
