@@ -18,8 +18,20 @@ const IMPORT_LABELS = {semantic:"Importar ZIP de criterios semánticos",designer
 const EXPORT_LABELS = {semantic:"Exportar comentarios y taxonomía para crear criterios",designer:"Exportar comentarios para crear taxonomía",classifier:"Descargar todos los ZIP de comentarios pendientes",normalizer:"Exportar comentarios para unificar conceptos"};
 export function TaxonomyProject({ role, context, url, disabled, canExport, onChange, proposal, proposalFingerprint, review }: { proposal?: TaxonomyStatus["proposed_discovered_taxonomy"]; proposalFingerprint?: string; review?: TaxonomyStatus["designer_review"]; role: Role; context: TaxonomyContext; url: string; disabled: boolean; canExport: boolean; onChange: () => Promise<void> }) {
   const [semanticMode, setSemanticMode] = useState<"SOURCE" | "COMPLETED">("SOURCE");
-  const exchangeContext = role === "semantic" ? { ...context, mode: semanticMode } : context;
-  const { data: progress, mutate } = useSWR(role !== "normalizer" ? taxonomyUrl("/discovery/progress", context) : null, () => taxonomyRequest<Progress>("/discovery/progress", context), {revalidateOnFocus:false});
+  const [commentScope, setCommentScope] = useState<"all" | "period">("all");
+  // Classification is cumulative by company and taxonomy; the dashboard period is
+  // only an optional restriction for preparing a specific analysis.
+  const progressContext = role === "classifier" && commentScope === "all"
+    ? { ...context, pop_year: "Todos", pop_month: "Todos" }
+    : context;
+  const exchangeContext = role === "semantic" ? { ...context, mode: semanticMode } : progressContext;
+  const { data: progress, error: progressError, isValidating, mutate } = useSWR(
+    role !== "normalizer" ? taxonomyUrl("/discovery/progress", progressContext) : null,
+    () => taxonomyRequest<Progress>("/discovery/progress", progressContext),
+    role === "classifier"
+      ? { revalidateOnMount: true, revalidateOnFocus: true, dedupingInterval: 0 }
+      : { revalidateOnFocus: false }
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [exported, setExported] = useState<ClassificationExport | null>(null);
@@ -36,7 +48,7 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
       return;
     }
     setExported(null);
-    try { setExported(await exportClassification(context, "/discovery/classifier/export")); }
+    try { setExported(await exportClassification(exchangeContext, "/discovery/classifier/export")); }
     finally { await mutate(); await onChange(); }
   }
   async function importZip(file: File) {
@@ -53,18 +65,24 @@ export function TaxonomyProject({ role, context, url, disabled, canExport, onCha
   const counts = role === "semantic" ? semanticProgress : role === "designer" ? progress?.designer : progress;
   const hasCategories = role !== "semantic" || !!semanticProgress?.total;
   const proposalCounts = proposal ? taxonomyCounts(proposal) : null;
+  // A cached zero must not be treated as authoritative after another ingestion.
+  const classifierProgressReady = role !== "classifier" || (!!progress && !progressError && !isValidating);
   return <article className="settings-subsection taxonomy-project">
     <div className="section-heading"><div><h3>{PROJECT_NAMES[role]}</h3><p className="secondary-copy">{role === "semantic" ? "Define criterios y fronteras para las categorías originales o manuales. Conserva sus nombres y aplica los criterios a comentarios e incidencias." : role === "designer" ? "Descubre dimensiones de experiencia que expliquen las opiniones del canal." : role === "classifier" ? "Clasifica con la lente activa. La categoría principal conserva los recuentos; los temas adicionales aportan contexto." : "Propón nombres principales y alias equivalentes para la compañía seleccionada."}</p></div></div>
     {role === "semantic" ? <label>Taxonomía para crear criterios<select value={semanticMode} disabled={locked} onChange={event => setSemanticMode(event.target.value as "SOURCE" | "COMPLETED")}><option value="SOURCE">Taxonomía Original</option><option value="COMPLETED">Taxonomía Manual</option></select></label> : null}
+    {role === "classifier" ? <><div className="inline-actions"><label>Ámbito de clasificación de comentarios<select value={commentScope} disabled={locked} onChange={event => { setCommentScope(event.target.value as "all" | "period"); setExported(null); setMessage(""); }}><option value="all">Todo el histórico de la compañía</option><option value="period">Periodo del análisis actual</option></select></label><button className="secondary-button" disabled={locked || isValidating} onClick={() => void perform(async () => { await mutate(); })}>Actualizar pendientes</button></div>
+    <p className="field-hint">Todo el histórico incluye las nuevas ingestas aunque estén fuera del Año/Mes seleccionado. El motor de clasificación y las incidencias siguen el horizonte del análisis.</p>
+    {isValidating ? <p role="status">Actualizando pendientes…</p> : null}
+    {progressError ? <p role="alert">No se pudo consultar el progreso. Pulsa Actualizar pendientes para reintentar.</p> : null}</> : null}
     {counts && role !== "normalizer" ? <ExchangeProgress counts={counts} unit={role === "semantic" ? "categorías" : "comentarios"} metrics={role === "semantic" ? [{label:"Palancas",value:semanticProgress!.levers},{label:"Subpalancas",value:semanticProgress!.sublevers}] : role === "designer" ? [{label:"Palancas",value:progress!.designer.levers},{label:"Subpalancas",value:progress!.designer.sublevers}] : [{...ADDITIONAL_TOPICS,value:progress!.multiple}]} /> : null}
     {role === "semantic" && semanticProgress ? <><p>Fingerprint <code>{semanticProgress.taxonomy_fingerprint.slice(0, 8)}</code></p>{semanticProgress.review ? <p>{semanticProgress.review.reason}</p> : <p className="field-hint">Exporta el catálogo y el corpus; importa el ZIP devuelto por el proyecto para completar los criterios.</p>}</> : null}
     {role === "classifier" ? <ClassificationEngineControl kind="comments" context={context} disabled={locked || !canExport} onChange={onChange} /> : null}
     <ProjectUrlField context={context} field={FIELDS[role]} label={`URL · ${PROJECT_NAMES[role]}`} url={url} disabled={locked} />
     <TaxonomyProjectInstructions role={role} context={context} />
-    {role === "classifier" && progress ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : progress.mode === "DISCOVERED" ? "Clasificación completa. La clasificación LLM está activa." : "Clasificación completa. Selecciona Clasificación LLM en este panel."}</p> : null}
-    {role === "classifier" && progress?.analysis_horizon?.comment_start ? <p>Ámbito analítico: {progress.analysis_horizon.comment_start} – {progress.analysis_horizon.comment_end}; Helix desde {progress.analysis_horizon.helix_start} por ventana de {progress.analysis_horizon.max_days_apart} días.</p> : null}
+    {role === "classifier" && progress && classifierProgressReady ? <p className="field-hint">{!progress.total ? "Importa comentarios NPS desde Ingesta." : !canExport ? "Crea o selecciona primero una taxonomía." : progress.pending ? "Descarga todos los ZIP pendientes de una vez. Procesa cada archivo numerado en el Proyecto ChatGPT e importa su respuesta." : "No quedan comentarios pendientes en el ámbito de clasificación seleccionado."}</p> : null}
+    {role === "classifier" && progress?.analysis_horizon?.comment_start ? <p>Ámbito de clasificación: {progress.analysis_horizon.comment_start} – {progress.analysis_horizon.comment_end}.</p> : null}
     {role === "classifier" && progress ? <p>Modo activo: {progress.mode} · fingerprint <code>{progress.taxonomy_fingerprint?.slice(0, 8)}</code></p> : null}
-    <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || !hasCategories || (role === "classifier" && progress?.pending === 0)} onClick={() => void perform(exportZips)}>{EXPORT_LABELS[role]}</button>
+    <div className="exchange-actions"><button className="primary-button" disabled={locked || !canExport || !hasCategories || (role === "classifier" && (!classifierProgressReady || !progress?.pending))} onClick={() => void perform(exportZips)}>{EXPORT_LABELS[role]}</button>
     <label>{IMPORT_LABELS[role]}<input type="file" accept=".zip,application/zip" disabled={locked || !hasCategories} onChange={e => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) void perform(() => importZip(file)); }} /></label></div>
     <ExchangeFiles result={exported} />
     {role === "designer" && proposal ? <section aria-label="Propuesta DISCOVERED">
