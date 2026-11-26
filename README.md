@@ -1,10 +1,8 @@
 # NPS Lens — Plataforma de Insights VoC (NPS + Texto + Incidencias)
-
 `develop`
 [![CI](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/ci.yml?query=branch%3Adevelop)
 [![Typecheck](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/typecheck.yml?query=branch%3Adevelop)
 [![Test](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/test.yml?query=branch%3Adevelop)
-
 `develop`
 [![Release](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml/badge.svg?branch=develop&event=push)](https://github.com/felixdelbarrio/nps_lens_app/actions/workflows/release.yml?query=branch%3Adevelop)
 
@@ -13,7 +11,6 @@
 
 
 ---
-
 ## Qué es NPS Lens
 
 **NPS Lens** es una plataforma para convertir señales de Voz del Cliente en **insights accionables**, combinando:
@@ -25,9 +22,7 @@
 La aplicación une métricas, verbatims y evidencia trazable; exporta PPT, newsletter y WebApp desde la clasificación activa.
 
 ---
-
 ## Para qué sirve (valor de negocio)
-
 - Detectar **drivers reales** de detracción (y también de promoción) por palanca/subpalanca/canal.
 - Priorizar asociaciones observadas con incidencias y comentarios únicos.
 - Construir **journeys de caída** (ruta: palanca → subpalanca → tópico → incidencia → impacto en Score).
@@ -35,7 +30,6 @@ La aplicación une métricas, verbatims y evidencia trazable; exporta PPT, newsl
 - Entregar un “paquete ejecutivo” reproducible: KPIs, hipótesis, evidencias, acciones sugeridas, trazabilidad.
 
 ---
-
 ## Demo mental: cómo fluye el insight
 
 ```mermaid
@@ -55,9 +49,7 @@ NPS↔Helix]
 ---
 
 ## Quickstart
-
 ### Requisitos
-
 - **Taxonomy Studio** utiliza tres proyectos GPT mediante archivos: Crea Taxonomía,
   Clasifica taxonomía y Helix Classifier. Sus URLs se editan en la aplicación y se
   guardan al salir del campo. Consulta [el flujo de la iteración 28](docs/iteration28.md).
@@ -65,15 +57,14 @@ NPS↔Helix]
   Procesa cada archivo por separado en su proyecto GPT e importa su respuesta.
   Cada lote conserva las validaciones de identidad, taxonomía y contenido;
   las importaciones acumulan el progreso sin repetir registros ya clasificados.
-
-- **Python 3.12.14** (entorno corporativo)
+- **Python 3.13.x** (entorno corporativo; usar una instalación independiente del runtime interno de Codex)
 - `make` (macOS / Linux)
 - (Opcional) `xcode-select --install` en macOS para builds nativas.
-
 ### Setup
 ```bash
 make setup
 ```
+Si existe un entorno virtual de Python 3.12 que se quiere conservar, usar un entorno nuevo con `make VENV=.venv-corporativo313 setup`. Mantener el mismo `VENV` en los siguientes comandos de make.
 
 ### Ejecutar UI
 ```bash
@@ -104,39 +95,33 @@ make build
 - Windows: vía GitHub Actions (PyInstaller no cross-compila)
 
 ---
-
 ## Estructura funcional actual
 
 La experiencia operativa se organiza así:
-
 - **OWNER SUPPORT COMPANY**: único contexto transversal para Insights, Ingesta y Datos.
 - **PERIOD CONTAINER**: periodo global (`Año`, `Mes`) para toda la app, tablas y reportes.
 - **Evolución NPS**: KPIs, evolución temporal y comparativas cruzadas afectados por Service + Period; muestra acumulado hasta el periodo y periodo actual con delta histórico.
 - **Comentarios**: filtros sincronizados de `Canal` y `Grupo Score`; contiene comentarios, cambios históricos y brechas.
 - **Evidencia Helix ↔ VoC**: conecta incidencias Helix y comentarios NPS mediante el vista de evidencia configurado; usa la atribución opcional N1/N2 del Canal y oculta `Grupo Score`.
 - **Reporte ejecutivo**: añade la preferencia `dimensionAnalisis` (`palanca`/`subpalanca`) para decidir si el deck incluye las slides de palanca o subpalanca, con numeración dinámica.
-
 Semántica:
 
 - **Score** es el valor individual 0-10 o su media.
 - **NPS clásico** es el índice `% promotores - % detractores`.
 - **NPS** se mantiene como nombre de fuente/dominio.
-
 Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se calculan siempre sobre todas las opiniones; Canal solo selecciona los tópicos o el ámbito de evidencia. En Evidencia Helix ↔ VoC, una asignación opcional permite vincular valores N1/N2 de Helix a un Canal y, sin asignación, se utilizan todos los comentarios, canales e incidencias de la compañía. Los enlaces Helix se construyen siempre como `base_url + Record ID`.
 
 ---
-
 ## Documentación imprescindible (léela en este orden)
 
-1. **Arquitectura** → `ARCHITECTURE.md`  
-2. **Módulos del código** → `docs/MODULES.md`  
-3. **Contratos de datos (Fuentes y modelo canónico)** → `docs/DATA_CONTRACTS.md`  
-4. **Operación y troubleshooting** → `docs/OPERATIONS.md`  
-5. **Release y builds** → `docs/RELEASE.md`  
+1. **Arquitectura** → `ARCHITECTURE.md`
+2. **Módulos del código** → `docs/MODULES.md`
+3. **Contratos de datos (Fuentes y modelo canónico)** → `docs/DATA_CONTRACTS.md`
+4. **Operación y troubleshooting** → `docs/OPERATIONS.md`
+5. **Release y builds** → `docs/RELEASE.md`
 6. **Desarrollo / contribución** → `docs/DEVELOPMENT.md`
 
 ---
-
 ## Estructura del repo (alto nivel)
 
 - `frontend/` → UI React (exploración interactiva)
@@ -146,9 +131,7 @@ Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se 
 - `.github/workflows/` → `test`, `typecheck`, `ci`, `codeql` y `release` multi-plataforma
 
 ---
-
 ## Principios de diseño (para mantenerlo “nivel empresa”)
-
 - **Contrato de datos**: ingesta validable + normalización + versionado → sin “magia silenciosa”.
 - **Trazabilidad**: cada insight debe incluir evidencia cuantitativa y cualitativa y referencias cruzadas.
 - **Performance**: caching determinista + pushdown temporal (Año/Mes) + precomputes en ingest.
@@ -156,12 +139,11 @@ Canal procede del fichero NPS y sus equivalencias configuradas. Los KPIs NPS se 
 - **Plataforma**: la UI no “hace magia”; consume casos de uso / servicios del core.
 
 ---
-
 ## Donaciones
 
 Si te aporta valor (o lo estás usando en producción), puedes apoyar el mantenimiento:
 
-- GitHub Sponsors: https://github.com/sponsors/felixdelbarrio  
+- GitHub Sponsors: https://github.com/sponsors/felixdelbarrio
 - PayPal: https://paypal.me/felixdelbarrio
 
 ---
@@ -169,7 +151,6 @@ Si te aporta valor (o lo estás usando en producción), puedes apoyar el manteni
 ## Licencia
 
 Define la licencia del repo en `LICENSE` (si aplica). En entornos corporativos suele ser privada.
-
 ### Identidad corporativa
-
-La App, la WebApp, el PPT y la newsletter comparten la identidad BBVA Banca de Empresas e Instituciones y la firma bIA (Banca Inteligente y Autónoma). Las definiciones y los estilos de la firma están en `src/nps_lens/design/brand.py`. Para regenerar los recursos, instala las dependencias de build y ejecuta `python scripts/prepare_brand.py`. El logo oficial de bIA se conserva en `frontend/public/assets/brand/bia.svg`, con sus colores, fondo y proporciones originales. El generador requiere las dependencias de frontend y Chromium de Playwright (`cd frontend && npm ci && npx playwright install chromium`) y produce un PNG de alta resolución para PPT y newsletter. Las fuentes web se sirven en WOFF2; el correo incluye el logo como imagen MIME inline, sin descargas externas.
+La App, la WebApp, el PPT y la newsletter comparten la identidad BBVA Banca de Empresas e Instituciones y la firma bIA (Banca Inteligente y Autónoma). Las definiciones y los estilos de la firma están en `src/nps_lens/design/brand.py`. Para regenerar los recursos, instala las dependencias de build y ejecuta `python scripts/prepare_brand.py`. El logo oficial de bIA se conserva en `frontend/public/assets/brand/bia.svg`, con sus colores, fondo y proporciones originales.
+El generador requiere las dependencias de frontend y Chromium de Playwright (`cd frontend && npm ci && npx playwright install chromium`) y produce un PNG de alta resolución para PPT y newsletter. Las fuentes web se sirven en WOFF2; el correo incluye el logo como imagen MIME inline, sin descargas externas.

@@ -22,12 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python 3.12.14
+      - name: Set up Python 3.13
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12.14"
+          python-version: "3.13"
           cache: "pip"
-
       - name: Set up Node.js 20
         uses: actions/setup-node@v6
         with:
@@ -48,7 +47,6 @@ jobs:
       - name: Typecheck
         shell: bash
         run: make typecheck
-
       - name: Test
         shell: bash
         run: make test
@@ -56,7 +54,6 @@ jobs:
       - name: CI frontend and E2E
         shell: bash
         run: make ci
-
   build:
     name: build-${{ matrix.label }}
     needs: quality
@@ -77,14 +74,13 @@ jobs:
             runner: windows-latest
             artifact_name: nps-lens-windows
             artifact_path: build/pyinstaller/windows/nps-lens-windows.zip
-
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python 3.12.14
+      - name: Set up Python 3.13
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12.14"
+          python-version: "3.13"
           cache: "pip"
 
       - name: Set up Node.js 20
@@ -93,7 +89,6 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install Linux system libraries for pywebview packaging
         if: matrix.label == 'linux'
         shell: bash
@@ -110,7 +105,6 @@ jobs:
       - name: Build native desktop application
         shell: bash
         run: make build
-
       - name: Verify Linux build output
         if: matrix.label == 'linux'
         shell: bash
@@ -120,7 +114,6 @@ jobs:
         if: matrix.label == 'macos'
         shell: bash
         run: test -d build/pyinstaller/macos/dist/nps-lens.app
-
       - name: Verify Windows build output
         if: matrix.label == 'windows'
         shell: pwsh
@@ -130,7 +123,6 @@ jobs:
             Get-ChildItem -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "build/pyinstaller/windows/dist") -Recurse -ErrorAction SilentlyContinue
             throw "Missing Windows build output: $exe"
           }
-
       - name: Archive Linux build output
         if: matrix.label == 'linux'
         shell: bash
@@ -145,7 +137,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             build/pyinstaller/macos/dist/nps-lens.app \
             build/pyinstaller/macos/nps-lens-macos.zip
-
       - name: Archive Windows build output
         if: matrix.label == 'windows'
         shell: pwsh
@@ -156,7 +147,6 @@ jobs:
             -Path $exe `
             -DestinationPath $zip `
             -Force
-
       - name: Verify packaged artifact
         shell: bash
         run: test -f "${{ matrix.artifact_path }}"
@@ -167,7 +157,6 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
-
       - name: Upload Windows executable artifact
         if: matrix.label == 'windows'
         uses: actions/upload-artifact@v7
@@ -182,7 +171,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v8
